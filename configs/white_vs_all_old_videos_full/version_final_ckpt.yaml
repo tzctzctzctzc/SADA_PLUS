@@ -1,0 +1,174 @@
+init_rand_seed: 123
+dataset_name: epic
+src_train_split: ['ek55_white_training']
+src_val_split: ['ek55_white_validation']
+tgt_train_split: ['ek55_dark_training', 'ek55_brown_training', 'ek55_other_training']
+tgt_val_split: ['ek55_dark_validation', 'ek55_brown_validation', 'ek55_other_validation']
+model_name: "sada"
+dataset: {
+  json_file: ./data/ek100_slowfast/annotations/epic_kitchens_100_verb_detailed_split.json,
+  feat_folder: ./data/ek100_slowfast/features,
+  file_prefix: ~,
+  file_ext: .npz,
+  num_classes: 97,
+  input_dim: 2304,
+  feat_stride: 16,
+  num_frames: 32,
+  default_fps: 30,
+  trunc_thresh: 0.3,
+  crop_ratio: [0.9, 1.0],
+  max_seq_len: 2304,
+
+  downsample_rate: 1,
+  force_upsampling: False,
+  action_subsampling: "10_majority_classes"
+}
+model: {
+  # Default options from the original model
+  backbone_type: SGP,
+  backbone_arch: [2, 2, 5],
+  scale_factor: 2,
+  embd_kernel_size: 3,
+  embd_dim: 512,
+  embd_with_ln: True,
+  fpn_dim: 512,
+  fpn_with_ln: True,
+  head_dim: 512,
+  head_kernel_size: 3,
+  boudary_kernel_size: 3,
+  head_num_layers: 3,
+  head_with_ln: True,
+  use_abs_pe: False,
+  use_trident_head: False,
+  downsample_type: "max",
+  k: 1.5,
+  init_conv_vars: 0,
+  input_noise: 0,
+  weight_sharing: True,
+
+  # Specifically overriden options
+  regression_range: [[0, 4], [2, 8], [4, 16], [8, 32], [16, 64], [32, 10000]],
+  fpn_type: identity,
+  max_buffer_len_factor: 4.0,
+  n_sgp_win_size: 5,
+  num_bins: 16,
+  iou_weight_power: 0.25,
+  sgp_mlp_dim: 1024,
+  k: 2,
+
+  # Other model-specific configurations ()
+  loss_weights: {
+    weight_reg: 1.0,  # on reg_loss, use -1 to enable auto balancing
+    weight_adv: 3.0,
+    weight_semantic: 0.0,
+    weight_downstream: 2.0,
+    weight_adv_gamma: 10.0
+  },
+  
+  # cls head without data (a fix to epic-kitchens / thumos)
+  head_empty_cls: [],
+  # dropout ratios for tranformers
+  dropout: 0.0,
+  # ratio for drop path
+  droppath: 0.1,
+  # if to use label smoothing (>0.0)
+  label_smoothing: 0.0,
+
+  # gradient cliping, not needed for pre-LN transformer
+  init_loss_norm: 250,
+  cls_prior_prob: 0.01,
+  center_sample: radius,
+  center_sample_radius: 1.5,
+
+  # Other new options
+  use_rev_grad: True,
+  weight_clip_value: 0.05,
+  adv_method: [conditional_rev],   # False uses the wgan-like paradigm
+  semantic_alignment: False,
+  da_ema_momentum: 0.7,
+  use_pseudo_labels: True,
+  pl_threshold: 0.3,
+  use_level_disc: True,
+  src_regularization: label_smoothing,
+  use_adv_discriminator: True,
+  align_final_embs: False,
+  
+  semantic_alignment_levels: [0,1,2,3,4,5],
+  semantic_align_loss: "mse",
+
+  focal_loss_gamma: 2.0,
+  align_bkg: True,
+
+
+  # New options for the adversarial training
+  num_conditional_adv_layers: 2,
+  conditional_adv_activation: "leaky_relu",
+  conditional_adv_bias: 0.5,
+  conditional_adv_drop_rate: 0.5,
+  dim_proj_adv: 512,
+  beta: 0.5,
+  weight_source_cond_adv: 0.7,
+  weight_target_cond_adv: 0.8,
+  weight_no_class_adv: 0.1,
+  weight_level_0: 0.7,
+  weight_level_1: 0.6,
+  weight_level_2: 1.0,
+  weight_level_3: 0.7,
+  weight_level_4: 0.2,
+  weight_level_5: 0.2,
+}
+opt: {
+  type: "AdamW",  # SGD or AdamW
+  momentum: 0.9,
+  warmup: True,
+  schedule_type: "cosine",
+  schedule_steps: [],
+  schedule_gamma: 0.1,
+
+  warmup_epochs: 5,
+  learning_rate: 0.0001,
+  disc_learning_rate: 0.006,
+  eta_min: 0.00005,
+  epochs: 50, #22,
+  weight_decay: 0.05,
+
+}
+loader: {
+  batch_size: 2,
+  num_workers: 4
+}
+train_cfg: {  
+  clip_grad_l2norm: 1.0,
+  warmup_adv: 5,
+
+  ema_active: True,
+  ema_decay: 0.999,
+  step_start_ema: 0,
+  update_ema_every: 1,
+
+  save_period: 5,
+  verbosity: 1,
+  monitor: "min val_loss",
+  early_stop: -1,
+  valid_freq: 5,
+  test_freq: 5,
+
+  train_vis_idces: [0, 1, 2],
+  test_vis_idces: [0, 1, 2],
+
+  umap_freq: 100 #15
+}
+test_cfg: {
+  pre_nms_thresh: 0.001, 
+  iou_threshold: 0.1,
+  nms_method: 'soft',  # soft | hard | none
+  duration_thresh: 0.05,
+  ext_score_file: None,
+  voting_thresh: 0.75,
+
+  pre_nms_topk: 5000,
+  max_seg_num: 2000,
+  min_score: 0.001,
+  nms_sigma : 0.4,
+  multiclass_nms: True
+}
