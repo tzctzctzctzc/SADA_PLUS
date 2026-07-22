@@ -238,7 +238,20 @@ def main(cfg, resume, project_name='domain_adaptation', debug=False):
     
     # Execute the inference
     print("Starting inference...")
-    trainer._test_epoch(curr_epoch=None, data_loader=train_loader_tgt2, mode='train', domain='tgt')
+    if args.eval_split == 'val':
+        trainer._test_epoch(
+            curr_epoch=None,
+            data_loader=val_loader_tgt,
+            mode='test',
+            domain='tgt',
+        )
+    else:
+        trainer._test_epoch(
+            curr_epoch=None,
+            data_loader=train_loader_tgt2,
+            mode='train',
+            domain='tgt',
+        )
 
     print("All done!")
     return
@@ -264,6 +277,8 @@ def create_argparser():
                         help='gpu')
     parser.add_argument('-d', '--debug', action='store_true',
                         help='debug flag')
+    parser.add_argument('--eval_split', choices=('train', 'val'), default='train',
+                        help='target-domain split to evaluate (default: train)')
 
     add_dict_to_argparser(parser, ARGS_TYPES)
 

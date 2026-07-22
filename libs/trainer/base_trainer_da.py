@@ -57,8 +57,8 @@ class BaseTrainerDA:
         self.lr_scheduler_gen_source_alignment = scheduler_gen_source_alignment
         self.lr_scheduler_disc = scheduler_disc
         
-        self.valid_freq = 2 #cfg['train_cfg']['valid_freq']
-        self.test_freq = 2 #cfg['train_cfg']['test_freq']
+        self.valid_freq = cfg['train_cfg']['valid_freq']
+        self.test_freq = cfg['train_cfg']['test_freq']
         
         self.metrics = cfg['opt']['epochs']
         self.epochs = cfg['opt']['epochs']
@@ -161,7 +161,7 @@ class BaseTrainerDA:
         self.mean_conf_tgt = None
         
         self.best_metric = 10000
-        self.early_stop = 1
+        self.early_stop = self.cfg['train_cfg']['early_stop']
         not_improved_count = 0
         
         print("Starting the training...")
@@ -219,7 +219,7 @@ class BaseTrainerDA:
 
 
                 # Perform early stopping
-                if not_improved_count >= self.early_stop:
+                if self.early_stop > 0 and not_improved_count >= self.early_stop:
                     print("Stopping due to early stopping")
                     self.logger.info("Validation performance didn\'t improve for {} epochs. "
                                      "Training stops.".format(self.early_stop))

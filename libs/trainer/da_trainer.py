@@ -63,9 +63,11 @@ class Trainer(BaseTrainerDA):
     
     def _phantom_train_epoch(self):
         # to make the data_loader behave in a reproducible way when training is resumed. It simulates an epoch-worth of data_loader iteration.
-        for batch_idx, batch in enumerate(self.data_loader):
-            if batch_idx == self.n_iters:
-                break
+        iter_src = itertools.cycle(iter(self.train_loader_src))
+        iter_tgt = itertools.cycle(iter(self.train_loader_tgt))
+        for _ in range(max(len(self.train_loader_src), len(self.train_loader_tgt))):
+            next(iter_src)
+            next(iter_tgt)
 
     def _train_epoch(self, curr_epoch, ad_lambda=1, cls_static_anchors = None, mean_class_conf=None): 
         """

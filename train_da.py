@@ -231,13 +231,21 @@ def main(cfg, resume, project_name='sada', debug=False):
             model.load_state_dict(checkpoint['state_dict'])
             
             if use_ema:
-                model_ema.module.load_state_dict(checkpoint['state_dict_ema'])
+                model_ema.module.load_state_dict(checkpoint['ema_state_dict'])
             
             # also load the optimizer / scheduler if necessary
             optimizer_gen_source.load_state_dict(checkpoint['optimizer_gen_source'])
             optimizer_gen_source_alignment.load_state_dict(checkpoint['optimizer_gen_source_alignment'])
             optimizer_disc.load_state_dict(checkpoint['optimizer_disc'])
-            #scheduler.load_state_dict(checkpoint['scheduler'])
+            completed_steps = checkpoint['epoch'] * num_iters_epoch
+            for scheduler, optimizer in (
+                    (scheduler_gen_source, optimizer_gen_source),
+                    (scheduler_gen_source_alignment, optimizer_gen_source_alignment),
+                    (scheduler_disc, optimizer_disc)):
+                if scheduler is not None:
+                    scheduler.last_epoch = completed_steps
+                    scheduler._step_count = completed_steps + 1
+                    scheduler._last_lr = [group['lr'] for group in optimizer.param_groups]
             print("=> loaded checkpoint '{:s}' (epoch {:d}".format(
                 args.resume, checkpoint['epoch']
             ))
@@ -364,6 +372,7 @@ def main(cfg, resume, project_name='sada', debug=False):
                         scheduler_gen_source=scheduler_gen_source,
                         scheduler_gen_source_alignment=scheduler_gen_source_alignment,
                         scheduler_disc=scheduler_disc)
+    trainer.start_epoch = args.start_epoch
     
     # ----------------------------------------------- TRAINING -----------------------------------------------
     logger.info(f"Starting training (epochs={cfg['opt']['epochs']}, early_stop={es})...")
@@ -407,7 +416,7 @@ if __name__ == '__main__':
     args = create_argparser().parse_args()
     
     # Read the configuration file
-    config_path = os.path.join(os.path.dirname(args.resume), "config.yaml") if args.resume else args.config_path
+    config_path = args.config_path
     config_dict = read_yaml(config_path)
 
     update_config_with_arguments(config_dict, args, ARGS_TYPES, ARGS_CONFIGPATH)
