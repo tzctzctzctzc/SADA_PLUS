@@ -29,6 +29,7 @@ interpolate_probabilities = stage1_utils.interpolate_probabilities
 shift_features = stage1_utils.shift_features
 weighted_quantile = stage1_utils.weighted_quantile
 source_action_eligible = stage1_utils.source_action_eligible
+validate_stage1_resume = stage1_utils.validate_stage1_resume
 
 DATA_UTILS_PATH = Path(__file__).parents[1] / "libs/datasets/data_utils.py"
 DATA_UTILS_SPEC = importlib.util.spec_from_file_location(
@@ -39,6 +40,92 @@ DATA_UTILS_SPEC.loader.exec_module(stage1_data_utils)
 
 
 class Stage1UtilsTest(unittest.TestCase):
+    @staticmethod
+    def _stage1_checkpoint(
+        perturbation="shift", alpha=0.6, epoch=5, include_new_fields=True
+    ):
+        stage1 = {"calibrated": True}
+        if include_new_fields:
+            stage1.update({
+                "enabled": True,
+                "perturbation": perturbation,
+                "alpha": alpha,
+            })
+        return {
+            "epoch": epoch,
+            "stage1": stage1,
+            "config": {
+                "stage1": {
+                    "enabled": True,
+                    "perturbation": perturbation,
+                },
+                "model": {"pl_threshold": alpha},
+            },
+        }
+
+    def test_stage1_resume_rejects_forgotten_cli_mode(self):
+        with self.assertRaisesRegex(ValueError, "--stage1 off"):
+            validate_stage1_resume(
+                self._stage1_checkpoint(),
+                current_enabled=False,
+                current_perturbation="shift",
+                current_alpha=0.6,
+                calibration_epoch=5,
+            )
+
+    def test_stage1_resume_rejects_perturbation_mismatch(self):
+        with self.assertRaisesRegex(ValueError, "perturbation mismatch"):
+            validate_stage1_resume(
+                self._stage1_checkpoint(perturbation="shift"),
+                current_enabled=True,
+                current_perturbation="context",
+                current_alpha=0.6,
+                calibration_epoch=5,
+            )
+
+    def test_stage1_resume_rejects_alpha_mismatch(self):
+        with self.assertRaisesRegex(ValueError, "alpha mismatch"):
+            validate_stage1_resume(
+                self._stage1_checkpoint(alpha=0.6),
+                current_enabled=True,
+                current_perturbation="shift",
+                current_alpha=0.5,
+                calibration_epoch=5,
+            )
+
+    def test_stage1_resume_accepts_legacy_config_metadata(self):
+        checkpoint = self._stage1_checkpoint(include_new_fields=False)
+        checkpoint["config"] = types.SimpleNamespace(
+            config=checkpoint["config"]
+        )
+        state = validate_stage1_resume(
+            checkpoint,
+            current_enabled=True,
+            current_perturbation="shift",
+            current_alpha=0.6,
+            calibration_epoch=5,
+        )
+        self.assertIs(state, checkpoint["stage1"])
+
+    def test_stage1_resume_rejects_missing_post_calibration_state(self):
+        checkpoint = {"epoch": 4, "config": {}}
+        self.assertIsNone(validate_stage1_resume(
+            checkpoint,
+            current_enabled=True,
+            current_perturbation="shift",
+            current_alpha=0.6,
+            calibration_epoch=5,
+        ))
+        checkpoint["epoch"] = 5
+        with self.assertRaisesRegex(ValueError, "no Stage 1 state"):
+            validate_stage1_resume(
+                checkpoint,
+                current_enabled=True,
+                current_perturbation="shift",
+                current_alpha=0.6,
+                calibration_epoch=5,
+            )
+
     def test_shift_has_no_wraparound(self):
         features = torch.arange(5).float().view(1, 5)
         mask = torch.ones(1, 5, dtype=torch.bool)

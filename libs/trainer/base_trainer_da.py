@@ -10,6 +10,7 @@ import csv
 import json
 
 from libs.evaluation.metrics import MetricTracker
+from libs.models.SADA.stage1_utils import validate_stage1_resume
 
 class BaseTrainerDA:
     """
@@ -389,6 +390,9 @@ class BaseTrainerDA:
         }
         if self.cfg.get('stage1', {}).get('enabled', False):
             state['stage1'] = {
+                'enabled': True,
+                'perturbation': self.model.stage1_perturbation,
+                'alpha': self.model.stage1_alpha,
                 'train_rng_state': self.model.stage1_train_rng.get_state(),
                 'calibration_rng_state': self.model.stage1_calibration_rng.get_state(),
                 'dryrun_rng_state': self.model.stage1_dryrun_rng.get_state(),
@@ -410,10 +414,17 @@ class BaseTrainerDA:
 
         checkpoint = torch.load(resume_path)
 
-        # load architecture params from checkpoint.
+        stage1 = validate_stage1_resume(
+            checkpoint,
+            current_enabled=self.model.stage1_enabled,
+            current_perturbation=self.model.stage1_perturbation,
+            current_alpha=self.model.stage1_alpha,
+            calibration_epoch=max(1, self.model.warmup_adv),
+        )
+
+        # Load state only after the checkpoint mode has been validated.
         self.model.load_state_dict(checkpoint['state_dict'])
-        if 'stage1' in checkpoint:
-            stage1 = checkpoint['stage1']
+        if stage1 is not None:
             legacy_rng = stage1.get('rng_state')
             train_rng_state = stage1.get('train_rng_state', legacy_rng)
             if train_rng_state is not None:

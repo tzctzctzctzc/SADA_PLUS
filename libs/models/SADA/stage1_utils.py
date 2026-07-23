@@ -2,6 +2,85 @@ import torch
 import torch.nn.functional as F
 
 
+def validate_stage1_resume(
+    checkpoint,
+    current_enabled,
+    current_perturbation,
+    current_alpha,
+    calibration_epoch,
+):
+    """Reject checkpoint resumes which would silently change Stage 1 mode."""
+    stage1 = checkpoint.get("stage1")
+    checkpoint_config = checkpoint.get("config", {})
+    if hasattr(checkpoint_config, "config"):
+        checkpoint_config = checkpoint_config.config
+    checkpoint_stage1_cfg = checkpoint_config.get("stage1", {})
+    checkpoint_model_cfg = checkpoint_config.get("model", {})
+
+    if stage1 is None:
+        if current_enabled and checkpoint.get("epoch", 0) >= calibration_epoch:
+            raise ValueError(
+                "Stage 1 is enabled, but this checkpoint has no Stage 1 state "
+                "and has already reached the calibration epoch"
+            )
+        return None
+
+    if not current_enabled:
+        raise ValueError(
+            "checkpoint contains Stage 1 state, but current run uses "
+            "--stage1 off; pass the matching --stage1 mode"
+        )
+
+    saved_enabled = stage1.get(
+        "enabled", checkpoint_stage1_cfg.get("enabled", True)
+    )
+    if not saved_enabled:
+        raise ValueError(
+            "checkpoint Stage 1 state is marked disabled and cannot be resumed"
+        )
+
+    saved_perturbation = stage1.get(
+        "perturbation", checkpoint_stage1_cfg.get("perturbation")
+    )
+    if saved_perturbation is None:
+        raise ValueError(
+            "cannot determine the Stage 1 perturbation mode from checkpoint"
+        )
+    if saved_perturbation != current_perturbation:
+        raise ValueError(
+            "Stage 1 perturbation mismatch: checkpoint={} current={}".format(
+                saved_perturbation, current_perturbation
+            )
+        )
+
+    saved_alpha = stage1.get(
+        "alpha", checkpoint_model_cfg.get("pl_threshold")
+    )
+    if saved_alpha is None:
+        raise ValueError("cannot determine Stage 1 alpha from checkpoint")
+    if not torch.isclose(
+        torch.as_tensor(float(saved_alpha)),
+        torch.as_tensor(float(current_alpha)),
+        rtol=0.0,
+        atol=1e-8,
+    ):
+        raise ValueError(
+            "Stage 1 alpha mismatch: checkpoint={} current={}".format(
+                saved_alpha, current_alpha
+            )
+        )
+
+    if (
+        checkpoint.get("epoch", 0) >= calibration_epoch
+        and not stage1.get("calibrated", False)
+    ):
+        raise ValueError(
+            "checkpoint passed the Stage 1 calibration epoch but contains "
+            "uncalibrated Stage 1 state"
+        )
+    return stage1
+
+
 def population_std(values, dim=0):
     """Population standard deviation used by the two-view routing rule."""
     return torch.std(values, dim=dim, correction=0)

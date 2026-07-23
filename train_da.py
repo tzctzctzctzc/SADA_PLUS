@@ -15,6 +15,7 @@ import torch.utils.data
 import torch.optim as optim
 from torch.optim.lr_scheduler import LambdaLR, CyclicLR
 from libs.models.SADA.optimizer import make_scheduler, make_optimizer
+from libs.models.SADA.stage1_utils import validate_stage1_resume
 
 os.environ['NUMBA_NUM_THREADS'] = "8"
 
@@ -234,9 +235,15 @@ def main(cfg, resume, project_name='sada', debug=False):
             checkpoint = torch.load(args.resume,
                                     map_location=lambda storage, loc: storage.cuda(device))
             args.start_epoch = checkpoint['epoch'] + 1
+            stage1 = validate_stage1_resume(
+                checkpoint,
+                current_enabled=model.stage1_enabled,
+                current_perturbation=model.stage1_perturbation,
+                current_alpha=model.stage1_alpha,
+                calibration_epoch=max(1, model.warmup_adv),
+            )
             model.load_state_dict(checkpoint['state_dict'])
-            if 'stage1' in checkpoint:
-                stage1 = checkpoint['stage1']
+            if stage1 is not None:
                 legacy_rng = stage1.get('rng_state')
                 train_rng_state = stage1.get('train_rng_state', legacy_rng)
                 if train_rng_state is not None:

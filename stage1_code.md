@@ -34,6 +34,8 @@ CUDA_VISIBLE_DEVICES=1 python train_da.py -c CONFIG -n stage1_context \
 
 新增无状态、可单元测试的基础算法：
 
+- `validate_stage1_resume`：在加载 checkpoint 状态前校验 Stage 1 开关、
+  扰动模式、`alpha` 和校准状态；
 - `population_std`：使用 `correction=0` 的总体标准差；
 - `shift_features`：显式 padding 的时间平移，不允许首尾回卷；
 - `context_view_on_cpu`：从完整特征切出 Context 视图，并保证进入 batch
@@ -406,6 +408,9 @@ tensorboard --logdir model_results/RUN_NAME/RUN_ID/stage1_tensorboard
 checkpoint 的 `stage1` 字段保存：
 
 ```text
+enabled
+perturbation
+alpha
 train_rng_state
 calibration_rng_state
 dryrun_rng_state
@@ -415,9 +420,29 @@ tau_bg
 calibrated
 ```
 
-实际训练入口 `train_da.py` 和 BaseTrainer 的备用恢复入口都会恢复这些状态；
-同时兼容首版 checkpoint 的旧字段 `rng_state`。因此连续训练与“保存后恢复”
-会从相同的正式扰动 RNG 状态继续。
+实际训练入口 `train_da.py` 和 BaseTrainer 的备用恢复入口都会先调用
+`validate_stage1_resume`。只有兼容性检查全部通过，才加载模型参数、三套 RNG、
+阈值和 calibrated 状态。以下情况直接抛出 `ValueError`：
+
+```text
+checkpoint 含 Stage 1 状态，但当前使用 --stage1 off
+checkpoint perturbation=shift，当前使用 --stage1 context
+checkpoint perturbation=context，当前使用 --stage1 shift
+checkpoint alpha 与当前 model.pl_threshold 不同
+恢复 epoch 已达到校准时刻，但 checkpoint 没有 Stage 1 状态
+恢复 epoch 已达到校准时刻，但 checkpoint 仍标记为未校准
+checkpoint 无法确定旧 Stage 1 模式或 alpha
+```
+
+所以忘记传 `--stage1` 或给错模式不会再静默关闭模块或混用阈值。恢复尚未到
+校准 epoch 的普通 baseline checkpoint 仍被允许，此时 Stage 1 会在后续固定
+时刻正常校准。
+
+新 checkpoint 直接保存 `enabled/perturbation/alpha`。首版 Stage 1 checkpoint
+尚未保存这三个字段，校验器会从 checkpoint 内部保存的
+`config.stage1.perturbation` 和 `config.model.pl_threshold` 回填，因此已有
+Shift/Context checkpoint 无需作废；旧字段 `rng_state` 也继续兼容。检查通过
+后，连续训练与“保存后恢复”会从相同的正式扰动 RNG 状态继续。
 
 checkpoint 内的 Stage 1 状态是正常断点恢复的权威来源。只有配置中显式给出
 `calibration_artifact` 且 checkpoint 没有已校准状态时，Trainer 才尝试加载
@@ -460,11 +485,14 @@ git diff --check
   并验证无效窗口准确重建 baseline crop；
 - source 校准裁剪复用 action-preserving 截断、边界裁剪和 label 保留；
 - 校准 manifest 与实验元数据不匹配时拒绝加载；
+- checkpoint 忘记传 Stage 1、Shift/Context 模式互换、`alpha` 不同、越过
+  校准 epoch 却缺少状态时均拒绝恢复；
+- 首版 checkpoint 可从内部 config 回填模式和 `alpha` 并正常通过校验；
 - 连续 RNG 序列与 checkpoint 恢复后的序列一致；
 - weighted quantile；
 - layer-balanced beta/tau 校准。
 
-当前共 12 个单元测试。
+当前共 17 个单元测试。
 
 本地 Python 环境未安装项目 requirements 中的 `einops`，因此没有完成完整
 SADA 模型实例化或 GPU 前向；这部分必须在 A40 的项目环境进行 smoke test 和
