@@ -6,6 +6,8 @@ import time
 import wandb
 import logging
 import math
+import csv
+import json
 
 from libs.evaluation.metrics import MetricTracker
 
@@ -84,6 +86,15 @@ class BaseTrainerDA:
         self.plots_dir = os.path.join(self.cfg.save_dir, 'plots')
         os.makedirs(self.checkpoint_dir, exist_ok=True)
         os.makedirs(self.plots_dir, exist_ok=True)
+        self.stage1_writer = None
+        if self.cfg.get('stage1', {}).get('enabled', False):
+            try:
+                from torch.utils.tensorboard import SummaryWriter
+                self.stage1_writer = SummaryWriter(
+                    os.path.join(self.cfg.save_dir, 'stage1_tensorboard')
+                )
+            except ImportError:
+                self.logger.warning("TensorBoard is unavailable; CSV/JSON logging remains active")
 
 
         # Pretraining: pretrain the model for a number of epochs before starting the training
@@ -134,7 +145,7 @@ class BaseTrainerDA:
     def move_to_device(self, video_list, device):
         for i, video in enumerate(video_list):
             for key in video.keys(): 
-                if isinstance(video[key], torch.Tensor):
+                if key != 'full_feats' and isinstance(video[key], torch.Tensor):
                     video_list[i][key] = video[key].to(device)
         return video_list 
 
@@ -191,6 +202,16 @@ class BaseTrainerDA:
                     self.model.train_label_smoothing = 0
                 elif src_regularization == 'l2':
                     pass 
+            calibration_epoch = max(
+                1, self.cfg['train_cfg'].get('warmup_adv', 0)
+            )
+            if (
+                epoch == calibration_epoch
+                and self.cfg.get('stage1', {}).get('enabled', False)
+                and hasattr(self, '_calibrate_stage1')
+                and not self.model.stage1_calibrated
+            ):
+                self._calibrate_stage1(epoch)
             
             # Call the function with the main training logic for one single epoch
             self._train_epoch(epoch, 
@@ -239,10 +260,33 @@ class BaseTrainerDA:
             log_data.update(**{k : v for k, v in list(self.train_metrics.result().items())})
             log_data.update(**{k : v for k, v in list(self.valid_metrics_src.result().items())})
             log_data.update(**{k : v for k, v in list(self.valid_metrics_tgt.result().items())})
+            log_data.update(getattr(self, 'stage1_epoch_summary', {}))
             
             # Upload to wandb
             if wandb.run is not None:
                 wandb.log(log_data, step=epoch)
+            if self.cfg.get('stage1', {}).get('enabled', False):
+                stage1_log = os.path.join(self.cfg.save_dir, 'stage1_epoch_metrics.jsonl')
+                with open(stage1_log, 'a', encoding='utf-8') as handle:
+                    handle.write(json.dumps(log_data, ensure_ascii=False) + '\n')
+                stage1_values = {
+                    key: value for key, value in log_data.items()
+                    if key == 'epoch' or 'stage1_' in key
+                }
+                if len(stage1_values) > 1:
+                    stage1_csv = os.path.join(self.cfg.save_dir, 'stage1_epoch_metrics.csv')
+                    write_header = not os.path.exists(stage1_csv)
+                    with open(stage1_csv, 'a', newline='', encoding='utf-8') as handle:
+                        writer = csv.DictWriter(
+                            handle, fieldnames=list(stage1_values.keys())
+                        )
+                        if write_header:
+                            writer.writeheader()
+                        writer.writerow(stage1_values)
+                    if self.stage1_writer is not None:
+                        for key, value in stage1_values.items():
+                            if key != 'epoch':
+                                self.stage1_writer.add_scalar(key, value, epoch)
             
             # print logged informations to the screen
             t = time.time() - t0
@@ -317,6 +361,14 @@ class BaseTrainerDA:
             "optimizer_disc": self.optimizer_disc.state_dict(),
             'config': self.cfg
         }
+        if self.cfg.get('stage1', {}).get('enabled', False):
+            state['stage1'] = {
+                'rng_state': self.model.stage1_rng.get_state(),
+                'beta': self.model.stage1_beta,
+                'tau_act': self.model.stage1_tau_act,
+                'tau_bg': self.model.stage1_tau_bg,
+                'calibrated': self.model.stage1_calibrated,
+            }
         return state
 
 
@@ -332,6 +384,13 @@ class BaseTrainerDA:
 
         # load architecture params from checkpoint.
         self.model.load_state_dict(checkpoint['state_dict'])
+        if 'stage1' in checkpoint:
+            stage1 = checkpoint['stage1']
+            self.model.stage1_rng.set_state(stage1['rng_state'])
+            self.model.stage1_beta = stage1['beta']
+            self.model.stage1_tau_act = stage1['tau_act']
+            self.model.stage1_tau_bg = stage1['tau_bg']
+            self.model.stage1_calibrated = stage1['calibrated']
 
         self.start_epoch = checkpoint['epoch'] + 1
 

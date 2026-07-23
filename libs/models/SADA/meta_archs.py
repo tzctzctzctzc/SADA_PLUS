@@ -6,6 +6,12 @@ from torch.nn import functional as F
 from .blocks import MaskedConv1D, Scale, LayerNorm
 from .losses_aux import ctr_diou_loss_1d, sigmoid_focal_loss, ctr_giou_loss_1d
 from .models import register_meta_arch, make_backbone, make_neck, make_generator
+from .stage1_utils import (
+    build_routing_masks,
+    erode_mask,
+    interpolate_probabilities,
+    shift_features,
+)
 from libs.utils import batched_nms
 import einops
 import copy
@@ -269,6 +275,22 @@ class SADA(nn.Module):
         self.reg_range = cfg['model']['regression_range']
         self.n_levels = len(self.fpn_strides)
         self.warmup_adv = cfg['train_cfg'].get('warmup_adv', 0)
+        stage1_cfg = cfg.get('stage1', {})
+        self.stage1_enabled = stage1_cfg.get('enabled', False)
+        self.stage1_perturbation = stage1_cfg.get('perturbation', 'shift')
+        self.stage1_seed = stage1_cfg.get('seed', cfg.get('init_rand_seed', 0) + 100003)
+        self.stage1_rng = torch.Generator(device='cpu')
+        self.stage1_rng.manual_seed(self.stage1_seed)
+        self.stage1_alpha = cfg['model'].get('pl_threshold', 0.7)
+        self.stage1_beta = stage1_cfg.get('beta', None)
+        self.stage1_tau_act = stage1_cfg.get('tau_act', None)
+        self.stage1_tau_bg = stage1_cfg.get('tau_bg', None)
+        self.stage1_calibrated = all(
+            value is not None
+            for value in (self.stage1_beta, self.stage1_tau_act, self.stage1_tau_bg)
+        )
+        if self.stage1_enabled:
+            assert self.stage1_perturbation in ('shift', 'context')
         
         
         assert len(self.fpn_strides) == len(self.reg_range)
@@ -648,6 +670,263 @@ class SADA(nn.Module):
             pred_fc_domain_frame = self.disc_dom_conditional_adv[level](feat_fc_domain_frame)
                 
         return pred_fc_domain_frame
+
+    @torch.no_grad()
+    def _stage1_shift_routing(self, video_list_tgt, points):
+        """Deterministic two-view routing for the feature-shift experiment."""
+        if not self.stage1_calibrated:
+            raise RuntimeError("Stage 1 thresholds must be calibrated before routing")
+
+        modules = (self.backbone_target, self.neck_target, self.cls_head_target)
+        training_states = [module.training for module in modules]
+        for module in modules:
+            module.eval()
+        try:
+            inputs, masks = self.preprocessing(video_list_tgt, mode='validation')
+            delta = -2 if torch.randint(
+                0, 2, (1,), generator=self.stage1_rng
+            ).item() == 0 else 2
+            self._stage1_last_perturbation = [
+                {'perturbation_direction': int(delta), 'offset': abs(int(delta))}
+                for _ in video_list_tgt
+            ]
+            shifted_inputs, shifted_masks = shift_features(inputs, masks, delta)
+
+            strict0 = self._stage1_strict_masks(masks)
+            strict1 = self._stage1_strict_masks(shifted_masks)
+            feats0, masks0, _ = self.backbone_target(inputs, masks)
+            fpn0, fpn_masks0 = self.neck_target(feats0, masks0)
+            logits0, _ = self.cls_head_target(fpn0, fpn_masks0)
+
+            feats1, masks1, _ = self.backbone_target(shifted_inputs, shifted_masks)
+            fpn1, fpn_masks1 = self.neck_target(feats1, masks1)
+            logits1, _ = self.cls_head_target(fpn1, fpn_masks1)
+
+            routes = []
+            for level, point_grid in enumerate(points):
+                prob0 = logits0[level].permute(0, 2, 1).sigmoid()
+                prob1 = logits1[level].permute(0, 2, 1).sigmoid()
+                valid0 = strict0[level].squeeze(1)
+                valid1 = strict1[level].squeeze(1)
+                query = point_grid[:, 0] + delta
+                interpolated, interpolation_valid = interpolate_probabilities(
+                    prob1, valid1, point_grid, query
+                )
+                valid = valid0 & interpolation_valid
+                level_route = build_routing_masks(
+                    prob0,
+                    interpolated,
+                    valid,
+                    self.stage1_alpha,
+                    self.stage1_beta,
+                    self.stage1_tau_act,
+                    self.stage1_tau_bg,
+                )
+                level_route["delta"] = delta
+                routes.append(level_route)
+            return routes
+        finally:
+            for module, was_training in zip(modules, training_states):
+                module.train(was_training)
+
+    def _stage1_strict_masks(self, input_mask):
+        """Propagate local-support validity through SGP and classification head."""
+        cfg_model = self.cfg['model']
+        mask = input_mask.bool()
+        embd_kernel = cfg_model['embd_kernel_size']
+        for _ in range(cfg_model['backbone_arch'][0]):
+            mask = erode_mask(mask, embd_kernel, stride=1, padding=embd_kernel // 2)
+
+        k_scale = cfg_model['k']
+        stem_kernel = 1
+        stem_up = round((stem_kernel + 1) * k_scale)
+        stem_up += 1 if stem_up % 2 == 0 else 0
+        for _ in range(cfg_model['backbone_arch'][1]):
+            mask = erode_mask(mask, stem_up, stride=1, padding=stem_up // 2)
+
+        masks = [mask]
+        windows = self.sgp_win_size[1:]
+        for window in windows:
+            stride = self.scale_factor
+            mask = erode_mask(
+                mask, stride + 1, stride=stride, padding=(stride + 1) // 2
+            )
+            local_kernel = max(int(window), 1)
+            local_up = round((local_kernel + 1) * k_scale)
+            local_up += 1 if local_up % 2 == 0 else 0
+            mask = erode_mask(
+                mask, local_up, stride=1, padding=local_up // 2
+            )
+            masks.append(mask)
+
+        head_kernel = cfg_model['head_kernel_size']
+        strict_outputs = []
+        for level_mask in masks:
+            current = level_mask
+            for _ in range(cfg_model['head_num_layers']):
+                current = erode_mask(
+                    current, head_kernel, stride=1, padding=head_kernel // 2
+                )
+            strict_outputs.append(current.bool())
+        return strict_outputs
+
+    @torch.no_grad()
+    def _stage1_context_routing(self, video_list_tgt, points):
+        """Deterministic routing for baseline-crop-preserving context views."""
+        if not self.stage1_calibrated:
+            raise RuntimeError("Stage 1 thresholds must be calibrated before routing")
+        context_videos, directions, offsets, context_valid = [], [], [], []
+        rho = self.cfg.get('stage1', {}).get('context_rho', 64.0 / 2304.0)
+        rho_max = self.cfg.get('stage1', {}).get('context_rho_max', 2.0 * rho)
+        for video in video_list_tgt:
+            original = video['feats']
+            full = video.get('full_feats')
+            start = int(video['metadata'].get('crop_start', 0))
+            length = original.shape[-1]
+            offset = max(1, int(round(rho * length)))
+            legal = []
+            if full is not None and offset / float(length) <= rho_max:
+                if start - offset >= 0:
+                    legal.append(-1)
+                if start + length + offset <= full.shape[-1]:
+                    legal.append(1)
+            if legal:
+                pick = torch.randint(0, len(legal), (1,), generator=self.stage1_rng).item()
+                direction = legal[pick]
+                context = full[:, start + direction * offset:start + direction * offset + length]
+                is_valid = True
+            else:
+                direction, context, is_valid = 0, original, False
+            context_video = dict(video)
+            context_video['feats'] = context
+            context_videos.append(context_video)
+            directions.append(direction)
+            offsets.append(offset)
+            context_valid.append(is_valid)
+
+        modules = (self.backbone_target, self.neck_target, self.cls_head_target)
+        training_states = [module.training for module in modules]
+        for module in modules:
+            module.eval()
+        self._stage1_last_perturbation = [
+            {'perturbation_direction': int(direction), 'offset': int(offset)}
+            for direction, offset in zip(directions, offsets)
+        ]
+        try:
+            inputs0, masks0 = self.preprocessing(video_list_tgt, mode='validation')
+            inputs1, masks1 = self.preprocessing(context_videos, mode='validation')
+            strict0 = self._stage1_strict_masks(masks0)
+            strict1 = self._stage1_strict_masks(masks1)
+            feats0, backbone_masks0, _ = self.backbone_target(inputs0, masks0)
+            fpn0, fpn_masks0 = self.neck_target(feats0, backbone_masks0)
+            logits0, _ = self.cls_head_target(fpn0, fpn_masks0)
+            feats1, backbone_masks1, _ = self.backbone_target(inputs1, masks1)
+            fpn1, fpn_masks1 = self.neck_target(feats1, backbone_masks1)
+            logits1, _ = self.cls_head_target(fpn1, fpn_masks1)
+
+            routes = []
+            for level, point_grid in enumerate(points):
+                prob0 = logits0[level].permute(0, 2, 1).sigmoid()
+                prob1 = logits1[level].permute(0, 2, 1).sigmoid()
+                valid0 = strict0[level].squeeze(1)
+                valid1 = strict1[level].squeeze(1)
+                interpolated_rows, valid_rows = [], []
+                for batch_idx, (direction, offset, is_valid) in enumerate(
+                    zip(directions, offsets, context_valid)
+                ):
+                    query = point_grid[:, 0] - direction * offset
+                    interpolated, valid = interpolate_probabilities(
+                        prob1[batch_idx:batch_idx + 1],
+                        valid1[batch_idx:batch_idx + 1],
+                        point_grid,
+                        query,
+                    )
+                    interpolated_rows.append(interpolated)
+                    valid_rows.append(valid & is_valid)
+                interpolated = torch.cat(interpolated_rows, dim=0)
+                valid = valid0 & torch.cat(valid_rows, dim=0)
+                route = build_routing_masks(
+                    prob0, interpolated, valid, self.stage1_alpha,
+                    self.stage1_beta, self.stage1_tau_act, self.stage1_tau_bg,
+                )
+                route['direction'] = directions
+                route['offset'] = offsets
+                routes.append(route)
+            return routes
+        finally:
+            for module, was_training in zip(modules, training_states):
+                module.train(was_training)
+
+    @torch.no_grad()
+    def collect_stage1_calibration_records(self, video_list):
+        """Return detached source-validation anchor records for calibration."""
+        inputs, masks = self.preprocessing(video_list, mode='validation')
+        feats, backbone_masks, _ = self.backbone_target(inputs, masks)
+        fpn_feats, _ = self.neck_target(feats, backbone_masks)
+        points = self.point_generator(fpn_feats)
+
+        saved = (
+            self.stage1_beta, self.stage1_tau_act,
+            self.stage1_tau_bg, self.stage1_calibrated,
+        )
+        self.stage1_beta = self.stage1_tau_act = self.stage1_tau_bg = 1.0
+        self.stage1_calibrated = True
+        try:
+            if self.stage1_perturbation == 'shift':
+                routes = self._stage1_shift_routing(video_list, points)
+            else:
+                routes = self._stage1_context_routing(video_list, points)
+        finally:
+            (
+                self.stage1_beta, self.stage1_tau_act,
+                self.stage1_tau_bg, self.stage1_calibrated,
+            ) = saved
+
+        gt_segments = [item['segments'].to(self.device) for item in video_list]
+        gt_labels = [item['labels'].to(self.device) for item in video_list]
+        gt_cls, _ = self.label_points(points, gt_segments, gt_labels)
+        gt_cls = torch.stack(gt_cls)
+        records, start = [], 0
+        for level, point_grid in enumerate(points):
+            length = point_grid.shape[0]
+            labels = gt_cls[:, start:start + length]
+            route = routes[level]
+            is_action = labels.sum(dim=-1) > 0
+            gt_class = labels.argmax(dim=-1)
+            valid = route['valid']
+            action_eligible = (
+                valid & is_action
+                & (route['pseudo_class'] == gt_class)
+                & (route['perturbed_class'] == gt_class)
+                & (route['score_original'] >= self.stage1_alpha)
+            )
+            records.append({
+                'level': torch.full(
+                    (labels.numel() // labels.shape[-1],), level,
+                    dtype=torch.long, device=labels.device,
+                ),
+                'is_action': is_action.flatten(),
+                'r': torch.maximum(
+                    route['score_original'], route['score_perturbed']
+                ).flatten(),
+                'action_eligible': action_eligible.flatten(),
+                'action_std': route['action_std'].flatten(),
+                'background_valid': valid.flatten(),
+                'background_std': route['background_std'].flatten(),
+            })
+            start += length
+        return records
+
+    @torch.no_grad()
+    def stage1_route_only(self, video_list):
+        """Route target videos without reading segments or labels."""
+        inputs, masks = self.preprocessing(video_list, mode='validation')
+        feats, backbone_masks, _ = self.backbone_target(inputs, masks)
+        fpn_feats, _ = self.neck_target(feats, backbone_masks)
+        points = self.point_generator(fpn_feats)
+        if self.stage1_perturbation == 'shift':
+            return self._stage1_shift_routing(video_list, points)
+        return self._stage1_context_routing(video_list, points)
     
     
 
@@ -701,6 +980,17 @@ class SADA(nn.Module):
         # (shared across all samples in the mini-batch)
         points = self.point_generator(fpn_feats)    
         points_per_level = [p.shape[0] for p in points]
+        stage1_routes = None
+        if (
+            self.stage1_enabled
+            and curr_epoch >= self.warmup_adv
+            and self.stage1_calibrated
+            and mode == 'train'
+        ):
+            if self.stage1_perturbation == 'shift':
+                stage1_routes = self._stage1_shift_routing(video_list_tgt, points)
+            else:
+                stage1_routes = self._stage1_context_routing(video_list_tgt, points)
 
         # ------------------------------------------------------------
         # Apply the classification and regression head for the source and target domains, separately
@@ -824,7 +1114,8 @@ class SADA(nn.Module):
                 gts_cls_per_level_src,
                 mode=mode,
                 domain=domain,
-                curr_epoch=curr_epoch
+                curr_epoch=curr_epoch,
+                stage1_routes=stage1_routes,
             )
             
             # Return the GTs of the target domain as well, to be used to compute the anchors
@@ -901,7 +1192,7 @@ class SADA(nn.Module):
                 batched_inputs += noise
         else:
             batched_inputs_final = []
-            for feat_video in feats:
+            for feat_video, feat_len in zip(feats, feats_lens):
                 #assert len(video_list) == 2, "Only support batch_size = 1 during inference (so batch size 1 for source and 1 for target)"
                 # input length < self.max_seq_len, pad to max_seq_len
                 if max_len <= self.max_seq_len:
@@ -910,7 +1201,7 @@ class SADA(nn.Module):
                     # pad the input to the next divisible size
                     stride = self.max_div_factor
                     max_len = (max_len + (stride - 1)) // stride * stride
-                padding_size = [0, max_len - feats_lens[0]]
+                padding_size = [0, max_len - int(feat_len)]
                 batched_inputs = F.pad(feat_video, padding_size, value=padding_val).unsqueeze(0)
                 batched_inputs_final.append(batched_inputs)
             batched_inputs = torch.cat(batched_inputs_final, dim=0)
@@ -1064,7 +1355,8 @@ class SADA(nn.Module):
             gts_per_level_src,
             mode, 
             domain, 
-            curr_epoch,):
+            curr_epoch,
+            stage1_routes=None,):
         bs = int(fpn_masks[0].shape[0] / 2)
         
         # gt_cls_labels is a list of 2B elements, each of shape FT x C
@@ -1327,8 +1619,39 @@ class SADA(nn.Module):
                     
                     # Apply thresholding to the maximum class probability
                     pseudo_gt_cls_target = torch.zeros_like(out_cls_logits_tgt2).detach()  # shape: B(T_l) x C or B(T_l) x C+1
-                    selected_anchors_mask = max_cls_prob_tgt >= threshold[max_cls_idx_tgt]
-                    pseudo_gt_cls_target[selected_anchors_mask] = F.one_hot(max_cls_idx_tgt[selected_anchors_mask], num_classes=self.num_classes).float()
+                    if stage1_routes is None:
+                        selected_anchors_mask = max_cls_prob_tgt >= threshold[max_cls_idx_tgt]
+                        pseudo_gt_cls_target[selected_anchors_mask] = F.one_hot(max_cls_idx_tgt[selected_anchors_mask], num_classes=self.num_classes).float()
+                        stage1_background_mask = None
+                    else:
+                        route_l = stage1_routes[l]
+                        route_valid = fpn_masks_tgt[l]
+                        selected_anchors_mask = route_l['reliable_action'][route_valid]
+                        selected_classes = route_l['pseudo_class'][route_valid]
+                        pseudo_gt_cls_target[selected_anchors_mask] = F.one_hot(
+                            selected_classes[selected_anchors_mask],
+                            num_classes=self.num_classes,
+                        ).float()
+                        stage1_background_mask = route_l['stable_background'][route_valid]
+                        metric_prefix = 'stage1_l{}_'.format(l)
+                        losses[metric_prefix + 'valid'] = route_l['valid'].sum().float()
+                        losses[metric_prefix + 'action_candidate'] = route_l['action_candidate'].sum().float()
+                        losses[metric_prefix + 'class_consistent'] = route_l['class_consistent'].sum().float()
+                        losses[metric_prefix + 'action'] = route_l['reliable_action'].sum().float()
+                        losses[metric_prefix + 'background_candidate'] = route_l['background_candidate'].sum().float()
+                        losses[metric_prefix + 'all_view_low'] = route_l['all_view_low'].sum().float()
+                        losses[metric_prefix + 'background'] = route_l['stable_background'].sum().float()
+                        losses[metric_prefix + 'ignore'] = route_l['ignore'].sum().float()
+                        losses[metric_prefix + 'action_std'] = (
+                            route_l['action_std'][route_l['valid']].mean()
+                            if route_l['valid'].any()
+                            else route_l['action_std'].sum() * 0
+                        )
+                        losses[metric_prefix + 'background_std'] = (
+                            route_l['background_std'][route_l['valid']].mean()
+                            if route_l['valid'].any()
+                            else route_l['background_std'].sum() * 0
+                        )
             
                     # 2) Compute the pseudo-labels of the source domain
                     # c* = argmax_c \hat{p}_c
@@ -1380,7 +1703,10 @@ class SADA(nn.Module):
                         if c == self.num_class_orig:
                             # Select all the background embeddings (all zeros in the source), and all the ones below all the thresholds in the pseudo-labels
                             class_c_mask_src = torch.all(source_labels == 0, dim=-1)  # shape: T'
-                            class_c_mask_tgt = torch.all(pseudo_gt_cls_target == 0, dim=-1)  # shape: T''
+                            if stage1_background_mask is None:
+                                class_c_mask_tgt = torch.all(pseudo_gt_cls_target == 0, dim=-1)  # shape: T''
+                            else:
+                                class_c_mask_tgt = stage1_background_mask
                             
                             # Set the influence of the background class to the predefined tunnable parameter
                             class_c_weight = self.cfg['model'].get('weight_no_class_adv', 1.0)

@@ -86,6 +86,12 @@ def main(cfg, resume, project_name='sada', debug=False):
     rng_generator = fix_random_seed(cfg['init_rand_seed'], include_cuda=True)
 
     """2. create dataset / dataloader"""
+    stage1_cfg = cfg.get('stage1', {})
+    if cfg['dataset_name'] == 'epic':
+        cfg['dataset']['stage1_context'] = (
+            stage1_cfg.get('enabled', False)
+            and stage1_cfg.get('perturbation') == 'context'
+        )
     train_dataset_src = make_dataset(
         cfg['dataset_name'], True, cfg['src_train_split'], **cfg['dataset']
     ) 
@@ -406,6 +412,14 @@ def create_argparser():
                         help='gpu')
     parser.add_argument('-d', '--debug', action='store_true',
                         help='debug flag')
+    parser.add_argument(
+        '--stage1', choices=['off', 'shift', 'context'], default='off',
+        help='enable Stage 1 target routing perturbation',
+    )
+    parser.add_argument(
+        '--stage1-seed', type=int, default=100003,
+        help='independent perturbation RNG seed',
+    )
 
     add_dict_to_argparser(parser, ARGS_TYPES)
 
@@ -418,6 +432,16 @@ if __name__ == '__main__':
     # Read the configuration file
     config_path = args.config_path
     config_dict = read_yaml(config_path)
+    config_dict['stage1'] = {
+        'enabled': args.stage1 != 'off',
+        'perturbation': args.stage1 if args.stage1 != 'off' else 'shift',
+        'seed': args.stage1_seed,
+        'calibration_seed': args.stage1_seed + 1,
+        'quantile': 0.90,
+        'epsilon_bg': 0.01,
+        'context_rho': 64.0 / 2304.0,
+        'context_rho_max': 2.0 * 64.0 / 2304.0,
+    }
 
     update_config_with_arguments(config_dict, args, ARGS_TYPES, ARGS_CONFIGPATH)
     _update_config(config_dict) # Done basically for TriDet and Actionformer, to add some basic parameters in the model config instead of dataset

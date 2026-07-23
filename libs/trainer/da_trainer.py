@@ -1,14 +1,20 @@
 import torch
 from tqdm import tqdm
 import itertools
+from pathlib import Path
 
 from .base_trainer_da import BaseTrainerDA
 from libs.utils.train_utils import AverageMeter
+from libs.models.SADA.stage1_calibration import (
+    calibrate_thresholds,
+    load_calibration_artifact,
+    save_calibration_artifact,
+)
 
 def move_to_device(video_list, device):
     for i, video in enumerate(video_list):
         for key in video.keys():
-            if isinstance(video[key], torch.Tensor):
+            if key != 'full_feats' and isinstance(video[key], torch.Tensor):
                 video_list[i][key] = video[key].to(device)
     return video_list
 
@@ -56,10 +62,126 @@ class Trainer(BaseTrainerDA):
                          scheduler_gen_source=scheduler_gen_source,
                          scheduler_gen_source_alignment=scheduler_gen_source_alignment,
                          scheduler_disc=scheduler_disc)
+        stage1_cfg = self.cfg.get('stage1', {})
+        artifact = stage1_cfg.get(
+            'calibration_artifact',
+            str(Path(self.checkpoint_dir) / 'stage1_calibration.json'),
+        )
+        if stage1_cfg.get('enabled', False) and Path(artifact).exists():
+            calibrated = load_calibration_artifact(artifact)
+            self.model.stage1_beta = calibrated['beta']
+            self.model.stage1_tau_act = calibrated['tau_act']
+            self.model.stage1_tau_bg = calibrated['tau_bg']
+            self.model.stage1_calibrated = True
         
     def get_evaluation_model(self):
         return self.model if not self.ema_active else self.model_ema.module
         #return self.model
+
+    def _calibrate_stage1(self, epoch):
+        self.logger.info("Calibrating Stage 1 thresholds at epoch %d", epoch)
+        records, manifest = [], []
+        crop_rng = torch.Generator(device='cpu')
+        crop_rng.manual_seed(self.cfg.get('stage1', {}).get('calibration_seed', 3407))
+        was_training = self.model.training
+        self.model.eval()
+        for video_list in tqdm(self.val_loader_src, desc='stage1 calibration'):
+            prepared = []
+            for video in video_list:
+                item = dict(video)
+                item['metadata'] = dict(video['metadata'])
+                full = item.get('full_feats', item['feats'])
+                max_len = self.cfg['dataset']['max_seq_len']
+                if full.shape[-1] > max_len:
+                    max_start = full.shape[-1] - max_len
+                    start = torch.randint(
+                        0, max_start + 1, (1,), generator=crop_rng
+                    ).item()
+                    item['feats'] = full[:, start:start + max_len].clone()
+                    item['segments'] = item['segments'] - start
+                    item['metadata']['crop_start'] = start
+                else:
+                    start = 0
+                    item['metadata']['crop_start'] = 0
+                item['full_feats'] = full
+                prepared.append(item)
+                manifest.append({
+                    'video_id': item['metadata']['video_id'],
+                    'original_crop_start': start,
+                    'original_valid_length': item['feats'].shape[-1],
+                    'perturbation_type': self.model.stage1_perturbation,
+                })
+            prepared = move_to_device(prepared, self.model.device)
+            records.extend(self.model.collect_stage1_calibration_records(prepared))
+            perturbations = self.model._stage1_last_perturbation
+            for item, perturbation in zip(manifest[-len(prepared):], perturbations):
+                item.update(perturbation)
+        thresholds = calibrate_thresholds(
+            records,
+            quantile=self.cfg.get('stage1', {}).get('quantile', 0.90),
+            epsilon_bg=self.cfg.get('stage1', {}).get('epsilon_bg', 0.01),
+        )
+        self.model.stage1_beta = thresholds['beta']
+        self.model.stage1_tau_act = thresholds['tau_act']
+        self.model.stage1_tau_bg = thresholds['tau_bg']
+        self.model.stage1_calibrated = True
+        artifact = self.cfg.get('stage1', {}).get(
+            'calibration_artifact',
+            str(Path(self.checkpoint_dir) / 'stage1_calibration.json'),
+        )
+        save_calibration_artifact(artifact, thresholds, manifest)
+        self.logger.info("Stage 1 thresholds: %s", thresholds)
+        self._stage1_dry_run()
+        self.model.train(was_training)
+
+    @torch.no_grad()
+    def _stage1_dry_run(self):
+        totals = {
+            'valid': 0, 'action_candidate': 0, 'class_consistent': 0,
+            'action': 0, 'background_candidate': 0, 'all_view_low': 0,
+            'background': 0, 'ignore': 0,
+            'batches': 0, 'empty_batches': 0,
+        }
+        crop_rng = torch.Generator(device='cpu')
+        crop_rng.manual_seed(self.cfg.get('stage1', {}).get('calibration_seed', 3407) + 1)
+        for video_list in tqdm(self.train_loader_tgt2, desc='stage1 dry run'):
+            prepared = []
+            for video in video_list:
+                item = dict(video)
+                item['metadata'] = dict(video['metadata'])
+                full = item.get('full_feats', item['feats'])
+                max_len = self.cfg['dataset']['max_seq_len']
+                if full.shape[-1] > max_len:
+                    start = torch.randint(
+                        0, full.shape[-1] - max_len + 1, (1,), generator=crop_rng
+                    ).item()
+                    item['feats'] = full[:, start:start + max_len].clone()
+                    item['metadata']['crop_start'] = start
+                item['full_feats'] = full
+                prepared.append(item)
+            video_list = move_to_device(prepared, self.model.device)
+            routes = self.model.stage1_route_only(video_list)
+            action = sum(int(route['reliable_action'].sum()) for route in routes)
+            background = sum(int(route['stable_background'].sum()) for route in routes)
+            totals['valid'] += sum(int(route['valid'].sum()) for route in routes)
+            totals['action_candidate'] += sum(
+                int(route['action_candidate'].sum()) for route in routes
+            )
+            totals['class_consistent'] += sum(
+                int(route['class_consistent'].sum()) for route in routes
+            )
+            totals['action'] += action
+            totals['background_candidate'] += sum(
+                int(route['background_candidate'].sum()) for route in routes
+            )
+            totals['all_view_low'] += sum(
+                int(route['all_view_low'].sum()) for route in routes
+            )
+            totals['background'] += background
+            totals['ignore'] += sum(int(route['ignore'].sum()) for route in routes)
+            totals['batches'] += 1
+            totals['empty_batches'] += int(action + background == 0)
+        self.logger.info("Stage 1 target dry-run (no GT): %s", totals)
     
     def _phantom_train_epoch(self):
         # to make the data_loader behave in a reproducible way when training is resumed. It simulates an epoch-worth of data_loader iteration.
@@ -80,6 +202,7 @@ class Trainer(BaseTrainerDA):
         """Training the model for one epoch"""
         # switch to train mode
         self.model.train()
+        self.stage1_epoch_summary = {}
         
         # Create iterator for the source and target data loaders
         iter_src = iter(self.train_loader_src)
@@ -187,10 +310,16 @@ class Trainer(BaseTrainerDA):
             
             # Define all these as training losses
             for loss_name, loss_tr in losses.items():
-                loss_name = 't_' + loss_name
-                if not self.train_metrics.contains(loss_name):
-                    self.train_metrics.add_new(loss_name)
-                self.train_metrics.update(loss_name, loss_tr.item())
+                raw_loss_name = loss_name
+                metric_name = 't_' + raw_loss_name
+                if not self.train_metrics.contains(metric_name):
+                    self.train_metrics.add_new(metric_name)
+                self.train_metrics.update(metric_name, loss_tr.item())
+                if raw_loss_name.startswith('stage1_') and not raw_loss_name.endswith('_std'):
+                    key = 't_' + raw_loss_name + '_total'
+                    self.stage1_epoch_summary[key] = (
+                        self.stage1_epoch_summary.get(key, 0.0) + loss_tr.item()
+                    )
             
             
             # OPTIONAL: Update the learning rate

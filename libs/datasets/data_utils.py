@@ -44,6 +44,8 @@ def truncate_feats(
     """
     # get the meta info
     feat_len = data_dict['feats'].shape[1]
+    data_dict['metadata']['original_feat_len'] = feat_len
+    data_dict['metadata']['crop_start'] = 0
     num_segs = data_dict['segments'].shape[0]
 
     # seq_len < max_seq_len
@@ -112,5 +114,6 @@ def truncate_feats(
 
     # Update the video length
     data_dict['metadata']['feat_num_frames'] = feats.shape[1]
+    data_dict['metadata']['crop_start'] = st
     
     return data_dict

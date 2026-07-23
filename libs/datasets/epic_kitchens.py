@@ -30,6 +30,7 @@ class EpicKitchensDataset(Dataset):
         file_ext,        # feature file extension if any
         force_upsampling, # force to upsample to max_seq_len
         action_subsampling='all', # subsample actions to max_seq_len
+        stage1_context=False,
     ):
         # file path
         assert os.path.exists(feat_folder)
@@ -76,6 +77,7 @@ class EpicKitchensDataset(Dataset):
         }
         
         self.action_subsampling = action_subsampling
+        self.stage1_context = stage1_context
 
     def find_empty_cls(self, label_dict, num_classes):
         # find categories with out a data sample
@@ -231,11 +233,18 @@ class EpicKitchensDataset(Dataset):
                      }
 
 
+        full_feats = feats
         # truncate the features during training
         if self.is_training and (segments is not None):
             data_dict = truncate_feats(
                 data_dict, self.max_seq_len, self.trunc_thresh, self.crop_ratio
             )
+        else:
+            data_dict['metadata']['original_feat_len'] = feats.shape[1]
+            data_dict['metadata']['crop_start'] = 0
+
+        if self.stage1_context:
+            data_dict['full_feats'] = full_feats
             
 
         return data_dict
