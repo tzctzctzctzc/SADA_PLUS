@@ -8,6 +8,7 @@ from .losses_aux import ctr_diou_loss_1d, sigmoid_focal_loss, ctr_giou_loss_1d
 from .models import register_meta_arch, make_backbone, make_neck, make_generator
 from .stage1_utils import (
     build_routing_masks,
+    context_view_on_cpu,
     erode_mask,
     interpolate_probabilities,
     shift_features,
@@ -804,10 +805,13 @@ class SADA(nn.Module):
             if legal:
                 pick = torch.randint(0, len(legal), (1,), generator=rng).item()
                 direction = legal[pick]
-                context = full[:, start + direction * offset:start + direction * offset + length]
+                context_start = start + direction * offset
                 is_valid = True
             else:
-                direction, context, is_valid = 0, original, False
+                direction, context_start, is_valid = 0, start, False
+            context = context_view_on_cpu(
+                original, full, context_start, length
+            )
             context_video = dict(video)
             context_video['feats'] = context
             context_videos.append(context_video)

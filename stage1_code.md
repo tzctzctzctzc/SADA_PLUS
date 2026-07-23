@@ -36,6 +36,8 @@ CUDA_VISIBLE_DEVICES=1 python train_da.py -c CONFIG -n stage1_context \
 
 - `population_std`：使用 `correction=0` 的总体标准差；
 - `shift_features`：显式 padding 的时间平移，不允许首尾回卷；
+- `context_view_on_cpu`：从完整特征切出 Context 视图，并保证进入 batch
+  padding/concatenation 前位于 CPU；
 - `interpolate_probabilities`：按每层 `points[:, 0]` 做连续时间线性插值，
   查询恰好落在 anchor 时只检查该 anchor；
 - `source_action_eligible`：按 multi-hot GT 判断 pseudo class 是否属于任一
@@ -213,6 +215,25 @@ offset = max(1, round((64 / 2304) * W))
 分别检查左移和右移是否合法；两个方向都合法时使用独立 RNG 均匀选择。若没有
 合法方向或 `offset/W > rho_max`，该视频全部 target anchor ignore，但不会
 重采样另一视频。
+
+Context 第二视图在进入 `preprocessing` 前统一保持在 CPU：
+
+```python
+if context_valid:
+    context_start = crop_start + direction * offset
+else:
+    context_start = crop_start
+
+context = context_view_on_cpu(
+    original, full_feats, context_start, length
+)
+```
+
+有效视频从 CPU `full_feats` 切出偏移窗口；无效视频从同一个 `full_feats`
+重建 baseline crop，仅在 `full_feats` 缺失时才将 `original` 转回 CPU。
+因此同一 batch 混合“有合法第二窗口”和“无合法第二窗口”的视频时，
+`preprocessing` 的 `F.pad` 与 `torch.cat` 输入仍在同一设备，完成拼接后再
+整批迁移到 GPU。无效视频的 routing mask 仍全部为 ignore。
 
 ### 5.3 绝对时间对应
 
@@ -435,13 +456,15 @@ git diff --check
 - 连续插值数值、越界 mask、精确网格点只检查自身有效性；
 - ReliableAction / StableBackground / Ignore 互斥；
 - multi-hot GT 中任一正类均可作为正确 pseudo class；
+- Context 合法窗口、无效窗口和缺失 `full_feats` fallback 均返回 CPU tensor，
+  并验证无效窗口准确重建 baseline crop；
 - source 校准裁剪复用 action-preserving 截断、边界裁剪和 label 保留；
 - 校准 manifest 与实验元数据不匹配时拒绝加载；
 - 连续 RNG 序列与 checkpoint 恢复后的序列一致；
 - weighted quantile；
 - layer-balanced beta/tau 校准。
 
-当前共 11 个单元测试。
+当前共 12 个单元测试。
 
 本地 Python 环境未安装项目 requirements 中的 `einops`，因此没有完成完整
 SADA 模型实例化或 GPU 前向；这部分必须在 A40 的项目环境进行 smoke test 和
@@ -454,10 +477,12 @@ SADA 模型实例化或 GPU 前向；这部分必须在 A40 的项目环境进�
 2. target-GT 离线机制分析必须在正式 checkpoint 锁定后单独执行；本次训练
    路径没有自动读取或导出 target GT，避免训练泄漏。正式 mAP 继续使用现有
    `evaluate_da.py` 的修复后多子域评测。
-3. Context 的 `full_feats` 保持在 CPU，只有切出的第二窗口由 preprocessing
-   移到 GPU；因此不会把完整长视频常驻显存。Shift 和 Context 都会在原训练
-   前向之外增加两次无梯度 target routing forward（原视图一次、扰动视图
-   一次），A40 smoke test 必须确认实际显存和耗时。
+3. Context 的 `full_feats` 保持在 CPU；合法偏移窗口和无效视频的 baseline
+   fallback 都先在 CPU 组成第二视图 batch，再由 preprocessing 整批移到
+   GPU，因此不会把完整长视频常驻显存，也不会出现混合 CPU/GPU 的
+   `torch.cat`。Shift 和 Context 都会在原训练前向之外增加两次无梯度 target
+   routing forward（原视图一次、扰动视图一次），A40 smoke test 必须确认
+   实际显存和耗时。
 4. `stage1_calibration.json` 是冻结阈值的权威工件。不得根据 target dry-run
    数量手工修改后继续同一轮实验。
 

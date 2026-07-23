@@ -24,6 +24,15 @@ def shift_features(features, valid_mask, delta):
     return shifted, shifted_mask
 
 
+def context_view_on_cpu(original, full, start, length):
+    """Build one Context view on CPU before batch padding/concatenation."""
+    if full is not None:
+        context = full[:, start:start + length]
+    else:
+        context = original
+    return context.detach().cpu()
+
+
 def interpolate_probabilities(probabilities, strict_mask, points, query):
     """
     Interpolate BxTxC probabilities on a shared 1-D point grid.

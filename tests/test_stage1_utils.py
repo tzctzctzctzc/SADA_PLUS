@@ -24,6 +24,7 @@ CALIBRATION_SPEC = importlib.util.spec_from_file_location(
 stage1_calibration = importlib.util.module_from_spec(CALIBRATION_SPEC)
 CALIBRATION_SPEC.loader.exec_module(stage1_calibration)
 build_routing_masks = stage1_utils.build_routing_masks
+context_view_on_cpu = stage1_utils.context_view_on_cpu
 interpolate_probabilities = stage1_utils.interpolate_probabilities
 shift_features = stage1_utils.shift_features
 weighted_quantile = stage1_utils.weighted_quantile
@@ -46,6 +47,26 @@ class Stage1UtilsTest(unittest.TestCase):
         self.assertEqual(
             shifted_mask.tolist(), [[False, False, True, True, True]]
         )
+
+    def test_context_valid_and_invalid_views_share_cpu_device(self):
+        full = torch.arange(12).float().view(1, 12)
+        original = full[:, 2:8].clone()
+        valid_view = context_view_on_cpu(
+            original, full, start=3, length=6
+        )
+        invalid_view = context_view_on_cpu(
+            original, full, start=2, length=6
+        )
+        fallback_view = context_view_on_cpu(
+            original, None, start=0, length=6
+        )
+
+        self.assertEqual(valid_view.device.type, "cpu")
+        self.assertEqual(invalid_view.device.type, "cpu")
+        self.assertEqual(fallback_view.device.type, "cpu")
+        self.assertEqual(valid_view.tolist(), [[3, 4, 5, 6, 7, 8]])
+        self.assertEqual(invalid_view.tolist(), [[2, 3, 4, 5, 6, 7]])
+        self.assertTrue(torch.equal(fallback_view, original))
 
     def test_interpolation_uses_two_valid_endpoints(self):
         points = torch.tensor([[0.0, 0, 0, 1], [4.0, 0, 0, 4], [8.0, 0, 0, 4]])
