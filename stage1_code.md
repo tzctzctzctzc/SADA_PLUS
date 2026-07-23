@@ -420,6 +420,13 @@ tau_bg
 calibrated
 ```
 
+checkpoint 只保存 `state_dict/ema_state_dict`，不再重复序列化完整的
+`model/model_ema` Python 对象。原字段从未被训练恢复或评测入口读取，而且
+Stage 1 模型持有三套 `torch.Generator`，旧式完整对象序列化会在 PyTorch 1.9
+上报 `TypeError: cannot pickle 'torch._C.Generator' object`。RNG 的可恢复状态
+已经以三个独立 ByteTensor 字段保存，因此移除完整对象不会损失恢复信息，同时
+会减小 checkpoint 体积。
+
 实际训练入口 `train_da.py` 和 BaseTrainer 的备用恢复入口都会先调用
 `validate_stage1_resume`。只有兼容性检查全部通过，才加载模型参数、三套 RNG、
 阈值和 calibrated 状态。以下情况直接抛出 `ValueError`：

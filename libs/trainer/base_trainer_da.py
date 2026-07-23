@@ -378,8 +378,6 @@ class BaseTrainerDA:
 
     def get_state(self, epoch):
         state = {
-            'model': self.model,
-            'model_ema': self.model_ema.module,
             'epoch': epoch,
             'state_dict': self.model.state_dict(),
             'ema_state_dict': self.model_ema.module.state_dict(),
