@@ -187,7 +187,7 @@ def main(cfg, resume, project_name='domain_adaptation', debug=False):
         target_train_db = train_dataset_tgt2.get_attributes()
         target_train_det_eval = ANETdetection(
                 train_dataset_tgt2.json_file,
-                train_dataset_tgt2.split[0],
+                train_dataset_tgt2.split,
                 tiou_thresholds=target_train_db['tiou_thresholds'],
                 action_subsampling=action_subsampling
             )
@@ -195,7 +195,7 @@ def main(cfg, resume, project_name='domain_adaptation', debug=False):
         target_val_db = train_dataset_tgt2.get_attributes()
         target_val_det_eval = ANETdetection(
                 val_dataset_tgt.json_file,
-                val_dataset_tgt.split[0],
+                val_dataset_tgt.split,
                 tiou_thresholds=target_val_db['tiou_thresholds'],
                 action_subsampling=action_subsampling
         )
@@ -203,14 +203,14 @@ def main(cfg, resume, project_name='domain_adaptation', debug=False):
         source_train_db = train_dataset_src2.get_attributes()
         source_train_det_eval = ANETdetection(
                 train_dataset_src2.json_file,
-                train_dataset_src2.split[0],
+                train_dataset_src2.split,
                 tiou_thresholds=source_train_db['tiou_thresholds'],
                 action_subsampling=action_subsampling)
                 
         source_val_db = val_dataset_src.get_attributes()
         source_val_det_eval = ANETdetection(
                 val_dataset_src.json_file,
-                val_dataset_src.split[0],
+                val_dataset_src.split,
                 tiou_thresholds=source_val_db['tiou_thresholds'],
                 action_subsampling=action_subsampling)
         

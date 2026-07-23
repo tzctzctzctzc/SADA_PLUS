@@ -34,11 +34,18 @@ def load_gt_seg_from_json(json_file, split=None, label='label_id', label_offset=
         json_db = json.load(f)
     json_db = json_db['database']
 
+    if split is None:
+        splits = None
+    elif isinstance(split, str):
+        splits = {split.lower()}
+    else:
+        splits = {item.lower() for item in split}
+
     vids, starts, stops, labels = [], [], [], []
     for k, v in json_db.items():
 
         # filter based on split
-        if (split is not None) and v['subset'].lower() != split:
+        if splits is not None and v['subset'].lower() not in splits:
             continue
         # remove duplicated instances
         ants = remove_duplicate_annotations(v['annotations'])
