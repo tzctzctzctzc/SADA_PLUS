@@ -102,12 +102,25 @@ def calibrate_thresholds(records, quantile=0.90, epsilon_bg=0.01):
     }
 
 
-def save_calibration_artifact(path, thresholds, manifest):
+def model_state_sha256(model):
+    """Stable identifier for the exact parameters used during calibration."""
+    digest = hashlib.sha256()
+    for name, tensor in sorted(model.state_dict().items()):
+        value = tensor.detach().cpu().contiguous()
+        digest.update(name.encode("utf-8"))
+        digest.update(str(tuple(value.shape)).encode("utf-8"))
+        digest.update(str(value.dtype).encode("utf-8"))
+        digest.update(value.numpy().tobytes())
+    return digest.hexdigest()
+
+
+def save_calibration_artifact(path, thresholds, manifest, metadata=None):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     manifest_json = json.dumps(manifest, sort_keys=True, ensure_ascii=False)
     payload = dict(thresholds)
     payload["manifest"] = manifest
+    payload["metadata"] = metadata or {}
     payload["manifest_sha256"] = hashlib.sha256(
         manifest_json.encode("utf-8")
     ).hexdigest()
@@ -116,5 +129,27 @@ def save_calibration_artifact(path, thresholds, manifest):
     )
 
 
-def load_calibration_artifact(path):
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+def load_calibration_artifact(path, expected_metadata=None):
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    manifest_json = json.dumps(
+        payload.get("manifest", []), sort_keys=True, ensure_ascii=False
+    )
+    actual_hash = hashlib.sha256(
+        manifest_json.encode("utf-8")
+    ).hexdigest()
+    if payload.get("manifest_sha256") != actual_hash:
+        raise ValueError("Stage 1 calibration manifest hash mismatch")
+
+    if expected_metadata is not None:
+        actual_metadata = payload.get("metadata", {})
+        mismatches = {
+            key: (actual_metadata.get(key), expected)
+            for key, expected in expected_metadata.items()
+            if actual_metadata.get(key) != expected
+        }
+        if mismatches:
+            raise ValueError(
+                "incompatible Stage 1 calibration artifact: "
+                + json.dumps(mismatches, ensure_ascii=False, sort_keys=True)
+            )
+    return payload

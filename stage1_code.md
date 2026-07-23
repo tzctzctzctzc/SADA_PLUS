@@ -3,7 +3,8 @@
 ## 1. 实现依据和版本边界
 
 本实现以工作区 `stage1_final_plan.md` 为唯一方案依据，基于 SADA_PLUS
-提交 `c676ba4` 开发。Stage 1 只替换 target conditional-alignment 的
+提交 `c676ba4` 开发，并在首版 Stage 1 提交 `8dfd0c6` 上完成代码审查修订。
+Stage 1 只替换 target conditional-alignment 的
 routing mask，不修改 source supervised classification / localization loss，
 也不修改原 SADA conditional loss 的 source/target 独立计数和平均口径。
 
@@ -24,7 +25,8 @@ CUDA_VISIBLE_DEVICES=1 python train_da.py -c CONFIG -n stage1_context \
 ```
 
 两个命令应使用相同的 `CONFIG`、训练 seed、数据 split 和训练预算。Stage 1
-扰动使用独立 RNG，不消费 DataLoader 和模型的随机数流。
+扰动使用独立 RNG，不消费 DataLoader 和模型的随机数流。正式训练、source
+校准和 target dry run 使用三套彼此独立的 CPU generator。
 
 ## 2. 文件改动总览
 
@@ -34,7 +36,10 @@ CUDA_VISIBLE_DEVICES=1 python train_da.py -c CONFIG -n stage1_context \
 
 - `population_std`：使用 `correction=0` 的总体标准差；
 - `shift_features`：显式 padding 的时间平移，不允许首尾回卷；
-- `interpolate_probabilities`：按每层 `points[:, 0]` 做连续时间线性插值；
+- `interpolate_probabilities`：按每层 `points[:, 0]` 做连续时间线性插值，
+  查询恰好落在 anchor 时只检查该 anchor；
+- `source_action_eligible`：按 multi-hot GT 判断 pseudo class 是否属于任一
+  真实正类；
 - `erode_mask`：用局部 kernel 传播 strict local-support mask；
 - `build_routing_masks`：生成 ReliableAction、StableBackground、Ignore；
 - `weighted_quantile`：source-only 层平衡校准使用的加权分位数。
@@ -46,13 +51,14 @@ CUDA_VISIBLE_DEVICES=1 python train_da.py -c CONFIG -n stage1_context \
 - `layer_balanced_weights`：每层样本总权重相同；
 - `calibrate_thresholds`：计算 `beta/tau_act/tau_bg`；
 - `save_calibration_artifact`：保存阈值、manifest 与 SHA256；
-- `load_calibration_artifact`：恢复训练时读取冻结阈值。
+- `load_calibration_artifact`：核验 manifest hash 和实验元数据后读取阈值；
+- `model_state_sha256`：标识校准时使用的精确模型参数。
 
 ### `libs/models/SADA/meta_archs.py`
 
 新增模型级 Stage 1 状态和 routing：
 
-- Stage 1 总开关、扰动类型、独立 RNG、冻结阈值；
+- Stage 1 总开关、扰动类型、三套独立 RNG、冻结阈值；
 - `_stage1_strict_masks`；
 - `_stage1_shift_routing`；
 - `_stage1_context_routing`；
@@ -70,6 +76,10 @@ metadata.crop_start
 ```
 
 `crop_start` 是 baseline 实际裁剪在完整特征时间轴中的绝对起点。
+函数新增可选 `rng` 参数；不传时仍使用原来的全局 `random`，因此 baseline
+行为不变；source 校准传入固定 `random.Random`，从而复用完全相同的
+`crop_ratio/trunc_thresh/action-preserving/segment clipping/label filtering`
+逻辑。
 
 ### `libs/datasets/epic_kitchens.py`
 
@@ -79,14 +89,15 @@ metadata.crop_start
 ### `libs/trainer/base_trainer_da.py`
 
 - 在 `E_cal = warmup_adv`、第一次 conditional update 之前触发校准；
-- checkpoint 保存和恢复冻结阈值及 perturbation RNG state；
+- checkpoint 保存和恢复冻结阈值及三套 perturbation RNG state；
 - epoch 结束写入 JSONL、CSV 和 TensorBoard。
 
 ### `libs/trainer/da_trainer.py`
 
 - `_calibrate_stage1`：source validation 固定 manifest 校准；
 - `_stage1_dry_run`：不读取 target segments/labels 的完整 target 扫描；
-- 累加每 epoch 的实际筛选数量。
+- 累加每 epoch 的实际筛选数量；
+- 对显式指定的旧校准工件执行配置、代码、split 和模型状态兼容性检查。
 
 ### `train_da.py`
 
@@ -98,10 +109,12 @@ metadata.crop_start
 ```
 
 并只在 Context + Epic-Kitchens 时为 dataset 打开完整特征返回。
+训练期 evaluator 同样接收完整 split list，不再只评估 `split[0]`。
 
 ### `tests/test_stage1_utils.py`
 
-覆盖平移、插值、互斥路由、总体标准差相关路径、加权分位数和层平衡校准。
+覆盖平移、连续/精确插值、互斥路由、多标签 source 判定、真实裁剪复用、
+校准工件校验、RNG 恢复、加权分位数和层平衡校准。
 
 ## 3. Stage 1 生命周期
 
@@ -111,7 +124,7 @@ metadata.crop_start
 
 - 不构造扰动视图；
 - 不调用 Stage 1 routing；
-- 不消费 `stage1_rng`；
+- 不消费 `stage1_train_rng`；
 - 训练行为与原 SADA 一致。
 
 ### 3.2 固定时刻校准
@@ -119,7 +132,8 @@ metadata.crop_start
 在 `epoch == max(1, warmup_adv)` 且第一次 adversarial update 之前：
 
 1. 临时将模型切为 eval；
-2. 用固定 `calibration_seed` 为 source validation 生成 baseline crop；
+2. 用固定 `calibration_seed` 和训练所用的 `truncate_feats` 为 source
+   validation 生成 baseline crop；
 3. 对 Shift 或 Context 生成双视图；
 4. 使用 SADA 自己的 `label_points` 生成 source anchor GT；
 5. 收集每层 detached calibration records；
@@ -137,8 +151,10 @@ metadata.crop_start
 每个 DA iteration：
 
 1. 原始 source/target 有梯度主前向保持不变；
-2. Stage 1 使用当前 target 网络权重做独立 routing forward；
-3. routing forward 只运行 target backbone、neck 和 classification head；
+2. Stage 1 使用当前 target 网络权重分别对原视图、扰动视图做两次独立的
+   deterministic routing forward；
+3. 两次 routing forward 都只运行 target backbone、neck 和
+   classification head；
 4. 这些模块临时 `eval()` 且整体位于 `torch.no_grad()`；
 5. routing 完成后精确恢复各模块原 train/eval 状态；
 6. 所有类别、分数、标准差和 mask 都不连接梯度；
@@ -167,8 +183,10 @@ query = point_grid[:, 0] + delta
 ```
 
 `interpolate_probabilities` 使用 `torch.searchsorted` 找到左右端点，并对完整
-类别 probability vector 线性插值。只有查询在坐标范围内且左右端点 strict-valid
-时对应有效。没有 `anchor_index + Delta` 或最近邻分支。
+类别 probability vector 线性插值。查询不在网格点上时，只有查询位于坐标
+范围内且左右端点都 strict-valid 才有效；查询恰好等于某个网格点时，直接取
+该 anchor 的完整 probability vector，并且只要求该 anchor strict-valid。
+没有 `anchor_index + Delta` 或最近邻分支。
 
 ## 5. Context 代码映射
 
@@ -292,8 +310,10 @@ r = max(score_original, score_perturbed)
 
 ### 8.3 Tau
 
-`tau_act` 的集合要求 source GT action、原预测正确、原分数过 alpha、扰动
-预测仍为 GT 且 strict-valid；取 layer-balanced weighted Q90。
+`tau_act` 的集合要求 source GT action、原 pseudo class 属于该 anchor 的
+任一 multi-hot GT 正类、原分数过 alpha、扰动预测保持同一个 pseudo class
+且 strict-valid；取 layer-balanced weighted Q90。代码不使用
+`labels.argmax()`，因此重叠动作 anchor 不会被错误压成单标签。
 
 `tau_bg` 的集合要求 source GT background、双视图最大动作分数均不超过 beta
 且 strict-valid；取 layer-balanced weighted Q90。
@@ -310,8 +330,10 @@ feats / full_feats / metadata
 
 输出包括 valid、action candidate、class-consistent、reliable action、
 background candidate、all-view-low、stable background、ignore、batch 数和
-全空 batch 数。Dry run 只用于发现 mapping、mask、NaN 或全零实现错误，代码
-不会据此修改阈值。
+全空 batch 数。额外输出 reliable action 的逐类别计数；Context 还输出有效
+视频数、视频覆盖率和有效重叠 anchor 数。Dry run 使用独立的
+`stage1_dryrun_rng`，不会推进正式训练使用的 `stage1_train_rng`，也不会据此
+修改阈值。
 
 ## 10. 日志和产物
 
@@ -338,8 +360,19 @@ ignore
 action/background std
 ```
 
+校准日志和 `stage1_calibration.json` 还包含用于判断阈值是否失真的：
+
+```text
+beta / tau_act / tau_bg
+balanced_contamination / pooled_contamination
+action_leakage / background_retention
+selected_count / eligible_action
+```
+
 带 `_total` 的字段是整 epoch 实际累计数量；不带 `_total` 的字段沿用原
-MetricTracker，表示 iteration 平均值。
+MetricTracker，表示 iteration 平均值。epoch 结束还会由累计量计算
+`stage1_anchor_valid_ratio`；Context 另有 `stage1_context_video_valid_ratio`，
+避免仅看绝对数量而误判覆盖率。
 
 查看 TensorBoard：
 
@@ -352,15 +385,39 @@ tensorboard --logdir model_results/RUN_NAME/RUN_ID/stage1_tensorboard
 checkpoint 的 `stage1` 字段保存：
 
 ```text
-rng_state
+train_rng_state
+calibration_rng_state
+dryrun_rng_state
 beta
 tau_act
 tau_bg
 calibrated
 ```
 
-恢复时优先恢复这些运行状态；Trainer 也会读取已存在的 calibration artifact。
-这样恢复训练不会重新校准，也不会从扰动 RNG 初始状态重新开始。
+实际训练入口 `train_da.py` 和 BaseTrainer 的备用恢复入口都会恢复这些状态；
+同时兼容首版 checkpoint 的旧字段 `rng_state`。因此连续训练与“保存后恢复”
+会从相同的正式扰动 RNG 状态继续。
+
+checkpoint 内的 Stage 1 状态是正常断点恢复的权威来源。只有配置中显式给出
+`calibration_artifact` 且 checkpoint 没有已校准状态时，Trainer 才尝试加载
+外部校准工件。加载前必须同时匹配：
+
+```text
+git_commit
+perturbation
+alpha
+source_split
+config_sha256
+calibration_epoch
+calibration_seed
+quantile
+epsilon_bg
+model_state_sha256
+manifest_sha256
+```
+
+任一项不匹配都会抛出异常，不会静默把 Shift 阈值用于 Context，或把旧模型的
+阈值用于新模型。
 
 ## 12. 测试
 
@@ -375,10 +432,16 @@ git diff --check
 当前单元测试覆盖：
 
 - 正负平移均不回卷；
-- 连续插值数值及越界 mask；
+- 连续插值数值、越界 mask、精确网格点只检查自身有效性；
 - ReliableAction / StableBackground / Ignore 互斥；
+- multi-hot GT 中任一正类均可作为正确 pseudo class；
+- source 校准裁剪复用 action-preserving 截断、边界裁剪和 label 保留；
+- 校准 manifest 与实验元数据不匹配时拒绝加载；
+- 连续 RNG 序列与 checkpoint 恢复后的序列一致；
 - weighted quantile；
 - layer-balanced beta/tau 校准。
+
+当前共 11 个单元测试。
 
 本地 Python 环境未安装项目 requirements 中的 `einops`，因此没有完成完整
 SADA 模型实例化或 GPU 前向；这部分必须在 A40 的项目环境进行 smoke test 和
@@ -392,8 +455,9 @@ SADA 模型实例化或 GPU 前向；这部分必须在 A40 的项目环境进�
    路径没有自动读取或导出 target GT，避免训练泄漏。正式 mAP 继续使用现有
    `evaluate_da.py` 的修复后多子域评测。
 3. Context 的 `full_feats` 保持在 CPU，只有切出的第二窗口由 preprocessing
-   移到 GPU；因此不会把完整长视频常驻显存。它仍会增加一次 target routing
-   前向，A40 smoke test 必须确认实际显存和耗时。
+   移到 GPU；因此不会把完整长视频常驻显存。Shift 和 Context 都会在原训练
+   前向之外增加两次无梯度 target routing forward（原视图一次、扰动视图
+   一次），A40 smoke test 必须确认实际显存和耗时。
 4. `stage1_calibration.json` 是冻结阈值的权威工件。不得根据 target dry-run
    数量手工修改后继续同一轮实验。
 
@@ -404,7 +468,9 @@ SADA 模型实例化或 GPU 前向；这部分必须在 A40 的项目环境进�
 3. 用相同 seed 分别启动 Shift 与 Context；
 4. 检查 calibration JSON 是否生成且三个阈值非空；
 5. 查看 dry-run 日志是否无 NaN、Inf、插值越界；
-6. 检查 `*_total` 筛选数量和全空 batch 比例；
-7. 确认显存后继续完整训练；
-8. 锁定 checkpoint 后运行修复后的正式评测；
-9. 最后才进行 target-GT 离线机制分析。
+6. 检查 `*_total`、逐类别筛选数量、Context 视频覆盖率和全空 batch 比例；
+7. 在 A40 分别完成 baseline 回归、Shift 一步、Context 混合有效/无效视频
+   一步、全空路由一步和真实 checkpoint 断点一致性 smoke；
+8. 确认显存、耗时和 smoke 结果后继续完整训练；
+9. 锁定 checkpoint 后运行完整多子域正式评测；
+10. 最后才进行 target-GT 离线机制分析。

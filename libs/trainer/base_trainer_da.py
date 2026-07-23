@@ -260,7 +260,33 @@ class BaseTrainerDA:
             log_data.update(**{k : v for k, v in list(self.train_metrics.result().items())})
             log_data.update(**{k : v for k, v in list(self.valid_metrics_src.result().items())})
             log_data.update(**{k : v for k, v in list(self.valid_metrics_tgt.result().items())})
-            log_data.update(getattr(self, 'stage1_epoch_summary', {}))
+            stage1_summary = getattr(self, 'stage1_epoch_summary', {})
+            context_total = stage1_summary.get(
+                't_stage1_context_video_total_total', 0.0
+            )
+            if context_total > 0:
+                stage1_summary['t_stage1_context_video_valid_ratio'] = (
+                    stage1_summary.get(
+                        't_stage1_context_video_valid_total', 0.0
+                    ) / context_total
+                )
+            anchor_valid = 0.0
+            anchor_total = 0.0
+            for level in range(getattr(self.model, 'n_levels', 0)):
+                prefix = 't_stage1_l{}_'.format(level)
+                anchor_valid += stage1_summary.get(
+                    prefix + 'valid_total', 0.0
+                )
+                anchor_total += (
+                    stage1_summary.get(prefix + 'action_total', 0.0)
+                    + stage1_summary.get(prefix + 'background_total', 0.0)
+                    + stage1_summary.get(prefix + 'ignore_total', 0.0)
+                )
+            if anchor_total > 0:
+                stage1_summary['t_stage1_anchor_valid_ratio'] = (
+                    anchor_valid / anchor_total
+                )
+            log_data.update(stage1_summary)
             
             # Upload to wandb
             if wandb.run is not None:
@@ -363,7 +389,9 @@ class BaseTrainerDA:
         }
         if self.cfg.get('stage1', {}).get('enabled', False):
             state['stage1'] = {
-                'rng_state': self.model.stage1_rng.get_state(),
+                'train_rng_state': self.model.stage1_train_rng.get_state(),
+                'calibration_rng_state': self.model.stage1_calibration_rng.get_state(),
+                'dryrun_rng_state': self.model.stage1_dryrun_rng.get_state(),
                 'beta': self.model.stage1_beta,
                 'tau_act': self.model.stage1_tau_act,
                 'tau_bg': self.model.stage1_tau_bg,
@@ -386,7 +414,18 @@ class BaseTrainerDA:
         self.model.load_state_dict(checkpoint['state_dict'])
         if 'stage1' in checkpoint:
             stage1 = checkpoint['stage1']
-            self.model.stage1_rng.set_state(stage1['rng_state'])
+            legacy_rng = stage1.get('rng_state')
+            train_rng_state = stage1.get('train_rng_state', legacy_rng)
+            if train_rng_state is not None:
+                self.model.stage1_train_rng.set_state(train_rng_state.cpu())
+            if stage1.get('calibration_rng_state') is not None:
+                self.model.stage1_calibration_rng.set_state(
+                    stage1['calibration_rng_state'].cpu()
+                )
+            if stage1.get('dryrun_rng_state') is not None:
+                self.model.stage1_dryrun_rng.set_state(
+                    stage1['dryrun_rng_state'].cpu()
+                )
             self.model.stage1_beta = stage1['beta']
             self.model.stage1_tau_act = stage1['tau_act']
             self.model.stage1_tau_bg = stage1['tau_bg']

@@ -1,13 +1,19 @@
 import torch
 from tqdm import tqdm
 import itertools
+import hashlib
+import json
+import random
+import subprocess
 from pathlib import Path
 
 from .base_trainer_da import BaseTrainerDA
+from libs.datasets import truncate_feats
 from libs.utils.train_utils import AverageMeter
 from libs.models.SADA.stage1_calibration import (
     calibrate_thresholds,
     load_calibration_artifact,
+    model_state_sha256,
     save_calibration_artifact,
 )
 
@@ -63,16 +69,59 @@ class Trainer(BaseTrainerDA):
                          scheduler_gen_source_alignment=scheduler_gen_source_alignment,
                          scheduler_disc=scheduler_disc)
         stage1_cfg = self.cfg.get('stage1', {})
-        artifact = stage1_cfg.get(
-            'calibration_artifact',
-            str(Path(self.checkpoint_dir) / 'stage1_calibration.json'),
-        )
-        if stage1_cfg.get('enabled', False) and Path(artifact).exists():
-            calibrated = load_calibration_artifact(artifact)
+        artifact = stage1_cfg.get('calibration_artifact')
+        if (
+            stage1_cfg.get('enabled', False)
+            and not self.model.stage1_calibrated
+            and artifact
+            and Path(artifact).exists()
+        ):
+            calibrated = load_calibration_artifact(
+                artifact, self._stage1_artifact_metadata(include_model=True)
+            )
             self.model.stage1_beta = calibrated['beta']
             self.model.stage1_tau_act = calibrated['tau_act']
             self.model.stage1_tau_bg = calibrated['tau_bg']
             self.model.stage1_calibrated = True
+
+    def _stage1_artifact_metadata(self, include_model=False):
+        stage1_cfg = self.cfg.get('stage1', {})
+        source_split = self.val_loader_src.dataset.split
+        if isinstance(source_split, str):
+            source_split = [source_split]
+        config_json = json.dumps(
+            self.cfg.config, sort_keys=True, ensure_ascii=False, default=str
+        )
+        try:
+            git_commit = subprocess.check_output(
+                ['git', 'rev-parse', 'HEAD'],
+                cwd=Path(__file__).resolve().parents[2],
+                text=True,
+            ).strip()
+        except (OSError, subprocess.SubprocessError):
+            git_commit = 'unknown'
+        metadata = {
+            'perturbation': self.model.stage1_perturbation,
+            'alpha': self.model.stage1_alpha,
+            'source_split': list(source_split),
+            'calibration_epoch': max(
+                1,
+                stage1_cfg.get(
+                    'calibration_epoch',
+                    self.cfg['train_cfg'].get('warmup_adv', 0),
+                ),
+            ),
+            'calibration_seed': stage1_cfg.get('calibration_seed', 3407),
+            'quantile': stage1_cfg.get('quantile', 0.90),
+            'epsilon_bg': stage1_cfg.get('epsilon_bg', 0.01),
+            'config_sha256': hashlib.sha256(
+                config_json.encode('utf-8')
+            ).hexdigest(),
+            'git_commit': git_commit,
+        }
+        if include_model:
+            metadata['model_state_sha256'] = model_state_sha256(self.model)
+        return metadata
         
     def get_evaluation_model(self):
         return self.model if not self.ema_active else self.model_ema.module
@@ -81,8 +130,9 @@ class Trainer(BaseTrainerDA):
     def _calibrate_stage1(self, epoch):
         self.logger.info("Calibrating Stage 1 thresholds at epoch %d", epoch)
         records, manifest = [], []
-        crop_rng = torch.Generator(device='cpu')
-        crop_rng.manual_seed(self.cfg.get('stage1', {}).get('calibration_seed', 3407))
+        crop_rng = random.Random(
+            self.cfg.get('stage1', {}).get('calibration_seed', 3407)
+        )
         was_training = self.model.training
         self.model.eval()
         for video_list in tqdm(self.val_loader_src, desc='stage1 calibration'):
@@ -91,23 +141,20 @@ class Trainer(BaseTrainerDA):
                 item = dict(video)
                 item['metadata'] = dict(video['metadata'])
                 full = item.get('full_feats', item['feats'])
-                max_len = self.cfg['dataset']['max_seq_len']
-                if full.shape[-1] > max_len:
-                    max_start = full.shape[-1] - max_len
-                    start = torch.randint(
-                        0, max_start + 1, (1,), generator=crop_rng
-                    ).item()
-                    item['feats'] = full[:, start:start + max_len].clone()
-                    item['segments'] = item['segments'] - start
-                    item['metadata']['crop_start'] = start
-                else:
-                    start = 0
-                    item['metadata']['crop_start'] = 0
+                item.pop('full_feats', None)
+                item['feats'] = full
+                item = truncate_feats(
+                    item,
+                    self.cfg['dataset']['max_seq_len'],
+                    self.cfg['dataset']['trunc_thresh'],
+                    self.cfg['dataset'].get('crop_ratio'),
+                    rng=crop_rng,
+                )
                 item['full_feats'] = full
                 prepared.append(item)
                 manifest.append({
                     'video_id': item['metadata']['video_id'],
-                    'original_crop_start': start,
+                    'original_crop_start': item['metadata']['crop_start'],
                     'original_valid_length': item['feats'].shape[-1],
                     'perturbation_type': self.model.stage1_perturbation,
                 })
@@ -129,7 +176,9 @@ class Trainer(BaseTrainerDA):
             'calibration_artifact',
             str(Path(self.checkpoint_dir) / 'stage1_calibration.json'),
         )
-        save_calibration_artifact(artifact, thresholds, manifest)
+        metadata = self._stage1_artifact_metadata(include_model=True)
+        metadata['calibration_epoch'] = epoch
+        save_calibration_artifact(artifact, thresholds, manifest, metadata)
         self.logger.info("Stage 1 thresholds: %s", thresholds)
         self._stage1_dry_run()
         self.model.train(was_training)
@@ -141,7 +190,9 @@ class Trainer(BaseTrainerDA):
             'action': 0, 'background_candidate': 0, 'all_view_low': 0,
             'background': 0, 'ignore': 0,
             'batches': 0, 'empty_batches': 0,
+            'context_video_total': 0, 'context_video_valid': 0,
         }
+        action_class_counts = [0] * self.model.num_classes
         crop_rng = torch.Generator(device='cpu')
         crop_rng.manual_seed(self.cfg.get('stage1', {}).get('calibration_seed', 3407) + 1)
         for video_list in tqdm(self.train_loader_tgt2, desc='stage1 dry run'):
@@ -181,6 +232,27 @@ class Trainer(BaseTrainerDA):
             totals['ignore'] += sum(int(route['ignore'].sum()) for route in routes)
             totals['batches'] += 1
             totals['empty_batches'] += int(action + background == 0)
+            for route in routes:
+                reliable = route['reliable_action']
+                classes = route['pseudo_class'][reliable]
+                if classes.numel() > 0:
+                    counts = torch.bincount(
+                        classes, minlength=self.model.num_classes
+                    )
+                    action_class_counts = [
+                        current + int(count)
+                        for current, count in zip(action_class_counts, counts)
+                    ]
+            if self.model.stage1_perturbation == 'context':
+                context_stats = self.model._stage1_last_context_stats
+                totals['context_video_total'] += context_stats['video_total']
+                totals['context_video_valid'] += context_stats['video_valid']
+        totals['action_class_counts'] = action_class_counts
+        if totals['context_video_total'] > 0:
+            totals['context_anchor_overlap_valid'] = totals['valid']
+            totals['context_video_coverage'] = (
+                totals['context_video_valid'] / totals['context_video_total']
+            )
         self.logger.info("Stage 1 target dry-run (no GT): %s", totals)
     
     def _phantom_train_epoch(self):

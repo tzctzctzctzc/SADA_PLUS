@@ -235,6 +235,24 @@ def main(cfg, resume, project_name='sada', debug=False):
                                     map_location=lambda storage, loc: storage.cuda(device))
             args.start_epoch = checkpoint['epoch'] + 1
             model.load_state_dict(checkpoint['state_dict'])
+            if 'stage1' in checkpoint:
+                stage1 = checkpoint['stage1']
+                legacy_rng = stage1.get('rng_state')
+                train_rng_state = stage1.get('train_rng_state', legacy_rng)
+                if train_rng_state is not None:
+                    model.stage1_train_rng.set_state(train_rng_state.cpu())
+                if stage1.get('calibration_rng_state') is not None:
+                    model.stage1_calibration_rng.set_state(
+                        stage1['calibration_rng_state'].cpu()
+                    )
+                if stage1.get('dryrun_rng_state') is not None:
+                    model.stage1_dryrun_rng.set_state(
+                        stage1['dryrun_rng_state'].cpu()
+                    )
+                model.stage1_beta = stage1['beta']
+                model.stage1_tau_act = stage1['tau_act']
+                model.stage1_tau_bg = stage1['tau_bg']
+                model.stage1_calibrated = stage1['calibrated']
             
             if use_ema:
                 model_ema.module.load_state_dict(checkpoint['ema_state_dict'])
@@ -328,7 +346,7 @@ def main(cfg, resume, project_name='sada', debug=False):
         target_train_db = train_dataset_tgt2.get_attributes()
         target_train_det_eval = ANETdetection(
                 train_dataset_tgt2.json_file,
-                train_dataset_tgt2.split[0],
+                train_dataset_tgt2.split,
                 tiou_thresholds=target_train_db['tiou_thresholds'],
                 action_subsampling=action_subsampling
             )
@@ -336,7 +354,7 @@ def main(cfg, resume, project_name='sada', debug=False):
         target_val_db = train_dataset_tgt2.get_attributes()
         target_val_det_eval = ANETdetection(
                 val_dataset_tgt.json_file,
-                val_dataset_tgt.split[0],
+                val_dataset_tgt.split,
                 tiou_thresholds=target_val_db['tiou_thresholds'],
                 action_subsampling=action_subsampling
         )
@@ -344,14 +362,14 @@ def main(cfg, resume, project_name='sada', debug=False):
         source_train_db = train_dataset_src2.get_attributes()
         source_train_det_eval = ANETdetection(
                 train_dataset_src2.json_file,
-                train_dataset_src2.split[0],
+                train_dataset_src2.split,
                 tiou_thresholds=source_train_db['tiou_thresholds'],
                 action_subsampling=action_subsampling)
                 
         source_val_db = val_dataset_src.get_attributes()
         source_val_det_eval = ANETdetection(
                 val_dataset_src.json_file,
-                val_dataset_src.split[0],
+                val_dataset_src.split,
                 tiou_thresholds=source_val_db['tiou_thresholds'],
                 action_subsampling=action_subsampling)
         

@@ -11,6 +11,7 @@ from .stage1_utils import (
     erode_mask,
     interpolate_probabilities,
     shift_features,
+    source_action_eligible,
 )
 from libs.utils import batched_nms
 import einops
@@ -279,8 +280,16 @@ class SADA(nn.Module):
         self.stage1_enabled = stage1_cfg.get('enabled', False)
         self.stage1_perturbation = stage1_cfg.get('perturbation', 'shift')
         self.stage1_seed = stage1_cfg.get('seed', cfg.get('init_rand_seed', 0) + 100003)
-        self.stage1_rng = torch.Generator(device='cpu')
-        self.stage1_rng.manual_seed(self.stage1_seed)
+        self.stage1_train_rng = torch.Generator(device='cpu')
+        self.stage1_calibration_rng = torch.Generator(device='cpu')
+        self.stage1_dryrun_rng = torch.Generator(device='cpu')
+        self.stage1_train_rng.manual_seed(self.stage1_seed)
+        self.stage1_calibration_rng.manual_seed(
+            stage1_cfg.get('calibration_seed', self.stage1_seed + 1)
+        )
+        self.stage1_dryrun_rng.manual_seed(
+            stage1_cfg.get('dryrun_seed', self.stage1_seed + 2)
+        )
         self.stage1_alpha = cfg['model'].get('pl_threshold', 0.7)
         self.stage1_beta = stage1_cfg.get('beta', None)
         self.stage1_tau_act = stage1_cfg.get('tau_act', None)
@@ -672,7 +681,7 @@ class SADA(nn.Module):
         return pred_fc_domain_frame
 
     @torch.no_grad()
-    def _stage1_shift_routing(self, video_list_tgt, points):
+    def _stage1_shift_routing(self, video_list_tgt, points, rng=None):
         """Deterministic two-view routing for the feature-shift experiment."""
         if not self.stage1_calibrated:
             raise RuntimeError("Stage 1 thresholds must be calibrated before routing")
@@ -683,8 +692,9 @@ class SADA(nn.Module):
             module.eval()
         try:
             inputs, masks = self.preprocessing(video_list_tgt, mode='validation')
+            rng = self.stage1_train_rng if rng is None else rng
             delta = -2 if torch.randint(
-                0, 2, (1,), generator=self.stage1_rng
+                0, 2, (1,), generator=rng
             ).item() == 0 else 2
             self._stage1_last_perturbation = [
                 {'perturbation_direction': int(delta), 'offset': abs(int(delta))}
@@ -771,13 +781,14 @@ class SADA(nn.Module):
         return strict_outputs
 
     @torch.no_grad()
-    def _stage1_context_routing(self, video_list_tgt, points):
+    def _stage1_context_routing(self, video_list_tgt, points, rng=None):
         """Deterministic routing for baseline-crop-preserving context views."""
         if not self.stage1_calibrated:
             raise RuntimeError("Stage 1 thresholds must be calibrated before routing")
         context_videos, directions, offsets, context_valid = [], [], [], []
         rho = self.cfg.get('stage1', {}).get('context_rho', 64.0 / 2304.0)
         rho_max = self.cfg.get('stage1', {}).get('context_rho_max', 2.0 * rho)
+        rng = self.stage1_train_rng if rng is None else rng
         for video in video_list_tgt:
             original = video['feats']
             full = video.get('full_feats')
@@ -791,7 +802,7 @@ class SADA(nn.Module):
                 if start + length + offset <= full.shape[-1]:
                     legal.append(1)
             if legal:
-                pick = torch.randint(0, len(legal), (1,), generator=self.stage1_rng).item()
+                pick = torch.randint(0, len(legal), (1,), generator=rng).item()
                 direction = legal[pick]
                 context = full[:, start + direction * offset:start + direction * offset + length]
                 is_valid = True
@@ -812,6 +823,10 @@ class SADA(nn.Module):
             {'perturbation_direction': int(direction), 'offset': int(offset)}
             for direction, offset in zip(directions, offsets)
         ]
+        self._stage1_last_context_stats = {
+            'video_total': len(context_valid),
+            'video_valid': sum(context_valid),
+        }
         try:
             inputs0, masks0 = self.preprocessing(video_list_tgt, mode='validation')
             inputs1, masks1 = self.preprocessing(context_videos, mode='validation')
@@ -851,6 +866,9 @@ class SADA(nn.Module):
                 )
                 route['direction'] = directions
                 route['offset'] = offsets
+                if level == 0:
+                    route['context_video_total'] = len(context_valid)
+                    route['context_video_valid'] = sum(context_valid)
                 routes.append(route)
             return routes
         finally:
@@ -873,9 +891,13 @@ class SADA(nn.Module):
         self.stage1_calibrated = True
         try:
             if self.stage1_perturbation == 'shift':
-                routes = self._stage1_shift_routing(video_list, points)
+                routes = self._stage1_shift_routing(
+                    video_list, points, rng=self.stage1_calibration_rng
+                )
             else:
-                routes = self._stage1_context_routing(video_list, points)
+                routes = self._stage1_context_routing(
+                    video_list, points, rng=self.stage1_calibration_rng
+                )
         finally:
             (
                 self.stage1_beta, self.stage1_tau_act,
@@ -892,13 +914,14 @@ class SADA(nn.Module):
             labels = gt_cls[:, start:start + length]
             route = routes[level]
             is_action = labels.sum(dim=-1) > 0
-            gt_class = labels.argmax(dim=-1)
             valid = route['valid']
-            action_eligible = (
-                valid & is_action
-                & (route['pseudo_class'] == gt_class)
-                & (route['perturbed_class'] == gt_class)
-                & (route['score_original'] >= self.stage1_alpha)
+            action_eligible = source_action_eligible(
+                labels,
+                route['pseudo_class'],
+                route['perturbed_class'],
+                route['score_original'],
+                valid,
+                self.stage1_alpha,
             )
             records.append({
                 'level': torch.full(
@@ -925,8 +948,12 @@ class SADA(nn.Module):
         fpn_feats, _ = self.neck_target(feats, backbone_masks)
         points = self.point_generator(fpn_feats)
         if self.stage1_perturbation == 'shift':
-            return self._stage1_shift_routing(video_list, points)
-        return self._stage1_context_routing(video_list, points)
+            return self._stage1_shift_routing(
+                video_list, points, rng=self.stage1_dryrun_rng
+            )
+        return self._stage1_context_routing(
+            video_list, points, rng=self.stage1_dryrun_rng
+        )
     
     
 
@@ -1642,6 +1669,15 @@ class SADA(nn.Module):
                         losses[metric_prefix + 'all_view_low'] = route_l['all_view_low'].sum().float()
                         losses[metric_prefix + 'background'] = route_l['stable_background'].sum().float()
                         losses[metric_prefix + 'ignore'] = route_l['ignore'].sum().float()
+                        if l == 0 and 'context_video_total' in route_l:
+                            losses['stage1_context_video_total'] = torch.tensor(
+                                float(route_l['context_video_total']),
+                                device=self.device,
+                            )
+                            losses['stage1_context_video_valid'] = torch.tensor(
+                                float(route_l['context_video_valid']),
+                                device=self.device,
+                            )
                         losses[metric_prefix + 'action_std'] = (
                             route_l['action_std'][route_l['valid']].mean()
                             if route_l['valid'].any()

@@ -2,6 +2,7 @@ import unittest
 import importlib.util
 from pathlib import Path
 import sys
+import tempfile
 import types
 
 import torch
@@ -26,6 +27,14 @@ build_routing_masks = stage1_utils.build_routing_masks
 interpolate_probabilities = stage1_utils.interpolate_probabilities
 shift_features = stage1_utils.shift_features
 weighted_quantile = stage1_utils.weighted_quantile
+source_action_eligible = stage1_utils.source_action_eligible
+
+DATA_UTILS_PATH = Path(__file__).parents[1] / "libs/datasets/data_utils.py"
+DATA_UTILS_SPEC = importlib.util.spec_from_file_location(
+    "stage1_data_utils", DATA_UTILS_PATH
+)
+stage1_data_utils = importlib.util.module_from_spec(DATA_UTILS_SPEC)
+DATA_UTILS_SPEC.loader.exec_module(stage1_data_utils)
 
 
 class Stage1UtilsTest(unittest.TestCase):
@@ -47,6 +56,28 @@ class Stage1UtilsTest(unittest.TestCase):
         )
         self.assertTrue(torch.allclose(output[0, :2, 0], torch.tensor([0.2, 0.6])))
         self.assertEqual(valid.tolist(), [[True, True, False]])
+
+    def test_exact_interpolation_uses_only_exact_anchor_validity(self):
+        points = torch.tensor([[0.0, 0, 0, 1], [4.0, 0, 0, 4], [8.0, 0, 0, 4]])
+        probabilities = torch.tensor([[[0.0], [0.4], [0.8]]])
+        mask = torch.tensor([[False, True, True]])
+        output, valid = interpolate_probabilities(
+            probabilities, mask, points, torch.tensor([4.0])
+        )
+        self.assertTrue(torch.allclose(output[0, 0], torch.tensor([0.4])))
+        self.assertEqual(valid.tolist(), [[True]])
+
+    def test_multilabel_source_action_accepts_any_positive_class(self):
+        labels = torch.tensor([[[0.0, 1.0, 0.0, 1.0]]])
+        eligible = source_action_eligible(
+            labels,
+            pseudo_class=torch.tensor([[3]]),
+            perturbed_class=torch.tensor([[3]]),
+            score_original=torch.tensor([[0.8]]),
+            valid=torch.tensor([[True]]),
+            alpha=0.6,
+        )
+        self.assertEqual(eligible.tolist(), [[True]])
 
     def test_routing_is_mutually_exclusive(self):
         original = torch.tensor([[[0.80, 0.10], [0.02, 0.03], [0.40, 0.30]]])
@@ -97,6 +128,62 @@ class Stage1UtilsTest(unittest.TestCase):
         self.assertEqual(
             shifted_mask.tolist(), [[True, True, True, False, False]]
         )
+
+    def test_calibration_crop_reuses_action_preserving_truncation(self):
+        class FixedRng:
+            def __init__(self):
+                self.values = iter((0, 4))
+
+            def randint(self, _lower, _upper):
+                return next(self.values)
+
+        item = {
+            "feats": torch.arange(10).float().view(1, 10),
+            "segments": torch.tensor([[6.0, 9.0]]),
+            "labels": torch.tensor([2]),
+            "metadata": {},
+        }
+        cropped = stage1_data_utils.truncate_feats(
+            item,
+            max_seq_len=5,
+            trunc_thresh=0.3,
+            crop_ratio=None,
+            rng=FixedRng(),
+        )
+        self.assertEqual(cropped["metadata"]["crop_start"], 4)
+        self.assertEqual(cropped["segments"].tolist(), [[2.0, 5.0]])
+        self.assertEqual(cropped["labels"].tolist(), [2])
+
+    def test_calibration_artifact_validates_manifest_and_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "calibration.json"
+            metadata = {"perturbation": "shift", "alpha": 0.6}
+            stage1_calibration.save_calibration_artifact(
+                path,
+                {"beta": 0.1, "tau_act": 0.2, "tau_bg": 0.03},
+                [{"video_id": "v1"}],
+                metadata,
+            )
+            loaded = stage1_calibration.load_calibration_artifact(
+                path, metadata
+            )
+            self.assertEqual(loaded["beta"], 0.1)
+            with self.assertRaises(ValueError):
+                stage1_calibration.load_calibration_artifact(
+                    path, {"perturbation": "context", "alpha": 0.6}
+                )
+
+    def test_training_rng_resume_matches_continuous_sequence(self):
+        continuous = torch.Generator(device="cpu")
+        continuous.manual_seed(3407)
+        torch.randint(0, 2, (1,), generator=continuous)
+        checkpoint_state = continuous.get_state()
+        expected = torch.randint(0, 2, (8,), generator=continuous)
+
+        resumed = torch.Generator(device="cpu")
+        resumed.set_state(checkpoint_state)
+        actual = torch.randint(0, 2, (8,), generator=resumed)
+        self.assertTrue(torch.equal(expected, actual))
 
 
 if __name__ == "__main__":

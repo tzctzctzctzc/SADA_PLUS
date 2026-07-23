@@ -28,7 +28,8 @@ def truncate_feats(
     crop_ratio=None,
     max_num_trials=200,
     has_action=True,
-    no_trunc=False
+    no_trunc=False,
+    rng=None,
 ):
     """
     Truncate feats and time stamps in a dict item
@@ -42,6 +43,7 @@ def truncate_feats(
                  'feat_num_frames' : in
 
     """
+    rng = random if rng is None else rng
     # get the meta info
     feat_len = data_dict['feats'].shape[1]
     data_dict['metadata']['original_feat_len'] = feat_len
@@ -55,7 +57,7 @@ def truncate_feats(
             return data_dict
         # randomly crop the seq by setting max_seq_len to a value in [l, r]
         else:
-            max_seq_len = random.randint(
+            max_seq_len = rng.randint(
                 max(round(crop_ratio[0] * feat_len), 1),
                 min(round(crop_ratio[1] * feat_len), feat_len),
             )
@@ -70,7 +72,7 @@ def truncate_feats(
     for _ in range(max_num_trials):
 
         # sample a random truncation of the video feats
-        st = random.randint(0, feat_len - max_seq_len)
+        st = rng.randint(0, feat_len - max_seq_len)
         ed = st + max_seq_len
         window = torch.as_tensor([st, ed], dtype=torch.float32)
 

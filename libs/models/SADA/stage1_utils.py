@@ -32,8 +32,18 @@ def interpolate_probabilities(probabilities, strict_mask, points, query):
     interpolation endpoints are strict-valid.
     """
     grid = points[:, 0]
-    right = torch.searchsorted(grid.contiguous(), query.contiguous(), right=False)
-    right = right.clamp(1, grid.numel() - 1)
+    insertion = torch.searchsorted(
+        grid.contiguous(), query.contiguous(), right=False
+    )
+    exact_index = insertion.clamp_max(grid.numel() - 1)
+    exact = (
+        (insertion < grid.numel())
+        & torch.isclose(
+            grid[exact_index], query, rtol=0.0, atol=1e-6
+        )
+    )
+
+    right = insertion.clamp(1, grid.numel() - 1)
     left = right - 1
 
     left_t = grid[left]
@@ -41,11 +51,40 @@ def interpolate_probabilities(probabilities, strict_mask, points, query):
     weight = ((query - left_t) / (right_t - left_t).clamp_min(1e-12))
     left_prob = probabilities[:, left, :]
     right_prob = probabilities[:, right, :]
-    output = left_prob + weight[None, :, None] * (right_prob - left_prob)
+    interpolated = left_prob + weight[None, :, None] * (
+        right_prob - left_prob
+    )
+    exact_prob = probabilities[:, exact_index, :]
+    output = torch.where(exact[None, :, None], exact_prob, interpolated)
 
     inside = (query >= grid[0]) & (query <= grid[-1])
-    valid = strict_mask[:, left] & strict_mask[:, right] & inside[None, :]
+    interpolated_valid = strict_mask[:, left] & strict_mask[:, right]
+    exact_valid = strict_mask[:, exact_index]
+    valid = torch.where(
+        exact[None, :], exact_valid, interpolated_valid
+    ) & inside[None, :]
     return output, valid
+
+
+def source_action_eligible(
+    labels,
+    pseudo_class,
+    perturbed_class,
+    score_original,
+    valid,
+    alpha,
+):
+    """Check source action correctness without collapsing multi-hot labels."""
+    predicted_is_positive = labels.gather(
+        -1, pseudo_class.unsqueeze(-1)
+    ).squeeze(-1) > 0
+    return (
+        valid
+        & (labels.sum(dim=-1) > 0)
+        & predicted_is_positive
+        & (perturbed_class == pseudo_class)
+        & (score_original >= alpha)
+    )
 
 
 def erode_mask(mask, kernel_size, stride=1, padding=0):
