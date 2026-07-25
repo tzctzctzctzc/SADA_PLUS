@@ -203,7 +203,7 @@ def main():
                     expected_labels = raw_video["labels"].to(args.device)
                     if (
                         segments.shape != expected_segments.shape
-                        or not torch.allclose(segments, expected_segments, atol=1e-4, rtol=1e-5)
+                        or not torch.equal(segments, expected_segments)
                         or not torch.equal(labels, expected_labels)
                     ):
                         raise RuntimeError(
