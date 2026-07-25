@@ -69,9 +69,12 @@ def crop_targets(annotation, metadata, crop_length, cfg, device):
             torch.empty((0, 2), dtype=torch.float32, device=device),
             torch.empty((0,), dtype=torch.long, device=device),
         )
+    segments = torch.tensor(segments, dtype=torch.float32, device=device)
+    labels = torch.tensor(labels, dtype=torch.long, device=device)
+    order = torch.argsort(segments[:, 0])
     return (
-        torch.tensor(segments, dtype=torch.float32, device=device),
-        torch.tensor(labels, dtype=torch.long, device=device),
+        segments[order],
+        labels[order],
     )
 
 
@@ -121,6 +124,17 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--seed", type=int, default=20260726)
     parser.add_argument("--device", default="cuda:0")
+    parser.add_argument(
+        "--pseudo-mode",
+        choices=("train", "eval"),
+        default="train",
+        help="Use train to reproduce the original training-time pseudo-label path.",
+    )
+    parser.add_argument(
+        "--verify-crop-targets",
+        action="store_true",
+        help="Assert reconstructed raw-JSON targets equal the dataset's cropped targets.",
+    )
     args = parser.parse_args()
 
     random.seed(args.seed)
@@ -139,7 +153,10 @@ def main():
     model = make_meta_arch(cfg["model_name"], cfg, device=args.device).to(args.device)
     checkpoint = torch.load(args.checkpoint, map_location=args.device)
     model.load_state_dict(checkpoint["state_dict"])
-    model.eval()
+    if args.pseudo_mode == "train":
+        model.train()
+    else:
+        model.eval()
 
     threshold = float(cfg["model"].get("pl_threshold", 0.7))
     totals = collections.defaultdict(new_counter)
@@ -149,7 +166,8 @@ def main():
         for raw_video in dataset:
             video_id = raw_video["metadata"]["video_id"]
             video = move_video(raw_video, args.device)
-            inputs, masks = model.preprocessing([video], mode="validation")
+            inputs, masks = model.preprocessing([video], mode=args.pseudo_mode)
+            inputs = model.dropout(inputs)
             backbone_feats, backbone_masks, _ = model.backbone_target(inputs, masks)
             fpn_feats, fpn_masks = model.neck_target(backbone_feats, backbone_masks)
             logits, _ = model.cls_head_target(fpn_feats, fpn_masks)
@@ -162,6 +180,17 @@ def main():
                 cfg,
                 args.device,
             )
+            if args.verify_crop_targets:
+                expected_segments = raw_video["segments"].to(args.device)
+                expected_labels = raw_video["labels"].to(args.device)
+                if (
+                    gt_segments.shape != expected_segments.shape
+                    or not torch.allclose(gt_segments, expected_segments, atol=1e-4, rtol=1e-5)
+                    or not torch.equal(gt_labels, expected_labels)
+                ):
+                    raise RuntimeError(
+                        "Reconstructed target GT differs from dataset crop for {}".format(video_id)
+                    )
             gt_cls, _ = model.label_points(points, [gt_segments], [gt_labels])
             start = 0
             for level, point_grid in enumerate(points):
@@ -229,10 +258,14 @@ def main():
             "score": "max(sigmoid(class_logits))",
             "action_rule": "score >= pl_threshold",
             "background_rule": "all valid anchors not selected as action",
+            "pseudo_mode": args.pseudo_mode,
             "pl_threshold": threshold,
             "align_bkg": bool(cfg["model"].get("align_bkg", False)),
             "raw_num_frames": cfg["dataset"]["num_frames"],
             "action_subsampling": cfg["dataset"].get("action_subsampling", "all"),
+            "input_noise": cfg["model"].get("input_noise", 0.0),
+            "dropout": cfg["model"].get("dropout", 0.0),
+            "droppath": cfg["model"].get("droppath", 0.0),
         },
         "groups": {name: summarize(counter) for name, counter in totals.items()},
         "selected_score_bins": summarize_simple(score_totals),
