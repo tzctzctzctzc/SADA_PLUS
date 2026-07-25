@@ -133,6 +133,7 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--seed", type=int, default=20260726)
     parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument(
         "--pseudo-mode",
         choices=("train", "eval"),
@@ -153,6 +154,7 @@ def main():
     cfg = read_yaml(args.config)
     cfg["stage1"] = {"enabled": False, "perturbation": "shift"}
     _update_config(cfg)
+    batch_size = args.batch_size or int(cfg.get("loader", {}).get("batch_size", 1))
     split = cfg["tgt_train_split"] if args.split == "train" else cfg["tgt_val_split"]
     dataset = make_dataset(
         cfg["dataset_name"], args.split == "train", split, **cfg["dataset"]
@@ -172,44 +174,52 @@ def main():
     score_totals = collections.defaultdict(new_counter)
     class_totals = collections.defaultdict(new_counter)
     with torch.no_grad():
-        for raw_video in dataset:
-            video_id = raw_video["metadata"]["video_id"]
-            video = move_video(raw_video, args.device)
-            inputs, masks = model.preprocessing([video], mode=args.pseudo_mode)
+        for batch_start in range(0, len(dataset), batch_size):
+            raw_videos = [
+                dataset[index]
+                for index in range(batch_start, min(batch_start + batch_size, len(dataset)))
+            ]
+            videos = [move_video(raw_video, args.device) for raw_video in raw_videos]
+            inputs, masks = model.preprocessing(videos, mode=args.pseudo_mode)
             inputs = model.dropout(inputs)
             backbone_feats, backbone_masks, _ = model.backbone_target(inputs, masks)
             fpn_feats, fpn_masks = model.neck_target(backbone_feats, backbone_masks)
             logits, _ = model.cls_head_target(fpn_feats, fpn_masks)
             points = model.point_generator(fpn_feats)
 
-            gt_segments, gt_labels = crop_targets(
-                annotations[video_id],
-                video["metadata"],
-                video["feats"].shape[-1],
-                cfg,
-                args.device,
-            )
-            if args.verify_crop_targets:
-                expected_segments = raw_video["segments"].to(args.device)
-                expected_labels = raw_video["labels"].to(args.device)
-                if (
-                    gt_segments.shape != expected_segments.shape
-                    or not torch.allclose(gt_segments, expected_segments, atol=1e-4, rtol=1e-5)
-                    or not torch.equal(gt_labels, expected_labels)
-                ):
-                    raise RuntimeError(
-                        "Reconstructed target GT differs from dataset crop for {}".format(video_id)
-                    )
-            gt_cls, _ = model.label_points(points, [gt_segments], [gt_labels])
+            gt_segments, gt_labels = [], []
+            for raw_video, video in zip(raw_videos, videos):
+                video_id = raw_video["metadata"]["video_id"]
+                segments, labels = crop_targets(
+                    annotations[video_id],
+                    video["metadata"],
+                    video["feats"].shape[-1],
+                    cfg,
+                    args.device,
+                )
+                if args.verify_crop_targets:
+                    expected_segments = raw_video["segments"].to(args.device)
+                    expected_labels = raw_video["labels"].to(args.device)
+                    if (
+                        segments.shape != expected_segments.shape
+                        or not torch.allclose(segments, expected_segments, atol=1e-4, rtol=1e-5)
+                        or not torch.equal(labels, expected_labels)
+                    ):
+                        raise RuntimeError(
+                            "Reconstructed target GT differs from dataset crop for {}".format(video_id)
+                        )
+                gt_segments.append(segments)
+                gt_labels.append(labels)
+            gt_cls, _ = model.label_points(points, gt_segments, gt_labels)
             start = 0
             for level, point_grid in enumerate(points):
                 length = point_grid.shape[0]
-                valid = fpn_masks[level][0].squeeze(0)
-                probabilities = logits[level][0].transpose(0, 1).sigmoid()
+                valid = fpn_masks[level].squeeze(1).reshape(-1)
+                probabilities = logits[level].transpose(1, 2).reshape(-1, logits[level].shape[1]).sigmoid()
                 scores, pseudo_class = probabilities.max(dim=-1)
                 selected = valid & (scores >= threshold)
                 background = valid & ~selected
-                labels = gt_cls[0][start:start + length]
+                labels = torch.stack(gt_cls)[:, start:start + length].reshape(-1, probabilities.shape[-1])
                 gt_action = labels.sum(dim=-1) > 0
                 correct = labels.gather(
                     -1, pseudo_class.unsqueeze(-1)
@@ -263,6 +273,7 @@ def main():
         "split": args.split,
         "seed": args.seed,
         "videos": len(dataset),
+        "batch_size": batch_size,
         "method": {
             "score": "max(sigmoid(class_logits))",
             "action_rule": "score >= pl_threshold",
