@@ -10,6 +10,7 @@ import json
 import random
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from libs.datasets import make_dataset
@@ -40,9 +41,9 @@ def crop_targets(annotation, metadata, crop_length, cfg, device):
     ``metadata['feat_num_frames']`` is mutable after truncation, so the
     feature-window size must come from the immutable dataset configuration.
     """
-    fps = float(metadata["fps"])
-    stride = float(metadata["feat_stride"])
-    num_frames = float(cfg["dataset"]["num_frames"])
+    fps = metadata["fps"]
+    stride = metadata["feat_stride"]
+    num_frames = cfg["dataset"]["num_frames"]
     crop_start = float(metadata.get("crop_start", 0))
     crop_end = crop_start + float(crop_length)
     trunc_thresh = float(cfg["dataset"]["trunc_thresh"])
@@ -53,9 +54,7 @@ def crop_targets(annotation, metadata, crop_length, cfg, device):
         label = int(action["label_id"])
         if not kept_label(label, action_subsampling):
             continue
-        left = (float(action["segment"][0]) * fps - 0.5 * num_frames) / stride
-        right = (float(action["segment"][1]) * fps - 0.5 * num_frames) / stride
-        segments.append((left, right))
+        segments.append(action["segment"])
         labels.append(label)
 
     if not segments:
@@ -65,7 +64,9 @@ def crop_targets(annotation, metadata, crop_length, cfg, device):
         )
     # Match EpicKitchensDataset: sort the complete CPU tensor before applying
     # the crop. Sorting only retained segments changes tie ordering.
-    segments = torch.tensor(segments, dtype=torch.float32)
+    segments = torch.from_numpy(
+        (np.asarray(segments, dtype=np.float32) * fps - 0.5 * num_frames) / stride
+    )
     labels = torch.tensor(labels, dtype=torch.long)
     order = torch.argsort(segments[:, 0])
     segments = segments[order]
