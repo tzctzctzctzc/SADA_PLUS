@@ -85,6 +85,7 @@ def build_summary(records):
             class_flip, gt_action, correct, valid_gt_actions
         ),
         "stability_retention": {},
+        "confidence_retention": {},
     }
 
     candidate_indices = torch.where(class_consistent)[0]
@@ -102,6 +103,7 @@ def build_summary(records):
 
     sorted_stability, order = torch.sort(candidate_stability)
     sorted_indices = candidate_indices[order]
+    sorted_scores, _ = torch.sort(score[candidate_indices], descending=True)
     for fraction in RETENTION_FRACTIONS:
         keep = max(1, int(math.ceil(fraction * sorted_indices.numel())))
         threshold = sorted_stability[keep - 1]
@@ -115,6 +117,14 @@ def build_summary(records):
             ),
             "stability_rejected": summarize_group(
                 rejected, gt_action, correct, valid_gt_actions
+            ),
+        }
+        score_floor = sorted_scores[keep - 1]
+        confidence_reliable = class_consistent & (score >= score_floor)
+        result["confidence_retention"][key] = {
+            "diagnostic_score_floor": float(score_floor.item()),
+            "reliable_action": summarize_route(
+                confidence_reliable, gt_action, correct
             ),
         }
     return result
