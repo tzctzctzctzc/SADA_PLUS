@@ -69,12 +69,14 @@ def crop_targets(annotation, metadata, crop_length, cfg, device):
             torch.empty((0, 2), dtype=torch.float32, device=device),
             torch.empty((0,), dtype=torch.long, device=device),
         )
-    segments = torch.tensor(segments, dtype=torch.float32, device=device)
-    labels = torch.tensor(labels, dtype=torch.long, device=device)
+    # Match EpicKitchensDataset, which sorts these tensors on CPU before the
+    # sample is moved to the training device.
+    segments = torch.tensor(segments, dtype=torch.float32)
+    labels = torch.tensor(labels, dtype=torch.long)
     order = torch.argsort(segments[:, 0])
     return (
-        segments[order],
-        labels[order],
+        segments[order].to(device),
+        labels[order].to(device),
     )
 
 
