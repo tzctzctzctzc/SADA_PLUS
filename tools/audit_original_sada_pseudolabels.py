@@ -55,13 +55,7 @@ def crop_targets(annotation, metadata, crop_length, cfg, device):
             continue
         left = (float(action["segment"][0]) * fps - 0.5 * num_frames) / stride
         right = (float(action["segment"][1]) * fps - 0.5 * num_frames) / stride
-        duration = max(right - left, 1e-8)
-        overlap_left = max(left, crop_start)
-        overlap_right = min(right, crop_end)
-        overlap = max(overlap_right - overlap_left, 0.0)
-        if overlap / duration < trunc_thresh:
-            continue
-        segments.append((overlap_left - crop_start, overlap_right - crop_start))
+        segments.append((left, right))
         labels.append(label)
 
     if not segments:
@@ -69,15 +63,28 @@ def crop_targets(annotation, metadata, crop_length, cfg, device):
             torch.empty((0, 2), dtype=torch.float32, device=device),
             torch.empty((0,), dtype=torch.long, device=device),
         )
-    # Match EpicKitchensDataset, which sorts these tensors on CPU before the
-    # sample is moved to the training device.
+    # Match EpicKitchensDataset: sort the complete CPU tensor before applying
+    # the crop. Sorting only retained segments changes tie ordering.
     segments = torch.tensor(segments, dtype=torch.float32)
     labels = torch.tensor(labels, dtype=torch.long)
     order = torch.argsort(segments[:, 0])
-    return (
-        segments[order].to(device),
-        labels[order].to(device),
-    )
+    segments = segments[order]
+    labels = labels[order]
+
+    # truncate_feats returns early when its sampled crop spans the entire
+    # feature sequence, preserving out-of-range segment endpoints.
+    if crop_length == int(metadata["original_feat_len"]):
+        return segments.to(device), labels.to(device)
+
+    window = torch.tensor([crop_start, crop_end], dtype=torch.float32)
+    window = window.unsqueeze(0).repeat(segments.shape[0], 1)
+    left = torch.maximum(window[:, 0], segments[:, 0])
+    right = torch.minimum(window[:, 1], segments[:, 1])
+    intersection = (right - left).clamp(min=0)
+    segment_area = torch.abs(segments[:, 1] - segments[:, 0])
+    retained = intersection / segment_area >= trunc_thresh
+    cropped_segments = torch.stack((left[retained], right[retained]), dim=1)
+    return cropped_segments.sub(crop_start).to(device), labels[retained].to(device)
 
 
 def new_counter():
