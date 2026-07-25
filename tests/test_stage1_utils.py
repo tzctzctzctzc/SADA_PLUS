@@ -24,6 +24,7 @@ CALIBRATION_SPEC = importlib.util.spec_from_file_location(
 stage1_calibration = importlib.util.module_from_spec(CALIBRATION_SPEC)
 CALIBRATION_SPEC.loader.exec_module(stage1_calibration)
 build_routing_masks = stage1_utils.build_routing_masks
+build_oracle_routing = stage1_utils.build_oracle_routing
 context_view_on_cpu = stage1_utils.context_view_on_cpu
 interpolate_probabilities = stage1_utils.interpolate_probabilities
 shift_features = stage1_utils.shift_features
@@ -202,6 +203,39 @@ class Stage1UtilsTest(unittest.TestCase):
             + route["ignore"].int()
             == 1
         ))
+
+    def test_oracle_routes_isolate_the_three_diagnostics(self):
+        probabilities = torch.tensor([
+            [0.80, 0.10, 0.05],
+            [0.20, 0.30, 0.10],
+            [0.05, 0.10, 0.90],
+            [0.20, 0.10, 0.30],
+        ])
+        gt_labels = torch.tensor([
+            [0.0, 1.0, 1.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ])
+
+        o1 = build_oracle_routing(probabilities, gt_labels, 0.6, "o1")
+        self.assertEqual(o1["action"].tolist(), [True, False, False, False])
+        self.assertEqual(o1["background"].tolist(), [False, False, True, True])
+        self.assertEqual(o1["ignore"].tolist(), [False, True, False, False])
+        self.assertEqual(o1["action_labels"][0].tolist(), [1.0, 0.0, 0.0])
+
+        o2 = build_oracle_routing(probabilities, gt_labels, 0.6, "o2")
+        self.assertEqual(o2["action"].tolist(), [True, False, True, False])
+        self.assertEqual(o2["background"].tolist(), [False, True, False, True])
+        self.assertFalse(o2["ignore"].any())
+        self.assertEqual(o2["action_labels"][0].tolist(), [0.0, 1.0, 1.0])
+        self.assertEqual(o2["action_labels"][2].tolist(), [0.0, 0.0, 1.0])
+
+        o3 = build_oracle_routing(probabilities, gt_labels, 0.6, "o3")
+        self.assertEqual(o3["action"].tolist(), [True, True, False, False])
+        self.assertEqual(o3["background"].tolist(), [False, False, True, True])
+        self.assertFalse(o3["ignore"].any())
+        self.assertTrue(torch.equal(o3["action_labels"], gt_labels))
 
     def test_weighted_quantile(self):
         value = weighted_quantile(

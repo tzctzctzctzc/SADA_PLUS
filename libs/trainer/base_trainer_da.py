@@ -177,8 +177,20 @@ class BaseTrainerDA:
         not_improved_count = 0
         
         print("Starting the training...")
+        stop_after_epoch = self.cfg.get('diagnostic', {}).get(
+            'stop_after_epoch'
+        )
+        final_epoch = (
+            min(self.epochs, stop_after_epoch)
+            if stop_after_epoch is not None else self.epochs
+        )
+        if final_epoch < self.start_epoch:
+            raise ValueError(
+                'stop_after_epoch must be at least the resumed start epoch'
+            )
+
         # Iterate over each of the epochs
-        for epoch in range(self.start_epoch, self.epochs + 1):
+        for epoch in range(self.start_epoch, final_epoch + 1):
             t0 = time.time()
             ad_lambda = self.adaptation_factor(epoch/MAX_STEPS)
 

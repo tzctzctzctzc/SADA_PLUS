@@ -7,6 +7,7 @@ from .blocks import MaskedConv1D, Scale, LayerNorm
 from .losses_aux import ctr_diou_loss_1d, sigmoid_focal_loss, ctr_giou_loss_1d
 from .models import register_meta_arch, make_backbone, make_neck, make_generator
 from .stage1_utils import (
+    build_oracle_routing,
     build_routing_masks,
     context_view_on_cpu,
     erode_mask,
@@ -277,6 +278,15 @@ class SADA(nn.Module):
         self.reg_range = cfg['model']['regression_range']
         self.n_levels = len(self.fpn_strides)
         self.warmup_adv = cfg['train_cfg'].get('warmup_adv', 0)
+        self.oracle_routing_mode = cfg.get('diagnostic', {}).get(
+            'oracle_routing', 'off'
+        )
+        if self.oracle_routing_mode not in ('off', 'o1', 'o2', 'o3'):
+            raise ValueError(
+                'unknown oracle routing mode: {}'.format(
+                    self.oracle_routing_mode
+                )
+            )
         stage1_cfg = cfg.get('stage1', {})
         self.stage1_enabled = stage1_cfg.get('enabled', False)
         self.stage1_perturbation = stage1_cfg.get('perturbation', 'shift')
@@ -301,6 +311,8 @@ class SADA(nn.Module):
         )
         if self.stage1_enabled:
             assert self.stage1_perturbation in ('shift', 'context')
+            if self.oracle_routing_mode != 'off':
+                raise ValueError('Stage 1 and Oracle routing cannot both be enabled')
         
         
         assert len(self.fpn_strides) == len(self.reg_range)
@@ -1143,6 +1155,7 @@ class SADA(nn.Module):
                 pred_domain_all, 
                 dom_inv_feats,  # These are the domain invariant features that we want to apply supervision on for the semantic loss
                 gts_cls_per_level_src,
+                gts_cls_per_level_tgt,
                 mode=mode,
                 domain=domain,
                 curr_epoch=curr_epoch,
@@ -1384,6 +1397,7 @@ class SADA(nn.Module):
             pred_domain_all,
             dom_inv_feats, 
             gts_per_level_src,
+            gts_per_level_tgt,
             mode, 
             domain, 
             curr_epoch,
@@ -1653,7 +1667,33 @@ class SADA(nn.Module):
                     
                     # Apply thresholding to the maximum class probability
                     pseudo_gt_cls_target = torch.zeros_like(out_cls_logits_tgt2).detach()  # shape: B(T_l) x C or B(T_l) x C+1
-                    if stage1_routes is None:
+                    if self.oracle_routing_mode != 'off':
+                        oracle_route = build_oracle_routing(
+                            out_cls_logits_tgt2,
+                            gts_per_level_tgt[l][valid_mask_l_tgt],
+                            static_threshold,
+                            self.oracle_routing_mode,
+                        )
+                        selected_anchors_mask = oracle_route['action']
+                        pseudo_gt_cls_target = oracle_route['action_labels']
+                        stage1_background_mask = oracle_route['background']
+                        metric_prefix = 'oracle_l{}_'.format(l)
+                        losses[metric_prefix + 'action'] = (
+                            oracle_route['action'].sum().float()
+                        )
+                        losses[metric_prefix + 'background'] = (
+                            oracle_route['background'].sum().float()
+                        )
+                        losses[metric_prefix + 'ignore'] = (
+                            oracle_route['ignore'].sum().float()
+                        )
+                        losses[metric_prefix + 'gt_foreground'] = (
+                            oracle_route['gt_foreground'].sum().float()
+                        )
+                        losses[metric_prefix + 'high_confidence'] = (
+                            oracle_route['high_confidence'].sum().float()
+                        )
+                    elif stage1_routes is None:
                         selected_anchors_mask = max_cls_prob_tgt >= threshold[max_cls_idx_tgt]
                         pseudo_gt_cls_target[selected_anchors_mask] = F.one_hot(max_cls_idx_tgt[selected_anchors_mask], num_classes=self.num_classes).float()
                         stage1_background_mask = None

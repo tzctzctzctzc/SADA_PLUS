@@ -2,6 +2,49 @@ import torch
 import torch.nn.functional as F
 
 
+def build_oracle_routing(probabilities, gt_labels, alpha, mode):
+    """Build diagnostic target routes without changing the default SADA path."""
+    if mode not in ("o1", "o2", "o3"):
+        raise ValueError("unknown oracle routing mode: {}".format(mode))
+    if probabilities.shape != gt_labels.shape:
+        raise ValueError("probabilities and GT labels must have the same shape")
+
+    score, pseudo_class = probabilities.max(dim=-1)
+    high_confidence = score >= alpha
+    gt_foreground = gt_labels.sum(dim=-1) > 0
+    pseudo_labels = F.one_hot(
+        pseudo_class, num_classes=probabilities.shape[-1]
+    ).to(probabilities.dtype)
+    action_labels = torch.zeros_like(probabilities).detach()
+
+    if mode == "o1":
+        action = high_confidence & gt_foreground
+        background = ~gt_foreground
+        action_labels[action] = pseudo_labels[action]
+    elif mode == "o2":
+        action = high_confidence
+        background = ~high_confidence
+        action_labels[action] = pseudo_labels[action]
+        true_action = action & gt_foreground
+        action_labels[true_action] = gt_labels[true_action]
+    else:
+        action = gt_foreground
+        background = ~gt_foreground
+        action_labels[action] = gt_labels[action]
+
+    ignore = ~(action | background)
+    return {
+        "action_labels": action_labels,
+        "action": action,
+        "background": background,
+        "ignore": ignore,
+        "gt_foreground": gt_foreground,
+        "high_confidence": high_confidence,
+        "pseudo_class": pseudo_class,
+        "score": score,
+    }
+
+
 def validate_stage1_resume(
     checkpoint,
     current_enabled,

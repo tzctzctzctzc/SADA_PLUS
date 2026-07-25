@@ -445,6 +445,14 @@ def create_argparser():
         '--stage1-seed', type=int, default=100003,
         help='independent perturbation RNG seed',
     )
+    parser.add_argument(
+        '--oracle-routing', choices=['off', 'o1', 'o2', 'o3'], default='off',
+        help='diagnostic target routing; uses target GT and is not a UDA method',
+    )
+    parser.add_argument(
+        '--stop-after-epoch', type=int, default=None,
+        help='stop after this epoch without changing the scheduler horizon',
+    )
 
     add_dict_to_argparser(parser, ARGS_TYPES)
 
@@ -466,6 +474,12 @@ if __name__ == '__main__':
         'epsilon_bg': 0.01,
         'context_rho': 64.0 / 2304.0,
         'context_rho_max': 2.0 * 64.0 / 2304.0,
+    }
+    if args.stage1 != 'off' and args.oracle_routing != 'off':
+        raise ValueError('Stage 1 and Oracle routing cannot both be enabled')
+    config_dict['diagnostic'] = {
+        'oracle_routing': args.oracle_routing,
+        'stop_after_epoch': args.stop_after_epoch,
     }
 
     update_config_with_arguments(config_dict, args, ARGS_TYPES, ARGS_CONFIGPATH)
