@@ -7,10 +7,12 @@ and common strict-valid FPN anchors.
 
 import argparse
 import json
+import math
 import random
 from pathlib import Path
 
 import torch
+from torch.nn import functional as F
 
 from libs.datasets import make_dataset
 from libs.models.SADA import make_meta_arch
@@ -21,7 +23,14 @@ from libs.models.SADA.stage1_utils import (
 )
 from libs.utils.utils import _update_config, read_yaml
 from tools.audit_original_sada_pseudolabels import crop_targets, move_video
-from tools.audit_shift_action_stability import build_summary
+from tools.audit_shift_action_stability import (
+    build_summary,
+    summarize_group,
+    summarize_route,
+)
+
+
+RETENTION_FRACTIONS = (0.8, 0.6, 0.4, 0.2)
 
 
 def describe(values):
@@ -32,6 +41,108 @@ def describe(values):
         "mean": float(tensor.mean().item()),
         "max": float(tensor.max().item()),
     }
+
+
+def records_for_metric(records, metric):
+    selected = dict(records)
+    selected["stability"] = records[metric]
+    return selected
+
+
+def build_exact_rank_retention(records):
+    """Select an exact Top-K so tied distances cannot inflate the budget."""
+    score = records["score"]
+    stability = records["stability"]
+    gt_action = records["gt_action"]
+    correct = records["correct"]
+    candidate = (score >= records["alpha"]) & records["consistent"]
+    candidate_indices = torch.where(candidate)[0]
+    valid_gt_actions = int(gt_action.sum().item())
+    result = {"stability_retention": {}, "confidence_retention": {}}
+    if not candidate_indices.numel():
+        return result
+
+    stability_order = torch.argsort(stability[candidate_indices])
+    confidence_order = torch.argsort(
+        score[candidate_indices], descending=True
+    )
+    for fraction in RETENTION_FRACTIONS:
+        keep = max(1, int(math.ceil(fraction * candidate_indices.numel())))
+        stable_indices = candidate_indices[stability_order[:keep]]
+        confidence_indices = candidate_indices[confidence_order[:keep]]
+        stable = torch.zeros_like(candidate)
+        confidence = torch.zeros_like(candidate)
+        stable[stable_indices] = True
+        confidence[confidence_indices] = True
+        rejected = candidate & ~stable
+        key = "retain_{:03d}".format(int(round(fraction * 100)))
+        result["stability_retention"][key] = {
+            "diagnostic_tau": float(stability[stable_indices[-1]].item()),
+            "reliable_action": summarize_route(stable, gt_action, correct),
+            "stability_rejected": summarize_group(
+                rejected, gt_action, correct, valid_gt_actions
+            ),
+        }
+        result["confidence_retention"][key] = {
+            "diagnostic_score_floor": float(
+                score[confidence_indices[-1]].item()
+            ),
+            "reliable_action": summarize_route(
+                confidence, gt_action, correct
+            ),
+        }
+    return result
+
+
+def build_score_stratified_retention(records, bin_width=0.05):
+    """Rank by stability while preserving the confidence-bin mixture."""
+    score = records["score"]
+    stability = records["stability"]
+    gt_action = records["gt_action"]
+    correct = records["correct"]
+    candidate = (score >= records["alpha"]) & records["consistent"]
+
+    bins = []
+    lower = float(records["alpha"])
+    while lower < 1.0:
+        upper = min(lower + bin_width, 1.0)
+        if upper == 1.0:
+            mask = candidate & (score >= lower) & (score <= upper)
+        else:
+            mask = candidate & (score >= lower) & (score < upper)
+        bins.append((lower, upper, torch.where(mask)[0]))
+        lower = upper
+
+    result = {}
+    for fraction in RETENTION_FRACTIONS:
+        reliable = torch.zeros_like(candidate)
+        bin_stats = {}
+        for lower, upper, indices in bins:
+            count = int(indices.numel())
+            if not count:
+                continue
+            keep = max(1, int(math.ceil(fraction * count)))
+            order = torch.argsort(stability[indices])
+            chosen = indices[order[:keep]]
+            reliable[chosen] = True
+            key = "{:.2f}_{:.2f}".format(lower, upper)
+            bin_stats[key] = {
+                "n": count,
+                "kept_n": keep,
+                "candidate_correct_class_rate": float(
+                    correct[indices].float().mean().item()
+                ),
+                "stable_correct_class_rate": float(
+                    correct[chosen].float().mean().item()
+                ),
+            }
+        key = "retain_{:03d}".format(int(round(fraction * 100)))
+        summary = summarize_route(reliable, gt_action, correct)
+        summary["actual_candidate_retention"] = (
+            summary["n"] / max(int(candidate.sum().item()), 1)
+        )
+        result[key] = {"reliable_action": summary, "score_bins": bin_stats}
+    return result
 
 
 def main():
@@ -76,6 +187,8 @@ def main():
             "score",
             "consistent",
             "stability",
+            "representation_cosine",
+            "representation_mse",
             "gt_action",
             "correct",
             "level",
@@ -158,10 +271,10 @@ def main():
             strict1 = model._stage1_strict_masks(masks1)
             feats0, backbone_masks0, _ = model.backbone_target(inputs0, masks0)
             fpn0, fpn_masks0 = model.neck_target(feats0, backbone_masks0)
-            logits0, _ = model.cls_head_target(fpn0, fpn_masks0)
+            logits0, head_feats0 = model.cls_head_target(fpn0, fpn_masks0)
             feats1, backbone_masks1, _ = model.backbone_target(inputs1, masks1)
             fpn1, fpn_masks1 = model.neck_target(feats1, backbone_masks1)
-            logits1, _ = model.cls_head_target(fpn1, fpn_masks1)
+            logits1, head_feats1 = model.cls_head_target(fpn1, fpn_masks1)
             points = model.point_generator(fpn0)
 
             gt_segments, gt_labels = [], []
@@ -213,6 +326,21 @@ def main():
                     aligned_valid_rows.append(aligned_valid)
                 aligned_prob1 = torch.cat(aligned_rows, dim=0)
                 aligned_valid = torch.cat(aligned_valid_rows, dim=0)
+                feature0 = head_feats0[level].permute(0, 2, 1)
+                feature1 = head_feats1[level].permute(0, 2, 1)
+                aligned_feature_rows = []
+                for batch_idx, (direction, offset) in enumerate(
+                    zip(directions, batch_offsets)
+                ):
+                    query = point_grid[:, 0] - direction * offset
+                    aligned_feature, _ = interpolate_probabilities(
+                        feature1[batch_idx:batch_idx + 1],
+                        strict1[level][batch_idx:batch_idx + 1].squeeze(1),
+                        point_grid,
+                        query,
+                    )
+                    aligned_feature_rows.append(aligned_feature)
+                aligned_feature1 = torch.cat(aligned_feature_rows, dim=0)
                 strict_valid0 = strict0[level].squeeze(1)
                 eligible = strict_valid0 & valid_video_rows
                 common_valid = eligible & aligned_valid
@@ -225,6 +353,12 @@ def main():
                 stability = population_std(
                     torch.stack((score0, class1_score), dim=0), dim=0
                 )
+                representation_cosine = 1.0 - F.cosine_similarity(
+                    feature0, aligned_feature1, dim=-1, eps=1e-8
+                )
+                representation_mse = F.mse_loss(
+                    feature0, aligned_feature1, reduction="none"
+                ).mean(dim=-1)
                 labels = gt_cls[:, start:start + length]
                 gt_action = labels.sum(dim=-1) > 0
                 correct = labels.gather(
@@ -238,6 +372,8 @@ def main():
                     "score": score0,
                     "consistent": class0 == class1,
                     "stability": stability,
+                    "representation_cosine": representation_cosine,
+                    "representation_mse": representation_mse,
                     "gt_action": gt_action,
                     "correct": correct,
                     "level": torch.full_like(class0, level),
@@ -249,7 +385,10 @@ def main():
 
     records = {key: torch.cat(value) for key, value in record_lists.items()}
     records["alpha"] = alpha
+    cosine_records = records_for_metric(records, "representation_cosine")
+    mse_records = records_for_metric(records, "representation_mse")
     per_level = {}
+    representation_per_level = {}
     for level in range(model.n_levels):
         selected = records["level"] == level
         level_records = {
@@ -259,8 +398,12 @@ def main():
         }
         level_records["alpha"] = alpha
         per_level[str(level)] = build_summary(level_records)
+        representation_per_level[str(level)] = build_summary(
+            records_for_metric(level_records, "representation_cosine")
+        )
 
     per_direction = {}
+    representation_per_direction = {}
     for direction in (-1, 1):
         selected = records["direction"] == direction
         direction_records = {
@@ -270,6 +413,9 @@ def main():
         }
         direction_records["alpha"] = alpha
         per_direction[str(direction)] = build_summary(direction_records)
+        representation_per_direction[str(direction)] = build_summary(
+            records_for_metric(direction_records, "representation_cosine")
+        )
 
     result = {
         "audit": "context_action_stability_direction_test",
@@ -296,6 +442,25 @@ def main():
         "global": build_summary(records),
         "per_direction": per_direction,
         "per_level": per_level,
+        "representation_stability": {
+            "primary_metric": "one_minus_cosine_of_penultimate_anchor_features",
+            "cosine": {
+                "global": build_summary(cosine_records),
+                "exact_rank": build_exact_rank_retention(cosine_records),
+                "score_stratified_retention": build_score_stratified_retention(
+                    cosine_records
+                ),
+                "per_direction": representation_per_direction,
+                "per_level": representation_per_level,
+            },
+            "raw_mse": {
+                "global": build_summary(mse_records),
+                "exact_rank": build_exact_rank_retention(mse_records),
+                "score_stratified_retention": build_score_stratified_retention(
+                    mse_records
+                ),
+            },
+        },
     }
     Path(args.output).write_text(
         json.dumps(result, indent=2), encoding="utf-8"
