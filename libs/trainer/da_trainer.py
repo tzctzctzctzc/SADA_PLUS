@@ -295,6 +295,17 @@ class Trainer(BaseTrainerDA):
             
             video_list_tgt = next(iter_tgt)
             video_list_tgt = move_to_device(video_list_tgt, self.model.device)
+
+            stage2_pseudo_targets = None
+            if (
+                self.model.stage2_enabled
+                and curr_epoch >= self.model.stage2_start_epoch
+            ):
+                candidate_targets = self.model_ema.module.generate_stage2_pseudo_targets(
+                    video_list_tgt
+                )
+                if any(item['scores'].numel() for item in candidate_targets):
+                    stage2_pseudo_targets = candidate_targets
             
             # forward / backward the model
             losses, _, _, _, _, _, _ = self.model(video_list_src = video_list_src,
@@ -302,7 +313,8 @@ class Trainer(BaseTrainerDA):
                                 mode='train',
                                 curr_epoch=curr_epoch,
                                 cls_static_anchors=cls_static_anchors,
-                                mean_class_conf=mean_class_conf) 
+                                mean_class_conf=mean_class_conf,
+                                stage2_pseudo_targets=stage2_pseudo_targets)
 
             # Update the final loss with the adversarial loss
             

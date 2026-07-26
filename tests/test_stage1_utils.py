@@ -28,6 +28,7 @@ build_oracle_routing = stage1_utils.build_oracle_routing
 build_oracle_target_regression_mask = (
     stage1_utils.build_oracle_target_regression_mask
 )
+build_stage2_regression_mask = stage1_utils.build_stage2_regression_mask
 context_view_on_cpu = stage1_utils.context_view_on_cpu
 interpolate_probabilities = stage1_utils.interpolate_probabilities
 shift_features = stage1_utils.shift_features
@@ -255,6 +256,15 @@ class Stage1UtilsTest(unittest.TestCase):
         )
         self.assertEqual(selected.tolist(), [[True, False, False, False]])
         self.assertEqual(full.tolist(), [[True, True, False, False]])
+
+    def test_stage2_regression_only_uses_reassigned_positive_anchors(self):
+        pseudo_labels = torch.tensor([[
+            [1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [0.0, 0.0]
+        ]])
+        valid = torch.tensor([[True, True, True, False]])
+        levels = torch.tensor([[True, False, True, True]])
+        mask = build_stage2_regression_mask(pseudo_labels, valid, levels)
+        self.assertEqual(mask.tolist(), [[True, False, True, False]])
 
     def test_weighted_quantile(self):
         value = weighted_quantile(

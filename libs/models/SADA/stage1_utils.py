@@ -78,6 +78,16 @@ def build_oracle_target_regression_mask(
     return eligible
 
 
+def build_stage2_regression_mask(pseudo_labels, valid_mask, enabled_levels):
+    """Select student anchors re-assigned by detached EMA proposals."""
+    if (
+        pseudo_labels.shape[:-1] != valid_mask.shape
+        or valid_mask.shape != enabled_levels.shape
+    ):
+        raise ValueError("Stage 2 pseudo-regression inputs have incompatible shapes")
+    return valid_mask & enabled_levels & (pseudo_labels.sum(dim=-1) > 0)
+
+
 def validate_stage1_resume(
     checkpoint,
     current_enabled,

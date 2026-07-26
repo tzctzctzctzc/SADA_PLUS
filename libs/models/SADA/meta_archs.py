@@ -10,6 +10,7 @@ from .stage1_utils import (
     build_oracle_target_regression_mask,
     build_oracle_routing,
     build_routing_masks,
+    build_stage2_regression_mask,
     context_view_on_cpu,
     erode_mask,
     interpolate_probabilities,
@@ -313,6 +314,24 @@ class SADA(nn.Module):
                    for level in self.oracle_target_regression_levels)
         ):
             raise ValueError('Oracle target regression levels are invalid')
+        stage2_cfg = cfg.get('stage2', {})
+        self.stage2_enabled = stage2_cfg.get('enabled', False)
+        self.stage2_start_epoch = int(stage2_cfg.get('start_epoch', 5))
+        self.stage2_weight = float(stage2_cfg.get('weight', 1.0))
+        self.stage2_levels = stage2_cfg.get('levels', [0, 1, 2])
+        self.stage2_alpha = cfg['model'].get('pl_threshold', 0.7)
+        if self.stage2_start_epoch < 1 or self.stage2_weight < 0:
+            raise ValueError('Stage 2 start epoch and weight are invalid')
+        if (
+            not self.stage2_levels
+            or len(set(self.stage2_levels)) != len(self.stage2_levels)
+            or any(level < 0 or level >= self.n_levels for level in self.stage2_levels)
+        ):
+            raise ValueError('Stage 2 levels are invalid')
+        if self.stage2_enabled and self.oracle_target_regression_mode != 'off':
+            raise ValueError('Stage 2 and Oracle target regression cannot both be enabled')
+        if self.stage2_enabled and not cfg['train_cfg'].get('ema_active', False):
+            raise ValueError('Stage 2 requires the external EMA teacher')
         stage1_cfg = cfg.get('stage1', {})
         self.stage1_enabled = stage1_cfg.get('enabled', False)
         self.stage1_perturbation = stage1_cfg.get('perturbation', 'shift')
@@ -407,6 +426,10 @@ class SADA(nn.Module):
             raise ValueError(
                 'Oracle target regression currently supports the direct '
                 'regression head only'
+            )
+        if self.stage2_enabled and self.use_trident_head:
+            raise ValueError(
+                'Stage 2 currently supports the direct regression head only'
             )
 
         backbone_type = cfg['model']['backbone_type']
@@ -1007,7 +1030,63 @@ class SADA(nn.Module):
     
     
 
-    def forward(self, video_list_src, video_list_tgt, mode=None, domain='src', curr_epoch=0, cls_static_anchors=None, mean_class_conf=None):
+    @torch.no_grad()
+    def generate_stage2_pseudo_targets(self, video_list):
+        """Generate detached, class-aware NMS proposals on feature grids."""
+        inputs, masks = self.preprocessing(video_list, mode='train')
+        feats, backbone_masks, _ = self.backbone_target(inputs, masks)
+        fpn_feats, fpn_masks = self.neck_target(feats, backbone_masks)
+        cls_logits, _ = self.cls_head_target(fpn_feats, fpn_masks)
+        offsets, _ = self.reg_head_target(fpn_feats, fpn_masks)
+        points = self.point_generator(fpn_feats)
+        targets = []
+        for batch_idx in range(len(video_list)):
+            all_segments, all_scores, all_labels = [], [], []
+            for level in self.stage2_levels:
+                probabilities = cls_logits[level][batch_idx].transpose(0, 1).sigmoid()
+                scores, labels = probabilities.max(dim=-1)
+                valid = fpn_masks[level][batch_idx, 0]
+                selected = valid & (scores >= self.stage2_alpha)
+                if not selected.any():
+                    continue
+                point_grid = points[level][selected]
+                level_offsets = offsets[level][batch_idx].transpose(0, 1)[selected]
+                segments = torch.stack((
+                    point_grid[:, 0] - level_offsets[:, 0] * point_grid[:, 3],
+                    point_grid[:, 0] + level_offsets[:, 1] * point_grid[:, 3],
+                ), dim=-1)
+                duration = segments[:, 1] - segments[:, 0]
+                kept = duration > self.test_duration_thresh
+                all_segments.append(segments[kept])
+                all_scores.append(scores[selected][kept])
+                all_labels.append(labels[selected][kept])
+
+            if not all_segments or not any(segment.numel() for segment in all_segments):
+                targets.append({
+                    'segments': torch.empty((0, 2), device=self.device),
+                    'labels': torch.empty((0,), dtype=torch.long, device=self.device),
+                    'scores': torch.empty((0,), device=self.device),
+                })
+                continue
+            segments = torch.cat(all_segments).detach().cpu()
+            scores = torch.cat(all_scores).detach().cpu()
+            labels = torch.cat(all_labels).detach().cpu()
+            segments, scores, labels = batched_nms(
+                segments, scores, labels,
+                self.test_iou_threshold, self.test_min_score, self.test_max_seg_num,
+                use_soft_nms=(self.test_nms_method == 'soft'),
+                multiclass=self.test_multiclass_nms,
+                sigma=self.test_nms_sigma,
+                voting_thresh=self.test_voting_thresh,
+            )
+            targets.append({
+                'segments': segments.to(self.device),
+                'labels': labels.to(self.device),
+                'scores': scores.to(self.device),
+            })
+        return targets
+
+    def forward(self, video_list_src, video_list_tgt, mode=None, domain='src', curr_epoch=0, cls_static_anchors=None, mean_class_conf=None, stage2_pseudo_targets=None):
         
         # Note: The domain is by default src, which indicates in the case of training that we care about applying supervision on the source domain (upper part of the architecture)
         # While during validation, we may want to evaluate the losses on the target domain only (lower part of the architecture)
@@ -1145,6 +1224,19 @@ class SADA(nn.Module):
             # list of prediction targets
             gt_cls_labels, gt_offsets = self.label_points(
                 points, gt_segments, gt_labels)
+            stage2_pseudo_cls, stage2_pseudo_offsets = None, None
+            stage2_proposal_count = 0
+            if stage2_pseudo_targets is not None:
+                if len(stage2_pseudo_targets) != bs:
+                    raise ValueError('Stage 2 target batch does not match source batch')
+                stage2_pseudo_cls, stage2_pseudo_offsets = self.label_points(
+                    points,
+                    [item['segments'].to(self.device) for item in stage2_pseudo_targets],
+                    [item['labels'].to(self.device) for item in stage2_pseudo_targets],
+                )
+                stage2_proposal_count = sum(
+                    int(item['scores'].numel()) for item in stage2_pseudo_targets
+                )
             
             
             # For debugging ...
@@ -1194,6 +1286,9 @@ class SADA(nn.Module):
                 domain=domain,
                 curr_epoch=curr_epoch,
                 stage1_routes=stage1_routes,
+                stage2_pseudo_cls=stage2_pseudo_cls,
+                stage2_pseudo_offsets=stage2_pseudo_offsets,
+                stage2_proposal_count=stage2_proposal_count,
             )
             
             # Return the GTs of the target domain as well, to be used to compute the anchors
@@ -1435,7 +1530,10 @@ class SADA(nn.Module):
             mode, 
             domain, 
             curr_epoch,
-            stage1_routes=None,):
+            stage1_routes=None,
+            stage2_pseudo_cls=None,
+            stage2_pseudo_offsets=None,
+            stage2_proposal_count=0,):
         bs = int(fpn_masks[0].shape[0] / 2)
         
         # gt_cls_labels is a list of 2B elements, each of shape FT x C
@@ -1501,6 +1599,14 @@ class SADA(nn.Module):
         gt_cls_src = torch.stack(gt_cls_labels_src) # shape: B x (T_1 + ... + T_L) x C  -> B x FT x C
         gt_cls_tgt = torch.stack(gt_cls_labels_tgt) # shape: B x (T_1 + ... + T_L) x C  -> B x FT x C
         gt_cls_tgt_full = gt_cls_tgt
+        stage2_cls_tgt = (
+            torch.stack(stage2_pseudo_cls)
+            if stage2_pseudo_cls is not None else None
+        )
+        stage2_offsets_tgt = (
+            torch.stack(stage2_pseudo_offsets)
+            if stage2_pseudo_offsets is not None else None
+        )
         
         # NOTE: We want to be able to specify if we want to apply the supervision over the source or the target domain
         # This is necessary when each of them uses a different backbone (i.e., not shared weights)
@@ -1652,11 +1758,46 @@ class SADA(nn.Module):
                 downstream_loss
                 + self.oracle_target_regression_weight * target_reg_loss
             )
+
+        stage2_reg_loss = 0 * decoded_offsets.sum()
+        stage2_reg_positive = 0 * decoded_offsets.sum()
+        if self.stage2_enabled and stage2_cls_tgt is not None:
+            stage2_predictions = self.decode_offset(
+                out_offsets_tgt, None, None, mode=mode
+            )
+            stage2_level_mask = torch.cat([
+                torch.full_like(
+                    fpn_masks_tgt[level],
+                    level in self.stage2_levels,
+                    dtype=torch.bool,
+                )
+                for level in range(self.n_levels)
+            ], dim=1)
+            stage2_reg_mask = build_stage2_regression_mask(
+                stage2_cls_tgt,
+                valid_mask_tgt,
+                stage2_level_mask,
+            )
+            stage2_reg_positive = stage2_reg_mask.sum().float()
+            if stage2_reg_mask.any():
+                stage2_reg_loss = ctr_diou_loss_1d(
+                    stage2_predictions[stage2_reg_mask],
+                    stage2_offsets_tgt[stage2_reg_mask],
+                    reduction='sum',
+                ) / stage2_reg_positive
+            else:
+                stage2_reg_loss = 0 * stage2_predictions.sum()
+            downstream_loss = downstream_loss + self.stage2_weight * stage2_reg_loss
         
         losses =  {'cls_loss': cls_loss,
                    'reg_loss': reg_loss,
                    'oracle_target_reg_loss': target_reg_loss,
                    'oracle_target_reg_positive': target_reg_positive,
+                   'stage2_pseudo_reg_loss': stage2_reg_loss,
+                   'stage2_pseudo_reg_positive': stage2_reg_positive,
+                   'stage2_pseudo_proposals': torch.tensor(
+                       float(stage2_proposal_count), device=self.device
+                   ),
                    'downstream_loss': downstream_loss}
         
         

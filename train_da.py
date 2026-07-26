@@ -450,6 +450,22 @@ def create_argparser():
         help='independent perturbation RNG seed',
     )
     parser.add_argument(
+        '--stage2', choices=['off', 'pseudo'], default='off',
+        help='EMA proposal pseudo-regression after warm-up',
+    )
+    parser.add_argument(
+        '--stage2-start-epoch', type=int, default=5,
+        help='first epoch eligible for Stage 2 EMA proposals',
+    )
+    parser.add_argument(
+        '--stage2-weight', type=float, default=1.0,
+        help='weight of the Stage 2 pseudo-regression loss',
+    )
+    parser.add_argument(
+        '--stage2-levels', default='0,1,2',
+        help='comma-separated FPN levels used for Stage 2 proposals and loss',
+    )
+    parser.add_argument(
         '--oracle-routing', choices=['off', 'o1', 'o2', 'o3'], default='off',
         help='diagnostic target routing; uses target GT and is not a UDA method',
     )
@@ -500,6 +516,23 @@ if __name__ == '__main__':
         'context_rho': 64.0 / 2304.0,
         'context_rho_max': 2.0 * 64.0 / 2304.0,
     }
+    stage2_levels = [
+        int(level.strip())
+        for level in args.stage2_levels.split(',')
+        if level.strip()
+    ]
+    if (
+        not stage2_levels
+        or len(set(stage2_levels)) != len(stage2_levels)
+        or any(level < 0 or level > 5 for level in stage2_levels)
+    ):
+        raise ValueError('Stage 2 levels must be unique values from 0 to 5')
+    config_dict['stage2'] = {
+        'enabled': args.stage2 == 'pseudo',
+        'start_epoch': args.stage2_start_epoch,
+        'weight': args.stage2_weight,
+        'levels': stage2_levels,
+    }
     if (
         args.stage1 != 'off'
         and (
@@ -508,6 +541,8 @@ if __name__ == '__main__':
         )
     ):
         raise ValueError('Stage 1 and Oracle diagnostics cannot both be enabled')
+    if args.stage2 != 'off' and args.oracle_target_regression != 'off':
+        raise ValueError('Stage 2 and Oracle target regression cannot both be enabled')
     diagnostic_levels = None
     if args.diagnostic_alignment_levels is not None:
         diagnostic_levels = [
