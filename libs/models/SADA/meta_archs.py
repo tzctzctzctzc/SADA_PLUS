@@ -1033,6 +1033,8 @@ class SADA(nn.Module):
     @torch.no_grad()
     def generate_stage2_pseudo_targets(self, video_list):
         """Generate detached, class-aware NMS proposals on feature grids."""
+        if self.training:
+            raise RuntimeError('Stage 2 EMA teacher must be in eval mode')
         inputs, masks = self.preprocessing(video_list, mode='train')
         feats, backbone_masks, _ = self.backbone_target(inputs, masks)
         fpn_feats, fpn_masks = self.neck_target(feats, backbone_masks)
@@ -1055,8 +1057,13 @@ class SADA(nn.Module):
                     point_grid[:, 0] - level_offsets[:, 0] * point_grid[:, 3],
                     point_grid[:, 0] + level_offsets[:, 1] * point_grid[:, 3],
                 ), dim=-1)
+                valid_length = float(video_list[batch_idx]['feats'].shape[-1])
+                segments[:, 0].clamp_(min=0.0, max=valid_length)
+                segments[:, 1].clamp_(min=0.0, max=valid_length)
                 duration = segments[:, 1] - segments[:, 0]
-                kept = duration > self.test_duration_thresh
+                kept = torch.isfinite(segments).all(dim=-1) & (
+                    duration > self.test_duration_thresh
+                )
                 all_segments.append(segments[kept])
                 all_scores.append(scores[selected][kept])
                 all_labels.append(labels[selected][kept])
@@ -1761,24 +1768,38 @@ class SADA(nn.Module):
 
         stage2_reg_loss = 0 * decoded_offsets.sum()
         stage2_reg_positive = 0 * decoded_offsets.sum()
+        stage2_reg_ratio = 0 * decoded_offsets.sum()
+        stage2_active_batch = 0 * decoded_offsets.sum()
+        stage2_level_positive = [
+            0 * decoded_offsets.sum() for _ in range(self.n_levels)
+        ]
         if self.stage2_enabled and stage2_cls_tgt is not None:
             stage2_predictions = self.decode_offset(
                 out_offsets_tgt, None, None, mode=mode
             )
-            stage2_level_mask = torch.cat([
+            stage2_level_masks = [
                 torch.full_like(
                     fpn_masks_tgt[level],
                     level in self.stage2_levels,
                     dtype=torch.bool,
                 )
                 for level in range(self.n_levels)
-            ], dim=1)
+            ]
+            stage2_level_mask = torch.cat(stage2_level_masks, dim=1)
             stage2_reg_mask = build_stage2_regression_mask(
                 stage2_cls_tgt,
                 valid_mask_tgt,
                 stage2_level_mask,
             )
             stage2_reg_positive = stage2_reg_mask.sum().float()
+            stage2_active_batch = torch.ones_like(stage2_reg_positive)
+            offset = 0
+            for level, level_mask in enumerate(stage2_level_masks):
+                next_offset = offset + level_mask.shape[1]
+                stage2_level_positive[level] = stage2_reg_mask[
+                    :, offset:next_offset
+                ].sum().float()
+                offset = next_offset
             if stage2_reg_mask.any():
                 stage2_reg_loss = ctr_diou_loss_1d(
                     stage2_predictions[stage2_reg_mask],
@@ -1787,7 +1808,13 @@ class SADA(nn.Module):
                 ) / stage2_reg_positive
             else:
                 stage2_reg_loss = 0 * stage2_predictions.sum()
-            downstream_loss = downstream_loss + self.stage2_weight * stage2_reg_loss
+            stage2_reg_ratio = (
+                stage2_reg_loss.detach() / reg_loss.detach().clamp_min(1e-8)
+            )
+            downstream_loss = (
+                downstream_loss
+                + self.stage2_weight * loss_reg_weight * stage2_reg_loss
+            )
         
         losses =  {'cls_loss': cls_loss,
                    'reg_loss': reg_loss,
@@ -1795,10 +1822,14 @@ class SADA(nn.Module):
                    'oracle_target_reg_positive': target_reg_positive,
                    'stage2_pseudo_reg_loss': stage2_reg_loss,
                    'stage2_pseudo_reg_positive': stage2_reg_positive,
+                   'stage2_pseudo_active_batch': stage2_active_batch,
+                   'stage2_pseudo_to_source_reg_ratio': stage2_reg_ratio,
                    'stage2_pseudo_proposals': torch.tensor(
                        float(stage2_proposal_count), device=self.device
                    ),
                    'downstream_loss': downstream_loss}
+        for level, count in enumerate(stage2_level_positive):
+            losses['stage2_pseudo_l{}_positive'.format(level)] = count
         
         
         # Set a threshold for the confidence of the pseudo-labels

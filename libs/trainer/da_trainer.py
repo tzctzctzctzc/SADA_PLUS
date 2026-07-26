@@ -301,9 +301,12 @@ class Trainer(BaseTrainerDA):
                 self.model.stage2_enabled
                 and curr_epoch >= self.model.stage2_start_epoch
             ):
-                candidate_targets = self.model_ema.module.generate_stage2_pseudo_targets(
-                    video_list_tgt
-                )
+                teacher = self.model_ema.module
+                teacher.eval()
+                with torch.no_grad():
+                    candidate_targets = teacher.generate_stage2_pseudo_targets(
+                        video_list_tgt
+                    )
                 if any(item['scores'].numel() for item in candidate_targets):
                     stage2_pseudo_targets = candidate_targets
             
