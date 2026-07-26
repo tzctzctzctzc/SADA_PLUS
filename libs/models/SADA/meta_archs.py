@@ -1081,15 +1081,16 @@ class SADA(nn.Module):
             segments, scores, labels = batched_nms(
                 segments, scores, labels,
                 self.test_iou_threshold, self.test_min_score, self.test_max_seg_num,
-                use_soft_nms=(self.test_nms_method == 'soft'),
-                multiclass=self.test_multiclass_nms,
+                use_soft_nms=False,
+                multiclass=False,
                 sigma=self.test_nms_sigma,
-                voting_thresh=self.test_voting_thresh,
+                voting_thresh=0.0,
             )
+            keep = scores >= self.stage2_alpha
             targets.append({
-                'segments': segments.to(self.device),
-                'labels': labels.to(self.device),
-                'scores': scores.to(self.device),
+                'segments': segments[keep].to(self.device),
+                'labels': labels[keep].to(self.device),
+                'scores': scores[keep].to(self.device),
             })
         return targets
 

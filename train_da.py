@@ -225,10 +225,9 @@ def main(cfg, resume, project_name='sada', debug=False):
     if use_ema:
         # enable model EMA
         print("Using model EMA ...")
-        # Avoid deep copy so that we can have learnable parameters in the underlying model
         new_model = make_meta_arch(cfg['model_name'], cfg, device = device).to(device)
-        
         model_ema = ModelEma2(new_model, decay=cfg['train_cfg']['ema_decay']).to(device)
+        model_ema.set(model)
         
 
     """4. Resume from model / Misc"""
@@ -266,7 +265,10 @@ def main(cfg, resume, project_name='sada', debug=False):
                 model.stage1_calibrated = stage1['calibrated']
             
             if use_ema:
-                model_ema.module.load_state_dict(checkpoint['ema_state_dict'])
+                if args.reset_ema_from_student:
+                    model_ema.set(model)
+                else:
+                    model_ema.module.load_state_dict(checkpoint['ema_state_dict'])
             
             # also load the optimizer / scheduler if necessary
             optimizer_gen_source.load_state_dict(checkpoint['optimizer_gen_source'])
@@ -464,6 +466,10 @@ def create_argparser():
     parser.add_argument(
         '--stage2-levels', default='0,1,2',
         help='comma-separated FPN levels used for Stage 2 proposals and loss',
+    )
+    parser.add_argument(
+        '--reset-ema-from-student', action='store_true',
+        help='on resume, discard checkpoint EMA and initialize it from student',
     )
     parser.add_argument(
         '--oracle-routing', choices=['off', 'o1', 'o2', 'o3'], default='off',
