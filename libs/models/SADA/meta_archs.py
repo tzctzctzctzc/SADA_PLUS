@@ -1500,6 +1500,7 @@ class SADA(nn.Module):
         # stack the list -> (B, FT) -> (# Valid, )
         gt_cls_src = torch.stack(gt_cls_labels_src) # shape: B x (T_1 + ... + T_L) x C  -> B x FT x C
         gt_cls_tgt = torch.stack(gt_cls_labels_tgt) # shape: B x (T_1 + ... + T_L) x C  -> B x FT x C
+        gt_cls_tgt_full = gt_cls_tgt
         
         # NOTE: We want to be able to specify if we want to apply the supervision over the source or the target domain
         # This is necessary when each of them uses a different backbone (i.e., not shared weights)
@@ -1632,7 +1633,7 @@ class SADA(nn.Module):
             ], dim=1)
             target_reg_mask = build_oracle_target_regression_mask(
                 target_scores,
-                gt_cls_tgt,
+                gt_cls_tgt_full,
                 valid_mask_tgt,
                 target_level_mask,
                 self.cfg['model'].get('pl_threshold', 0.7),

@@ -61,7 +61,15 @@ def build_oracle_target_regression_mask(
         or max_scores.shape != enabled_levels.shape
         or gt_labels.shape[:-1] != max_scores.shape
     ):
-        raise ValueError("Oracle target regression inputs have incompatible shapes")
+        raise ValueError(
+            "Oracle target regression inputs have incompatible shapes: "
+            "scores={}, labels={}, valid={}, levels={}".format(
+                tuple(max_scores.shape),
+                tuple(gt_labels.shape),
+                tuple(valid_mask.shape),
+                tuple(enabled_levels.shape),
+            )
+        )
 
     foreground = gt_labels.sum(dim=-1) > 0
     eligible = valid_mask & enabled_levels & foreground
