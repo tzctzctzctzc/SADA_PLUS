@@ -1763,6 +1763,12 @@ class SADA(nn.Module):
                     
                     loss_cond_reverse_level_source = torch.tensor(0.0, requires_grad=True).to(self.device)
                     loss_cond_reverse_level_target = torch.tensor(0.0, requires_grad=True).to(self.device)
+                    source_class_losses = []
+                    target_class_losses = []
+                    source_sample_count = 0
+                    target_sample_count = 0
+                    min_source_class_samples = None
+                    min_target_class_samples = None
                     
                     # Iterate over the true class labels (and not the no-class)
                     n_classes = self.num_class_orig if not self.align_bkg else self.num_class_orig + 1
@@ -1834,13 +1840,61 @@ class SADA(nn.Module):
                             if torch.sum(class_c_mask_src) > 0:
                                 loss_cond_reverse_level_source += class_c_weight * domain_loss_src
                                 counter_src += 1
+                                class_samples = int(class_c_mask_src.sum().item())
+                                source_sample_count += class_samples
+                                min_source_class_samples = (
+                                    class_samples if min_source_class_samples is None
+                                    else min(min_source_class_samples, class_samples)
+                                )
+                                source_class_losses.append(domain_loss_src.detach())
                             if torch.sum(class_c_mask_tgt) > 0:
                                 loss_cond_reverse_level_target += class_c_weight * domain_loss_tgt
                                 counter_tgt += 1
+                                class_samples = int(class_c_mask_tgt.sum().item())
+                                target_sample_count += class_samples
+                                min_target_class_samples = (
+                                    class_samples if min_target_class_samples is None
+                                    else min(min_target_class_samples, class_samples)
+                                )
+                                target_class_losses.append(domain_loss_tgt.detach())
 
                     if 'conditional_rev' in self.cfg['model']['adv_method']:
                         loss_cond_reverse_level_source = loss_cond_reverse_level_source / (max(counter_src,1))
                         loss_cond_reverse_level_target = loss_cond_reverse_level_target / (max(counter_tgt,1))
+
+                        diagnostic_prefix = 'conditional_l{}_'.format(l)
+                        losses[diagnostic_prefix + 'source_loss'] = (
+                            loss_cond_reverse_level_source.detach()
+                        )
+                        losses[diagnostic_prefix + 'target_loss'] = (
+                            loss_cond_reverse_level_target.detach()
+                        )
+                        losses[diagnostic_prefix + 'source_classes'] = torch.tensor(
+                            float(counter_src), device=self.device
+                        )
+                        losses[diagnostic_prefix + 'target_classes'] = torch.tensor(
+                            float(counter_tgt), device=self.device
+                        )
+                        losses[diagnostic_prefix + 'source_samples'] = torch.tensor(
+                            float(source_sample_count), device=self.device
+                        )
+                        losses[diagnostic_prefix + 'target_samples'] = torch.tensor(
+                            float(target_sample_count), device=self.device
+                        )
+                        losses[diagnostic_prefix + 'source_min_samples'] = torch.tensor(
+                            float(min_source_class_samples or 0), device=self.device
+                        )
+                        losses[diagnostic_prefix + 'target_min_samples'] = torch.tensor(
+                            float(min_target_class_samples or 0), device=self.device
+                        )
+                        losses[diagnostic_prefix + 'source_max_class_loss'] = (
+                            torch.stack(source_class_losses).max()
+                            if source_class_losses else torch.tensor(0.0, device=self.device)
+                        )
+                        losses[diagnostic_prefix + 'target_max_class_loss'] = (
+                            torch.stack(target_class_losses).max()
+                            if target_class_losses else torch.tensor(0.0, device=self.device)
+                        )
                         
                         loss_cond_reverse_level = weight_source * loss_cond_reverse_level_source + weight_target * loss_cond_reverse_level_target
                         losses['loss_conditional_adv_rev_' + str(l)] = loss_cond_reverse_level

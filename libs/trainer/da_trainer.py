@@ -327,7 +327,10 @@ class Trainer(BaseTrainerDA):
                     if adv_disc: 
                         final_loss += weight_adv * losses['loss_adv_rev']  
                 if 'conditional_rev' in adv_method: 
-                    if adv_disc: 
+                    no_conditional_update = self.cfg.get(
+                        'diagnostic', {}
+                    ).get('no_conditional_update', False)
+                    if adv_disc and not no_conditional_update:
                         final_loss += weight_adv * losses['loss_conditional_adv_rev']  
                 if 'None' in adv_method:
                     pass

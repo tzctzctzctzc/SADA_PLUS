@@ -454,6 +454,14 @@ def create_argparser():
         help='diagnostic target routing; uses target GT and is not a UDA method',
     )
     parser.add_argument(
+        '--diagnostic-no-ca', action='store_true',
+        help='compute conditional alignment diagnostics but exclude it from updates',
+    )
+    parser.add_argument(
+        '--diagnostic-alignment-levels', default=None,
+        help='comma-separated FPN levels used only for diagnostic runs',
+    )
+    parser.add_argument(
         '--stop-after-epoch', type=int, default=None,
         help='stop after this epoch without changing the scheduler horizon',
     )
@@ -481,9 +489,27 @@ if __name__ == '__main__':
     }
     if args.stage1 != 'off' and args.oracle_routing != 'off':
         raise ValueError('Stage 1 and Oracle routing cannot both be enabled')
+    diagnostic_levels = None
+    if args.diagnostic_alignment_levels is not None:
+        diagnostic_levels = [
+            int(level.strip())
+            for level in args.diagnostic_alignment_levels.split(',')
+            if level.strip()
+        ]
+        if (
+            not diagnostic_levels
+            or len(set(diagnostic_levels)) != len(diagnostic_levels)
+            or any(level < 0 or level > 5 for level in diagnostic_levels)
+        ):
+            raise ValueError(
+                'diagnostic alignment levels must be unique values from 0 to 5'
+            )
+        config_dict['model']['semantic_alignment_levels'] = diagnostic_levels
     config_dict['diagnostic'] = {
         'oracle_routing': args.oracle_routing,
         'stop_after_epoch': args.stop_after_epoch,
+        'no_conditional_update': args.diagnostic_no_ca,
+        'alignment_levels': diagnostic_levels,
     }
 
     update_config_with_arguments(config_dict, args, ARGS_TYPES, ARGS_CONFIGPATH)
