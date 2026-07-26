@@ -454,6 +454,19 @@ def create_argparser():
         help='diagnostic target routing; uses target GT and is not a UDA method',
     )
     parser.add_argument(
+        '--oracle-target-regression', choices=['off', 'selected', 'full'],
+        default='off',
+        help='diagnostic target boundary loss using target GT; not a UDA method',
+    )
+    parser.add_argument(
+        '--oracle-target-regression-weight', type=float, default=1.0,
+        help='weight for the diagnostic target boundary loss',
+    )
+    parser.add_argument(
+        '--oracle-target-regression-levels', default='0,1,2',
+        help='comma-separated FPN levels for diagnostic target boundary loss',
+    )
+    parser.add_argument(
         '--diagnostic-no-ca', action='store_true',
         help='compute conditional alignment diagnostics but exclude it from updates',
     )
@@ -487,8 +500,14 @@ if __name__ == '__main__':
         'context_rho': 64.0 / 2304.0,
         'context_rho_max': 2.0 * 64.0 / 2304.0,
     }
-    if args.stage1 != 'off' and args.oracle_routing != 'off':
-        raise ValueError('Stage 1 and Oracle routing cannot both be enabled')
+    if (
+        args.stage1 != 'off'
+        and (
+            args.oracle_routing != 'off'
+            or args.oracle_target_regression != 'off'
+        )
+    ):
+        raise ValueError('Stage 1 and Oracle diagnostics cannot both be enabled')
     diagnostic_levels = None
     if args.diagnostic_alignment_levels is not None:
         diagnostic_levels = [
@@ -505,8 +524,24 @@ if __name__ == '__main__':
                 'diagnostic alignment levels must be unique values from 0 to 5'
             )
         config_dict['model']['semantic_alignment_levels'] = diagnostic_levels
+    target_regression_levels = [
+        int(level.strip())
+        for level in args.oracle_target_regression_levels.split(',')
+        if level.strip()
+    ]
+    if (
+        not target_regression_levels
+        or len(set(target_regression_levels)) != len(target_regression_levels)
+        or any(level < 0 or level > 5 for level in target_regression_levels)
+    ):
+        raise ValueError(
+            'Oracle target regression levels must be unique values from 0 to 5'
+        )
     config_dict['diagnostic'] = {
         'oracle_routing': args.oracle_routing,
+        'oracle_target_regression': args.oracle_target_regression,
+        'oracle_target_regression_weight': args.oracle_target_regression_weight,
+        'target_regression_levels': target_regression_levels,
         'stop_after_epoch': args.stop_after_epoch,
         'no_conditional_update': args.diagnostic_no_ca,
         'alignment_levels': diagnostic_levels,

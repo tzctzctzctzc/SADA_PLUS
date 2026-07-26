@@ -7,6 +7,7 @@ from .blocks import MaskedConv1D, Scale, LayerNorm
 from .losses_aux import ctr_diou_loss_1d, sigmoid_focal_loss, ctr_giou_loss_1d
 from .models import register_meta_arch, make_backbone, make_neck, make_generator
 from .stage1_utils import (
+    build_oracle_target_regression_mask,
     build_oracle_routing,
     build_routing_masks,
     context_view_on_cpu,
@@ -287,6 +288,31 @@ class SADA(nn.Module):
                     self.oracle_routing_mode
                 )
             )
+        self.oracle_target_regression_mode = cfg.get('diagnostic', {}).get(
+            'oracle_target_regression', 'off'
+        )
+        if self.oracle_target_regression_mode not in ('off', 'selected', 'full'):
+            raise ValueError(
+                'unknown Oracle target regression mode: {}'.format(
+                    self.oracle_target_regression_mode
+                )
+            )
+        self.oracle_target_regression_weight = float(
+            cfg.get('diagnostic', {}).get('oracle_target_regression_weight', 1.0)
+        )
+        if self.oracle_target_regression_weight < 0:
+            raise ValueError('Oracle target regression weight must be non-negative')
+        self.oracle_target_regression_levels = cfg.get(
+            'diagnostic', {}
+        ).get('target_regression_levels', [0, 1, 2])
+        if (
+            not self.oracle_target_regression_levels
+            or len(set(self.oracle_target_regression_levels))
+            != len(self.oracle_target_regression_levels)
+            or any(level < 0 or level >= self.n_levels
+                   for level in self.oracle_target_regression_levels)
+        ):
+            raise ValueError('Oracle target regression levels are invalid')
         stage1_cfg = cfg.get('stage1', {})
         self.stage1_enabled = stage1_cfg.get('enabled', False)
         self.stage1_perturbation = stage1_cfg.get('perturbation', 'shift')
@@ -311,8 +337,11 @@ class SADA(nn.Module):
         )
         if self.stage1_enabled:
             assert self.stage1_perturbation in ('shift', 'context')
-            if self.oracle_routing_mode != 'off':
-                raise ValueError('Stage 1 and Oracle routing cannot both be enabled')
+            if (
+                self.oracle_routing_mode != 'off'
+                or self.oracle_target_regression_mode != 'off'
+            ):
+                raise ValueError('Stage 1 and Oracle diagnostics cannot both be enabled')
         
         
         assert len(self.fpn_strides) == len(self.reg_range)
@@ -374,6 +403,11 @@ class SADA(nn.Module):
         self.test_voting_thresh = cfg['test_cfg']['voting_thresh']
         self.num_bins = cfg['model']['num_bins']
         self.use_trident_head = cfg['model']['use_trident_head']
+        if self.oracle_target_regression_mode != 'off' and self.use_trident_head:
+            raise ValueError(
+                'Oracle target regression currently supports the direct '
+                'regression head only'
+            )
 
         backbone_type = cfg['model']['backbone_type']
         input_dim = cfg['model']['input_dim']
@@ -1577,9 +1611,51 @@ class SADA(nn.Module):
             loss_reg_weight = cls_loss.detach() / max(reg_loss.item(), 0.01)
 
         downstream_loss = cls_loss + reg_loss * loss_reg_weight 
+
+        target_reg_loss = 0 * decoded_offsets.sum()
+        target_reg_positive = 0 * decoded_offsets.sum()
+        if self.oracle_target_regression_mode != 'off':
+            target_predictions = self.decode_offset(
+                out_offsets_tgt, None, None, mode=mode
+            )
+            target_offsets = torch.stack(gt_offsets_tgt)
+            target_scores = torch.cat(out_cls_logits_tgt, dim=1).sigmoid().max(
+                dim=-1
+            ).values
+            target_level_mask = torch.cat([
+                torch.full_like(
+                    fpn_masks_tgt[level],
+                    level in self.oracle_target_regression_levels,
+                    dtype=torch.bool,
+                )
+                for level in range(self.n_levels)
+            ], dim=1)
+            target_reg_mask = build_oracle_target_regression_mask(
+                target_scores,
+                gt_cls_tgt,
+                valid_mask_tgt,
+                target_level_mask,
+                self.cfg['model'].get('pl_threshold', 0.7),
+                self.oracle_target_regression_mode,
+            )
+            target_reg_positive = target_reg_mask.sum().float()
+            if target_reg_mask.any():
+                target_reg_loss = ctr_diou_loss_1d(
+                    target_predictions[target_reg_mask],
+                    target_offsets[target_reg_mask],
+                    reduction='sum',
+                ) / target_reg_positive
+            else:
+                target_reg_loss = 0 * target_predictions.sum()
+            downstream_loss = (
+                downstream_loss
+                + self.oracle_target_regression_weight * target_reg_loss
+            )
         
         losses =  {'cls_loss': cls_loss,
                    'reg_loss': reg_loss,
+                   'oracle_target_reg_loss': target_reg_loss,
+                   'oracle_target_reg_positive': target_reg_positive,
                    'downstream_loss': downstream_loss}
         
         

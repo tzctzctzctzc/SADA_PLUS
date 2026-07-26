@@ -45,6 +45,31 @@ def build_oracle_routing(probabilities, gt_labels, alpha, mode):
     }
 
 
+def build_oracle_target_regression_mask(
+    max_scores, gt_labels, valid_mask, enabled_levels, alpha, mode
+):
+    """Select target anchors for the explicit Oracle boundary diagnostic.
+
+    ``selected`` keeps the original SADA confidence candidate set and only
+    reveals its true foreground members. ``full`` reveals every foreground
+    anchor in the requested levels. Both modes are diagnostics, never UDA.
+    """
+    if mode not in ("selected", "full"):
+        raise ValueError("unknown Oracle target regression mode: {}".format(mode))
+    if (
+        max_scores.shape != valid_mask.shape
+        or max_scores.shape != enabled_levels.shape
+        or gt_labels.shape[:-1] != max_scores.shape
+    ):
+        raise ValueError("Oracle target regression inputs have incompatible shapes")
+
+    foreground = gt_labels.sum(dim=-1) > 0
+    eligible = valid_mask & enabled_levels & foreground
+    if mode == "selected":
+        eligible = eligible & (max_scores >= alpha)
+    return eligible
+
+
 def validate_stage1_resume(
     checkpoint,
     current_enabled,
