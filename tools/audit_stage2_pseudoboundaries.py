@@ -116,6 +116,13 @@ def main():
                 [item["labels"] for item in pseudo_targets],
             )
             valid = torch.cat([mask.squeeze(1) for mask in fpn_masks], dim=1)
+            enabled_levels = torch.cat([
+                torch.full(
+                    (len(batch), point.shape[0]), level in levels,
+                    dtype=torch.bool, device=args.device,
+                )
+                for level, point in enumerate(points)
+            ], dim=1)
             centers = torch.cat([point[:, 0] for point in points])
             strides = torch.cat([point[:, 3] for point in points])
 
@@ -144,7 +151,8 @@ def main():
                     )
 
                 pseudo_positive = (
-                    valid[index] & (pseudo_cls[index].sum(dim=-1) > 0)
+                    valid[index] & enabled_levels[index]
+                    & (pseudo_cls[index].sum(dim=-1) > 0)
                 )
                 gt_foreground = gt_cls[index].sum(dim=-1) > 0
                 anchor["pseudo_positive_n"] += int(pseudo_positive.sum())
