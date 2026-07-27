@@ -88,6 +88,24 @@ def build_stage2_regression_mask(pseudo_labels, valid_mask, enabled_levels):
     return valid_mask & enabled_levels & (pseudo_labels.sum(dim=-1) > 0)
 
 
+def build_same_selection_oracle_mask(
+    pseudo_labels, gt_labels, valid_mask, enabled_levels
+):
+    """Keep only Stage 2-selected anchors that are true target actions."""
+    if (
+        pseudo_labels.shape != gt_labels.shape
+        or pseudo_labels.shape[:-1] != valid_mask.shape
+        or valid_mask.shape != enabled_levels.shape
+    ):
+        raise ValueError("Same-selection Oracle inputs have incompatible shapes")
+    return (
+        valid_mask
+        & enabled_levels
+        & (pseudo_labels.sum(dim=-1) > 0)
+        & (gt_labels.sum(dim=-1) > 0)
+    )
+
+
 def validate_stage1_resume(
     checkpoint,
     current_enabled,

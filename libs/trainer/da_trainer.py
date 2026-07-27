@@ -298,7 +298,11 @@ class Trainer(BaseTrainerDA):
 
             stage2_pseudo_targets = None
             if (
-                self.model.stage2_enabled
+                (
+                    self.model.stage2_enabled
+                    or self.model.oracle_target_regression_mode
+                    == 'same_selection'
+                )
                 and curr_epoch >= self.model.stage2_start_epoch
             ):
                 teacher = self.model_ema.module

@@ -10,6 +10,7 @@ from .stage1_utils import (
     build_oracle_target_regression_mask,
     build_oracle_routing,
     build_routing_masks,
+    build_same_selection_oracle_mask,
     build_stage2_regression_mask,
     context_view_on_cpu,
     erode_mask,
@@ -292,7 +293,8 @@ class SADA(nn.Module):
         self.oracle_target_regression_mode = cfg.get('diagnostic', {}).get(
             'oracle_target_regression', 'off'
         )
-        if self.oracle_target_regression_mode not in ('off', 'selected', 'full'):
+        if self.oracle_target_regression_mode not in (
+                'off', 'selected', 'full', 'same_selection'):
             raise ValueError(
                 'unknown Oracle target regression mode: {}'.format(
                     self.oracle_target_regression_mode
@@ -330,8 +332,12 @@ class SADA(nn.Module):
             raise ValueError('Stage 2 levels are invalid')
         if self.stage2_enabled and self.oracle_target_regression_mode != 'off':
             raise ValueError('Stage 2 and Oracle target regression cannot both be enabled')
-        if self.stage2_enabled and not cfg['train_cfg'].get('ema_active', False):
-            raise ValueError('Stage 2 requires the external EMA teacher')
+        if (
+            (self.stage2_enabled
+             or self.oracle_target_regression_mode == 'same_selection')
+            and not cfg['train_cfg'].get('ema_active', False)
+        ):
+            raise ValueError('Stage 2 proposal routing requires the external EMA teacher')
         stage1_cfg = cfg.get('stage1', {})
         self.stage1_enabled = stage1_cfg.get('enabled', False)
         self.stage1_perturbation = stage1_cfg.get('perturbation', 'shift')
@@ -1031,8 +1037,8 @@ class SADA(nn.Module):
     
 
     @torch.no_grad()
-    def generate_stage2_pseudo_targets(self, video_list):
-        """Generate detached, class-aware NMS proposals on feature grids."""
+    def generate_stage2_pseudo_targets(self, video_list, return_pre_nms=False):
+        """Generate detached, class-agnostic NMS proposals on feature grids."""
         if self.training:
             raise RuntimeError('Stage 2 EMA teacher must be in eval mode')
         inputs, masks = self.preprocessing(video_list, mode='train')
@@ -1041,7 +1047,7 @@ class SADA(nn.Module):
         cls_logits, _ = self.cls_head_target(fpn_feats, fpn_masks)
         offsets, _ = self.reg_head_target(fpn_feats, fpn_masks)
         points = self.point_generator(fpn_feats)
-        targets = []
+        targets, pre_nms_targets = [], []
         for batch_idx in range(len(video_list)):
             all_segments, all_scores, all_labels = [], [], []
             for level in self.stage2_levels:
@@ -1069,15 +1075,24 @@ class SADA(nn.Module):
                 all_labels.append(labels[selected][kept])
 
             if not all_segments or not any(segment.numel() for segment in all_segments):
-                targets.append({
+                empty_target = {
                     'segments': torch.empty((0, 2), device=self.device),
                     'labels': torch.empty((0,), dtype=torch.long, device=self.device),
                     'scores': torch.empty((0,), device=self.device),
-                })
+                }
+                targets.append(empty_target)
+                if return_pre_nms:
+                    pre_nms_targets.append(empty_target)
                 continue
             segments = torch.cat(all_segments).detach().cpu()
             scores = torch.cat(all_scores).detach().cpu()
             labels = torch.cat(all_labels).detach().cpu()
+            if return_pre_nms:
+                pre_nms_targets.append({
+                    'segments': segments.to(self.device),
+                    'labels': labels.to(self.device),
+                    'scores': scores.to(self.device),
+                })
             segments, scores, labels = batched_nms(
                 segments, scores, labels,
                 self.test_iou_threshold, self.test_min_score, self.test_max_seg_num,
@@ -1092,7 +1107,7 @@ class SADA(nn.Module):
                 'labels': labels[keep].to(self.device),
                 'scores': scores[keep].to(self.device),
             })
-        return targets
+        return (targets, pre_nms_targets) if return_pre_nms else targets
 
     def forward(self, video_list_src, video_list_tgt, mode=None, domain='src', curr_epoch=0, cls_static_anchors=None, mean_class_conf=None, stage2_pseudo_targets=None):
         
@@ -1397,7 +1412,8 @@ class SADA(nn.Module):
         return batched_inputs, batched_masks
 
     @torch.no_grad()
-    def label_points(self, points, gt_segments, gt_labels):
+    def label_points(
+            self, points, gt_segments, gt_labels, return_assignments=False):
         # concat points on all fpn levels List[T_i x 2B] -> (T_1 + T_2 + ... + T_6) x 4
         # This is shared for all samples in the mini-batch
                 
@@ -1407,21 +1423,30 @@ class SADA(nn.Module):
         # Dim 2: Regression range right (how close to be depending on the level?)
         # Dim 3: Stride
         concat_points = torch.cat(points, dim=0)    
-        gt_cls, gt_offset = [], []
+        gt_cls, gt_offset, assignments = [], [], []
         
         # loop over each of the video samples (2B)
         for gt_segment, gt_label in zip(gt_segments, gt_labels):
-            cls_targets, reg_targets = self.label_points_single_video(
-                concat_points, gt_segment, gt_label
+            result = self.label_points_single_video(
+                concat_points, gt_segment, gt_label,
+                return_assignment=return_assignments,
             )
+            if return_assignments:
+                cls_targets, reg_targets, assignment = result
+                assignments.append(assignment)
+            else:
+                cls_targets, reg_targets = result
             # append to list (len = # images, each of size FT x C)
             gt_cls.append(cls_targets)
             gt_offset.append(reg_targets)
 
+        if return_assignments:
+            return gt_cls, gt_offset, assignments
         return gt_cls, gt_offset
 
     @torch.no_grad()
-    def label_points_single_video(self, concat_points, gt_segment, gt_label):
+    def label_points_single_video(
+            self, concat_points, gt_segment, gt_label, return_assignment=False):
         # Important! Only keep the points that are inside the gt segment and inside the regression range
 
         # concat_points : F T x 4 (t, regressoin range, stride)
@@ -1434,6 +1459,10 @@ class SADA(nn.Module):
         if num_gts == 0:
             cls_targets = gt_segment.new_full((num_pts, self.num_class_orig), 0)   
             reg_targets = gt_segment.new_zeros((num_pts, 2))
+            if return_assignment:
+                return cls_targets, reg_targets, torch.full(
+                    (num_pts,), -1, dtype=torch.long, device=gt_segment.device
+                )
             return cls_targets, reg_targets
 
         # compute the lengths of all segments -> F T x N
@@ -1520,6 +1549,11 @@ class SADA(nn.Module):
         # normalization based on stride
         reg_targets /= concat_points[:, 3, None]
 
+        if return_assignment:
+            assignment = min_len_inds.masked_fill(
+                min_len == float('inf'), -1
+            )
+            return cls_targets, reg_targets, assignment
         return cls_targets, reg_targets
 
 
@@ -1734,9 +1768,6 @@ class SADA(nn.Module):
                 out_offsets_tgt, None, None, mode=mode
             )
             target_offsets = torch.stack(gt_offsets_tgt)
-            target_scores = torch.cat(out_cls_logits_tgt, dim=1).sigmoid().max(
-                dim=-1
-            ).values
             target_level_mask = torch.cat([
                 torch.full_like(
                     fpn_masks_tgt[level],
@@ -1745,14 +1776,30 @@ class SADA(nn.Module):
                 )
                 for level in range(self.n_levels)
             ], dim=1)
-            target_reg_mask = build_oracle_target_regression_mask(
-                target_scores,
-                gt_cls_tgt_full,
-                valid_mask_tgt,
-                target_level_mask,
-                self.cfg['model'].get('pl_threshold', 0.7),
-                self.oracle_target_regression_mode,
-            )
+            if self.oracle_target_regression_mode == 'same_selection':
+                if stage2_cls_tgt is None:
+                    target_reg_mask = torch.zeros_like(
+                        valid_mask_tgt, dtype=torch.bool
+                    )
+                else:
+                    target_reg_mask = build_same_selection_oracle_mask(
+                        stage2_cls_tgt,
+                        gt_cls_tgt_full,
+                        valid_mask_tgt,
+                        target_level_mask,
+                    )
+            else:
+                target_scores = torch.cat(
+                    out_cls_logits_tgt, dim=1
+                ).sigmoid().max(dim=-1).values
+                target_reg_mask = build_oracle_target_regression_mask(
+                    target_scores,
+                    gt_cls_tgt_full,
+                    valid_mask_tgt,
+                    target_level_mask,
+                    self.cfg['model'].get('pl_threshold', 0.7),
+                    self.oracle_target_regression_mode,
+                )
             target_reg_positive = target_reg_mask.sum().float()
             if target_reg_mask.any():
                 target_reg_loss = ctr_diou_loss_1d(
@@ -1764,7 +1811,13 @@ class SADA(nn.Module):
                 target_reg_loss = 0 * target_predictions.sum()
             downstream_loss = (
                 downstream_loss
-                + self.oracle_target_regression_weight * target_reg_loss
+                + self.oracle_target_regression_weight
+                * (
+                    loss_reg_weight
+                    if self.oracle_target_regression_mode == 'same_selection'
+                    else 1.0
+                )
+                * target_reg_loss
             )
 
         stage2_reg_loss = 0 * decoded_offsets.sum()

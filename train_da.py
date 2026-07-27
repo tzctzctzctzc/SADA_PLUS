@@ -476,7 +476,8 @@ def create_argparser():
         help='diagnostic target routing; uses target GT and is not a UDA method',
     )
     parser.add_argument(
-        '--oracle-target-regression', choices=['off', 'selected', 'full'],
+        '--oracle-target-regression',
+        choices=['off', 'selected', 'full', 'same_selection'],
         default='off',
         help='diagnostic target boundary loss using target GT; not a UDA method',
     )
@@ -577,6 +578,13 @@ if __name__ == '__main__':
     ):
         raise ValueError(
             'Oracle target regression levels must be unique values from 0 to 5'
+        )
+    if (
+        args.oracle_target_regression == 'same_selection'
+        and target_regression_levels != stage2_levels
+    ):
+        raise ValueError(
+            'Same-selection Oracle levels must equal Stage 2 proposal levels'
         )
     config_dict['diagnostic'] = {
         'oracle_routing': args.oracle_routing,
