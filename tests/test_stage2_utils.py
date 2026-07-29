@@ -100,6 +100,31 @@ class Stage2UtilsTest(unittest.TestCase):
         self.assertAlmostEqual(float(tiou), 8.0 / 12.0, places=6)
         self.assertAlmostEqual(float(tnd), 4.0 / 144.0, places=6)
 
+    def test_proposal_loss_terms_remove_anchor_amplification(self):
+        numerator, denominator, weight_square_sum, proposal_count = (
+            stage2_utils.proposal_loss_terms(
+                torch.tensor([1.0, 1.0, 1.0, 3.0]),
+                torch.tensor([0, 0, 0, 1]),
+                torch.tensor([1.0, 1.0]),
+            )
+        )
+        self.assertAlmostEqual(float(numerator / denominator), 2.0)
+        self.assertEqual(float(denominator), 2.0)
+        self.assertEqual(float(weight_square_sum), 2.0)
+        self.assertEqual(float(proposal_count), 2.0)
+
+    def test_proposal_loss_terms_apply_detached_quality_weights(self):
+        weights = torch.tensor([1.0, 3.0], requires_grad=True)
+        numerator, denominator, _, _ = stage2_utils.proposal_loss_terms(
+            torch.tensor([1.0, 3.0], requires_grad=True),
+            torch.tensor([0, 1]),
+            weights,
+        )
+        loss = numerator / denominator
+        loss.backward()
+        self.assertIsNone(weights.grad)
+        self.assertAlmostEqual(float(loss), 2.5)
+
 
 if __name__ == "__main__":
     unittest.main()

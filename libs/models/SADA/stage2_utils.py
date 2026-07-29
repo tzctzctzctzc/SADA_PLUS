@@ -21,6 +21,36 @@ def select_same_budget_alqa(
     return candidates[order[:budget]], budget
 
 
+def proposal_loss_terms(anchor_losses, proposal_ids, proposal_weights):
+    """Return weighted proposal-mean loss terms without reducing a batch."""
+    if anchor_losses.ndim != 1 or proposal_ids.shape != anchor_losses.shape:
+        raise ValueError("anchor losses and proposal ids must be 1D and aligned")
+    if proposal_weights.ndim != 1:
+        raise ValueError("proposal weights must be 1D")
+    valid = (
+        (proposal_ids >= 0)
+        & (proposal_ids < proposal_weights.numel())
+    )
+    if not valid.any():
+        zero = anchor_losses.sum() * 0.0
+        return zero, zero.detach(), zero.detach(), zero.detach()
+
+    ids = proposal_ids[valid].long()
+    losses = anchor_losses[valid]
+    sums = losses.new_zeros(proposal_weights.numel())
+    counts = losses.new_zeros(proposal_weights.numel())
+    sums.scatter_add_(0, ids, losses)
+    counts.scatter_add_(0, ids, torch.ones_like(losses))
+    present = counts > 0
+    weights = proposal_weights.detach()[present].to(losses.dtype)
+    proposal_means = sums[present] / counts[present]
+    numerator = (weights * proposal_means).sum()
+    denominator = weights.sum()
+    weight_square_sum = weights.square().sum()
+    proposal_count = present.sum().to(losses.dtype)
+    return numerator, denominator, weight_square_sum, proposal_count
+
+
 def temporal_roi_interpolate(
         features, segment, point_centers, valid_length, output_size):
     """Linearly sample a CxT feature map inside one temporal segment."""

@@ -89,7 +89,7 @@ class Trainer(BaseTrainerDA):
             self.model.stage1_tau_bg = calibrated['tau_bg']
             self.model.stage1_calibrated = True
         self.alqa_calibration = None
-        if self.model.stage2_routing == 'alqa_same_budget':
+        if self.model.stage2_requires_quality:
             stage2_cfg = self.cfg.get('stage2', {})
             if not stage2_cfg.get('alqa_calibrated', False):
                 self._calibrate_alqa_heads()

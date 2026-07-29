@@ -272,9 +272,7 @@ def main(cfg, resume, project_name='sada', debug=False):
                 current_alpha=model.stage1_alpha,
                 calibration_epoch=max(1, model.warmup_adv),
             )
-            alqa_enabled = (
-                model.stage2_routing == 'alqa_same_budget'
-            )
+            alqa_enabled = model.stage2_requires_quality
             checkpoint_alqa = checkpoint.get('alqa')
             needs_alqa_calibration = (
                 alqa_enabled
@@ -535,6 +533,15 @@ def create_argparser():
         help='comma-separated FPN levels used for Stage 2 proposals and loss',
     )
     parser.add_argument(
+        '--stage2-loss-weighting',
+        choices=[
+            'anchor_equal', 'proposal_equal',
+            'proposal_quality', 'proposal_joint',
+        ],
+        default='anchor_equal',
+        help='aggregation and detached proposal weighting for Stage 2 DIoU',
+    )
+    parser.add_argument(
         '--alqa-head-seeds', default='123,456,789',
         help='source-only ALQA quality-head ensemble seeds',
     )
@@ -633,6 +640,7 @@ if __name__ == '__main__':
         'start_epoch': args.stage2_start_epoch,
         'weight': args.stage2_weight,
         'levels': stage2_levels,
+        'loss_weighting': args.stage2_loss_weighting,
         'alqa_head_seeds': [
             int(value.strip())
             for value in args.alqa_head_seeds.split(',')
@@ -646,14 +654,24 @@ if __name__ == '__main__':
         ),
         'alqa_calibration_seed': args.alqa_calibration_seed,
         'alqa_calibrated': False,
-        'protocol': 'alqa_pre_alpha_same_budget_v1',
+        'protocol': (
+            'alqa_pre_alpha_same_budget_v1'
+            if args.stage2 == 'alqa'
+            else 'confidence_fixed_routing_loss_weighting_v1'
+        ),
         'quality_head_mode': 'source_gt_calibrated_then_frozen',
         'selection_budget': 'per_video_per_fpn_original_alpha_count',
         'nms': 'hard_class_agnostic_ranked_by_classification_confidence',
         'target_gt_usage': 'none',
     }
+    if args.stage2 == 'off' and args.stage2_loss_weighting != 'anchor_equal':
+        raise ValueError('Stage 2 loss weighting requires Stage 2')
     if (
-        args.stage2 == 'alqa'
+        (
+            args.stage2 == 'alqa'
+            or args.stage2_loss_weighting
+            in ('proposal_quality', 'proposal_joint')
+        )
         and (
             not config_dict['stage2']['alqa_head_seeds']
             or args.alqa_calibration_epochs < 1

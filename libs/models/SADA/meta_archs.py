@@ -22,6 +22,7 @@ from .stage1_utils import (
 from .stage2_utils import (
     match_post_nms_to_pre_nms,
     npl_boundary_ambiguity,
+    proposal_loss_terms,
 )
 from .stage2_alqa import (
     ALQAQualityHead,
@@ -334,6 +335,9 @@ class SADA(nn.Module):
         self.stage2_weight = float(stage2_cfg.get('weight', 1.0))
         self.stage2_levels = stage2_cfg.get('levels', [0, 1, 2])
         self.stage2_routing = stage2_cfg.get('routing', 'confidence')
+        self.stage2_loss_weighting = stage2_cfg.get(
+            'loss_weighting', 'anchor_equal'
+        )
         self.stage2_alqa_head_seeds = stage2_cfg.get(
             'alqa_head_seeds', [123, 456, 789]
         )
@@ -351,8 +355,17 @@ class SADA(nn.Module):
             raise ValueError('Stage 2 levels are invalid')
         if self.stage2_routing not in ('confidence', 'alqa_same_budget'):
             raise ValueError('unknown Stage 2 routing mode')
-        if (
+        if self.stage2_loss_weighting not in (
+                'anchor_equal', 'proposal_equal',
+                'proposal_quality', 'proposal_joint'):
+            raise ValueError('unknown Stage 2 loss weighting')
+        self.stage2_requires_quality = (
             self.stage2_routing == 'alqa_same_budget'
+            or self.stage2_loss_weighting
+            in ('proposal_quality', 'proposal_joint')
+        )
+        if (
+            self.stage2_requires_quality
             and (
                 not self.stage2_enabled
                 or not self.stage2_alqa_head_seeds
@@ -615,7 +628,7 @@ class SADA(nn.Module):
                 ALQAQualityHead(head_dim)
                 for _ in self.stage2_alqa_head_seeds
             ]) if (
-                self.stage2_routing == 'alqa_same_budget'
+                self.stage2_requires_quality
             ) else nn.ModuleList()
 
         # maintain an EMA of #foreground to stabilize the loss normalizer
@@ -1086,7 +1099,7 @@ class SADA(nn.Module):
         feats, backbone_masks, _ = self.backbone_target(inputs, masks)
         fpn_feats, fpn_masks = self.neck_target(feats, backbone_masks)
         cls_logits, _ = self.cls_head_target(fpn_feats, fpn_masks)
-        if self.stage2_routing == 'alqa_same_budget':
+        if self.stage2_requires_quality:
             hidden, offsets = regression_hidden_and_offsets(
                 self.reg_head_target, fpn_feats, fpn_masks
             )
@@ -1101,6 +1114,7 @@ class SADA(nn.Module):
         for batch_idx in range(len(video_list)):
             all_segments, all_scores, all_labels = [], [], []
             all_classification_scores = []
+            all_quality_scores = []
             all_levels, all_indices = [], []
             all_ambiguity, all_neighbor_counts = [], []
             dense_budget = 0
@@ -1148,6 +1162,12 @@ class SADA(nn.Module):
                 all_segments.append(segments[selected_indices])
                 all_scores.append(selected_scores)
                 all_classification_scores.append(selected_scores)
+                if self.stage2_requires_quality:
+                    predicted = quality_maps[level][batch_idx]
+                    all_quality_scores.append(
+                        (predicted[0] - predicted[1])
+                        .clamp_min(self.stage2_alqa_epsilon)[selected_indices]
+                    )
                 all_labels.append(labels[selected_indices])
                 if return_npl_details:
                     dense_points = points[level]
@@ -1184,6 +1204,10 @@ class SADA(nn.Module):
                     'segments': torch.empty((0, 2), device=self.device),
                     'labels': torch.empty((0,), dtype=torch.long, device=self.device),
                     'scores': torch.empty((0,), device=self.device),
+                    'classification_scores': torch.empty(
+                        (0,), device=self.device
+                    ),
+                    'quality_scores': torch.empty((0,), device=self.device),
                     'pre_nms_budget': 0,
                     'rescued_pre_nms': 0,
                     'rescued_post_nms': 0,
@@ -1213,6 +1237,11 @@ class SADA(nn.Module):
             classification_scores = torch.cat(
                 all_classification_scores
             ).detach().cpu()
+            quality_scores = (
+                torch.cat(all_quality_scores).detach().cpu()
+                if all_quality_scores
+                else torch.empty_like(classification_scores)
+            )
             labels = torch.cat(all_labels).detach().cpu()
             details = {}
             if return_npl_details:
@@ -1265,6 +1294,12 @@ class SADA(nn.Module):
                 'segments': segments[keep].to(self.device),
                 'labels': labels[keep].to(self.device),
                 'scores': scores[keep].to(self.device),
+                'classification_scores': post_classification_scores.to(
+                    self.device
+                ),
+                'quality_scores': quality_scores[
+                    post_source_indices
+                ].to(self.device),
                 'pre_nms_budget': dense_budget,
                 'rescued_pre_nms': rescued_pre_nms,
                 'rescued_post_nms': int(
@@ -1418,6 +1453,8 @@ class SADA(nn.Module):
             gt_cls_labels, gt_offsets = self.label_points(
                 points, gt_segments, gt_labels)
             stage2_pseudo_cls, stage2_pseudo_offsets = None, None
+            stage2_pseudo_assignments = None
+            stage2_proposal_weights = None
             stage2_proposal_count = 0
             stage2_pre_nms_budget = 0
             stage2_rescued_pre_nms = 0
@@ -1425,11 +1462,36 @@ class SADA(nn.Module):
             if stage2_pseudo_targets is not None:
                 if len(stage2_pseudo_targets) != bs:
                     raise ValueError('Stage 2 target batch does not match source batch')
-                stage2_pseudo_cls, stage2_pseudo_offsets = self.label_points(
+                assignment_result = self.label_points(
                     points,
                     [item['segments'].to(self.device) for item in stage2_pseudo_targets],
                     [item['labels'].to(self.device) for item in stage2_pseudo_targets],
+                    return_assignments=(
+                        self.stage2_loss_weighting != 'anchor_equal'
+                    ),
                 )
+                if self.stage2_loss_weighting == 'anchor_equal':
+                    stage2_pseudo_cls, stage2_pseudo_offsets = assignment_result
+                else:
+                    (
+                        stage2_pseudo_cls,
+                        stage2_pseudo_offsets,
+                        stage2_pseudo_assignments,
+                    ) = assignment_result
+                    stage2_proposal_weights = []
+                    for item in stage2_pseudo_targets:
+                        if self.stage2_loss_weighting == 'proposal_equal':
+                            weights = torch.ones_like(item['scores'])
+                        elif self.stage2_loss_weighting == 'proposal_quality':
+                            weights = item['quality_scores']
+                        else:
+                            weights = (
+                                item['classification_scores']
+                                * item['quality_scores']
+                            )
+                        stage2_proposal_weights.append(
+                            weights.to(self.device).detach()
+                        )
                 stage2_proposal_count = sum(
                     int(item['scores'].numel()) for item in stage2_pseudo_targets
                 )
@@ -1496,6 +1558,8 @@ class SADA(nn.Module):
                 stage1_routes=stage1_routes,
                 stage2_pseudo_cls=stage2_pseudo_cls,
                 stage2_pseudo_offsets=stage2_pseudo_offsets,
+                stage2_pseudo_assignments=stage2_pseudo_assignments,
+                stage2_proposal_weights=stage2_proposal_weights,
                 stage2_proposal_count=stage2_proposal_count,
             )
             losses.update({
@@ -1771,6 +1835,8 @@ class SADA(nn.Module):
             stage1_routes=None,
             stage2_pseudo_cls=None,
             stage2_pseudo_offsets=None,
+            stage2_pseudo_assignments=None,
+            stage2_proposal_weights=None,
             stage2_proposal_count=0,):
         bs = int(fpn_masks[0].shape[0] / 2)
         
@@ -1844,6 +1910,10 @@ class SADA(nn.Module):
         stage2_offsets_tgt = (
             torch.stack(stage2_pseudo_offsets)
             if stage2_pseudo_offsets is not None else None
+        )
+        stage2_assignments_tgt = (
+            torch.stack(stage2_pseudo_assignments)
+            if stage2_pseudo_assignments is not None else None
         )
         
         # NOTE: We want to be able to specify if we want to apply the supervision over the source or the target domain
@@ -2030,6 +2100,10 @@ class SADA(nn.Module):
         stage2_reg_positive = 0 * decoded_offsets.sum()
         stage2_reg_ratio = 0 * decoded_offsets.sum()
         stage2_active_batch = 0 * decoded_offsets.sum()
+        stage2_effective_proposals = 0 * decoded_offsets.sum()
+        stage2_anchor_amplification = 0 * decoded_offsets.sum()
+        stage2_weight_ess = 0 * decoded_offsets.sum()
+        stage2_weight_mean = 0 * decoded_offsets.sum()
         stage2_level_positive = [
             0 * decoded_offsets.sum() for _ in range(self.n_levels)
         ]
@@ -2061,11 +2135,47 @@ class SADA(nn.Module):
                 ].sum().float()
                 offset = next_offset
             if stage2_reg_mask.any():
-                stage2_reg_loss = ctr_diou_loss_1d(
-                    stage2_predictions[stage2_reg_mask],
-                    stage2_offsets_tgt[stage2_reg_mask],
-                    reduction='sum',
-                ) / stage2_reg_positive
+                if self.stage2_loss_weighting == 'anchor_equal':
+                    stage2_reg_loss = ctr_diou_loss_1d(
+                        stage2_predictions[stage2_reg_mask],
+                        stage2_offsets_tgt[stage2_reg_mask],
+                        reduction='sum',
+                    ) / stage2_reg_positive
+                else:
+                    numerator = 0 * stage2_predictions.sum()
+                    denominator = 0 * stage2_predictions.sum()
+                    weight_square_sum = 0 * stage2_predictions.sum()
+                    proposal_count = 0 * stage2_predictions.sum()
+                    for batch_idx in range(stage2_reg_mask.shape[0]):
+                        batch_mask = stage2_reg_mask[batch_idx]
+                        anchor_losses = ctr_diou_loss_1d(
+                            stage2_predictions[batch_idx][batch_mask],
+                            stage2_offsets_tgt[batch_idx][batch_mask],
+                        )
+                        terms = proposal_loss_terms(
+                            anchor_losses,
+                            stage2_assignments_tgt[batch_idx][batch_mask],
+                            stage2_proposal_weights[batch_idx],
+                        )
+                        numerator = numerator + terms[0]
+                        denominator = denominator + terms[1]
+                        weight_square_sum = weight_square_sum + terms[2]
+                        proposal_count = proposal_count + terms[3]
+                    stage2_reg_loss = (
+                        numerator / denominator.clamp_min(1e-8)
+                    )
+                    stage2_effective_proposals = proposal_count
+                    stage2_anchor_amplification = (
+                        stage2_reg_positive
+                        / proposal_count.clamp_min(1.0)
+                    )
+                    stage2_weight_ess = (
+                        denominator.square()
+                        / weight_square_sum.clamp_min(1e-8)
+                    )
+                    stage2_weight_mean = (
+                        denominator / proposal_count.clamp_min(1.0)
+                    )
             else:
                 stage2_reg_loss = 0 * stage2_predictions.sum()
             stage2_reg_ratio = (
@@ -2087,6 +2197,10 @@ class SADA(nn.Module):
                    'stage2_pseudo_proposals': torch.tensor(
                        float(stage2_proposal_count), device=self.device
                    ),
+                   'stage2_effective_proposals': stage2_effective_proposals,
+                   'stage2_anchor_amplification': stage2_anchor_amplification,
+                   'stage2_weight_ess': stage2_weight_ess,
+                   'stage2_weight_mean': stage2_weight_mean,
                    'downstream_loss': downstream_loss}
         for level, count in enumerate(stage2_level_positive):
             losses['stage2_pseudo_l{}_positive'.format(level)] = count
