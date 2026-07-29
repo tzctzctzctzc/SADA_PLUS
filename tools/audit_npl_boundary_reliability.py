@@ -144,13 +144,13 @@ def summarize_selection(
     }
 
 
-def select_within_fpn_level(records, values, fraction):
+def select_within_fpn_level(records, values, fraction, level_key="level"):
     selected = []
-    levels = sorted({record["level"] for record in records})
+    levels = sorted({record[level_key] for record in records})
     for level in levels:
         global_indices = [
             index for index, record in enumerate(records)
-            if record["level"] == level
+            if record[level_key] == level
         ]
         local_values = values[global_indices]
         local_indices = matched_budget_indices(
@@ -251,6 +251,108 @@ def summarize_rankings(
     return result
 
 
+def summarize_anchor_selection(
+        records, selected_indices, total_gt_anchors, tie_eps, near_same_l1):
+    selected = [records[index] for index in selected_indices]
+    foreground = sum(record["foreground"] for record in selected)
+    good_boundary = sum(record["good_boundary"] for record in selected)
+    deltas = [
+        record["delta_iou"] for record in selected
+        if record["delta_iou"] is not None
+    ]
+    offset_l1 = [
+        record["offset_l1"] for record in selected
+        if record["offset_l1"] is not None
+    ]
+    teacher_wins = sum(value > tie_eps for value in deltas)
+    student_wins = sum(value < -tie_eps for value in deltas)
+    ties = len(deltas) - teacher_wins - student_wins
+    level_counts = {}
+    for record in selected:
+        key = str(record["anchor_level"])
+        level_counts[key] = level_counts.get(key, 0) + 1
+    return {
+        "pseudo_positive": len(selected),
+        "student_anchor_level_counts": level_counts,
+        "foreground_precision": ratio(foreground, len(selected)),
+        "good_boundary_precision_iou50": ratio(
+            good_boundary, len(selected)
+        ),
+        "gt_foreground_anchor_coverage": ratio(
+            foreground, total_gt_anchors
+        ),
+        "good_boundary_anchor_coverage": ratio(
+            good_boundary, total_gt_anchors
+        ),
+        "teacher_vs_student_on_gt_foreground_anchors": {
+            "n": len(deltas),
+            "teacher_win_rate": ratio(teacher_wins, len(deltas)),
+            "student_win_rate": ratio(student_wins, len(deltas)),
+            "tie_rate": ratio(ties, len(deltas)),
+            "mean_delta_iou": ratio(sum(deltas), len(deltas)),
+            "mean_teacher_student_boundary_l1": ratio(
+                sum(offset_l1), len(offset_l1)
+            ),
+            "near_same_prediction_rate": ratio(
+                sum(value <= near_same_l1 for value in offset_l1),
+                len(offset_l1),
+            ),
+        },
+    }
+
+
+def summarize_anchor_rankings(
+        records, radii, fractions, total_gt_anchors,
+        tie_eps, near_same_l1):
+    if not records:
+        return {"records": 0, "matched_budget": {}}
+    confidence = torch.tensor(
+        [record["score"] for record in records], dtype=torch.float64
+    )
+    ranking_values = {"confidence": confidence}
+    for radius_index, radius in enumerate(radii):
+        ambiguity = torch.tensor([
+            record["ambiguity"][radius_index] for record in records
+        ], dtype=torch.float64)
+        npl_score = torch.zeros_like(confidence)
+        finite = torch.isfinite(ambiguity)
+        npl_score[finite] = confidence[finite] / (
+            ambiguity[finite].clamp_min(1e-6)
+        )
+        ranking_values["npl_radius_{}".format(radius)] = npl_score
+
+    output = {
+        "records": len(records),
+        "matched_budget": {},
+        "matched_budget_within_student_fpn_level": {},
+    }
+    for fraction in fractions:
+        key = "{:.2f}".format(fraction)
+        output["matched_budget"][key] = {}
+        output["matched_budget_within_student_fpn_level"][key] = {}
+        expected_count = min(
+            len(records), max(1, math.ceil(len(records) * fraction))
+        )
+        for name, values in ranking_values.items():
+            indices = matched_budget_indices(values, fraction).tolist()
+            if len(indices) != expected_count:
+                raise RuntimeError("anchor matched-budget size drifted")
+            output["matched_budget"][key][name] = summarize_anchor_selection(
+                records, indices, total_gt_anchors,
+                tie_eps, near_same_l1,
+            )
+            stratified_indices = select_within_fpn_level(
+                records, values, fraction, level_key="anchor_level"
+            )
+            output["matched_budget_within_student_fpn_level"][
+                key
+            ][name] = summarize_anchor_selection(
+                records, stratified_indices, total_gt_anchors,
+                tie_eps, near_same_l1,
+            )
+    return output
+
+
 def load_models(cfg, checkpoint_path, device):
     checkpoint = torch.load(checkpoint_path, map_location=device)
     student = make_meta_arch(cfg["model_name"], cfg, device=device).to(device)
@@ -268,6 +370,7 @@ def audit_checkpoint(
     checkpoint, student, teacher = load_models(cfg, checkpoint_path, device)
     reset_audit_rng(seed)
     records = []
+    anchor_records = []
     total_gt_segments = 0
     total_gt_anchors = 0
     videos = 0
@@ -315,6 +418,13 @@ def audit_checkpoint(
             ], dim=1)
             centers = torch.cat([point[:, 0] for point in points])
             strides = torch.cat([point[:, 3] for point in points])
+            anchor_levels = torch.cat([
+                torch.full(
+                    (point.shape[0],), level,
+                    dtype=torch.long, device=device,
+                )
+                for level, point in enumerate(points)
+            ])
 
             gt_segments, gt_labels = [], []
             for raw_video, video in zip(raw_videos, batch):
@@ -401,6 +511,12 @@ def audit_checkpoint(
                     )
                     assigned_foreground = assigned & gt_positive
                     delta_iou, offset_l1 = [], []
+                    delta_by_anchor = torch.full(
+                        pseudo_positive.shape, float("nan"), device=device
+                    )
+                    l1_by_anchor = torch.full(
+                        pseudo_positive.shape, float("nan"), device=device
+                    )
                     if assigned_foreground.any():
                         teacher_iou = aligned_iou(
                             pseudo_segments[assigned_foreground],
@@ -417,6 +533,13 @@ def audit_checkpoint(
                             pseudo_segments[assigned_foreground]
                             - student_segments[assigned_foreground]
                         ).abs().mean(dim=-1).cpu().tolist()
+                        delta_by_anchor[assigned_foreground] = (
+                            teacher_iou - student_iou
+                        )
+                        l1_by_anchor[assigned_foreground] = (
+                            pseudo_segments[assigned_foreground]
+                            - student_segments[assigned_foreground]
+                        ).abs().mean(dim=-1)
 
                     records.append({
                         "score": float(post["scores"][proposal_index]),
@@ -442,6 +565,27 @@ def audit_checkpoint(
                         "delta_iou": delta_iou,
                         "offset_l1": offset_l1,
                     })
+                    for anchor_index in torch.where(assigned)[0].tolist():
+                        is_foreground = bool(gt_positive[anchor_index])
+                        anchor_records.append({
+                            "score": float(post["scores"][proposal_index]),
+                            "ambiguity": post["npl_ambiguity"][
+                                proposal_index
+                            ].cpu().tolist(),
+                            "anchor_level": int(anchor_levels[anchor_index]),
+                            "foreground": is_foreground,
+                            "good_boundary": bool(
+                                anchor_iou[anchor_index] >= 0.5
+                            ),
+                            "delta_iou": (
+                                float(delta_by_anchor[anchor_index])
+                                if is_foreground else None
+                            ),
+                            "offset_l1": (
+                                float(l1_by_anchor[anchor_index])
+                                if is_foreground else None
+                            ),
+                        })
 
     return {
         "checkpoint": checkpoint_path,
@@ -457,6 +601,10 @@ def audit_checkpoint(
         },
         **summarize_rankings(
             records, radii, fractions, total_gt_segments, total_gt_anchors,
+            tie_eps, near_same_l1,
+        ),
+        "anchor_exact_budget": summarize_anchor_rankings(
+            anchor_records, radii, fractions, total_gt_anchors,
             tie_eps, near_same_l1,
         ),
     }
