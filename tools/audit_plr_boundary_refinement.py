@@ -293,6 +293,7 @@ def collect_source_samples(
     all_rois, all_segments, all_gt = [], [], []
     all_classes, all_foreground, all_iou = [], [], []
     all_feature_noise, all_categories = [], []
+    all_origins = []
     videos = 0
     proposals = 0
     num_classes = model.num_class_orig
@@ -317,9 +318,11 @@ def collect_source_samples(
                 ]
             candidate_segments, candidate_categories = [], []
             candidate_feature_noise = []
+            candidate_origins = []
             for video, target in zip(batch, pseudo_targets):
                 segments = [target["segments"]]
                 categories = ["teacher"] * int(target["segments"].shape[0])
+                origins = ["teacher"] * int(target["segments"].shape[0])
                 noise = torch.zeros(
                     target["segments"].shape[0],
                     dtype=torch.bool, device=device,
@@ -334,19 +337,28 @@ def collect_source_samples(
                     )
                     segments.append(synthetic)
                     categories.extend(synthetic_categories)
+                    origins.extend([
+                        (
+                            "synthetic_jitter"
+                            if category.startswith("iou_")
+                            else "synthetic_{}".format(category)
+                        )
+                        for category in synthetic_categories
+                    ])
                     noise = torch.cat((noise, synthetic_noise))
                 candidate_segments.append(torch.cat(segments))
                 candidate_categories.append(categories)
                 candidate_feature_noise.append(noise)
+                candidate_origins.append(origins)
             rois = proposal_rois(
                 fpn_features[0], fpn_masks[0], points[0][:, 0],
                 candidate_segments,
                 roi_size,
             )
             roi_offset = 0
-            for video, segments, categories, feature_noise in zip(
+            for video, segments, categories, feature_noise, origins in zip(
                     batch, candidate_segments, candidate_categories,
-                    candidate_feature_noise):
+                    candidate_feature_noise, candidate_origins):
                 count = int(segments.shape[0])
                 videos += 1
                 proposals += count
@@ -378,22 +390,23 @@ def collect_source_samples(
                 all_foreground.append(foreground.cpu())
                 all_iou.append(max_iou.cpu())
                 all_feature_noise.append(feature_noise.cpu())
-                for category, iou in zip(categories, max_iou.tolist()):
+                for category, origin, iou in zip(
+                        categories, origins, max_iou.tolist()):
                     if category == "teacher":
                         if iou < 0.1:
-                            category = "teacher_background"
+                            category = "background"
                         else:
                             category = next(
                                 name for name, low, high in IOU_BINS
                                 if low <= iou < high
                             )
-                            category = "teacher_{}".format(category)
                     elif category.startswith("iou_"):
                         category = next(
                             name for name, low, high in IOU_BINS
                             if low <= iou < high
                         )
                     all_categories.append(category)
+                    all_origins.append(origin)
                 roi_offset += count
 
     if not all_rois:
@@ -407,6 +420,7 @@ def collect_source_samples(
         "baseline_iou": torch.cat(all_iou),
         "feature_noise": torch.cat(all_feature_noise),
         "categories": all_categories,
+        "origins": all_origins,
         "videos": videos,
         "proposals": proposals,
     }
@@ -1135,6 +1149,9 @@ def summarize_source_samples(samples):
     category_counts = {}
     for category in samples["categories"]:
         category_counts[category] = category_counts.get(category, 0) + 1
+    origin_counts = {}
+    for origin in samples["origins"]:
+        origin_counts[origin] = origin_counts.get(origin, 0) + 1
     return {
         "videos_or_windows": samples["videos"],
         "proposals": samples["proposals"],
@@ -1145,6 +1162,7 @@ def summarize_source_samples(samples):
             (~samples["foreground"]).sum()
         ),
         "category_counts": category_counts,
+        "origin_counts": origin_counts,
     }
 
 
