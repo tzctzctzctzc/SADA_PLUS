@@ -371,6 +371,12 @@ class Trainer(BaseTrainerDA):
             and curr_epoch == self.model.stage2_start_epoch
         ):
             self.model.initialize_static_stage2_head()
+        if (
+            self.model.stage2_enabled
+            and self.model.stage2_routing == 'static_full_dense'
+            and curr_epoch == self.model.stage2_start_epoch
+        ):
+            self.model.initialize_static_stage2_path()
         self.stage1_epoch_summary = {}
         
         # Create iterator for the source and target data loaders

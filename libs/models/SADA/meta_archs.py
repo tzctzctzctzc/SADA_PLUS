@@ -355,10 +355,12 @@ class SADA(nn.Module):
         ):
             raise ValueError('Stage 2 levels are invalid')
         if self.stage2_routing not in (
-                'confidence', 'alqa_same_budget', 'static_dense'):
+                'confidence', 'alqa_same_budget',
+                'static_dense', 'static_full_dense'):
             raise ValueError('unknown Stage 2 routing mode')
         self.stage2_uses_external_teacher = (
-            self.stage2_routing != 'static_dense'
+            self.stage2_routing
+            not in ('static_dense', 'static_full_dense')
         )
         if self.stage2_loss_weighting not in (
                 'anchor_equal', 'proposal_equal',
@@ -696,15 +698,30 @@ class SADA(nn.Module):
         self.cls_thres_prob = torch.zeros(self.num_classes).to(self.device) # shape: C (not using the no-class)
         self.cls_thres_ti = torch.ones(self.num_classes).to(self.device) # shape: C # To avoid NaNs, initialize to 1
         
-        self.backbone_pl = self.backbone_source
-        self.neck_pl = self.neck_source
         self.cls_head_pl = self.cls_head
-        if self.stage2_enabled and self.stage2_routing == 'static_dense':
+        if (
+            self.stage2_enabled
+            and self.stage2_routing == 'static_full_dense'
+        ):
+            self.backbone_pl = copy.deepcopy(self.backbone_source)
+            self.neck_pl = copy.deepcopy(self.neck_source)
+            self.reg_head_pl = copy.deepcopy(self.reg_head)
+            for module in (
+                self.backbone_pl, self.neck_pl, self.reg_head_pl
+            ):
+                module.eval()
+                for parameter in module.parameters():
+                    parameter.requires_grad_(False)
+        elif self.stage2_enabled and self.stage2_routing == 'static_dense':
+            self.backbone_pl = self.backbone_source
+            self.neck_pl = self.neck_source
             self.reg_head_pl = copy.deepcopy(self.reg_head)
             self.reg_head_pl.eval()
             for parameter in self.reg_head_pl.parameters():
                 parameter.requires_grad_(False)
         else:
+            self.backbone_pl = self.backbone_source
+            self.neck_pl = self.neck_source
             self.reg_head_pl = self.reg_head
         
         
@@ -830,6 +847,24 @@ class SADA(nn.Module):
         self.reg_head_pl.eval()
         for parameter in self.reg_head_pl.parameters():
             parameter.requires_grad_(False)
+
+    @torch.no_grad()
+    def initialize_static_stage2_path(self):
+        """Snapshot the complete target feature-to-localization path."""
+        if not (
+            self.stage2_enabled
+            and self.stage2_routing == 'static_full_dense'
+        ):
+            return
+        self.backbone_pl.load_state_dict(self.backbone_target.state_dict())
+        self.neck_pl.load_state_dict(self.neck_target.state_dict())
+        self.reg_head_pl.load_state_dict(self.reg_head_target.state_dict())
+        for module in (
+            self.backbone_pl, self.neck_pl, self.reg_head_pl
+        ):
+            module.eval()
+            for parameter in module.parameters():
+                parameter.requires_grad_(False)
 
     @torch.no_grad()
     def _stage1_shift_routing(self, video_list_tgt, points, rng=None):
@@ -1366,9 +1401,31 @@ class SADA(nn.Module):
         feats_tgt, masks_tgt, _ = self.backbone_target(batched_inputs_tgt, batched_masks_tgt)
         fpn_feats_tgt, fpn_masks_tgt = self.neck_target(feats_tgt, masks_tgt)  # Maintains the same shape as its input
 
-        # Generate the logits that we use for the pseudo-label computation (static)
-        feats_tgt_pl, masks_tgt_pl, _ = self.backbone_pl(batched_inputs_tgt, batched_masks_tgt)
-        fpn_feats_tgt_pl, fpn_masks_tgt_pl = self.neck_pl(feats_tgt_pl, masks_tgt_pl)  # Maintains the same shape as its input
+        # Run the complete warm-up pseudo path without gradients.  The older
+        # static mode keeps using the current features and freezes only the
+        # localization head.
+        if (
+            self.stage2_enabled
+            and self.stage2_routing == 'static_full_dense'
+        ):
+            for module in (
+                self.backbone_pl, self.neck_pl, self.reg_head_pl
+            ):
+                module.eval()
+            with torch.no_grad():
+                feats_tgt_pl, masks_tgt_pl, _ = self.backbone_pl(
+                    batched_inputs_tgt, batched_masks_tgt
+                )
+                fpn_feats_tgt_pl, fpn_masks_tgt_pl = self.neck_pl(
+                    feats_tgt_pl, masks_tgt_pl
+                )
+        else:
+            feats_tgt_pl, masks_tgt_pl, _ = self.backbone_pl(
+                batched_inputs_tgt, batched_masks_tgt
+            )
+            fpn_feats_tgt_pl, fpn_masks_tgt_pl = self.neck_pl(
+                feats_tgt_pl, masks_tgt_pl
+            )
         
 
         # Concatenate the two lists L features levels, each of which with shape [B x F x T] into L feature levels of shape [2B x F x T]
@@ -1413,7 +1470,14 @@ class SADA(nn.Module):
         out_cls_logits = [torch.cat((out_cls_logits_src[i], out_cls_logits_tgt[i]), dim=0) for i in range(len(out_cls_logits_src))]
 
         # Generate the logits using the pseudo-label network (frozen in the case of static, or changing in the case of dynamic)
-        out_cls_logits_tgt_pl, _ = self.cls_head_pl(fpn_feats_tgt_pl, fpn_masks_tgt_pl)
+        if self.stage2_routing == 'static_full_dense':
+            out_cls_logits_tgt_pl = [
+                logits.detach() for logits in out_cls_logits_tgt
+            ]
+        else:
+            out_cls_logits_tgt_pl, _ = self.cls_head_pl(
+                fpn_feats_tgt_pl, fpn_masks_tgt_pl
+            )
         
         if self.use_trident_head:
             out_lb_logits_src = self.start_head(fpn_feats_src, fpn_masks_src)
@@ -1440,11 +1504,25 @@ class SADA(nn.Module):
         out_actionness = [torch.cat((out_actionness_src[i], out_actionness_tgt[i]), dim=0) for i in range(len(out_offsets_src))]
 
         # Generate the regression offsets of the frozen pseudo-label network (frozen in the case of static, or changing in the case of dynamic)
-        if self.stage2_enabled and self.stage2_routing == 'static_dense':
+        if (
+            self.stage2_enabled
+            and self.stage2_routing
+            in ('static_dense', 'static_full_dense')
+        ):
             self.reg_head_pl.eval()
             with torch.no_grad():
+                pseudo_features = (
+                    fpn_feats_tgt_pl
+                    if self.stage2_routing == 'static_full_dense'
+                    else fpn_feats_tgt
+                )
+                pseudo_masks = (
+                    fpn_masks_tgt_pl
+                    if self.stage2_routing == 'static_full_dense'
+                    else fpn_masks_tgt
+                )
                 out_offsets_tgt_pl, out_actionness_tgt_pl = self.reg_head_pl(
-                    fpn_feats_tgt, fpn_masks_tgt
+                    pseudo_features, pseudo_masks
                 )
         else:
             out_offsets_tgt_pl, out_actionness_tgt_pl = self.reg_head_pl(
@@ -1542,7 +1620,8 @@ class SADA(nn.Module):
                 )
             elif (
                 self.stage2_enabled
-                and self.stage2_routing == 'static_dense'
+                and self.stage2_routing
+                in ('static_dense', 'static_full_dense')
                 and mode == 'train'
                 and curr_epoch >= self.stage2_start_epoch
             ):
@@ -2152,7 +2231,8 @@ class SADA(nn.Module):
         ]
         if (
             self.stage2_enabled
-            and self.stage2_routing == 'static_dense'
+            and self.stage2_routing
+            in ('static_dense', 'static_full_dense')
             and stage2_dense_pseudo_offsets is not None
         ):
             stage2_predictions = self.decode_offset(
@@ -2186,11 +2266,18 @@ class SADA(nn.Module):
                 ].sum().float()
                 offset = next_offset
             if stage2_reg_mask.any():
-                stage2_reg_loss = ctr_diou_loss_1d(
-                    stage2_predictions[stage2_reg_mask],
-                    stage2_targets[stage2_reg_mask],
-                    reduction='sum',
-                ) / stage2_reg_positive
+                if self.stage2_routing == 'static_full_dense':
+                    stage2_reg_loss = F.mse_loss(
+                        stage2_predictions[stage2_reg_mask],
+                        stage2_targets[stage2_reg_mask],
+                        reduction='mean',
+                    )
+                else:
+                    stage2_reg_loss = ctr_diou_loss_1d(
+                        stage2_predictions[stage2_reg_mask],
+                        stage2_targets[stage2_reg_mask],
+                        reduction='sum',
+                    ) / stage2_reg_positive
                 stage2_offset_l1 = (
                     stage2_predictions[stage2_reg_mask]
                     - stage2_targets[stage2_reg_mask]

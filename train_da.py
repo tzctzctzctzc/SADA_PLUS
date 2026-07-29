@@ -211,7 +211,8 @@ def main(cfg, resume, project_name='sada', debug=False):
     
     generator_exclusions = [
         'disc_dom_adv', 'disc_dom_conditional_adv',
-        'learnable_embeddings', 'alqa_quality_heads', 'reg_head_pl',
+        'learnable_embeddings', 'alqa_quality_heads',
+        'backbone_pl', 'neck_pl', 'reg_head_pl',
     ]
     optimizer_gen_source = make_optimizer(
         model, cfg['opt'], cfg['opt']['learning_rate'],
@@ -517,12 +518,14 @@ def create_argparser():
         help='independent perturbation RNG seed',
     )
     parser.add_argument(
-        '--stage2', choices=['off', 'pseudo', 'alqa', 'static'], default='off',
+        '--stage2',
+        choices=['off', 'pseudo', 'alqa', 'static', 'static-full'],
+        default='off',
         help='target pseudo-boundary regression after warm-up',
     )
     parser.add_argument(
         '--stage2-start-epoch', type=int, default=5,
-        help='first epoch eligible for Stage 2 EMA proposals',
+        help='first epoch eligible for Stage 2 pseudo-boundary regression',
     )
     parser.add_argument(
         '--stage2-weight', type=float, default=1.0,
@@ -636,7 +639,15 @@ if __name__ == '__main__':
         'routing': (
             'alqa_same_budget'
             if args.stage2 == 'alqa'
-            else ('static_dense' if args.stage2 == 'static' else 'confidence')
+            else (
+                'static_dense'
+                if args.stage2 == 'static'
+                else (
+                    'static_full_dense'
+                    if args.stage2 == 'static-full'
+                    else 'confidence'
+                )
+            )
         ),
         'start_epoch': args.stage2_start_epoch,
         'weight': args.stage2_weight,
@@ -661,28 +672,45 @@ if __name__ == '__main__':
             else (
                 'sada_static_dense_localization_v1'
                 if args.stage2 == 'static'
-                else 'confidence_fixed_routing_loss_weighting_v1'
+                else (
+                    'sada_static_full_path_offset_mse_v1'
+                    if args.stage2 == 'static-full'
+                    else 'confidence_fixed_routing_loss_weighting_v1'
+                )
             )
         ),
         'quality_head_mode': (
             'none'
-            if args.stage2 == 'static'
+            if args.stage2 in ('static', 'static-full')
             else 'source_gt_calibrated_then_frozen'
         ),
         'selection_budget': (
             'original_sada_high_confidence_dense_anchors'
-            if args.stage2 == 'static'
+            if args.stage2 in ('static', 'static-full')
             else 'per_video_per_fpn_original_alpha_count'
         ),
         'nms': (
-            'none' if args.stage2 == 'static'
+            'none' if args.stage2 in ('static', 'static-full')
             else 'hard_class_agnostic_ranked_by_classification_confidence'
+        ),
+        'pseudo_path': (
+            'frozen_warmup_sgp_fpn_localization'
+            if args.stage2 == 'static-full'
+            else 'none'
+        ),
+        'regression_loss': (
+            'offset_mse'
+            if args.stage2 == 'static-full'
+            else 'diou'
         ),
         'target_gt_usage': 'none',
     }
     if args.stage2 == 'off' and args.stage2_loss_weighting != 'anchor_equal':
         raise ValueError('Stage 2 loss weighting requires Stage 2')
-    if args.stage2 == 'static' and args.stage2_loss_weighting != 'anchor_equal':
+    if (
+        args.stage2 in ('static', 'static-full')
+        and args.stage2_loss_weighting != 'anchor_equal'
+    ):
         raise ValueError('Static dense Stage 2 uses anchor-equal regression')
     if (
         (
