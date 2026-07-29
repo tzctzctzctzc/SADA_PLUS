@@ -104,14 +104,199 @@ def proposal_rois(
     return torch.stack(rois)
 
 
+IOU_BINS = (
+    ("iou_01_03", 0.1, 0.3),
+    ("iou_03_05", 0.3, 0.5),
+    ("iou_05_07", 0.5, 0.7),
+    ("iou_07_10", 0.7, 1.000001),
+)
+
+
+def _segment_iou(candidate, references):
+    if references.numel() == 0:
+        return 0.0
+    left = torch.maximum(candidate[0], references[:, 0])
+    right = torch.minimum(candidate[1], references[:, 1])
+    intersection = (right - left).clamp_min(0)
+    union = (
+        candidate[1] - candidate[0]
+        + references[:, 1] - references[:, 0]
+        - intersection
+    ).clamp_min(1e-6)
+    return float((intersection / union).max())
+
+
+def _sample_jittered_segment(gt, valid_length, low, high, rng):
+    """Generate one deterministic-error-family proposal in an IoU band."""
+    start, end = float(gt[0]), float(gt[1])
+    duration = max(end - start, 1.0)
+    center = 0.5 * (start + end)
+    for attempt in range(400):
+        error_type = attempt % 4
+        if error_type == 0:
+            shifted_center = center + rng.uniform(-1.5, 1.5) * duration
+            scale = np.exp(rng.uniform(np.log(0.3), np.log(2.5)))
+            candidate = [
+                shifted_center - 0.5 * scale * duration,
+                shifted_center + 0.5 * scale * duration,
+            ]
+        elif error_type == 1:
+            candidate = [
+                start + rng.uniform(-1.5, 1.5) * duration,
+                end + rng.uniform(-0.25, 0.25) * duration,
+            ]
+        elif error_type == 2:
+            candidate = [
+                start + rng.uniform(-0.25, 0.25) * duration,
+                end + rng.uniform(-1.5, 1.5) * duration,
+            ]
+        else:
+            candidate = [
+                start + rng.uniform(-1.0, 1.0) * duration,
+                end + rng.uniform(-1.0, 1.0) * duration,
+            ]
+        candidate = torch.tensor(
+            [max(0.0, candidate[0]), min(float(valid_length), candidate[1])],
+            dtype=gt.dtype, device=gt.device,
+        )
+        if candidate[1] - candidate[0] <= 1e-3:
+            continue
+        iou = _segment_iou(candidate, gt[None])
+        if low <= iou < high:
+            return candidate
+    return None
+
+
+def make_balanced_source_candidates(
+        gt_segments, valid_length, rng, background_per_gt=2):
+    """Build hard foreground, BS-expanded and true-background source proposals."""
+    candidates, categories, feature_noise = [], [], []
+    for gt in gt_segments:
+        for category, low, high in IOU_BINS:
+            candidate = _sample_jittered_segment(
+                gt, valid_length, low, high, rng
+            )
+            if candidate is not None:
+                candidates.append(candidate)
+                categories.append(category)
+                feature_noise.append(False)
+
+        duration = max(float(gt[1] - gt[0]), 1.0)
+        expanded = torch.tensor(
+            [
+                float(gt[0]) + (rng.normal(0.0, 0.05) - 0.5) * duration,
+                float(gt[1]) + (rng.normal(0.0, 0.05) + 0.5) * duration,
+            ],
+            dtype=gt.dtype, device=gt.device,
+        )
+        expanded[0].clamp_(min=0.0, max=float(valid_length))
+        expanded[1].clamp_(min=0.0, max=float(valid_length))
+        if expanded[1] - expanded[0] > 1e-3:
+            candidates.append(expanded)
+            categories.append("bs_expanded")
+            feature_noise.append(True)
+
+    wanted_background = max(4, background_per_gt * max(len(gt_segments), 1))
+    durations = (
+        (gt_segments[:, 1] - gt_segments[:, 0]).clamp_min(1.0).cpu().numpy()
+        if gt_segments.numel() else np.asarray([max(valid_length * 0.1, 1.0)])
+    )
+    for _ in range(wanted_background):
+        candidate = None
+        for _ in range(600):
+            duration = float(rng.choice(durations))
+            duration *= float(np.exp(rng.uniform(np.log(0.5), np.log(2.0))))
+            duration = min(max(duration, 1.0), float(valid_length))
+            start = rng.uniform(0.0, max(float(valid_length) - duration, 1e-6))
+            trial = torch.tensor(
+                [start, start + duration],
+                dtype=gt_segments.dtype, device=gt_segments.device,
+            )
+            if _segment_iou(trial, gt_segments) < 0.1:
+                candidate = trial
+                break
+        if candidate is not None:
+            candidates.append(candidate)
+            categories.append("background")
+            feature_noise.append(False)
+
+    if not candidates:
+        return (
+            gt_segments.new_empty((0, 2)),
+            [],
+            torch.empty(0, dtype=torch.bool, device=gt_segments.device),
+        )
+    return (
+        torch.stack(candidates),
+        categories,
+        torch.tensor(feature_noise, dtype=torch.bool, device=gt_segments.device),
+    )
+
+
+class DeterministicWindowDataset:
+    """Lazy fixed windows that retain every GT fragment visible in a crop."""
+
+    def __init__(self, dataset, max_seq_len, stride):
+        self.dataset = dataset
+        self.windows = []
+        for index in range(len(dataset)):
+            length = int(dataset[index]["feats"].shape[-1])
+            if length <= max_seq_len:
+                starts = [0]
+            else:
+                starts = list(range(0, length - max_seq_len + 1, stride))
+                last = length - max_seq_len
+                if starts[-1] != last:
+                    starts.append(last)
+            self.windows.extend(
+                (index, start, min(start + max_seq_len, length))
+                for start in starts
+            )
+
+    def __len__(self):
+        return len(self.windows)
+
+    def __getitem__(self, index):
+        video_index, start, stop = self.windows[index]
+        video = self.dataset[video_index]
+        length = int(video["feats"].shape[-1])
+        window = {
+            "feats": video["feats"][:, start:stop].clone(),
+            "metadata": copy.deepcopy(video["metadata"]),
+        }
+        window["metadata"]["original_feat_len"] = length
+        window["metadata"]["crop_start"] = start
+        window["metadata"]["video_length"] = stop - start
+        segments = video["segments"]
+        labels = video["labels"]
+        if segments is None or segments.numel() == 0:
+            window["segments"] = torch.empty((0, 2))
+            window["labels"] = torch.empty(0, dtype=torch.long)
+        else:
+            overlap = (
+                torch.minimum(segments[:, 1], torch.tensor(float(stop)))
+                - torch.maximum(segments[:, 0], torch.tensor(float(start)))
+            ).clamp_min(0)
+            keep = overlap > 0
+            clipped = segments[keep].clone()
+            clipped[:, 0].clamp_(min=float(start), max=float(stop))
+            clipped[:, 1].clamp_(min=float(start), max=float(stop))
+            window["segments"] = clipped - start
+            window["labels"] = labels[keep].clone()
+        return window
+
+
 def collect_source_samples(
-        model, dataset, device, batch_size, seed, roi_size, foreground_iou):
+        model, dataset, device, batch_size, seed, roi_size,
+        include_teacher=True, include_synthetic=True):
     reset_audit_rng(seed)
     all_rois, all_segments, all_gt = [], [], []
     all_classes, all_foreground, all_iou = [], [], []
+    all_feature_noise, all_categories = [], []
     videos = 0
     proposals = 0
     num_classes = model.num_class_orig
+    rng = np.random.default_rng(seed)
 
     with torch.no_grad():
         for batch_start in range(0, len(dataset), batch_size):
@@ -122,47 +307,93 @@ def collect_source_samples(
                 )
             ]
             batch = [move_video(video, device) for video in raw_batch]
-            pseudo_targets = model.generate_stage2_pseudo_targets(batch)
             fpn_features, fpn_masks, points = encode_latent_batch(model, batch)
+            if include_teacher:
+                pseudo_targets = model.generate_stage2_pseudo_targets(batch)
+            else:
+                pseudo_targets = [
+                    {"segments": video["segments"].new_empty((0, 2))}
+                    for video in batch
+                ]
+            candidate_segments, candidate_categories = [], []
+            candidate_feature_noise = []
+            for video, target in zip(batch, pseudo_targets):
+                segments = [target["segments"]]
+                categories = ["teacher"] * int(target["segments"].shape[0])
+                noise = torch.zeros(
+                    target["segments"].shape[0],
+                    dtype=torch.bool, device=device,
+                )
+                if include_synthetic:
+                    synthetic, synthetic_categories, synthetic_noise = (
+                        make_balanced_source_candidates(
+                            video["segments"],
+                            int(video["feats"].shape[-1]),
+                            rng,
+                        )
+                    )
+                    segments.append(synthetic)
+                    categories.extend(synthetic_categories)
+                    noise = torch.cat((noise, synthetic_noise))
+                candidate_segments.append(torch.cat(segments))
+                candidate_categories.append(categories)
+                candidate_feature_noise.append(noise)
             rois = proposal_rois(
                 fpn_features[0], fpn_masks[0], points[0][:, 0],
-                [target["segments"] for target in pseudo_targets],
+                candidate_segments,
                 roi_size,
             )
             roi_offset = 0
-            for video, target in zip(batch, pseudo_targets):
-                count = int(target["segments"].shape[0])
+            for video, segments, categories, feature_noise in zip(
+                    batch, candidate_segments, candidate_categories,
+                    candidate_feature_noise):
+                count = int(segments.shape[0])
                 videos += 1
                 proposals += count
                 if count == 0:
                     continue
                 gt_segments = video["segments"]
                 gt_labels = video["labels"]
-                overlap = pairwise_iou(target["segments"], gt_segments)
+                overlap = pairwise_iou(segments, gt_segments)
                 if gt_segments.numel():
                     max_iou, matches = overlap.max(dim=1)
                     matched_gt = gt_segments[matches]
                     matched_labels = gt_labels[matches]
                 else:
-                    max_iou = target["scores"].new_zeros(count)
-                    matched_gt = target["segments"].clone()
+                    max_iou = segments.new_zeros(count)
+                    matched_gt = segments.clone()
                     matched_labels = torch.zeros(
                         count, dtype=torch.long, device=device
                     )
-                foreground = max_iou >= foreground_iou
-                class_targets = target["segments"].new_zeros(
-                    (count, num_classes)
-                )
+                foreground = max_iou >= 0.1
+                class_targets = segments.new_zeros((count, num_classes))
                 if foreground.any():
                     class_targets[
                         foreground, matched_labels[foreground].long()
                     ] = 1.0
                 all_rois.append(rois[roi_offset:roi_offset + count].cpu())
-                all_segments.append(target["segments"].cpu())
+                all_segments.append(segments.cpu())
                 all_gt.append(matched_gt.cpu())
                 all_classes.append(class_targets.cpu())
                 all_foreground.append(foreground.cpu())
                 all_iou.append(max_iou.cpu())
+                all_feature_noise.append(feature_noise.cpu())
+                for category, iou in zip(categories, max_iou.tolist()):
+                    if category == "teacher":
+                        if iou < 0.1:
+                            category = "teacher_background"
+                        else:
+                            category = next(
+                                name for name, low, high in IOU_BINS
+                                if low <= iou < high
+                            )
+                            category = "teacher_{}".format(category)
+                    elif category.startswith("iou_"):
+                        category = next(
+                            name for name, low, high in IOU_BINS
+                            if low <= iou < high
+                        )
+                    all_categories.append(category)
                 roi_offset += count
 
     if not all_rois:
@@ -174,6 +405,8 @@ def collect_source_samples(
         "class_targets": torch.cat(all_classes),
         "foreground": torch.cat(all_foreground),
         "baseline_iou": torch.cat(all_iou),
+        "feature_noise": torch.cat(all_feature_noise),
+        "categories": all_categories,
         "videos": videos,
         "proposals": proposals,
     }
@@ -185,7 +418,7 @@ def evaluate_refiner(
     refiner.eval()
     total_loss = 0.0
     total_count = 0
-    baseline_iou, refined_iou = [], []
+    baseline_iou, refined_iou, foreground_categories = [], [], []
     with torch.no_grad():
         for start in range(0, samples["rois"].shape[0], batch_size):
             stop = min(start + batch_size, samples["rois"].shape[0])
@@ -209,6 +442,14 @@ def evaluate_refiner(
                     .tolist()
                 )
                 refined_iou.extend(tiou.cpu().tolist())
+                foreground_categories.extend([
+                    category
+                    for category, keep in zip(
+                        samples["categories"][start:stop],
+                        foreground.cpu().tolist(),
+                    )
+                    if keep
+                ])
             else:
                 regression_loss = 0.0 * refined.sum()
             loss = (
@@ -219,6 +460,20 @@ def evaluate_refiner(
             total_count += stop - start
 
     delta = np.asarray(refined_iou) - np.asarray(baseline_iou)
+    baseline_array = np.asarray(baseline_iou)
+    refined_array = np.asarray(refined_iou)
+    category_metrics = {}
+    for category in sorted(set(foreground_categories)):
+        mask = np.asarray([
+            value == category for value in foreground_categories
+        ])
+        category_delta = delta[mask]
+        category_metrics[category] = {
+            "n": int(mask.sum()),
+            "baseline_mean_iou": float(baseline_array[mask].mean()),
+            "refined_mean_iou": float(refined_array[mask].mean()),
+            "mean_delta_iou": float(category_delta.mean()),
+        }
     return {
         "loss": ratio(total_loss, total_count),
         "foreground_proposals": len(refined_iou),
@@ -231,13 +486,60 @@ def evaluate_refiner(
         "mean_delta_iou": float(delta.mean()) if delta.size else None,
         "win_rate": float((delta > 1e-4).mean()) if delta.size else None,
         "loss_rate": float((delta < -1e-4).mean()) if delta.size else None,
+        "baseline_iou50_rate": (
+            float((baseline_array >= 0.5).mean()) if delta.size else None
+        ),
+        "refined_iou50_rate": (
+            float((refined_array >= 0.5).mean()) if delta.size else None
+        ),
+        "iou50_rate_gain": (
+            float(
+                (refined_array >= 0.5).mean()
+                - (baseline_array >= 0.5).mean()
+            )
+            if delta.size else None
+        ),
+        "per_category": category_metrics,
     }
+
+
+def balanced_epoch_order(samples, seed):
+    """Sample 50% background and equal counts from foreground categories."""
+    generator = torch.Generator().manual_seed(seed)
+    foreground = samples["foreground"].bool()
+    background_indices = torch.where(~foreground)[0]
+    positive_groups = {}
+    for index, category in enumerate(samples["categories"]):
+        if foreground[index]:
+            positive_groups.setdefault(category, []).append(index)
+    if not len(background_indices) or not positive_groups:
+        return torch.randperm(len(foreground), generator=generator)
+
+    epoch_size = len(foreground)
+    positive_count = epoch_size // 2
+    background_count = epoch_size - positive_count
+    selected = [
+        background_indices[torch.randint(
+            len(background_indices), (background_count,), generator=generator
+        )]
+    ]
+    group_names = sorted(positive_groups)
+    base = positive_count // len(group_names)
+    remainder = positive_count % len(group_names)
+    for group_index, name in enumerate(group_names):
+        group = torch.tensor(positive_groups[name], dtype=torch.long)
+        count = base + int(group_index < remainder)
+        selected.append(group[torch.randint(
+            len(group), (count,), generator=generator
+        )])
+    order = torch.cat(selected)
+    return order[torch.randperm(len(order), generator=generator)]
 
 
 def train_refiner(
         train_samples, val_samples, feature_dim, hidden_dim, num_classes,
         device, seed, max_epochs, patience, learning_rate, train_batch_size,
-        max_delta_scale, class_weight, regression_weight):
+        max_delta_scale, class_weight, regression_weight, feature_sigma):
     reset_audit_rng(seed)
     refiner = PLSRRefiner(
         feature_dim, hidden_dim, num_classes
@@ -245,22 +547,42 @@ def train_refiner(
     optimizer = torch.optim.AdamW(
         refiner.parameters(), lr=learning_rate, weight_decay=1e-4
     )
-    best_state = copy.deepcopy(refiner.state_dict())
-    best_epoch = 0
-    best_val = float("inf")
+    selectors = {
+        "min_loss": {
+            "value": float("inf"), "direction": "min",
+            "epoch": 0, "state": copy.deepcopy(refiner.state_dict()),
+        },
+        "max_mean_delta_iou": {
+            "value": -float("inf"), "direction": "max",
+            "epoch": 0, "state": copy.deepcopy(refiner.state_dict()),
+        },
+        "max_iou50_gain": {
+            "value": -float("inf"), "direction": "max",
+            "epoch": 0, "state": copy.deepcopy(refiner.state_dict()),
+        },
+    }
     remaining_patience = patience
     history = []
-    sample_count = train_samples["rois"].shape[0]
 
     for epoch in range(1, max_epochs + 1):
         refiner.train()
         generator = torch.Generator().manual_seed(seed + epoch)
-        order = torch.randperm(sample_count, generator=generator)
+        order = balanced_epoch_order(train_samples, seed + epoch)
         loss_sum = 0.0
         seen = 0
-        for start in range(0, sample_count, train_batch_size):
+        for start in range(0, len(order), train_batch_size):
             indices = order[start:start + train_batch_size]
             rois = train_samples["rois"][indices].to(device)
+            noise_mask = train_samples["feature_noise"][indices].to(device)
+            if noise_mask.any() and feature_sigma > 0:
+                noise = torch.randn(
+                    rois.shape, generator=generator, dtype=rois.dtype
+                ).to(device)
+                rois = rois + (
+                    feature_sigma
+                    * noise
+                    * noise_mask[:, None, None].to(rois.dtype)
+                )
             segments = train_samples["segments"][indices].to(device)
             gt_segments = train_samples["gt_segments"][indices].to(device)
             class_targets = train_samples["class_targets"][indices].to(device)
@@ -296,44 +618,76 @@ def train_refiner(
             "train_loss": ratio(loss_sum, seen),
             "validation_loss": validation["loss"],
             "validation_mean_delta_iou": validation["mean_delta_iou"],
+            "validation_iou50_gain": validation["iou50_rate_gain"],
         })
-        if validation["loss"] < best_val - 1e-6:
-            best_val = validation["loss"]
-            best_epoch = epoch
-            best_state = copy.deepcopy(refiner.state_dict())
+        values = {
+            "min_loss": validation["loss"],
+            "max_mean_delta_iou": validation["mean_delta_iou"],
+            "max_iou50_gain": validation["iou50_rate_gain"],
+        }
+        improved = False
+        for name, value in values.items():
+            target = selectors[name]
+            better = (
+                value < target["value"] - 1e-6
+                if target["direction"] == "min"
+                else value > target["value"] + 1e-6
+            )
+            if better:
+                target["value"] = value
+                target["epoch"] = epoch
+                target["state"] = copy.deepcopy(refiner.state_dict())
+                improved = True
+        if improved:
             remaining_patience = patience
         else:
             remaining_patience -= 1
             if remaining_patience == 0:
                 break
 
-    refiner.load_state_dict(best_state)
-    return refiner, {
+    selected_refiners, selected_metrics = {}, {}
+    for name, selector in selectors.items():
+        selected = PLSRRefiner(
+            feature_dim, hidden_dim, num_classes
+        ).to(device)
+        selected.load_state_dict(selector["state"])
+        selected.eval()
+        selected_refiners[name] = selected
+        selected_metrics[name] = {
+            "epoch": selector["epoch"],
+            "validation": evaluate_refiner(
+                selected, val_samples, device, train_batch_size,
+                max_delta_scale, class_weight, regression_weight,
+            ),
+        }
+    return selected_refiners, {
         "seed": seed,
-        "best_epoch": best_epoch,
-        "validation": evaluate_refiner(
-            refiner, val_samples, device, train_batch_size,
-            max_delta_scale, class_weight, regression_weight,
-        ),
+        "selectors": selected_metrics,
         "history": history,
     }
 
 
 def infer_refinement(
-        refiner, rois, segments, labels, valid_lengths, max_delta_scale):
+        refiner, rois, segments, labels, valid_lengths, max_delta_scale,
+        confidence_mode="pseudo_class"):
     logits, offsets = refiner(rois)
     refined = apply_boundary_offsets(segments, offsets, max_delta_scale)
     refined = clip_segments(refined, valid_lengths, fallback=segments)
-    confidence = logits.sigmoid().gather(
-        1, labels[:, None]
-    ).squeeze(1)
+    probabilities = logits.sigmoid()
+    if confidence_mode == "pseudo_class":
+        confidence = probabilities.gather(1, labels[:, None]).squeeze(1)
+    elif confidence_mode == "max_class":
+        confidence = probabilities.max(dim=1).values
+    else:
+        raise ValueError("unknown confidence mode: {}".format(confidence_mode))
     return refined, confidence
 
 
 def synthesize_boundaries(
         refiner, direct_segments, feature_maps, masks, centers,
         video_indices, labels, valid_lengths, roi_size, max_delta_scale,
-        repeats, boundary_sigma, feature_sigma, random_seed):
+        repeats, boundary_sigma, feature_sigma, random_seed,
+        confidence_mode):
     generator = torch.Generator().manual_seed(random_seed)
     count = direct_segments.shape[0]
     duration = direct_segments[:, 1] - direct_segments[:, 0]
@@ -395,7 +749,7 @@ def synthesize_boundaries(
     repeated_labels = labels.repeat_interleave(repeats)
     refined, confidence = infer_refinement(
         refiner, rois, expanded, repeated_labels,
-        repeated_lengths, max_delta_scale,
+        repeated_lengths, max_delta_scale, confidence_mode,
     )
     refined = refined.reshape(count, repeats, 2)
     confidence = confidence.reshape(count, repeats).clamp_min(1e-6)
@@ -473,17 +827,19 @@ def proposal_variant_record(
 
 
 def collect_target_results(
-        model, refiners, dataset, annotations, cfg, device, levels,
+        model, refiners, selector_groups, dataset, annotations, cfg,
+        device, levels,
         batch_size, target_seed, roi_size, max_delta_scale,
         repeats, boundary_sigma, feature_sigma):
     reset_audit_rng(target_seed)
     variants = ["baseline"]
-    for seed in refiners:
+    variants.extend("direct_{}".format(name) for name in refiners)
+    for selector in selector_groups:
         variants.extend([
-            "direct_seed_{}".format(seed),
-            "synthesis_seed_{}".format(seed),
+            "direct_{}_ensemble".format(selector),
+            "synthesis_pseudo_class_{}_ensemble".format(selector),
+            "synthesis_max_class_{}_ensemble".format(selector),
         ])
-    variants.extend(["direct_ensemble", "synthesis_ensemble"])
     proposal_records = []
     anchor_statistics = {
         variant: {
@@ -515,8 +871,19 @@ def collect_target_results(
                 fpn_features[0], fpn_masks[0], points[0][:, 0],
                 baseline_segments, roi_size,
             )
-            flat_segments = torch.cat(baseline_segments)
-            flat_labels = torch.cat(baseline_labels)
+            batch_proposals = sum(
+                int(segments.shape[0]) for segments in baseline_segments
+            )
+            flat_segments = (
+                torch.cat(baseline_segments)
+                if batch_proposals
+                else fpn_features[0].new_empty((0, 2))
+            )
+            flat_labels = (
+                torch.cat(baseline_labels)
+                if batch_proposals
+                else torch.empty(0, dtype=torch.long, device=device)
+            )
             video_indices = torch.cat([
                 torch.full(
                     (segments.shape[0],), index,
@@ -533,34 +900,50 @@ def collect_target_results(
             ])
 
             flat_variants = {"baseline": flat_segments}
-            direct_outputs, synthesis_outputs = [], []
-            for refiner_seed, refiner in refiners.items():
-                direct, _ = infer_refinement(
-                    refiner, rois, flat_segments, flat_labels,
-                    valid_lengths, max_delta_scale,
-                )
-                synthesis = synthesize_boundaries(
-                    refiner, direct,
-                    fpn_features[0], fpn_masks[0], points[0][:, 0],
-                    video_indices, flat_labels, valid_lengths,
-                    roi_size, max_delta_scale, repeats,
-                    boundary_sigma, feature_sigma,
-                    target_seed + batch_start * 1000,
-                )
-                flat_variants[
-                    "direct_seed_{}".format(refiner_seed)
-                ] = direct
-                flat_variants[
-                    "synthesis_seed_{}".format(refiner_seed)
-                ] = synthesis
-                direct_outputs.append(direct)
-                synthesis_outputs.append(synthesis)
-            flat_variants["direct_ensemble"] = torch.stack(
-                direct_outputs
-            ).mean(dim=0)
-            flat_variants["synthesis_ensemble"] = torch.stack(
-                synthesis_outputs
-            ).mean(dim=0)
+            direct_outputs = {}
+            synthesis_outputs = {
+                "pseudo_class": {},
+                "max_class": {},
+            }
+            if batch_proposals:
+                for name, refiner in refiners.items():
+                    direct, _ = infer_refinement(
+                        refiner, rois, flat_segments, flat_labels,
+                        valid_lengths, max_delta_scale,
+                    )
+                    direct_outputs[name] = direct
+                    flat_variants["direct_{}".format(name)] = direct
+                    for confidence_mode in synthesis_outputs:
+                        synthesis_outputs[confidence_mode][name] = (
+                            synthesize_boundaries(
+                                refiner, direct,
+                                fpn_features[0], fpn_masks[0],
+                                points[0][:, 0],
+                                video_indices, flat_labels, valid_lengths,
+                                roi_size, max_delta_scale, repeats,
+                                boundary_sigma, feature_sigma,
+                                target_seed + batch_start * 1000,
+                                confidence_mode,
+                            )
+                        )
+                for selector, names in selector_groups.items():
+                    flat_variants[
+                        "direct_{}_ensemble".format(selector)
+                    ] = torch.stack([
+                        direct_outputs[name] for name in names
+                    ]).mean(dim=0)
+                    for confidence_mode in synthesis_outputs:
+                        flat_variants[
+                            "synthesis_{}_{}_ensemble".format(
+                                confidence_mode, selector
+                            )
+                        ] = torch.stack([
+                            synthesis_outputs[confidence_mode][name]
+                            for name in names
+                        ]).mean(dim=0)
+            else:
+                for variant in variants[1:]:
+                    flat_variants[variant] = flat_segments.clone()
 
             grouped_variants = {}
             for variant, flat in flat_variants.items():
@@ -748,6 +1131,23 @@ def summarize_anchor_variant(
     return output
 
 
+def summarize_source_samples(samples):
+    category_counts = {}
+    for category in samples["categories"]:
+        category_counts[category] = category_counts.get(category, 0) + 1
+    return {
+        "videos_or_windows": samples["videos"],
+        "proposals": samples["proposals"],
+        "foreground_proposals_iou_ge_0_1": int(
+            samples["foreground"].sum()
+        ),
+        "background_proposals_iou_lt_0_1": int(
+            (~samples["foreground"]).sum()
+        ),
+        "category_counts": category_counts,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
@@ -761,7 +1161,6 @@ def main():
     parser.add_argument("--target-seed", type=int, default=20260729)
     parser.add_argument("--roi-size", type=int, default=16)
     parser.add_argument("--hidden-dim", type=int, default=256)
-    parser.add_argument("--foreground-iou", type=float, default=0.5)
     parser.add_argument("--max-delta-scale", type=float, default=0.45)
     parser.add_argument("--max-epochs", type=int, default=50)
     parser.add_argument("--patience", type=int, default=7)
@@ -792,10 +1191,10 @@ def main():
     model.eval()
 
     source_train = make_dataset(
-        cfg["dataset_name"], True, cfg["src_train_split"], **cfg["dataset"]
+        cfg["dataset_name"], False, cfg["src_train_split"], **cfg["dataset"]
     )
     source_val = make_dataset(
-        cfg["dataset_name"], True, cfg["src_val_split"], **cfg["dataset"]
+        cfg["dataset_name"], False, cfg["src_val_split"], **cfg["dataset"]
     )
     target_train = make_dataset(
         cfg["dataset_name"], True, cfg["tgt_train_split"], **cfg["dataset"]
@@ -807,31 +1206,43 @@ def main():
         cfg.get("loader", {}).get("batch_size", 1)
     )
 
+    max_seq_len = int(cfg["dataset"]["max_seq_len"])
+    training_windows = DeterministicWindowDataset(
+        source_train, max_seq_len, max_seq_len
+    )
+    validation_windows = DeterministicWindowDataset(
+        source_val, max_seq_len, max_seq_len // 2
+    )
     train_samples = collect_source_samples(
-        model, source_train, args.device, batch_size,
-        args.source_seed, args.roi_size, args.foreground_iou,
+        model, training_windows, args.device, batch_size,
+        args.source_seed, args.roi_size,
+        include_teacher=True, include_synthetic=True,
     )
     val_samples = collect_source_samples(
-        model, source_val, args.device, batch_size,
-        args.source_seed, args.roi_size, args.foreground_iou,
+        model, validation_windows, args.device, batch_size,
+        args.source_seed, args.roi_size,
+        include_teacher=True, include_synthetic=False,
     )
     feature_dim = train_samples["rois"].shape[1]
-    refiners, training = {}, {}
+    refiners, selector_groups, training = {}, {}, {}
     for seed in refiner_seeds:
-        refiner, metrics = train_refiner(
+        selected, metrics = train_refiner(
             train_samples, val_samples, feature_dim, args.hidden_dim,
             model.num_class_orig, args.device, seed,
             args.max_epochs, args.patience, args.learning_rate,
             args.train_batch_size, args.max_delta_scale,
             args.class_weight, args.regression_weight,
+            args.feature_sigma,
         )
-        refiner.eval()
-        refiners[seed] = refiner
+        for selector, refiner in selected.items():
+            name = "seed{}_{}".format(seed, selector)
+            refiners[name] = refiner
+            selector_groups.setdefault(selector, []).append(name)
         training[str(seed)] = metrics
 
     target = collect_target_results(
-        model, refiners, target_train, annotations, cfg, args.device,
-        levels, batch_size, args.target_seed, args.roi_size,
+        model, refiners, selector_groups, target_train, annotations, cfg,
+        args.device, levels, batch_size, args.target_seed, args.roi_size,
         args.max_delta_scale, args.synthesis_repeats,
         args.boundary_sigma, args.feature_sigma,
     )
@@ -851,15 +1262,27 @@ def main():
         for variant in target["variants"]
     }
     output = {
-        "audit": "plr_style_source_trained_boundary_refinement",
+        "audit": "plr_style_distribution_balanced_source_refinement",
         "checkpoint": args.checkpoint,
         "checkpoint_epoch": checkpoint.get("epoch"),
         "protocol": {
             "refiner_supervision": "source GT only",
             "target_gt_usage": "offline evaluation only",
             "source_validation": (
-                "fixed-seed 2304-window crop for proposal-compatible early stop"
+                "deterministic full-video sliding windows with 50% overlap"
             ),
+            "source_training_candidates": (
+                "EMA proposals plus GT jitter in four IoU bands, "
+                "BS-expanded proposals and true background proposals"
+            ),
+            "source_training_windows": (
+                "deterministic non-overlapping full-video coverage plus "
+                "one final boundary-aligned window"
+            ),
+            "source_epoch_sampler": (
+                "50% true background; foreground categories sampled equally"
+            ),
+            "source_positive_rule": "max source-GT IoU >= 0.1",
             "candidate_pipeline": (
                 "EMA -> alpha -> hard class-agnostic NMS; proposal set fixed"
             ),
@@ -867,15 +1290,22 @@ def main():
                 "FPN0 temporal RoI interpolation -> two Conv1d -> "
                 "class and normalized start/end offset branches"
             ),
-            "source_foreground_iou": args.foreground_iou,
             "roi_size": args.roi_size,
             "max_delta_scale": args.max_delta_scale,
             "refiner_seeds": refiner_seeds,
+            "checkpoint_selection": [
+                "minimum source-validation total loss",
+                "maximum source-validation mean delta IoU",
+                "maximum source-validation IoU>=0.5 rate gain",
+            ],
             "boundary_synthesis": {
                 "repeats": args.synthesis_repeats,
                 "boundary_sigma": args.boundary_sigma,
                 "feature_sigma": args.feature_sigma,
-                "fusion": "PLSR class-confidence weighted boundary mean",
+                "fusion_modes": [
+                    "original pseudo-class confidence",
+                    "maximum predicted class confidence",
+                ],
             },
             "excluded": (
                 "AWL, target training, target classification, re-NMS, "
@@ -883,16 +1313,8 @@ def main():
             ),
         },
         "source": {
-            "train_videos": train_samples["videos"],
-            "train_proposals": train_samples["proposals"],
-            "train_foreground_proposals": int(
-                train_samples["foreground"].sum()
-            ),
-            "validation_videos": val_samples["videos"],
-            "validation_proposals": val_samples["proposals"],
-            "validation_foreground_proposals": int(
-                val_samples["foreground"].sum()
-            ),
+            "train": summarize_source_samples(train_samples),
+            "validation": summarize_source_samples(val_samples),
             "refiner_training": training,
         },
         "target": {

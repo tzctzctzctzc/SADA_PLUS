@@ -38,6 +38,8 @@ def apply_boundary_offsets(segments, normalized_offsets, max_scale):
     """Add duration-normalized start/end offsets while keeping positive length."""
     if segments.shape != normalized_offsets.shape or segments.shape[-1] != 2:
         raise ValueError("segments and offsets must both have shape [N, 2]")
+    if not 0.0 <= max_scale < 0.5:
+        raise ValueError("max_scale must satisfy 0 <= max_scale < 0.5")
     duration = (segments[:, 1] - segments[:, 0]).clamp_min(1e-6)
     scaled = normalized_offsets.clamp(-1.0, 1.0) * max_scale
     return torch.stack((

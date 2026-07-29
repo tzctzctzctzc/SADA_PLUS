@@ -31,6 +31,14 @@ class PLRAuditTests(unittest.TestCase):
         torch.testing.assert_close(refined, torch.tensor([[3.8, 4.2]]))
         self.assertGreater(float(refined[0, 1] - refined[0, 0]), 0.0)
 
+    def test_boundary_offsets_reject_unsafe_scale(self):
+        with self.assertRaises(ValueError):
+            stage2_utils.apply_boundary_offsets(
+                torch.tensor([[2.0, 6.0]]),
+                torch.tensor([[1.0, -1.0]]),
+                0.5,
+            )
+
     def test_clip_segments_uses_fallback_for_collapsed_interval(self):
         refined = torch.tensor([[5.0, 8.0]])
         fallback = torch.tensor([[3.0, 4.0]])
