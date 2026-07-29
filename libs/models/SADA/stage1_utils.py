@@ -106,6 +106,17 @@ def build_same_selection_oracle_mask(
     )
 
 
+def select_same_selection_regression_targets(
+    pseudo_offsets, gt_offsets, mode
+):
+    """Choose the boundary target while keeping the same cleaned anchor mask."""
+    if mode not in ("clean_pseudo", "same_selection"):
+        raise ValueError("unknown same-selection target mode: {}".format(mode))
+    if pseudo_offsets.shape != gt_offsets.shape:
+        raise ValueError("pseudo and GT offsets must have the same shape")
+    return pseudo_offsets if mode == "clean_pseudo" else gt_offsets
+
+
 def validate_stage1_resume(
     checkpoint,
     current_enabled,

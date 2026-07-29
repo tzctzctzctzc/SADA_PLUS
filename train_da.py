@@ -477,9 +477,12 @@ def create_argparser():
     )
     parser.add_argument(
         '--oracle-target-regression',
-        choices=['off', 'selected', 'full', 'same_selection'],
+        choices=['off', 'selected', 'full', 'clean_pseudo', 'same_selection'],
         default='off',
-        help='diagnostic target boundary loss using target GT; not a UDA method',
+        help=(
+            'diagnostic target boundary loss; clean_pseudo uses target GT only '
+            'to remove false-positive pseudo anchors'
+        ),
     )
     parser.add_argument(
         '--oracle-target-regression-weight', type=float, default=1.0,
@@ -580,11 +583,11 @@ if __name__ == '__main__':
             'Oracle target regression levels must be unique values from 0 to 5'
         )
     if (
-        args.oracle_target_regression == 'same_selection'
+        args.oracle_target_regression in ('clean_pseudo', 'same_selection')
         and target_regression_levels != stage2_levels
     ):
         raise ValueError(
-            'Same-selection Oracle levels must equal Stage 2 proposal levels'
+            'Clean-pseudo/Same-selection levels must equal Stage 2 proposal levels'
         )
     config_dict['diagnostic'] = {
         'oracle_routing': args.oracle_routing,

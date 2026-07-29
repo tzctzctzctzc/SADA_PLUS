@@ -30,6 +30,9 @@ build_oracle_target_regression_mask = (
 )
 build_stage2_regression_mask = stage1_utils.build_stage2_regression_mask
 build_same_selection_oracle_mask = stage1_utils.build_same_selection_oracle_mask
+select_same_selection_regression_targets = (
+    stage1_utils.select_same_selection_regression_targets
+)
 context_view_on_cpu = stage1_utils.context_view_on_cpu
 interpolate_probabilities = stage1_utils.interpolate_probabilities
 shift_features = stage1_utils.shift_features
@@ -274,6 +277,18 @@ class Stage1UtilsTest(unittest.TestCase):
         levels = torch.tensor([[True, True, True, True]])
         mask = build_same_selection_oracle_mask(pseudo, gt, valid, levels)
         self.assertEqual(mask.tolist(), [[True, False, False, False]])
+
+    def test_clean_pseudo_keeps_teacher_offsets_on_the_cleaned_mask(self):
+        pseudo_offsets = torch.tensor([[[0.4, 0.6], [0.2, 0.3]]])
+        gt_offsets = torch.tensor([[[0.9, 1.1], [0.7, 0.8]]])
+        clean = select_same_selection_regression_targets(
+            pseudo_offsets, gt_offsets, "clean_pseudo"
+        )
+        oracle = select_same_selection_regression_targets(
+            pseudo_offsets, gt_offsets, "same_selection"
+        )
+        self.assertTrue(torch.equal(clean, pseudo_offsets))
+        self.assertTrue(torch.equal(oracle, gt_offsets))
 
     def test_weighted_quantile(self):
         value = weighted_quantile(

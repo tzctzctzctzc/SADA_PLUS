@@ -15,6 +15,7 @@ from .stage1_utils import (
     context_view_on_cpu,
     erode_mask,
     interpolate_probabilities,
+    select_same_selection_regression_targets,
     shift_features,
     source_action_eligible,
 )
@@ -294,7 +295,7 @@ class SADA(nn.Module):
             'oracle_target_regression', 'off'
         )
         if self.oracle_target_regression_mode not in (
-                'off', 'selected', 'full', 'same_selection'):
+                'off', 'selected', 'full', 'clean_pseudo', 'same_selection'):
             raise ValueError(
                 'unknown Oracle target regression mode: {}'.format(
                     self.oracle_target_regression_mode
@@ -334,7 +335,8 @@ class SADA(nn.Module):
             raise ValueError('Stage 2 and Oracle target regression cannot both be enabled')
         if (
             (self.stage2_enabled
-             or self.oracle_target_regression_mode == 'same_selection')
+             or self.oracle_target_regression_mode
+             in ('clean_pseudo', 'same_selection'))
             and not cfg['train_cfg'].get('ema_active', False)
         ):
             raise ValueError('Stage 2 proposal routing requires the external EMA teacher')
@@ -1776,7 +1778,9 @@ class SADA(nn.Module):
                 )
                 for level in range(self.n_levels)
             ], dim=1)
-            if self.oracle_target_regression_mode == 'same_selection':
+            target_regression_offsets = target_offsets
+            if self.oracle_target_regression_mode in (
+                    'clean_pseudo', 'same_selection'):
                 if stage2_cls_tgt is None:
                     target_reg_mask = torch.zeros_like(
                         valid_mask_tgt, dtype=torch.bool
@@ -1787,6 +1791,13 @@ class SADA(nn.Module):
                         gt_cls_tgt_full,
                         valid_mask_tgt,
                         target_level_mask,
+                    )
+                    target_regression_offsets = (
+                        select_same_selection_regression_targets(
+                            stage2_offsets_tgt,
+                            target_offsets,
+                            self.oracle_target_regression_mode,
+                        )
                     )
             else:
                 target_scores = torch.cat(
@@ -1804,7 +1815,7 @@ class SADA(nn.Module):
             if target_reg_mask.any():
                 target_reg_loss = ctr_diou_loss_1d(
                     target_predictions[target_reg_mask],
-                    target_offsets[target_reg_mask],
+                    target_regression_offsets[target_reg_mask],
                     reduction='sum',
                 ) / target_reg_positive
             else:
@@ -1814,7 +1825,8 @@ class SADA(nn.Module):
                 + self.oracle_target_regression_weight
                 * (
                     loss_reg_weight
-                    if self.oracle_target_regression_mode == 'same_selection'
+                    if self.oracle_target_regression_mode
+                    in ('clean_pseudo', 'same_selection')
                     else 1.0
                 )
                 * target_reg_loss

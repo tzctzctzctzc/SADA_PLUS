@@ -301,7 +301,7 @@ class Trainer(BaseTrainerDA):
                 (
                     self.model.stage2_enabled
                     or self.model.oracle_target_regression_mode
-                    == 'same_selection'
+                    in ('clean_pseudo', 'same_selection')
                 )
                 and curr_epoch >= self.model.stage2_start_epoch
             ):
