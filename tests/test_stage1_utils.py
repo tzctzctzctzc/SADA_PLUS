@@ -29,6 +29,9 @@ build_oracle_target_regression_mask = (
     stage1_utils.build_oracle_target_regression_mask
 )
 build_stage2_regression_mask = stage1_utils.build_stage2_regression_mask
+build_dense_stage2_regression_mask = (
+    stage1_utils.build_dense_stage2_regression_mask
+)
 build_same_selection_oracle_mask = stage1_utils.build_same_selection_oracle_mask
 select_same_selection_regression_targets = (
     stage1_utils.select_same_selection_regression_targets
@@ -269,6 +272,20 @@ class Stage1UtilsTest(unittest.TestCase):
         levels = torch.tensor([[True, False, True, True]])
         mask = build_stage2_regression_mask(pseudo_labels, valid, levels)
         self.assertEqual(mask.tolist(), [[True, False, True, False]])
+
+    def test_dense_stage2_reuses_sada_confidence_and_level_masks(self):
+        logits = torch.tensor([[
+            [2.0, -2.0],
+            [0.0, -1.0],
+            [-2.0, 1.0],
+            [3.0, -3.0],
+        ]])
+        valid = torch.tensor([[True, True, True, False]])
+        levels = torch.tensor([[True, True, False, True]])
+        mask = build_dense_stage2_regression_mask(
+            logits, valid, levels, alpha=0.6
+        )
+        self.assertEqual(mask.tolist(), [[True, False, False, False]])
 
     def test_same_selection_oracle_keeps_selected_true_actions(self):
         pseudo = torch.tensor([[[1.0], [0.0], [1.0], [1.0]]])

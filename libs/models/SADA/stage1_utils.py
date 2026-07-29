@@ -88,6 +88,20 @@ def build_stage2_regression_mask(pseudo_labels, valid_mask, enabled_levels):
     return valid_mask & enabled_levels & (pseudo_labels.sum(dim=-1) > 0)
 
 
+def build_dense_stage2_regression_mask(
+        class_logits, valid_mask, enabled_levels, alpha):
+    """Reuse SADA's high-confidence target anchors for boundary regression."""
+    if (
+        class_logits.shape[:-1] != valid_mask.shape
+        or valid_mask.shape != enabled_levels.shape
+    ):
+        raise ValueError(
+            "Dense Stage 2 classification and mask shapes are incompatible"
+        )
+    confidence = class_logits.sigmoid().max(dim=-1).values
+    return valid_mask & enabled_levels & (confidence >= alpha)
+
+
 def build_same_selection_oracle_mask(
     pseudo_labels, gt_labels, valid_mask, enabled_levels
 ):

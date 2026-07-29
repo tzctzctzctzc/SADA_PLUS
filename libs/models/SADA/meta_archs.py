@@ -7,6 +7,7 @@ from .blocks import MaskedConv1D, Scale, LayerNorm
 from .losses_aux import ctr_diou_loss_1d, sigmoid_focal_loss, ctr_giou_loss_1d
 from .models import register_meta_arch, make_backbone, make_neck, make_generator
 from .stage1_utils import (
+    build_dense_stage2_regression_mask,
     build_oracle_target_regression_mask,
     build_oracle_routing,
     build_routing_masks,
@@ -353,8 +354,12 @@ class SADA(nn.Module):
             or any(level < 0 or level >= self.n_levels for level in self.stage2_levels)
         ):
             raise ValueError('Stage 2 levels are invalid')
-        if self.stage2_routing not in ('confidence', 'alqa_same_budget'):
+        if self.stage2_routing not in (
+                'confidence', 'alqa_same_budget', 'static_dense'):
             raise ValueError('unknown Stage 2 routing mode')
+        self.stage2_uses_external_teacher = (
+            self.stage2_routing != 'static_dense'
+        )
         if self.stage2_loss_weighting not in (
                 'anchor_equal', 'proposal_equal',
                 'proposal_quality', 'proposal_joint'):
@@ -376,7 +381,7 @@ class SADA(nn.Module):
         if self.stage2_enabled and self.oracle_target_regression_mode != 'off':
             raise ValueError('Stage 2 and Oracle target regression cannot both be enabled')
         if (
-            (self.stage2_enabled
+            ((self.stage2_enabled and self.stage2_uses_external_teacher)
              or self.oracle_target_regression_mode
              in ('clean_pseudo', 'same_selection'))
             and not cfg['train_cfg'].get('ema_active', False)
@@ -694,7 +699,13 @@ class SADA(nn.Module):
         self.backbone_pl = self.backbone_source
         self.neck_pl = self.neck_source
         self.cls_head_pl = self.cls_head
-        self.reg_head_pl = self.reg_head
+        if self.stage2_enabled and self.stage2_routing == 'static_dense':
+            self.reg_head_pl = copy.deepcopy(self.reg_head)
+            self.reg_head_pl.eval()
+            for parameter in self.reg_head_pl.parameters():
+                parameter.requires_grad_(False)
+        else:
+            self.reg_head_pl = self.reg_head
         
         
         # Related to the classification loss
@@ -807,6 +818,18 @@ class SADA(nn.Module):
             pred_fc_domain_frame = self.disc_dom_conditional_adv[level](feat_fc_domain_frame)
                 
         return pred_fc_domain_frame
+
+    @torch.no_grad()
+    def initialize_static_stage2_head(self):
+        """Snapshot the localization head when dense Stage 2 becomes active."""
+        if not (
+            self.stage2_enabled and self.stage2_routing == 'static_dense'
+        ):
+            return
+        self.reg_head_pl.load_state_dict(self.reg_head.state_dict())
+        self.reg_head_pl.eval()
+        for parameter in self.reg_head_pl.parameters():
+            parameter.requires_grad_(False)
 
     @torch.no_grad()
     def _stage1_shift_routing(self, video_list_tgt, points, rng=None):
@@ -1417,7 +1440,16 @@ class SADA(nn.Module):
         out_actionness = [torch.cat((out_actionness_src[i], out_actionness_tgt[i]), dim=0) for i in range(len(out_offsets_src))]
 
         # Generate the regression offsets of the frozen pseudo-label network (frozen in the case of static, or changing in the case of dynamic)
-        out_offsets_tgt_pl, out_actionness_tgt_pl = self.reg_head_pl(fpn_feats_tgt, fpn_masks_tgt)
+        if self.stage2_enabled and self.stage2_routing == 'static_dense':
+            self.reg_head_pl.eval()
+            with torch.no_grad():
+                out_offsets_tgt_pl, out_actionness_tgt_pl = self.reg_head_pl(
+                    fpn_feats_tgt, fpn_masks_tgt
+                )
+        else:
+            out_offsets_tgt_pl, out_actionness_tgt_pl = self.reg_head_pl(
+                fpn_feats_tgt, fpn_masks_tgt
+            )
 
         # ------------------------------------------------------------
         # permute the outputs
@@ -1455,6 +1487,7 @@ class SADA(nn.Module):
             stage2_pseudo_cls, stage2_pseudo_offsets = None, None
             stage2_pseudo_assignments = None
             stage2_proposal_weights = None
+            stage2_dense_pseudo_offsets = None
             stage2_proposal_count = 0
             stage2_pre_nms_budget = 0
             stage2_rescued_pre_nms = 0
@@ -1507,6 +1540,13 @@ class SADA(nn.Module):
                     int(item.get('rescued_post_nms', 0))
                     for item in stage2_pseudo_targets
                 )
+            elif (
+                self.stage2_enabled
+                and self.stage2_routing == 'static_dense'
+                and mode == 'train'
+                and curr_epoch >= self.stage2_start_epoch
+            ):
+                stage2_dense_pseudo_offsets = out_offsets_tgt_pl
             
             
             # For debugging ...
@@ -1561,6 +1601,7 @@ class SADA(nn.Module):
                 stage2_pseudo_assignments=stage2_pseudo_assignments,
                 stage2_proposal_weights=stage2_proposal_weights,
                 stage2_proposal_count=stage2_proposal_count,
+                stage2_dense_pseudo_offsets=stage2_dense_pseudo_offsets,
             )
             losses.update({
                 'stage2_pre_nms_budget': torch.tensor(
@@ -1837,7 +1878,8 @@ class SADA(nn.Module):
             stage2_pseudo_offsets=None,
             stage2_pseudo_assignments=None,
             stage2_proposal_weights=None,
-            stage2_proposal_count=0,):
+            stage2_proposal_count=0,
+            stage2_dense_pseudo_offsets=None,):
         bs = int(fpn_masks[0].shape[0] / 2)
         
         # gt_cls_labels is a list of 2B elements, each of shape FT x C
@@ -2104,10 +2146,58 @@ class SADA(nn.Module):
         stage2_anchor_amplification = 0 * decoded_offsets.sum()
         stage2_weight_ess = 0 * decoded_offsets.sum()
         stage2_weight_mean = 0 * decoded_offsets.sum()
+        stage2_offset_l1 = 0 * decoded_offsets.sum()
         stage2_level_positive = [
             0 * decoded_offsets.sum() for _ in range(self.n_levels)
         ]
-        if self.stage2_enabled and stage2_cls_tgt is not None:
+        if (
+            self.stage2_enabled
+            and self.stage2_routing == 'static_dense'
+            and stage2_dense_pseudo_offsets is not None
+        ):
+            stage2_predictions = self.decode_offset(
+                out_offsets_tgt, None, None, mode=mode
+            )
+            stage2_targets = self.decode_offset(
+                stage2_dense_pseudo_offsets, None, None, mode=mode
+            ).detach()
+            stage2_level_masks = [
+                torch.full_like(
+                    fpn_masks_tgt[level],
+                    level in self.stage2_levels,
+                    dtype=torch.bool,
+                )
+                for level in range(self.n_levels)
+            ]
+            stage2_level_mask = torch.cat(stage2_level_masks, dim=1)
+            stage2_reg_mask = build_dense_stage2_regression_mask(
+                torch.cat(out_cls_logits_tgt, dim=1),
+                valid_mask_tgt,
+                stage2_level_mask,
+                self.stage2_alpha,
+            )
+            stage2_reg_positive = stage2_reg_mask.sum().float()
+            stage2_active_batch = torch.ones_like(stage2_reg_positive)
+            offset = 0
+            for level, level_mask in enumerate(stage2_level_masks):
+                next_offset = offset + level_mask.shape[1]
+                stage2_level_positive[level] = stage2_reg_mask[
+                    :, offset:next_offset
+                ].sum().float()
+                offset = next_offset
+            if stage2_reg_mask.any():
+                stage2_reg_loss = ctr_diou_loss_1d(
+                    stage2_predictions[stage2_reg_mask],
+                    stage2_targets[stage2_reg_mask],
+                    reduction='sum',
+                ) / stage2_reg_positive
+                stage2_offset_l1 = (
+                    stage2_predictions[stage2_reg_mask]
+                    - stage2_targets[stage2_reg_mask]
+                ).abs().mean()
+            else:
+                stage2_reg_loss = 0 * stage2_predictions.sum()
+        elif self.stage2_enabled and stage2_cls_tgt is not None:
             stage2_predictions = self.decode_offset(
                 out_offsets_tgt, None, None, mode=mode
             )
@@ -2178,6 +2268,13 @@ class SADA(nn.Module):
                     )
             else:
                 stage2_reg_loss = 0 * stage2_predictions.sum()
+        if (
+            self.stage2_enabled
+            and (
+                stage2_dense_pseudo_offsets is not None
+                or stage2_cls_tgt is not None
+            )
+        ):
             stage2_reg_ratio = (
                 stage2_reg_loss.detach() / reg_loss.detach().clamp_min(1e-8)
             )
@@ -2201,6 +2298,7 @@ class SADA(nn.Module):
                    'stage2_anchor_amplification': stage2_anchor_amplification,
                    'stage2_weight_ess': stage2_weight_ess,
                    'stage2_weight_mean': stage2_weight_mean,
+                   'stage2_pseudo_offset_l1': stage2_offset_l1,
                    'downstream_loss': downstream_loss}
         for level, count in enumerate(stage2_level_positive):
             losses['stage2_pseudo_l{}_positive'.format(level)] = count

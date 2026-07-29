@@ -365,6 +365,12 @@ class Trainer(BaseTrainerDA):
         """Training the model for one epoch"""
         # switch to train mode
         self.model.train()
+        if (
+            self.model.stage2_enabled
+            and self.model.stage2_routing == 'static_dense'
+            and curr_epoch == self.model.stage2_start_epoch
+        ):
+            self.model.initialize_static_stage2_head()
         self.stage1_epoch_summary = {}
         
         # Create iterator for the source and target data loaders
@@ -390,7 +396,10 @@ class Trainer(BaseTrainerDA):
             stage2_pseudo_targets = None
             if (
                 (
-                    self.model.stage2_enabled
+                    (
+                        self.model.stage2_enabled
+                        and self.model.stage2_uses_external_teacher
+                    )
                     or self.model.oracle_target_regression_mode
                     in ('clean_pseudo', 'same_selection')
                 )

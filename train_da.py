@@ -211,7 +211,7 @@ def main(cfg, resume, project_name='sada', debug=False):
     
     generator_exclusions = [
         'disc_dom_adv', 'disc_dom_conditional_adv',
-        'learnable_embeddings', 'alqa_quality_heads',
+        'learnable_embeddings', 'alqa_quality_heads', 'reg_head_pl',
     ]
     optimizer_gen_source = make_optimizer(
         model, cfg['opt'], cfg['opt']['learning_rate'],
@@ -517,8 +517,8 @@ def create_argparser():
         help='independent perturbation RNG seed',
     )
     parser.add_argument(
-        '--stage2', choices=['off', 'pseudo', 'alqa'], default='off',
-        help='EMA proposal pseudo-regression after warm-up',
+        '--stage2', choices=['off', 'pseudo', 'alqa', 'static'], default='off',
+        help='target pseudo-boundary regression after warm-up',
     )
     parser.add_argument(
         '--stage2-start-epoch', type=int, default=5,
@@ -635,7 +635,8 @@ if __name__ == '__main__':
         'enabled': args.stage2 != 'off',
         'routing': (
             'alqa_same_budget'
-            if args.stage2 == 'alqa' else 'confidence'
+            if args.stage2 == 'alqa'
+            else ('static_dense' if args.stage2 == 'static' else 'confidence')
         ),
         'start_epoch': args.stage2_start_epoch,
         'weight': args.stage2_weight,
@@ -657,15 +658,32 @@ if __name__ == '__main__':
         'protocol': (
             'alqa_pre_alpha_same_budget_v1'
             if args.stage2 == 'alqa'
-            else 'confidence_fixed_routing_loss_weighting_v1'
+            else (
+                'sada_static_dense_localization_v1'
+                if args.stage2 == 'static'
+                else 'confidence_fixed_routing_loss_weighting_v1'
+            )
         ),
-        'quality_head_mode': 'source_gt_calibrated_then_frozen',
-        'selection_budget': 'per_video_per_fpn_original_alpha_count',
-        'nms': 'hard_class_agnostic_ranked_by_classification_confidence',
+        'quality_head_mode': (
+            'none'
+            if args.stage2 == 'static'
+            else 'source_gt_calibrated_then_frozen'
+        ),
+        'selection_budget': (
+            'original_sada_high_confidence_dense_anchors'
+            if args.stage2 == 'static'
+            else 'per_video_per_fpn_original_alpha_count'
+        ),
+        'nms': (
+            'none' if args.stage2 == 'static'
+            else 'hard_class_agnostic_ranked_by_classification_confidence'
+        ),
         'target_gt_usage': 'none',
     }
     if args.stage2 == 'off' and args.stage2_loss_weighting != 'anchor_equal':
         raise ValueError('Stage 2 loss weighting requires Stage 2')
+    if args.stage2 == 'static' and args.stage2_loss_weighting != 'anchor_equal':
+        raise ValueError('Static dense Stage 2 uses anchor-equal regression')
     if (
         (
             args.stage2 == 'alqa'
