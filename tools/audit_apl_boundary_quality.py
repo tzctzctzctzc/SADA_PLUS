@@ -824,7 +824,8 @@ def assert_original_baseline(expected, actual):
 
 
 def early_proposal_record(
-        segment, label, score, level, gt, gt_label, video_key):
+        segment, label, score, classification_score, level, temporal_index,
+        gt, gt_label, video_key):
     if gt.numel():
         overlap = pairwise_iou(segment[None], gt)[0]
         max_iou, matched_index = overlap.max(dim=0)
@@ -843,7 +844,10 @@ def early_proposal_record(
         matched_gt = []
     return {
         "score": float(score),
+        "classification_score": float(classification_score),
         "level": int(level),
+        "temporal_index": int(temporal_index),
+        "video_key": int(video_key),
         "max_iou": max_iou,
         "foreground": max_iou >= 0.5,
         "class_correct": class_correct,
@@ -997,7 +1001,9 @@ def collect_early_quality_records(
                         target["segments"][proposal_index],
                         target["labels"][proposal_index],
                         target["scores"][proposal_index],
+                        target["classification_scores"][proposal_index],
                         target["levels"][proposal_index],
+                        target["indices"][proposal_index],
                         gt_segments[batch_index],
                         gt_labels[batch_index],
                         video_key,
@@ -1038,7 +1044,9 @@ def collect_early_quality_records(
                         target["segments"][proposal_index],
                         target["labels"][proposal_index],
                         target["scores"][proposal_index],
+                        target["classification_scores"][proposal_index],
                         target["levels"][proposal_index],
+                        target["indices"][proposal_index],
                         gt_segments[batch_index],
                         gt_labels[batch_index],
                         video_key,
@@ -1069,6 +1077,40 @@ def collect_early_quality_records(
     pre_count = {name: len(value) for name, value in pre_records.items()}
     if len(set(pre_count.values())) != 1:
         raise RuntimeError("pre-alpha per-level matched budget drifted")
+    baseline_keys = {
+        (
+            record["video_key"],
+            record["level"],
+            record["temporal_index"],
+        )
+        for record in pre_records["confidence"]
+    }
+    selection_change = {}
+    for name, records in pre_records.items():
+        keys = {
+            (
+                record["video_key"],
+                record["level"],
+                record["temporal_index"],
+            )
+            for record in records
+        }
+        added = keys - baseline_keys
+        selection_change[name] = {
+            "selected": len(keys),
+            "shared_with_confidence": len(keys & baseline_keys),
+            "replaced_vs_confidence": len(added),
+            "replacement_rate": ratio(len(added), len(keys)),
+            "rescued_below_alpha": sum(
+                (
+                    record["video_key"],
+                    record["level"],
+                    record["temporal_index"],
+                ) in added
+                and record["classification_score"] < model.stage2_alpha
+                for record in records
+            ),
+        }
     common_proposal_count = min(
         len(value) for value in post_records.values()
     )
@@ -1087,6 +1129,7 @@ def collect_early_quality_records(
             )
             for name, records in pre_records.items()
         },
+        "pre_nms_selection_change": selection_change,
         "post_nms_natural_budget": {
             name: {
                 "proposal": summarize_early_proposals(
