@@ -12,6 +12,35 @@ SPEC.loader.exec_module(stage2_utils)
 
 
 class Stage2UtilsTest(unittest.TestCase):
+    def test_alqa_same_budget_can_rescue_below_alpha_candidate(self):
+        confidence = torch.tensor([0.9, 0.8, 0.5, 0.4])
+        tiou = torch.tensor([0.2, 0.3, 0.95, 0.1])
+        tnd = torch.zeros(4)
+        score = stage2_utils.alqa_joint_score(
+            confidence, tiou, tnd
+        )
+        indices, budget = stage2_utils.select_same_budget_alqa(
+            confidence,
+            score,
+            torch.ones(4, dtype=torch.bool),
+            alpha=0.6,
+        )
+        self.assertEqual(budget, 2)
+        self.assertEqual(indices.tolist(), [2, 1])
+        self.assertEqual(
+            int((confidence[indices] < 0.6).sum()), 1
+        )
+
+    def test_alqa_same_budget_respects_usable_mask(self):
+        indices, budget = stage2_utils.select_same_budget_alqa(
+            torch.tensor([0.9, 0.8, 0.7]),
+            torch.tensor([0.1, 0.9, 0.8]),
+            torch.tensor([True, False, True]),
+            alpha=0.6,
+        )
+        self.assertEqual(budget, 2)
+        self.assertEqual(indices.tolist(), [2, 0])
+
     def test_npl_ambiguity_detects_boundary_outlier(self):
         segments = torch.tensor([
             [10.0, 30.0],

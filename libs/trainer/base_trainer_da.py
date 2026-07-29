@@ -411,6 +411,12 @@ class BaseTrainerDA:
                 'tau_bg': self.model.stage1_tau_bg,
                 'calibrated': self.model.stage1_calibrated,
             }
+        if self.model.stage2_routing == 'alqa_same_budget':
+            state['alqa'] = (
+                self.alqa_calibration
+                if self.alqa_calibration is not None
+                else {'calibrated': True}
+            )
         return state
 
 

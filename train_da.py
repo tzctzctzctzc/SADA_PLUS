@@ -57,6 +57,23 @@ def sync_configs(from_cfg, to_cfg):
             sync_configs(from_cfg[key], to_cfg[key])
 
 
+def load_model_state_for_stage2(model, state_dict, allow_missing_alqa):
+    result = model.load_state_dict(
+        state_dict, strict=not allow_missing_alqa
+    )
+    if allow_missing_alqa:
+        unexpected = list(result.unexpected_keys)
+        invalid_missing = [
+            key for key in result.missing_keys
+            if not key.startswith('alqa_quality_heads.')
+        ]
+        if unexpected or invalid_missing:
+            raise RuntimeError(
+                'checkpoint mismatch outside ALQA heads: missing={}, '
+                'unexpected={}'.format(invalid_missing, unexpected)
+            )
+
+
 ################################################################################
 def main(cfg, resume, project_name='sada', debug=False):
     """main function that handles training / inference"""
@@ -192,12 +209,22 @@ def main(cfg, resume, project_name='sada', debug=False):
     
     num_iters_epoch = max(len(train_loader_src), len(train_loader_tgt))
     
-    optimizer_gen_source = make_optimizer(model, cfg['opt'], cfg['opt']['learning_rate'], exclude_params = ['disc_dom_adv', 'disc_dom_conditional_adv', 'learnable_embeddings'])
+    generator_exclusions = [
+        'disc_dom_adv', 'disc_dom_conditional_adv',
+        'learnable_embeddings', 'alqa_quality_heads',
+    ]
+    optimizer_gen_source = make_optimizer(
+        model, cfg['opt'], cfg['opt']['learning_rate'],
+        exclude_params=generator_exclusions,
+    )
     scheduler_gen_source = make_scheduler(optimizer_gen_source, cfg['opt'], num_iters_epoch)
 
 
     # Create an optimizer for the source alignment phase
-    optimizer_gen_source_alignment = make_optimizer(model, cfg['opt'], cfg['opt']['learning_rate'], exclude_params = ['disc_dom_adv', 'disc_dom_conditional_adv', 'learnable_embeddings'])
+    optimizer_gen_source_alignment = make_optimizer(
+        model, cfg['opt'], cfg['opt']['learning_rate'],
+        exclude_params=generator_exclusions,
+    )
     scheduler_gen_source_alignment = make_scheduler(optimizer_gen_source_alignment, cfg['opt'], num_iters_epoch)
 
     optimizer_disc = make_optimizer(model, cfg['opt'], cfg['opt']['disc_learning_rate'], include_params = ['disc_dom_adv', 'disc_dom_conditional_adv', 'learnable_embeddings'])
@@ -245,7 +272,43 @@ def main(cfg, resume, project_name='sada', debug=False):
                 current_alpha=model.stage1_alpha,
                 calibration_epoch=max(1, model.warmup_adv),
             )
-            model.load_state_dict(checkpoint['state_dict'])
+            alqa_enabled = (
+                model.stage2_routing == 'alqa_same_budget'
+            )
+            checkpoint_alqa = checkpoint.get('alqa')
+            needs_alqa_calibration = (
+                alqa_enabled
+                and not (
+                    checkpoint_alqa
+                    and checkpoint_alqa.get('calibrated', False)
+                )
+            )
+            if needs_alqa_calibration:
+                if checkpoint['epoch'] != model.stage2_start_epoch - 1:
+                    raise ValueError(
+                        'uncalibrated ALQA must branch from the epoch '
+                        'immediately before Stage 2 activation'
+                    )
+                if not args.reset_ema_from_student:
+                    raise ValueError(
+                        'first ALQA branch must reset EMA from the shared '
+                        'student warm-up checkpoint'
+                    )
+            elif alqa_enabled and args.reset_ema_from_student:
+                raise ValueError(
+                    'do not reset EMA when resuming a calibrated ALQA run'
+                )
+            load_model_state_for_stage2(
+                model,
+                checkpoint['state_dict'],
+                allow_missing_alqa=needs_alqa_calibration,
+            )
+            cfg.config['stage2']['alqa_calibrated'] = (
+                alqa_enabled and not needs_alqa_calibration
+            )
+            cfg.config['stage2']['alqa_calibration'] = (
+                checkpoint_alqa if checkpoint_alqa else None
+            )
             if stage1 is not None:
                 legacy_rng = stage1.get('rng_state')
                 train_rng_state = stage1.get('train_rng_state', legacy_rng)
@@ -268,7 +331,11 @@ def main(cfg, resume, project_name='sada', debug=False):
                 if args.reset_ema_from_student:
                     model_ema.set(model)
                 else:
-                    model_ema.module.load_state_dict(checkpoint['ema_state_dict'])
+                    load_model_state_for_stage2(
+                        model_ema.module,
+                        checkpoint['ema_state_dict'],
+                        allow_missing_alqa=needs_alqa_calibration,
+                    )
             
             # also load the optimizer / scheduler if necessary
             optimizer_gen_source.load_state_dict(checkpoint['optimizer_gen_source'])
@@ -452,7 +519,7 @@ def create_argparser():
         help='independent perturbation RNG seed',
     )
     parser.add_argument(
-        '--stage2', choices=['off', 'pseudo'], default='off',
+        '--stage2', choices=['off', 'pseudo', 'alqa'], default='off',
         help='EMA proposal pseudo-regression after warm-up',
     )
     parser.add_argument(
@@ -466,6 +533,26 @@ def create_argparser():
     parser.add_argument(
         '--stage2-levels', default='0,1,2',
         help='comma-separated FPN levels used for Stage 2 proposals and loss',
+    )
+    parser.add_argument(
+        '--alqa-head-seeds', default='123,456,789',
+        help='source-only ALQA quality-head ensemble seeds',
+    )
+    parser.add_argument(
+        '--alqa-calibration-epochs', type=int, default=50,
+        help='maximum source-only quality-head calibration epochs',
+    )
+    parser.add_argument(
+        '--alqa-calibration-patience', type=int, default=7,
+        help='source-validation patience for ALQA head calibration',
+    )
+    parser.add_argument(
+        '--alqa-calibration-learning-rate', type=float, default=0.001,
+        help='learning rate used only for frozen ALQA head calibration',
+    )
+    parser.add_argument(
+        '--alqa-calibration-seed', type=int, default=20260730,
+        help='source crop seed used only for ALQA calibration',
     )
     parser.add_argument(
         '--reset-ema-from-student', action='store_true',
@@ -538,11 +625,43 @@ if __name__ == '__main__':
     ):
         raise ValueError('Stage 2 levels must be unique values from 0 to 5')
     config_dict['stage2'] = {
-        'enabled': args.stage2 == 'pseudo',
+        'enabled': args.stage2 != 'off',
+        'routing': (
+            'alqa_same_budget'
+            if args.stage2 == 'alqa' else 'confidence'
+        ),
         'start_epoch': args.stage2_start_epoch,
         'weight': args.stage2_weight,
         'levels': stage2_levels,
+        'alqa_head_seeds': [
+            int(value.strip())
+            for value in args.alqa_head_seeds.split(',')
+            if value.strip()
+        ],
+        'alqa_epsilon': 1e-6,
+        'alqa_calibration_epochs': args.alqa_calibration_epochs,
+        'alqa_calibration_patience': args.alqa_calibration_patience,
+        'alqa_calibration_learning_rate': (
+            args.alqa_calibration_learning_rate
+        ),
+        'alqa_calibration_seed': args.alqa_calibration_seed,
+        'alqa_calibrated': False,
+        'protocol': 'alqa_pre_alpha_same_budget_v1',
+        'quality_head_mode': 'source_gt_calibrated_then_frozen',
+        'selection_budget': 'per_video_per_fpn_original_alpha_count',
+        'nms': 'hard_class_agnostic_ranked_by_classification_confidence',
+        'target_gt_usage': 'none',
     }
+    if (
+        args.stage2 == 'alqa'
+        and (
+            not config_dict['stage2']['alqa_head_seeds']
+            or args.alqa_calibration_epochs < 1
+            or args.alqa_calibration_patience < 1
+            or args.alqa_calibration_learning_rate <= 0
+        )
+    ):
+        raise ValueError('ALQA calibration arguments are invalid')
     if (
         args.stage1 != 'off'
         and (

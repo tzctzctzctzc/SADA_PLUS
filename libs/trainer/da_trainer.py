@@ -6,6 +6,7 @@ import json
 import random
 import subprocess
 from pathlib import Path
+import numpy as np
 
 from .base_trainer_da import BaseTrainerDA
 from libs.datasets import truncate_feats
@@ -15,6 +16,10 @@ from libs.models.SADA.stage1_calibration import (
     load_calibration_artifact,
     model_state_sha256,
     save_calibration_artifact,
+)
+from libs.models.SADA.stage2_alqa import (
+    calibrate_quality_heads,
+    collect_source_quality_sequences,
 )
 
 def move_to_device(video_list, device):
@@ -83,6 +88,92 @@ class Trainer(BaseTrainerDA):
             self.model.stage1_tau_act = calibrated['tau_act']
             self.model.stage1_tau_bg = calibrated['tau_bg']
             self.model.stage1_calibrated = True
+        self.alqa_calibration = None
+        if self.model.stage2_routing == 'alqa_same_budget':
+            stage2_cfg = self.cfg.get('stage2', {})
+            if not stage2_cfg.get('alqa_calibrated', False):
+                self._calibrate_alqa_heads()
+            else:
+                self.alqa_calibration = stage2_cfg.get('alqa_calibration')
+            self._freeze_alqa_heads()
+
+    def _freeze_alqa_heads(self):
+        for container in (
+                self.model.alqa_quality_heads,
+                self.model_ema.module.alqa_quality_heads):
+            container.eval()
+            for parameter in container.parameters():
+                parameter.requires_grad_(False)
+
+    def _calibrate_alqa_heads(self):
+        stage2_cfg = self.cfg.get('stage2', {})
+        python_state = random.getstate()
+        numpy_state = np.random.get_state()
+        torch_state = torch.get_rng_state()
+        cuda_states = (
+            torch.cuda.get_rng_state_all()
+            if torch.cuda.is_available() else None
+        )
+        teacher = self.model_ema.module
+        teacher.eval()
+        try:
+            train_sequences, train_positive = (
+                collect_source_quality_sequences(
+                    teacher,
+                    self.train_loader_src.dataset,
+                    self.model.device,
+                    self.model.stage2_levels,
+                    self.cfg['loader']['batch_size'],
+                    stage2_cfg.get('alqa_calibration_seed', 20260730),
+                    'train',
+                )
+            )
+            val_sequences, val_positive = (
+                collect_source_quality_sequences(
+                    teacher,
+                    self.val_loader_src.dataset,
+                    self.model.device,
+                    self.model.stage2_levels,
+                    self.cfg['loader']['batch_size'],
+                    stage2_cfg.get('alqa_calibration_seed', 20260730),
+                    'validation',
+                )
+            )
+            head_metrics = calibrate_quality_heads(
+                teacher.alqa_quality_heads,
+                train_sequences,
+                val_sequences,
+                self.model.device,
+                self.model.stage2_alqa_head_seeds,
+                stage2_cfg.get('alqa_calibration_epochs', 50),
+                stage2_cfg.get('alqa_calibration_patience', 7),
+                stage2_cfg.get(
+                    'alqa_calibration_learning_rate', 1e-3
+                ),
+            )
+            self.model.alqa_quality_heads.load_state_dict(
+                teacher.alqa_quality_heads.state_dict()
+            )
+            self.alqa_calibration = {
+                'calibrated': True,
+                'source_gt_only': True,
+                'detector_frozen': True,
+                'head_seeds': list(self.model.stage2_alqa_head_seeds),
+                'train_positive_anchors': train_positive,
+                'validation_positive_anchors': val_positive,
+                'heads': head_metrics,
+            }
+            artifact = Path(self.cfg.save_dir) / 'alqa_calibration.json'
+            artifact.write_text(
+                json.dumps(self.alqa_calibration, indent=2),
+                encoding='utf-8',
+            )
+        finally:
+            random.setstate(python_state)
+            np.random.set_state(numpy_state)
+            torch.set_rng_state(torch_state)
+            if cuda_states is not None:
+                torch.cuda.set_rng_state_all(cuda_states)
 
     def _stage1_artifact_metadata(self, include_model=False):
         stage1_cfg = self.cfg.get('stage1', {})

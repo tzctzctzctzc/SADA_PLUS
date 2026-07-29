@@ -3,6 +3,24 @@ import math
 import torch
 
 
+def alqa_joint_score(
+        confidence, predicted_tiou, predicted_tnd, epsilon=1e-6):
+    return confidence * (predicted_tiou - predicted_tnd).clamp_min(epsilon)
+
+
+def select_same_budget_alqa(
+        confidence, joint_score, usable, alpha):
+    """Replace the original alpha set without changing its dense budget."""
+    candidates = torch.where(usable)[0]
+    budget = int((usable & (confidence >= alpha)).sum())
+    if budget == 0:
+        return candidates[:0], 0
+    order = torch.argsort(
+        joint_score[candidates], descending=True, stable=True
+    )
+    return candidates[order[:budget]], budget
+
+
 def temporal_roi_interpolate(
         features, segment, point_centers, valid_length, output_size):
     """Linearly sample a CxT feature map inside one temporal segment."""

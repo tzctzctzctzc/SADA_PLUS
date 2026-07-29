@@ -23,6 +23,13 @@ from .stage2_utils import (
     match_post_nms_to_pre_nms,
     npl_boundary_ambiguity,
 )
+from .stage2_alqa import (
+    ALQAQualityHead,
+    alqa_joint_score,
+    ensemble_quality_maps,
+    regression_hidden_and_offsets,
+    select_same_budget_alqa,
+)
 from libs.utils import batched_nms
 import einops
 import copy
@@ -326,6 +333,13 @@ class SADA(nn.Module):
         self.stage2_start_epoch = int(stage2_cfg.get('start_epoch', 5))
         self.stage2_weight = float(stage2_cfg.get('weight', 1.0))
         self.stage2_levels = stage2_cfg.get('levels', [0, 1, 2])
+        self.stage2_routing = stage2_cfg.get('routing', 'confidence')
+        self.stage2_alqa_head_seeds = stage2_cfg.get(
+            'alqa_head_seeds', [123, 456, 789]
+        )
+        self.stage2_alqa_epsilon = float(
+            stage2_cfg.get('alqa_epsilon', 1e-6)
+        )
         self.stage2_alpha = cfg['model'].get('pl_threshold', 0.7)
         if self.stage2_start_epoch < 1 or self.stage2_weight < 0:
             raise ValueError('Stage 2 start epoch and weight are invalid')
@@ -335,6 +349,17 @@ class SADA(nn.Module):
             or any(level < 0 or level >= self.n_levels for level in self.stage2_levels)
         ):
             raise ValueError('Stage 2 levels are invalid')
+        if self.stage2_routing not in ('confidence', 'alqa_same_budget'):
+            raise ValueError('unknown Stage 2 routing mode')
+        if (
+            self.stage2_routing == 'alqa_same_budget'
+            and (
+                not self.stage2_enabled
+                or not self.stage2_alqa_head_seeds
+                or self.stage2_alqa_epsilon <= 0
+            )
+        ):
+            raise ValueError('ALQA Stage 2 configuration is invalid')
         if self.stage2_enabled and self.oracle_target_regression_mode != 'off':
             raise ValueError('Stage 2 and Oracle target regression cannot both be enabled')
         if (
@@ -584,6 +609,14 @@ class SADA(nn.Module):
 
         self.cls_head_target = self.cls_head
         self.reg_head_target = self.reg_head
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(3407)
+            self.alqa_quality_heads = nn.ModuleList([
+                ALQAQualityHead(head_dim)
+                for _ in self.stage2_alqa_head_seeds
+            ]) if (
+                self.stage2_routing == 'alqa_same_budget'
+            ) else nn.ModuleList()
 
         # maintain an EMA of #foreground to stabilize the loss normalizer
         # useful for small mini-batch training
@@ -1053,22 +1086,31 @@ class SADA(nn.Module):
         feats, backbone_masks, _ = self.backbone_target(inputs, masks)
         fpn_feats, fpn_masks = self.neck_target(feats, backbone_masks)
         cls_logits, _ = self.cls_head_target(fpn_feats, fpn_masks)
-        offsets, _ = self.reg_head_target(fpn_feats, fpn_masks)
+        if self.stage2_routing == 'alqa_same_budget':
+            hidden, offsets = regression_hidden_and_offsets(
+                self.reg_head_target, fpn_feats, fpn_masks
+            )
+            quality_maps = ensemble_quality_maps(
+                self.alqa_quality_heads, hidden
+            )
+        else:
+            offsets, _ = self.reg_head_target(fpn_feats, fpn_masks)
+            quality_maps = None
         points = self.point_generator(fpn_feats)
         targets, pre_nms_targets = [], []
         for batch_idx in range(len(video_list)):
             all_segments, all_scores, all_labels = [], [], []
+            all_classification_scores = []
             all_levels, all_indices = [], []
             all_ambiguity, all_neighbor_counts = [], []
+            dense_budget = 0
+            rescued_pre_nms = 0
             for level in self.stage2_levels:
                 probabilities = cls_logits[level][batch_idx].transpose(0, 1).sigmoid()
                 scores, labels = probabilities.max(dim=-1)
                 valid = fpn_masks[level][batch_idx, 0]
-                selected = valid & (scores >= self.stage2_alpha)
-                if not selected.any():
-                    continue
-                point_grid = points[level][selected]
-                level_offsets = offsets[level][batch_idx].transpose(0, 1)[selected]
+                point_grid = points[level]
+                level_offsets = offsets[level][batch_idx].transpose(0, 1)
                 segments = torch.stack((
                     point_grid[:, 0] - level_offsets[:, 0] * point_grid[:, 3],
                     point_grid[:, 0] + level_offsets[:, 1] * point_grid[:, 3],
@@ -1077,12 +1119,36 @@ class SADA(nn.Module):
                 segments[:, 0].clamp_(min=0.0, max=valid_length)
                 segments[:, 1].clamp_(min=0.0, max=valid_length)
                 duration = segments[:, 1] - segments[:, 0]
-                kept = torch.isfinite(segments).all(dim=-1) & (
-                    duration > self.test_duration_thresh
+                usable = (
+                    valid
+                    & torch.isfinite(segments).all(dim=-1)
+                    & (duration > self.test_duration_thresh)
                 )
-                all_segments.append(segments[kept])
-                all_scores.append(scores[selected][kept])
-                all_labels.append(labels[selected][kept])
+                if self.stage2_routing == 'alqa_same_budget':
+                    predicted = quality_maps[level][batch_idx]
+                    joint_score = alqa_joint_score(
+                        scores, predicted[0], predicted[1],
+                        self.stage2_alqa_epsilon,
+                    )
+                    selected_indices, level_budget = select_same_budget_alqa(
+                        scores, joint_score, usable, self.stage2_alpha
+                    )
+                else:
+                    selected_indices = torch.where(
+                        usable & (scores >= self.stage2_alpha)
+                    )[0]
+                    level_budget = int(selected_indices.numel())
+                if not selected_indices.numel():
+                    continue
+                dense_budget += level_budget
+                selected_scores = scores[selected_indices]
+                rescued_pre_nms += int(
+                    (selected_scores < self.stage2_alpha).sum()
+                )
+                all_segments.append(segments[selected_indices])
+                all_scores.append(selected_scores)
+                all_classification_scores.append(selected_scores)
+                all_labels.append(labels[selected_indices])
                 if return_npl_details:
                     dense_points = points[level]
                     dense_offsets = offsets[level][
@@ -1108,7 +1174,6 @@ class SADA(nn.Module):
                     ambiguity, neighbor_counts = npl_boundary_ambiguity(
                         dense_segments, dense_valid, npl_neighbor_radii
                     )
-                    selected_indices = torch.where(selected)[0][kept]
                     all_levels.append(torch.full_like(selected_indices, level))
                     all_indices.append(selected_indices)
                     all_ambiguity.append(ambiguity[selected_indices])
@@ -1119,6 +1184,9 @@ class SADA(nn.Module):
                     'segments': torch.empty((0, 2), device=self.device),
                     'labels': torch.empty((0,), dtype=torch.long, device=self.device),
                     'scores': torch.empty((0,), device=self.device),
+                    'pre_nms_budget': 0,
+                    'rescued_pre_nms': 0,
+                    'rescued_post_nms': 0,
                 }
                 if return_npl_details:
                     empty_target.update({
@@ -1142,6 +1210,9 @@ class SADA(nn.Module):
                 continue
             segments = torch.cat(all_segments).detach().cpu()
             scores = torch.cat(all_scores).detach().cpu()
+            classification_scores = torch.cat(
+                all_classification_scores
+            ).detach().cpu()
             labels = torch.cat(all_labels).detach().cpu()
             details = {}
             if return_npl_details:
@@ -1166,25 +1237,43 @@ class SADA(nn.Module):
             pre_segments, pre_scores, pre_labels = segments, scores, labels
             segments, scores, labels = batched_nms(
                 segments, scores, labels,
-                self.test_iou_threshold, self.test_min_score, self.test_max_seg_num,
+                self.test_iou_threshold,
+                (
+                    0.0
+                    if self.stage2_routing == 'alqa_same_budget'
+                    else self.test_min_score
+                ),
+                self.test_max_seg_num,
                 use_soft_nms=False,
                 multiclass=False,
                 sigma=self.test_nms_sigma,
                 voting_thresh=0.0,
             )
-            keep = scores >= self.stage2_alpha
+            keep = (
+                torch.ones_like(scores, dtype=torch.bool)
+                if self.stage2_routing == 'alqa_same_budget'
+                else scores >= self.stage2_alpha
+            )
+            post_source_indices = match_post_nms_to_pre_nms(
+                segments[keep], scores[keep], labels[keep],
+                pre_segments, pre_scores, pre_labels,
+            )
+            post_classification_scores = classification_scores[
+                post_source_indices
+            ]
             target = {
                 'segments': segments[keep].to(self.device),
                 'labels': labels[keep].to(self.device),
                 'scores': scores[keep].to(self.device),
+                'pre_nms_budget': dense_budget,
+                'rescued_pre_nms': rescued_pre_nms,
+                'rescued_post_nms': int(
+                    (post_classification_scores < self.stage2_alpha).sum()
+                ),
             }
             if return_npl_details:
-                source_indices = match_post_nms_to_pre_nms(
-                    segments[keep], scores[keep], labels[keep],
-                    pre_segments, pre_scores, pre_labels,
-                )
                 target.update({
-                    key: value[source_indices].to(self.device)
+                    key: value[post_source_indices].to(self.device)
                     for key, value in details.items()
                 })
             targets.append(target)
@@ -1330,6 +1419,9 @@ class SADA(nn.Module):
                 points, gt_segments, gt_labels)
             stage2_pseudo_cls, stage2_pseudo_offsets = None, None
             stage2_proposal_count = 0
+            stage2_pre_nms_budget = 0
+            stage2_rescued_pre_nms = 0
+            stage2_rescued_post_nms = 0
             if stage2_pseudo_targets is not None:
                 if len(stage2_pseudo_targets) != bs:
                     raise ValueError('Stage 2 target batch does not match source batch')
@@ -1340,6 +1432,18 @@ class SADA(nn.Module):
                 )
                 stage2_proposal_count = sum(
                     int(item['scores'].numel()) for item in stage2_pseudo_targets
+                )
+                stage2_pre_nms_budget = sum(
+                    int(item.get('pre_nms_budget', item['scores'].numel()))
+                    for item in stage2_pseudo_targets
+                )
+                stage2_rescued_pre_nms = sum(
+                    int(item.get('rescued_pre_nms', 0))
+                    for item in stage2_pseudo_targets
+                )
+                stage2_rescued_post_nms = sum(
+                    int(item.get('rescued_post_nms', 0))
+                    for item in stage2_pseudo_targets
                 )
             
             
@@ -1394,6 +1498,17 @@ class SADA(nn.Module):
                 stage2_pseudo_offsets=stage2_pseudo_offsets,
                 stage2_proposal_count=stage2_proposal_count,
             )
+            losses.update({
+                'stage2_pre_nms_budget': torch.tensor(
+                    float(stage2_pre_nms_budget), device=self.device
+                ),
+                'stage2_rescued_pre_nms': torch.tensor(
+                    float(stage2_rescued_pre_nms), device=self.device
+                ),
+                'stage2_rescued_post_nms': torch.tensor(
+                    float(stage2_rescued_post_nms), device=self.device
+                ),
+            })
             
             # Return the GTs of the target domain as well, to be used to compute the anchors
             gt_tgt_cls = torch.stack(gt_cls_labels[bs:])   # shape: List of B elements B x FT x C
