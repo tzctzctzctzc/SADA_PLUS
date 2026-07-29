@@ -19,6 +19,10 @@ from .stage1_utils import (
     shift_features,
     source_action_eligible,
 )
+from .stage2_utils import (
+    match_post_nms_to_pre_nms,
+    npl_boundary_ambiguity,
+)
 from libs.utils import batched_nms
 import einops
 import copy
@@ -1039,7 +1043,9 @@ class SADA(nn.Module):
     
 
     @torch.no_grad()
-    def generate_stage2_pseudo_targets(self, video_list, return_pre_nms=False):
+    def generate_stage2_pseudo_targets(
+            self, video_list, return_pre_nms=False,
+            return_npl_details=False, npl_neighbor_radii=(1, 2, 4)):
         """Generate detached, class-agnostic NMS proposals on feature grids."""
         if self.training:
             raise RuntimeError('Stage 2 EMA teacher must be in eval mode')
@@ -1052,6 +1058,8 @@ class SADA(nn.Module):
         targets, pre_nms_targets = [], []
         for batch_idx in range(len(video_list)):
             all_segments, all_scores, all_labels = [], [], []
+            all_levels, all_indices = [], []
+            all_ambiguity, all_neighbor_counts = [], []
             for level in self.stage2_levels:
                 probabilities = cls_logits[level][batch_idx].transpose(0, 1).sigmoid()
                 scores, labels = probabilities.max(dim=-1)
@@ -1075,6 +1083,39 @@ class SADA(nn.Module):
                 all_segments.append(segments[kept])
                 all_scores.append(scores[selected][kept])
                 all_labels.append(labels[selected][kept])
+                if return_npl_details:
+                    dense_points = points[level]
+                    dense_offsets = offsets[level][
+                        batch_idx
+                    ].transpose(0, 1)
+                    dense_segments = torch.stack((
+                        dense_points[:, 0]
+                        - dense_offsets[:, 0] * dense_points[:, 3],
+                        dense_points[:, 0]
+                        + dense_offsets[:, 1] * dense_points[:, 3],
+                    ), dim=-1)
+                    dense_segments[:, 0].clamp_(
+                        min=0.0, max=valid_length
+                    )
+                    dense_segments[:, 1].clamp_(
+                        min=0.0, max=valid_length
+                    )
+                    dense_duration = (
+                        dense_segments[:, 1] - dense_segments[:, 0]
+                    )
+                    dense_valid = (
+                        valid
+                        & torch.isfinite(dense_segments).all(dim=-1)
+                        & (dense_duration > self.test_duration_thresh)
+                    )
+                    ambiguity, neighbor_counts = npl_boundary_ambiguity(
+                        dense_segments, dense_valid, npl_neighbor_radii
+                    )
+                    selected_indices = torch.where(selected)[0][kept]
+                    all_levels.append(torch.full_like(selected_indices, level))
+                    all_indices.append(selected_indices)
+                    all_ambiguity.append(ambiguity[selected_indices])
+                    all_neighbor_counts.append(neighbor_counts[selected_indices])
 
             if not all_segments or not any(segment.numel() for segment in all_segments):
                 empty_target = {
@@ -1082,6 +1123,22 @@ class SADA(nn.Module):
                     'labels': torch.empty((0,), dtype=torch.long, device=self.device),
                     'scores': torch.empty((0,), device=self.device),
                 }
+                if return_npl_details:
+                    empty_target.update({
+                        'levels': torch.empty(
+                            (0,), dtype=torch.long, device=self.device
+                        ),
+                        'indices': torch.empty(
+                            (0,), dtype=torch.long, device=self.device
+                        ),
+                        'npl_ambiguity': torch.empty(
+                            (0, len(npl_neighbor_radii)), device=self.device
+                        ),
+                        'npl_neighbor_counts': torch.empty(
+                            (0, len(npl_neighbor_radii)),
+                            dtype=torch.long, device=self.device,
+                        ),
+                    })
                 targets.append(empty_target)
                 if return_pre_nms:
                     pre_nms_targets.append(empty_target)
@@ -1089,12 +1146,27 @@ class SADA(nn.Module):
             segments = torch.cat(all_segments).detach().cpu()
             scores = torch.cat(all_scores).detach().cpu()
             labels = torch.cat(all_labels).detach().cpu()
+            details = {}
+            if return_npl_details:
+                details = {
+                    'levels': torch.cat(all_levels).detach().cpu(),
+                    'indices': torch.cat(all_indices).detach().cpu(),
+                    'npl_ambiguity': torch.cat(all_ambiguity).detach().cpu(),
+                    'npl_neighbor_counts': torch.cat(
+                        all_neighbor_counts
+                    ).detach().cpu(),
+                }
             if return_pre_nms:
-                pre_nms_targets.append({
+                pre_target = {
                     'segments': segments.to(self.device),
                     'labels': labels.to(self.device),
                     'scores': scores.to(self.device),
+                }
+                pre_target.update({
+                    key: value.to(self.device) for key, value in details.items()
                 })
+                pre_nms_targets.append(pre_target)
+            pre_segments, pre_scores, pre_labels = segments, scores, labels
             segments, scores, labels = batched_nms(
                 segments, scores, labels,
                 self.test_iou_threshold, self.test_min_score, self.test_max_seg_num,
@@ -1104,11 +1176,21 @@ class SADA(nn.Module):
                 voting_thresh=0.0,
             )
             keep = scores >= self.stage2_alpha
-            targets.append({
+            target = {
                 'segments': segments[keep].to(self.device),
                 'labels': labels[keep].to(self.device),
                 'scores': scores[keep].to(self.device),
-            })
+            }
+            if return_npl_details:
+                source_indices = match_post_nms_to_pre_nms(
+                    segments[keep], scores[keep], labels[keep],
+                    pre_segments, pre_scores, pre_labels,
+                )
+                target.update({
+                    key: value[source_indices].to(self.device)
+                    for key, value in details.items()
+                })
+            targets.append(target)
         return (targets, pre_nms_targets) if return_pre_nms else targets
 
     def forward(self, video_list_src, video_list_tgt, mode=None, domain='src', curr_epoch=0, cls_static_anchors=None, mean_class_conf=None, stage2_pseudo_targets=None):
