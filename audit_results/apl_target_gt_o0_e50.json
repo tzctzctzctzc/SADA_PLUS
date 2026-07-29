@@ -1,0 +1,2450 @@
+{
+  "audit": "apl_style_source_trained_boundary_quality",
+  "checkpoint": "/home1/gyy/vlms/SADA_STAGE2_20260727/results/s1_recovery_o0_seed123/260729_052111_013/saved_ckpt/latest_ckpt/checkpoint-epoch50.pt",
+  "checkpoint_epoch": 50,
+  "protocol": {
+    "quality_supervision": "source GT only",
+    "target_gt_usage": "offline evaluation only",
+    "quality_head": "two kernel-3 Conv1d outputs on frozen regression hidden features",
+    "joint_score": "classification confidence * max(pred_tIoU-pred_tND, 1e-6)",
+    "candidate_pipeline": "EMA -> alpha -> hard class-agnostic NMS -> FPN 0-2",
+    "source_seed": 20260730,
+    "target_seed": 20260729,
+    "head_seeds": [
+      123,
+      456,
+      789
+    ],
+    "retain_fractions": [
+      0.25,
+      0.5,
+      0.75,
+      1.0
+    ]
+  },
+  "source": {
+    "train_videos": 51,
+    "validation_videos": 7,
+    "train_positive_anchors": 14113,
+    "validation_positive_anchors": 2643,
+    "head_training": {
+      "123": {
+        "seed": 123,
+        "best_epoch": 10,
+        "train_sequences": 77,
+        "validation": {
+          "bce": 0.5135080678148157,
+          "positive_anchors": 2643,
+          "tiou_mae": 0.2423429638147354,
+          "tnd_mae": 0.02893034741282463,
+          "diou_pearson": 0.15263445691342542,
+          "diou_spearman": 0.19175504061102738
+        },
+        "history": [
+          {
+            "epoch": 1,
+            "train_bce": 0.16902180523533405,
+            "val_bce": 0.6136332204113664
+          },
+          {
+            "epoch": 2,
+            "train_bce": 0.13349461692001904,
+            "val_bce": 0.5903006137612639
+          },
+          {
+            "epoch": 3,
+            "train_bce": 0.1321707423645727,
+            "val_bce": 0.5541998007691723
+          },
+          {
+            "epoch": 4,
+            "train_bce": 0.13165357671184458,
+            "val_bce": 0.5527243828890769
+          },
+          {
+            "epoch": 5,
+            "train_bce": 0.13076609098044648,
+            "val_bce": 0.5317200791686942
+          },
+          {
+            "epoch": 6,
+            "train_bce": 0.13067785494648776,
+            "val_bce": 0.5697597584127252
+          },
+          {
+            "epoch": 7,
+            "train_bce": 0.13030307657933798,
+            "val_bce": 0.5661634309157431
+          },
+          {
+            "epoch": 8,
+            "train_bce": 0.13000823875556194,
+            "val_bce": 0.5942721668175572
+          },
+          {
+            "epoch": 9,
+            "train_bce": 0.13002408662406928,
+            "val_bce": 0.5266803890477966
+          },
+          {
+            "epoch": 10,
+            "train_bce": 0.12959649241140392,
+            "val_bce": 0.5135080678148157
+          },
+          {
+            "epoch": 11,
+            "train_bce": 0.13015329149809515,
+            "val_bce": 0.5185547692280487
+          },
+          {
+            "epoch": 12,
+            "train_bce": 0.12919460775824668,
+            "val_bce": 0.5678348718066581
+          },
+          {
+            "epoch": 13,
+            "train_bce": 0.1290948250665094,
+            "val_bce": 0.5490241029070401
+          },
+          {
+            "epoch": 14,
+            "train_bce": 0.12922549651180634,
+            "val_bce": 0.5604388099523191
+          },
+          {
+            "epoch": 15,
+            "train_bce": 0.12898986926345207,
+            "val_bce": 0.565165047026745
+          },
+          {
+            "epoch": 16,
+            "train_bce": 0.12880096935046723,
+            "val_bce": 0.5645130931812392
+          },
+          {
+            "epoch": 17,
+            "train_bce": 0.1285432523855166,
+            "val_bce": 0.5958884914310151
+          }
+        ]
+      },
+      "456": {
+        "seed": 456,
+        "best_epoch": 2,
+        "train_sequences": 77,
+        "validation": {
+          "bce": 0.530728125815765,
+          "positive_anchors": 2643,
+          "tiou_mae": 0.25512033700942993,
+          "tnd_mae": 0.029436860233545303,
+          "diou_pearson": 0.24222184302948643,
+          "diou_spearman": 0.2369131604725416
+        },
+        "history": [
+          {
+            "epoch": 1,
+            "train_bce": 0.17748930641160093,
+            "val_bce": 0.5996225323137622
+          },
+          {
+            "epoch": 2,
+            "train_bce": 0.1347460312796401,
+            "val_bce": 0.530728125815765
+          },
+          {
+            "epoch": 3,
+            "train_bce": 0.13317180596292547,
+            "val_bce": 0.5751332404980639
+          },
+          {
+            "epoch": 4,
+            "train_bce": 0.13192313269582095,
+            "val_bce": 0.5491570953703991
+          },
+          {
+            "epoch": 5,
+            "train_bce": 0.13169843339030177,
+            "val_bce": 0.5639045120322971
+          },
+          {
+            "epoch": 6,
+            "train_bce": 0.13130585099898096,
+            "val_bce": 0.6107032009475483
+          },
+          {
+            "epoch": 7,
+            "train_bce": 0.13053218526124938,
+            "val_bce": 0.5584063513730901
+          },
+          {
+            "epoch": 8,
+            "train_bce": 0.13026911086638882,
+            "val_bce": 0.5740428571668575
+          },
+          {
+            "epoch": 9,
+            "train_bce": 0.1297289830205088,
+            "val_bce": 0.606517977756034
+          }
+        ]
+      },
+      "789": {
+        "seed": 789,
+        "best_epoch": 2,
+        "train_sequences": 77,
+        "validation": {
+          "bce": 0.5184734186077948,
+          "positive_anchors": 2643,
+          "tiou_mae": 0.24853049218654633,
+          "tnd_mae": 0.029184948652982712,
+          "diou_pearson": 0.19753125500188043,
+          "diou_spearman": 0.21789341617936844
+        },
+        "history": [
+          {
+            "epoch": 1,
+            "train_bce": 0.14214035268818337,
+            "val_bce": 0.5600194631541177
+          },
+          {
+            "epoch": 2,
+            "train_bce": 0.13384112700569734,
+            "val_bce": 0.5184734186077948
+          },
+          {
+            "epoch": 3,
+            "train_bce": 0.13186971372915837,
+            "val_bce": 0.5473142427970549
+          },
+          {
+            "epoch": 4,
+            "train_bce": 0.1311221631532995,
+            "val_bce": 0.5855513640168125
+          },
+          {
+            "epoch": 5,
+            "train_bce": 0.1304982535676734,
+            "val_bce": 0.5673329324105271
+          },
+          {
+            "epoch": 6,
+            "train_bce": 0.13029594370875025,
+            "val_bce": 0.5645236514348042
+          },
+          {
+            "epoch": 7,
+            "train_bce": 0.1298886407513829,
+            "val_bce": 0.5456294445120111
+          },
+          {
+            "epoch": 8,
+            "train_bce": 0.1295776558169009,
+            "val_bce": 0.5408788744897225
+          },
+          {
+            "epoch": 9,
+            "train_bce": 0.13006746946544792,
+            "val_bce": 0.5618630989094914
+          }
+        ]
+      }
+    }
+  },
+  "target": {
+    "videos": 106,
+    "gt_segments": 12118,
+    "gt_foreground_anchors_fpn_0_2": 35041,
+    "proposals": 4891,
+    "pseudo_positive_anchors": 15238,
+    "quality_prediction": {
+      "seed_123": {
+        "tiou_mae": 0.3368105664897361,
+        "tnd_mae": 0.09680324145915656,
+        "diou_pearson": 0.07084122553203713,
+        "diou_spearman": 0.11458858623666897
+      },
+      "seed_456": {
+        "tiou_mae": 0.34130589272816436,
+        "tnd_mae": 0.09707548064744691,
+        "diou_pearson": 0.09044023915614989,
+        "diou_spearman": 0.14473872022027076
+      },
+      "seed_789": {
+        "tiou_mae": 0.34191339263920806,
+        "tnd_mae": 0.09684294971765729,
+        "diou_pearson": 0.0970089287486139,
+        "diou_spearman": 0.13919770373727797
+      },
+      "ensemble": {
+        "tiou_mae": 0.3396960869235844,
+        "tnd_mae": 0.09690290097868769,
+        "diou_pearson": 0.09448839743409143,
+        "diou_spearman": 0.14656872001004856
+      }
+    },
+    "proposal_matched_budget": {
+      "global": {
+        "0.25": {
+          "confidence": {
+            "proposal": {
+              "n": 1223,
+              "fpn_level_counts": {
+                "0": 1103,
+                "1": 93,
+                "2": 27
+              },
+              "foreground_precision_iou50": 0.7645134914145544,
+              "class_correct_precision": 0.749795584627964,
+              "class_correct_given_foreground": 0.9807486631016042,
+              "mean_max_gt_iou": 0.6242137926937944,
+              "iou70_rate": 0.40964840556009813,
+              "gt_segment_recall_iou50": 0.078148209275458
+            },
+            "anchor": {
+              "pseudo_positive": 3625,
+              "foreground_precision": 0.7172413793103448,
+              "good_boundary_precision_iou50": 0.6102068965517241,
+              "gt_foreground_anchor_coverage": 0.07419879569646985,
+              "proposal_to_anchor_amplification": 2.9640228945216682
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2600,
+              "teacher_win_rate": 0.5061538461538462,
+              "student_win_rate": 0.4938461538461538,
+              "tie_rate": 0.0,
+              "mean_delta_iou": 0.003407633506621306,
+              "mean_teacher_student_boundary_l1": 0.2902384554881316,
+              "near_same_prediction_rate": 0.003076923076923077
+            }
+          },
+          "apl_seed_123": {
+            "proposal": {
+              "n": 1223,
+              "fpn_level_counts": {
+                "0": 1083,
+                "1": 103,
+                "2": 37
+              },
+              "foreground_precision_iou50": 0.7735077677841373,
+              "class_correct_precision": 0.7579721995094031,
+              "class_correct_given_foreground": 0.9799154334038055,
+              "mean_max_gt_iou": 0.6284116060663021,
+              "iou70_rate": 0.4260016353229763,
+              "gt_segment_recall_iou50": 0.07889090609011389
+            },
+            "anchor": {
+              "pseudo_positive": 3639,
+              "foreground_precision": 0.7235504259411927,
+              "good_boundary_precision_iou50": 0.6270953558669964,
+              "gt_foreground_anchor_coverage": 0.07514054964184812,
+              "proposal_to_anchor_amplification": 2.9754701553556826
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2633,
+              "teacher_win_rate": 0.5043676414736042,
+              "student_win_rate": 0.49525256361564757,
+              "tie_rate": 0.00037979491074819596,
+              "mean_delta_iou": 0.003587142455059451,
+              "mean_teacher_student_boundary_l1": 0.27703795567058676,
+              "near_same_prediction_rate": 0.0030383592859855677
+            }
+          },
+          "apl_seed_456": {
+            "proposal": {
+              "n": 1223,
+              "fpn_level_counts": {
+                "0": 1055,
+                "1": 115,
+                "2": 53
+              },
+              "foreground_precision_iou50": 0.7661488143908421,
+              "class_correct_precision": 0.7522485690923958,
+              "class_correct_given_foreground": 0.9818569903948773,
+              "mean_max_gt_iou": 0.6335358396897859,
+              "iou70_rate": 0.4358135731807032,
+              "gt_segment_recall_iou50": 0.0783132530120482
+            },
+            "anchor": {
+              "pseudo_positive": 3867,
+              "foreground_precision": 0.7145073700543056,
+              "good_boundary_precision_iou50": 0.6108094129816395,
+              "gt_foreground_anchor_coverage": 0.07885048942667161,
+              "proposal_to_anchor_amplification": 3.161896974652494
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2763,
+              "teacher_win_rate": 0.5074194715888527,
+              "student_win_rate": 0.49221860296778863,
+              "tie_rate": 0.0003619254433586681,
+              "mean_delta_iou": 0.004482763831193923,
+              "mean_teacher_student_boundary_l1": 0.30249650841642883,
+              "near_same_prediction_rate": 0.003981179876945349
+            }
+          },
+          "apl_seed_789": {
+            "proposal": {
+              "n": 1223,
+              "fpn_level_counts": {
+                "0": 1067,
+                "1": 111,
+                "2": 45
+              },
+              "foreground_precision_iou50": 0.7702371218315618,
+              "class_correct_precision": 0.7563368765331153,
+              "class_correct_given_foreground": 0.9819532908704883,
+              "mean_max_gt_iou": 0.6304396032422358,
+              "iou70_rate": 0.4268192968111202,
+              "gt_segment_recall_iou50": 0.07864334048522859
+            },
+            "anchor": {
+              "pseudo_positive": 3795,
+              "foreground_precision": 0.7133069828722003,
+              "good_boundary_precision_iou50": 0.6126482213438735,
+              "gt_foreground_anchor_coverage": 0.07725236151936303,
+              "proposal_to_anchor_amplification": 3.1030253475061325
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2707,
+              "teacher_win_rate": 0.5079423716291097,
+              "student_win_rate": 0.4916882157369782,
+              "tie_rate": 0.0003694126339120798,
+              "mean_delta_iou": 0.0039003947010042925,
+              "mean_teacher_student_boundary_l1": 0.29427422555029326,
+              "near_same_prediction_rate": 0.0033247137052087182
+            }
+          },
+          "apl_ensemble": {
+            "proposal": {
+              "n": 1223,
+              "fpn_level_counts": {
+                "0": 1066,
+                "1": 109,
+                "2": 48
+              },
+              "foreground_precision_iou50": 0.7726901062959934,
+              "class_correct_precision": 0.7579721995094031,
+              "class_correct_given_foreground": 0.9809523809523809,
+              "mean_max_gt_iou": 0.632432555366507,
+              "iou70_rate": 0.43172526573998365,
+              "gt_segment_recall_iou50": 0.07897342795840898
+            },
+            "anchor": {
+              "pseudo_positive": 3769,
+              "foreground_precision": 0.7184929689572831,
+              "good_boundary_precision_iou50": 0.6192624038206421,
+              "gt_foreground_anchor_coverage": 0.07728089951770782,
+              "proposal_to_anchor_amplification": 3.081766148814391
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2708,
+              "teacher_win_rate": 0.5088626292466765,
+              "student_win_rate": 0.490768094534712,
+              "tie_rate": 0.00036927621861152144,
+              "mean_delta_iou": 0.005452665797485647,
+              "mean_teacher_student_boundary_l1": 0.2942840029517164,
+              "near_same_prediction_rate": 0.003692762186115214
+            }
+          }
+        },
+        "0.50": {
+          "confidence": {
+            "proposal": {
+              "n": 2446,
+              "fpn_level_counts": {
+                "0": 2075,
+                "1": 243,
+                "2": 128
+              },
+              "foreground_precision_iou50": 0.7334423548650858,
+              "class_correct_precision": 0.7170891251022077,
+              "class_correct_given_foreground": 0.9777034559643255,
+              "mean_max_gt_iou": 0.6082844029125306,
+              "iou70_rate": 0.41210139002452983,
+              "gt_segment_recall_iou50": 0.15018980029707873
+            },
+            "anchor": {
+              "pseudo_positive": 7438,
+              "foreground_precision": 0.6882226404947567,
+              "good_boundary_precision_iou50": 0.5833557407905351,
+              "gt_foreground_anchor_coverage": 0.14608601352701123,
+              "proposal_to_anchor_amplification": 3.0408830744071955
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5119,
+              "teacher_win_rate": 0.5061535456143778,
+              "student_win_rate": 0.4934557530767728,
+              "tie_rate": 0.0003907013088493846,
+              "mean_delta_iou": 0.0024342391444186397,
+              "mean_teacher_student_boundary_l1": 0.3434202275161609,
+              "near_same_prediction_rate": 0.0035163117796444617
+            }
+          },
+          "apl_seed_123": {
+            "proposal": {
+              "n": 2446,
+              "fpn_level_counts": {
+                "0": 2076,
+                "1": 248,
+                "2": 122
+              },
+              "foreground_precision_iou50": 0.7289452166802943,
+              "class_correct_precision": 0.7130008176614882,
+              "class_correct_given_foreground": 0.9781267526640494,
+              "mean_max_gt_iou": 0.606225515113331,
+              "iou70_rate": 0.41210139002452983,
+              "gt_segment_recall_iou50": 0.14895197227265225
+            },
+            "anchor": {
+              "pseudo_positive": 7444,
+              "foreground_precision": 0.6851155292853305,
+              "good_boundary_precision_iou50": 0.5824825362708221,
+              "gt_foreground_anchor_coverage": 0.1455437915584601,
+              "proposal_to_anchor_amplification": 3.043336058871627
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5100,
+              "teacher_win_rate": 0.5062745098039215,
+              "student_win_rate": 0.4931372549019608,
+              "tie_rate": 0.000588235294117647,
+              "mean_delta_iou": 0.00265170352643027,
+              "mean_teacher_student_boundary_l1": 0.3199553934499329,
+              "near_same_prediction_rate": 0.00392156862745098
+            }
+          },
+          "apl_seed_456": {
+            "proposal": {
+              "n": 2446,
+              "fpn_level_counts": {
+                "0": 2035,
+                "1": 263,
+                "2": 148
+              },
+              "foreground_precision_iou50": 0.7305805396565822,
+              "class_correct_precision": 0.7134096484055601,
+              "class_correct_given_foreground": 0.9764969222160045,
+              "mean_max_gt_iou": 0.6078106362921112,
+              "iou70_rate": 0.4125102207686018,
+              "gt_segment_recall_iou50": 0.14952962535071795
+            },
+            "anchor": {
+              "pseudo_positive": 7671,
+              "foreground_precision": 0.6812671098944075,
+              "good_boundary_precision_iou50": 0.5790640073002216,
+              "gt_foreground_anchor_coverage": 0.1491395793499044,
+              "proposal_to_anchor_amplification": 3.1361406377759606
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5226,
+              "teacher_win_rate": 0.5088021431305013,
+              "student_win_rate": 0.49062380405663986,
+              "tie_rate": 0.000574052812858783,
+              "mean_delta_iou": 0.0037959269313886618,
+              "mean_teacher_student_boundary_l1": 0.3507496736262249,
+              "near_same_prediction_rate": 0.003444316877152698
+            }
+          },
+          "apl_seed_789": {
+            "proposal": {
+              "n": 2446,
+              "fpn_level_counts": {
+                "0": 2047,
+                "1": 260,
+                "2": 139
+              },
+              "foreground_precision_iou50": 0.7350776778413737,
+              "class_correct_precision": 0.7183156173344235,
+              "class_correct_given_foreground": 0.9771968854282537,
+              "mean_max_gt_iou": 0.6097718952831912,
+              "iou70_rate": 0.4170073589533933,
+              "gt_segment_recall_iou50": 0.15043736590196402
+            },
+            "anchor": {
+              "pseudo_positive": 7568,
+              "foreground_precision": 0.6841966173361522,
+              "good_boundary_precision_iou50": 0.5835095137420718,
+              "gt_foreground_anchor_coverage": 0.1477697554293542,
+              "proposal_to_anchor_amplification": 3.0940310711365493
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5178,
+              "teacher_win_rate": 0.5071456160679799,
+              "student_win_rate": 0.49227500965623794,
+              "tie_rate": 0.0005793742757821553,
+              "mean_delta_iou": 0.003566365430758192,
+              "mean_teacher_student_boundary_l1": 0.34588264640853783,
+              "near_same_prediction_rate": 0.0034762456546929316
+            }
+          },
+          "apl_ensemble": {
+            "proposal": {
+              "n": 2446,
+              "fpn_level_counts": {
+                "0": 2055,
+                "1": 257,
+                "2": 134
+              },
+              "foreground_precision_iou50": 0.7338511856091579,
+              "class_correct_precision": 0.7170891251022077,
+              "class_correct_given_foreground": 0.977158774373259,
+              "mean_max_gt_iou": 0.6079099626838742,
+              "iou70_rate": 0.4141455437448896,
+              "gt_segment_recall_iou50": 0.15002475656048853
+            },
+            "anchor": {
+              "pseudo_positive": 7548,
+              "foreground_precision": 0.6826974032856385,
+              "good_boundary_precision_iou50": 0.5834658187599364,
+              "gt_foreground_anchor_coverage": 0.14705630547073428,
+              "proposal_to_anchor_amplification": 3.0858544562551105
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5153,
+              "teacher_win_rate": 0.5088298078789055,
+              "student_win_rate": 0.4905880069862216,
+              "tie_rate": 0.0005821851348728896,
+              "mean_delta_iou": 0.0033812878204102243,
+              "mean_teacher_student_boundary_l1": 0.33676442543835217,
+              "near_same_prediction_rate": 0.0034931108092373375
+            }
+          }
+        },
+        "0.75": {
+          "confidence": {
+            "proposal": {
+              "n": 3669,
+              "fpn_level_counts": {
+                "0": 3025,
+                "1": 412,
+                "2": 232
+              },
+              "foreground_precision_iou50": 0.6941946034341783,
+              "class_correct_precision": 0.6715726355955302,
+              "class_correct_given_foreground": 0.9674126423243031,
+              "mean_max_gt_iou": 0.5858633009327612,
+              "iou70_rate": 0.3853911147451622,
+              "gt_segment_recall_iou50": 0.21290642020135336
+            },
+            "anchor": {
+              "pseudo_positive": 11385,
+              "foreground_precision": 0.6599912165129557,
+              "good_boundary_precision_iou50": 0.546772068511199,
+              "gt_foreground_anchor_coverage": 0.21443451956279785,
+              "proposal_to_anchor_amplification": 3.1030253475061325
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7514,
+              "teacher_win_rate": 0.5051903114186851,
+              "student_win_rate": 0.49401117913228637,
+              "tie_rate": 0.0007985094490284802,
+              "mean_delta_iou": 0.002426850476364427,
+              "mean_teacher_student_boundary_l1": 0.39513447724475104,
+              "near_same_prediction_rate": 0.0030609528879425073
+            }
+          },
+          "apl_seed_123": {
+            "proposal": {
+              "n": 3669,
+              "fpn_level_counts": {
+                "0": 3068,
+                "1": 392,
+                "2": 209
+              },
+              "foreground_precision_iou50": 0.6952848187517034,
+              "class_correct_precision": 0.6713000817661489,
+              "class_correct_given_foreground": 0.9655037240297922,
+              "mean_max_gt_iou": 0.586389390731603,
+              "iou70_rate": 0.38648133006268737,
+              "gt_segment_recall_iou50": 0.21315398580623865
+            },
+            "anchor": {
+              "pseudo_positive": 11215,
+              "foreground_precision": 0.6639322336156933,
+              "good_boundary_precision_iou50": 0.5521176995095853,
+              "gt_foreground_anchor_coverage": 0.21249393567535174,
+              "proposal_to_anchor_amplification": 3.056691196511311
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7446,
+              "teacher_win_rate": 0.5077894171367177,
+              "student_win_rate": 0.49127048079505775,
+              "tie_rate": 0.0009401020682245501,
+              "mean_delta_iou": 0.0032370322402201445,
+              "mean_teacher_student_boundary_l1": 0.37010509624632976,
+              "near_same_prediction_rate": 0.0030889067955949504
+            }
+          },
+          "apl_seed_456": {
+            "proposal": {
+              "n": 3669,
+              "fpn_level_counts": {
+                "0": 3013,
+                "1": 423,
+                "2": 233
+              },
+              "foreground_precision_iou50": 0.6952848187517034,
+              "class_correct_precision": 0.6726628509130553,
+              "class_correct_given_foreground": 0.9674637397099177,
+              "mean_max_gt_iou": 0.5871124270336683,
+              "iou70_rate": 0.389751976015263,
+              "gt_segment_recall_iou50": 0.21340155141112394
+            },
+            "anchor": {
+              "pseudo_positive": 11485,
+              "foreground_precision": 0.6592076621680453,
+              "good_boundary_precision_iou50": 0.547409664780148,
+              "gt_foreground_anchor_coverage": 0.21606118546845124,
+              "proposal_to_anchor_amplification": 3.130280730444263
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7571,
+              "teacher_win_rate": 0.509047681944261,
+              "student_win_rate": 0.4901598203671906,
+              "tie_rate": 0.0007924976885484084,
+              "mean_delta_iou": 0.0030375213664024575,
+              "mean_teacher_student_boundary_l1": 0.3921951107801841,
+              "near_same_prediction_rate": 0.003037907806102232
+            }
+          },
+          "apl_seed_789": {
+            "proposal": {
+              "n": 3669,
+              "fpn_level_counts": {
+                "0": 3027,
+                "1": 414,
+                "2": 228
+              },
+              "foreground_precision_iou50": 0.6947397110929409,
+              "class_correct_precision": 0.672390297083674,
+              "class_correct_given_foreground": 0.9678305217732444,
+              "mean_max_gt_iou": 0.5870614165492111,
+              "iou70_rate": 0.3881166530389752,
+              "gt_segment_recall_iou50": 0.21323650767453375
+            },
+            "anchor": {
+              "pseudo_positive": 11430,
+              "foreground_precision": 0.6600174978127734,
+              "good_boundary_precision_iou50": 0.5466316710411199,
+              "gt_foreground_anchor_coverage": 0.21529065951314175,
+              "proposal_to_anchor_amplification": 3.115290269828291
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7544,
+              "teacher_win_rate": 0.5060975609756098,
+              "student_win_rate": 0.4931071049840933,
+              "tie_rate": 0.0007953340402969247,
+              "mean_delta_iou": 0.002172947198069582,
+              "mean_teacher_student_boundary_l1": 0.3894432325346725,
+              "near_same_prediction_rate": 0.0029162248144220574
+            }
+          },
+          "apl_ensemble": {
+            "proposal": {
+              "n": 3669,
+              "fpn_level_counts": {
+                "0": 3043,
+                "1": 405,
+                "2": 221
+              },
+              "foreground_precision_iou50": 0.695829926410466,
+              "class_correct_precision": 0.6734805124011992,
+              "class_correct_given_foreground": 0.9678809244026635,
+              "mean_max_gt_iou": 0.5871707099202653,
+              "iou70_rate": 0.3881166530389752,
+              "gt_segment_recall_iou50": 0.21356659514771414
+            },
+            "anchor": {
+              "pseudo_positive": 11369,
+              "foreground_precision": 0.6620635060251562,
+              "good_boundary_precision_iou50": 0.5493007300554138,
+              "gt_foreground_anchor_coverage": 0.21480551354128022,
+              "proposal_to_anchor_amplification": 3.0986644862360317
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7527,
+              "teacher_win_rate": 0.5068420353394447,
+              "student_win_rate": 0.49236083432974626,
+              "tie_rate": 0.0007971303308090873,
+              "mean_delta_iou": 0.0021408313161010396,
+              "mean_teacher_student_boundary_l1": 0.38301134942552556,
+              "near_same_prediction_rate": 0.0030556662681015014
+            }
+          }
+        },
+        "1.00": {
+          "confidence": {
+            "proposal": {
+              "n": 4891,
+              "fpn_level_counts": {
+                "0": 3984,
+                "1": 572,
+                "2": 335
+              },
+              "foreground_precision_iou50": 0.6587609895726845,
+              "class_correct_precision": 0.6272745859742384,
+              "class_correct_given_foreground": 0.952203600248293,
+              "mean_max_gt_iou": 0.5620996553156726,
+              "iou70_rate": 0.3533019832345124,
+              "gt_segment_recall_iou50": 0.2698465093249711
+            },
+            "anchor": {
+              "pseudo_positive": 15238,
+              "foreground_precision": 0.6317758235988975,
+              "good_boundary_precision_iou50": 0.5106313164457278,
+              "gt_foreground_anchor_coverage": 0.274735310065352,
+              "proposal_to_anchor_amplification": 3.115518298916377
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          },
+          "apl_seed_123": {
+            "proposal": {
+              "n": 4891,
+              "fpn_level_counts": {
+                "0": 3984,
+                "1": 572,
+                "2": 335
+              },
+              "foreground_precision_iou50": 0.6587609895726845,
+              "class_correct_precision": 0.6272745859742384,
+              "class_correct_given_foreground": 0.952203600248293,
+              "mean_max_gt_iou": 0.5620996553156726,
+              "iou70_rate": 0.3533019832345124,
+              "gt_segment_recall_iou50": 0.2698465093249711
+            },
+            "anchor": {
+              "pseudo_positive": 15238,
+              "foreground_precision": 0.6317758235988975,
+              "good_boundary_precision_iou50": 0.5106313164457278,
+              "gt_foreground_anchor_coverage": 0.274735310065352,
+              "proposal_to_anchor_amplification": 3.115518298916377
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          },
+          "apl_seed_456": {
+            "proposal": {
+              "n": 4891,
+              "fpn_level_counts": {
+                "0": 3984,
+                "1": 572,
+                "2": 335
+              },
+              "foreground_precision_iou50": 0.6587609895726845,
+              "class_correct_precision": 0.6272745859742384,
+              "class_correct_given_foreground": 0.952203600248293,
+              "mean_max_gt_iou": 0.5620996553156726,
+              "iou70_rate": 0.3533019832345124,
+              "gt_segment_recall_iou50": 0.2698465093249711
+            },
+            "anchor": {
+              "pseudo_positive": 15238,
+              "foreground_precision": 0.6317758235988975,
+              "good_boundary_precision_iou50": 0.5106313164457278,
+              "gt_foreground_anchor_coverage": 0.274735310065352,
+              "proposal_to_anchor_amplification": 3.115518298916377
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          },
+          "apl_seed_789": {
+            "proposal": {
+              "n": 4891,
+              "fpn_level_counts": {
+                "0": 3984,
+                "1": 572,
+                "2": 335
+              },
+              "foreground_precision_iou50": 0.6587609895726845,
+              "class_correct_precision": 0.6272745859742384,
+              "class_correct_given_foreground": 0.952203600248293,
+              "mean_max_gt_iou": 0.5620996553156726,
+              "iou70_rate": 0.3533019832345124,
+              "gt_segment_recall_iou50": 0.2698465093249711
+            },
+            "anchor": {
+              "pseudo_positive": 15238,
+              "foreground_precision": 0.6317758235988975,
+              "good_boundary_precision_iou50": 0.5106313164457278,
+              "gt_foreground_anchor_coverage": 0.274735310065352,
+              "proposal_to_anchor_amplification": 3.115518298916377
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          },
+          "apl_ensemble": {
+            "proposal": {
+              "n": 4891,
+              "fpn_level_counts": {
+                "0": 3984,
+                "1": 572,
+                "2": 335
+              },
+              "foreground_precision_iou50": 0.6587609895726845,
+              "class_correct_precision": 0.6272745859742384,
+              "class_correct_given_foreground": 0.952203600248293,
+              "mean_max_gt_iou": 0.5620996553156726,
+              "iou70_rate": 0.3533019832345124,
+              "gt_segment_recall_iou50": 0.2698465093249711
+            },
+            "anchor": {
+              "pseudo_positive": 15238,
+              "foreground_precision": 0.6317758235988975,
+              "good_boundary_precision_iou50": 0.5106313164457278,
+              "gt_foreground_anchor_coverage": 0.274735310065352,
+              "proposal_to_anchor_amplification": 3.115518298916377
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          }
+        }
+      },
+      "within_fpn_level": {
+        "0.25": {
+          "confidence": {
+            "proposal": {
+              "n": 1223,
+              "fpn_level_counts": {
+                "0": 996,
+                "1": 143,
+                "2": 84
+              },
+              "foreground_precision_iou50": 0.7694194603434178,
+              "class_correct_precision": 0.7547015535568274,
+              "class_correct_given_foreground": 0.9808714133900106,
+              "mean_max_gt_iou": 0.633535440514117,
+              "iou70_rate": 0.4358135731807032,
+              "gt_segment_recall_iou50": 0.07847829674863839
+            },
+            "anchor": {
+              "pseudo_positive": 3841,
+              "foreground_precision": 0.7138765946368133,
+              "good_boundary_precision_iou50": 0.6180682114032804,
+              "gt_foreground_anchor_coverage": 0.07825119146143089,
+              "proposal_to_anchor_amplification": 3.1406377759607524
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2742,
+              "teacher_win_rate": 0.5018234865061999,
+              "student_win_rate": 0.49817651349380015,
+              "tie_rate": 0.0,
+              "mean_delta_iou": 0.003407884007394531,
+              "mean_teacher_student_boundary_l1": 0.3321597431368588,
+              "near_same_prediction_rate": 0.0029175784099197666
+            }
+          },
+          "apl_seed_123": {
+            "proposal": {
+              "n": 1223,
+              "fpn_level_counts": {
+                "0": 996,
+                "1": 143,
+                "2": 84
+              },
+              "foreground_precision_iou50": 0.777596075224857,
+              "class_correct_precision": 0.7628781684382666,
+              "class_correct_given_foreground": 0.9810725552050473,
+              "mean_max_gt_iou": 0.6343650206741104,
+              "iou70_rate": 0.446443172526574,
+              "gt_segment_recall_iou50": 0.07922099356329428
+            },
+            "anchor": {
+              "pseudo_positive": 3833,
+              "foreground_precision": 0.7164101226193582,
+              "good_boundary_precision_iou50": 0.6256196190973128,
+              "gt_foreground_anchor_coverage": 0.07836534345481008,
+              "proposal_to_anchor_amplification": 3.134096484055601
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2746,
+              "teacher_win_rate": 0.5003641660597232,
+              "student_win_rate": 0.49927166788055355,
+              "tie_rate": 0.0003641660597232338,
+              "mean_delta_iou": 0.0031802976369662435,
+              "mean_teacher_student_boundary_l1": 0.3114320436534618,
+              "near_same_prediction_rate": 0.0029133284777858705
+            }
+          },
+          "apl_seed_456": {
+            "proposal": {
+              "n": 1223,
+              "fpn_level_counts": {
+                "0": 996,
+                "1": 143,
+                "2": 84
+              },
+              "foreground_precision_iou50": 0.7726901062959934,
+              "class_correct_precision": 0.759607522485691,
+              "class_correct_given_foreground": 0.9830687830687831,
+              "mean_max_gt_iou": 0.6369398673983003,
+              "iou70_rate": 0.45216680294358136,
+              "gt_segment_recall_iou50": 0.07897342795840898
+            },
+            "anchor": {
+              "pseudo_positive": 3975,
+              "foreground_precision": 0.710440251572327,
+              "good_boundary_precision_iou50": 0.6155974842767296,
+              "gt_foreground_anchor_coverage": 0.08059130732570417,
+              "proposal_to_anchor_amplification": 3.250204415372036
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2824,
+              "teacher_win_rate": 0.5028328611898017,
+              "student_win_rate": 0.4968130311614731,
+              "tie_rate": 0.0003541076487252125,
+              "mean_delta_iou": 0.005124627822276638,
+              "mean_teacher_student_boundary_l1": 0.3230877324474432,
+              "near_same_prediction_rate": 0.003186968838526912
+            }
+          },
+          "apl_seed_789": {
+            "proposal": {
+              "n": 1223,
+              "fpn_level_counts": {
+                "0": 996,
+                "1": 143,
+                "2": 84
+              },
+              "foreground_precision_iou50": 0.776778413736713,
+              "class_correct_precision": 0.7628781684382666,
+              "class_correct_given_foreground": 0.9821052631578947,
+              "mean_max_gt_iou": 0.635967170010349,
+              "iou70_rate": 0.4439901880621423,
+              "gt_segment_recall_iou50": 0.07938603729988447
+            },
+            "anchor": {
+              "pseudo_positive": 3944,
+              "foreground_precision": 0.7155172413793104,
+              "good_boundary_precision_iou50": 0.6206896551724138,
+              "gt_foreground_anchor_coverage": 0.08053423132901458,
+              "proposal_to_anchor_amplification": 3.2248569092395747
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2822,
+              "teacher_win_rate": 0.502834868887314,
+              "student_win_rate": 0.4968107725017718,
+              "tie_rate": 0.00035435861091424523,
+              "mean_delta_iou": 0.003326661175897069,
+              "mean_teacher_student_boundary_l1": 0.32318189163566224,
+              "near_same_prediction_rate": 0.002834868887313962
+            }
+          },
+          "apl_ensemble": {
+            "proposal": {
+              "n": 1223,
+              "fpn_level_counts": {
+                "0": 996,
+                "1": 143,
+                "2": 84
+              },
+              "foreground_precision_iou50": 0.776778413736713,
+              "class_correct_precision": 0.7628781684382666,
+              "class_correct_given_foreground": 0.9821052631578947,
+              "mean_max_gt_iou": 0.6374299813235957,
+              "iou70_rate": 0.4513491414554375,
+              "gt_segment_recall_iou50": 0.07938603729988447
+            },
+            "anchor": {
+              "pseudo_positive": 3898,
+              "foreground_precision": 0.7136993329912775,
+              "good_boundary_precision_iou50": 0.62108773730118,
+              "gt_foreground_anchor_coverage": 0.07939271139522273,
+              "proposal_to_anchor_amplification": 3.187244480784955
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2782,
+              "teacher_win_rate": 0.5021567217828901,
+              "student_win_rate": 0.4974838245866283,
+              "tie_rate": 0.0003594536304816679,
+              "mean_delta_iou": 0.0044041474414741625,
+              "mean_teacher_student_boundary_l1": 0.3173554420985394,
+              "near_same_prediction_rate": 0.003235082674335011
+            }
+          }
+        },
+        "0.50": {
+          "confidence": {
+            "proposal": {
+              "n": 2446,
+              "fpn_level_counts": {
+                "0": 1992,
+                "1": 286,
+                "2": 168
+              },
+              "foreground_precision_iou50": 0.7346688470973017,
+              "class_correct_precision": 0.7195421095666394,
+              "class_correct_given_foreground": 0.9794101279910963,
+              "mean_max_gt_iou": 0.6102215800026374,
+              "iou70_rate": 0.4178250204415372,
+              "gt_segment_recall_iou50": 0.15035484403366892
+            },
+            "anchor": {
+              "pseudo_positive": 7626,
+              "foreground_precision": 0.6839758720167847,
+              "good_boundary_precision_iou50": 0.5835300288486756,
+              "gt_foreground_anchor_coverage": 0.14885419936645644,
+              "proposal_to_anchor_amplification": 3.117743254292723
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5216,
+              "teacher_win_rate": 0.5072852760736196,
+              "student_win_rate": 0.49233128834355827,
+              "tie_rate": 0.0003834355828220859,
+              "mean_delta_iou": 0.004074388635744758,
+              "mean_teacher_student_boundary_l1": 0.36905919838171064,
+              "near_same_prediction_rate": 0.003067484662576687
+            }
+          },
+          "apl_seed_123": {
+            "proposal": {
+              "n": 2446,
+              "fpn_level_counts": {
+                "0": 1992,
+                "1": 286,
+                "2": 168
+              },
+              "foreground_precision_iou50": 0.7363041700735895,
+              "class_correct_precision": 0.7195421095666394,
+              "class_correct_given_foreground": 0.9772348695169351,
+              "mean_max_gt_iou": 0.611982679040322,
+              "iou70_rate": 0.42395748160261654,
+              "gt_segment_recall_iou50": 0.15043736590196402
+            },
+            "anchor": {
+              "pseudo_positive": 7579,
+              "foreground_precision": 0.6899327088006333,
+              "good_boundary_precision_iou50": 0.5918986673703654,
+              "gt_foreground_anchor_coverage": 0.14922519334493878,
+              "proposal_to_anchor_amplification": 3.098528209321341
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5229,
+              "teacher_win_rate": 0.5117613310384395,
+              "student_win_rate": 0.4876649454962708,
+              "tie_rate": 0.0005737234652897303,
+              "mean_delta_iou": 0.00563939814315993,
+              "mean_teacher_student_boundary_l1": 0.3497613809331696,
+              "near_same_prediction_rate": 0.003251099636641805
+            }
+          },
+          "apl_seed_456": {
+            "proposal": {
+              "n": 2446,
+              "fpn_level_counts": {
+                "0": 1992,
+                "1": 286,
+                "2": 168
+              },
+              "foreground_precision_iou50": 0.7330335241210139,
+              "class_correct_precision": 0.7166802943581357,
+              "class_correct_given_foreground": 0.9776910206358059,
+              "mean_max_gt_iou": 0.6103195793320747,
+              "iou70_rate": 0.41618969746524936,
+              "gt_segment_recall_iou50": 0.14994223469219342
+            },
+            "anchor": {
+              "pseudo_positive": 7746,
+              "foreground_precision": 0.6829331267751098,
+              "good_boundary_precision_iou50": 0.5814613994319648,
+              "gt_foreground_anchor_coverage": 0.15096601124397135,
+              "proposal_to_anchor_amplification": 3.166802943581357
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5290,
+              "teacher_win_rate": 0.5094517958412098,
+              "student_win_rate": 0.4897920604914934,
+              "tie_rate": 0.0007561436672967864,
+              "mean_delta_iou": 0.003991462457185657,
+              "mean_teacher_student_boundary_l1": 0.36777841458924554,
+              "near_same_prediction_rate": 0.0032136105860113423
+            }
+          },
+          "apl_seed_789": {
+            "proposal": {
+              "n": 2446,
+              "fpn_level_counts": {
+                "0": 1992,
+                "1": 286,
+                "2": 168
+              },
+              "foreground_precision_iou50": 0.7367130008176614,
+              "class_correct_precision": 0.7195421095666394,
+              "class_correct_given_foreground": 0.97669256381798,
+              "mean_max_gt_iou": 0.6112744177392557,
+              "iou70_rate": 0.41986917416189695,
+              "gt_segment_recall_iou50": 0.1507674533751444
+            },
+            "anchor": {
+              "pseudo_positive": 7690,
+              "foreground_precision": 0.6829648894668401,
+              "good_boundary_precision_iou50": 0.5842652795838752,
+              "gt_foreground_anchor_coverage": 0.1498815673068691,
+              "proposal_to_anchor_amplification": 3.143908421913328
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5252,
+              "teacher_win_rate": 0.5066641279512567,
+              "student_win_rate": 0.49257425742574257,
+              "tie_rate": 0.0007616146230007616,
+              "mean_delta_iou": 0.0035342767668685112,
+              "mean_teacher_student_boundary_l1": 0.36192560350268466,
+              "near_same_prediction_rate": 0.003427265803503427
+            }
+          },
+          "apl_ensemble": {
+            "proposal": {
+              "n": 2446,
+              "fpn_level_counts": {
+                "0": 1992,
+                "1": 286,
+                "2": 168
+              },
+              "foreground_precision_iou50": 0.7375306623058054,
+              "class_correct_precision": 0.7211774325429272,
+              "class_correct_given_foreground": 0.9778270509977827,
+              "mean_max_gt_iou": 0.6128944229858699,
+              "iou70_rate": 0.4243663123466885,
+              "gt_segment_recall_iou50": 0.1507674533751444
+            },
+            "anchor": {
+              "pseudo_positive": 7682,
+              "foreground_precision": 0.686149440249935,
+              "good_boundary_precision_iou50": 0.5865659984379068,
+              "gt_foreground_anchor_coverage": 0.15042378927542022,
+              "proposal_to_anchor_amplification": 3.1406377759607524
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5271,
+              "teacher_win_rate": 0.5110984632896983,
+              "student_win_rate": 0.48814266742553597,
+              "tie_rate": 0.0007588692847656991,
+              "mean_delta_iou": 0.00438607846171348,
+              "mean_teacher_student_boundary_l1": 0.36085233736300554,
+              "near_same_prediction_rate": 0.003414911781445646
+            }
+          }
+        },
+        "0.75": {
+          "confidence": {
+            "proposal": {
+              "n": 3669,
+              "fpn_level_counts": {
+                "0": 2988,
+                "1": 429,
+                "2": 252
+              },
+              "foreground_precision_iou50": 0.6933769419460344,
+              "class_correct_precision": 0.6715726355955302,
+              "class_correct_given_foreground": 0.9685534591194969,
+              "mean_max_gt_iou": 0.5865513169412666,
+              "iou70_rate": 0.3859362224039248,
+              "gt_segment_recall_iou50": 0.21274137646476315
+            },
+            "anchor": {
+              "pseudo_positive": 11468,
+              "foreground_precision": 0.6591384722706662,
+              "good_boundary_precision_iou50": 0.5454307638646669,
+              "gt_foreground_anchor_coverage": 0.2157187294883137,
+              "proposal_to_anchor_amplification": 3.125647315344781
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7559,
+              "teacher_win_rate": 0.5056224368302685,
+              "student_win_rate": 0.4935838073819288,
+              "tie_rate": 0.0007937557878026194,
+              "mean_delta_iou": 0.0022443830971877747,
+              "mean_teacher_student_boundary_l1": 0.4033319303985941,
+              "near_same_prediction_rate": 0.0029104378886096044
+            }
+          },
+          "apl_seed_123": {
+            "proposal": {
+              "n": 3669,
+              "fpn_level_counts": {
+                "0": 2988,
+                "1": 429,
+                "2": 252
+              },
+              "foreground_precision_iou50": 0.6961024802398473,
+              "class_correct_precision": 0.6721177432542927,
+              "class_correct_given_foreground": 0.9655442443226312,
+              "mean_max_gt_iou": 0.5882979384375344,
+              "iou70_rate": 0.3894794221858817,
+              "gt_segment_recall_iou50": 0.21364911701600925
+            },
+            "anchor": {
+              "pseudo_positive": 11388,
+              "foreground_precision": 0.6635054443273621,
+              "good_boundary_precision_iou50": 0.551721109940288,
+              "gt_foreground_anchor_coverage": 0.2156331154932793,
+              "proposal_to_anchor_amplification": 3.1038430089942763
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7556,
+              "teacher_win_rate": 0.5071466384330333,
+              "student_win_rate": 0.49205929062996295,
+              "tie_rate": 0.0007940709370037057,
+              "mean_delta_iou": 0.003053697183542841,
+              "mean_teacher_student_boundary_l1": 0.38843433127840593,
+              "near_same_prediction_rate": 0.002911593435680254
+            }
+          },
+          "apl_seed_456": {
+            "proposal": {
+              "n": 3669,
+              "fpn_level_counts": {
+                "0": 2988,
+                "1": 429,
+                "2": 252
+              },
+              "foreground_precision_iou50": 0.6941946034341783,
+              "class_correct_precision": 0.6713000817661489,
+              "class_correct_given_foreground": 0.967020023557126,
+              "mean_max_gt_iou": 0.5870490002135055,
+              "iou70_rate": 0.38893431452711913,
+              "gt_segment_recall_iou50": 0.21307146393794354
+            },
+            "anchor": {
+              "pseudo_positive": 11544,
+              "foreground_precision": 0.6574844074844075,
+              "good_boundary_precision_iou50": 0.5453049203049203,
+              "gt_foreground_anchor_coverage": 0.21660340743700238,
+              "proposal_to_anchor_amplification": 3.1463614063777596
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7590,
+              "teacher_win_rate": 0.508300395256917,
+              "student_win_rate": 0.4909090909090909,
+              "tie_rate": 0.0007905138339920949,
+              "mean_delta_iou": 0.0029650358721240865,
+              "mean_teacher_student_boundary_l1": 0.3994959587793262,
+              "near_same_prediction_rate": 0.0030303030303030303
+            }
+          },
+          "apl_seed_789": {
+            "proposal": {
+              "n": 3669,
+              "fpn_level_counts": {
+                "0": 2988,
+                "1": 429,
+                "2": 252
+              },
+              "foreground_precision_iou50": 0.6950122649223222,
+              "class_correct_precision": 0.672390297083674,
+              "class_correct_given_foreground": 0.9674509803921568,
+              "mean_max_gt_iou": 0.5877895514669497,
+              "iou70_rate": 0.3883892068683565,
+              "gt_segment_recall_iou50": 0.21323650767453375
+            },
+            "anchor": {
+              "pseudo_positive": 11512,
+              "foreground_precision": 0.6593988881167477,
+              "good_boundary_precision_iou50": 0.5463863794301599,
+              "gt_foreground_anchor_coverage": 0.21663194543534717,
+              "proposal_to_anchor_amplification": 3.1376396838375578
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7591,
+              "teacher_win_rate": 0.5061256751416151,
+              "student_win_rate": 0.4930839151626927,
+              "tie_rate": 0.0007904096956922672,
+              "mean_delta_iou": 0.0024212811526464167,
+              "mean_teacher_student_boundary_l1": 0.39970277658706754,
+              "near_same_prediction_rate": 0.0028981688842049796
+            }
+          },
+          "apl_ensemble": {
+            "proposal": {
+              "n": 3669,
+              "fpn_level_counts": {
+                "0": 2988,
+                "1": 429,
+                "2": 252
+              },
+              "foreground_precision_iou50": 0.6971926955573726,
+              "class_correct_precision": 0.6745707277187244,
+              "class_correct_given_foreground": 0.9675527756059421,
+              "mean_max_gt_iou": 0.5884126886268141,
+              "iou70_rate": 0.3905696375034069,
+              "gt_segment_recall_iou50": 0.21389668262089453
+            },
+            "anchor": {
+              "pseudo_positive": 11480,
+              "foreground_precision": 0.6603658536585366,
+              "good_boundary_precision_iou50": 0.5491289198606272,
+              "gt_foreground_anchor_coverage": 0.2163465654518992,
+              "proposal_to_anchor_amplification": 3.1289179612973563
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7581,
+              "teacher_win_rate": 0.5079804775095634,
+              "student_win_rate": 0.49122807017543857,
+              "tie_rate": 0.0007914523149980214,
+              "mean_delta_iou": 0.003063491563430768,
+              "mean_teacher_student_boundary_l1": 0.39591718400126946,
+              "near_same_prediction_rate": 0.0029019918216594115
+            }
+          }
+        },
+        "1.00": {
+          "confidence": {
+            "proposal": {
+              "n": 4891,
+              "fpn_level_counts": {
+                "0": 3984,
+                "1": 572,
+                "2": 335
+              },
+              "foreground_precision_iou50": 0.6587609895726845,
+              "class_correct_precision": 0.6272745859742384,
+              "class_correct_given_foreground": 0.952203600248293,
+              "mean_max_gt_iou": 0.5620996553156726,
+              "iou70_rate": 0.3533019832345124,
+              "gt_segment_recall_iou50": 0.2698465093249711
+            },
+            "anchor": {
+              "pseudo_positive": 15238,
+              "foreground_precision": 0.6317758235988975,
+              "good_boundary_precision_iou50": 0.5106313164457278,
+              "gt_foreground_anchor_coverage": 0.274735310065352,
+              "proposal_to_anchor_amplification": 3.115518298916377
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          },
+          "apl_seed_123": {
+            "proposal": {
+              "n": 4891,
+              "fpn_level_counts": {
+                "0": 3984,
+                "1": 572,
+                "2": 335
+              },
+              "foreground_precision_iou50": 0.6587609895726845,
+              "class_correct_precision": 0.6272745859742384,
+              "class_correct_given_foreground": 0.952203600248293,
+              "mean_max_gt_iou": 0.5620996553156726,
+              "iou70_rate": 0.3533019832345124,
+              "gt_segment_recall_iou50": 0.2698465093249711
+            },
+            "anchor": {
+              "pseudo_positive": 15238,
+              "foreground_precision": 0.6317758235988975,
+              "good_boundary_precision_iou50": 0.5106313164457278,
+              "gt_foreground_anchor_coverage": 0.274735310065352,
+              "proposal_to_anchor_amplification": 3.115518298916377
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          },
+          "apl_seed_456": {
+            "proposal": {
+              "n": 4891,
+              "fpn_level_counts": {
+                "0": 3984,
+                "1": 572,
+                "2": 335
+              },
+              "foreground_precision_iou50": 0.6587609895726845,
+              "class_correct_precision": 0.6272745859742384,
+              "class_correct_given_foreground": 0.952203600248293,
+              "mean_max_gt_iou": 0.5620996553156726,
+              "iou70_rate": 0.3533019832345124,
+              "gt_segment_recall_iou50": 0.2698465093249711
+            },
+            "anchor": {
+              "pseudo_positive": 15238,
+              "foreground_precision": 0.6317758235988975,
+              "good_boundary_precision_iou50": 0.5106313164457278,
+              "gt_foreground_anchor_coverage": 0.274735310065352,
+              "proposal_to_anchor_amplification": 3.115518298916377
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          },
+          "apl_seed_789": {
+            "proposal": {
+              "n": 4891,
+              "fpn_level_counts": {
+                "0": 3984,
+                "1": 572,
+                "2": 335
+              },
+              "foreground_precision_iou50": 0.6587609895726845,
+              "class_correct_precision": 0.6272745859742384,
+              "class_correct_given_foreground": 0.952203600248293,
+              "mean_max_gt_iou": 0.5620996553156726,
+              "iou70_rate": 0.3533019832345124,
+              "gt_segment_recall_iou50": 0.2698465093249711
+            },
+            "anchor": {
+              "pseudo_positive": 15238,
+              "foreground_precision": 0.6317758235988975,
+              "good_boundary_precision_iou50": 0.5106313164457278,
+              "gt_foreground_anchor_coverage": 0.274735310065352,
+              "proposal_to_anchor_amplification": 3.115518298916377
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          },
+          "apl_ensemble": {
+            "proposal": {
+              "n": 4891,
+              "fpn_level_counts": {
+                "0": 3984,
+                "1": 572,
+                "2": 335
+              },
+              "foreground_precision_iou50": 0.6587609895726845,
+              "class_correct_precision": 0.6272745859742384,
+              "class_correct_given_foreground": 0.952203600248293,
+              "mean_max_gt_iou": 0.5620996553156726,
+              "iou70_rate": 0.3533019832345124,
+              "gt_segment_recall_iou50": 0.2698465093249711
+            },
+            "anchor": {
+              "pseudo_positive": 15238,
+              "foreground_precision": 0.6317758235988975,
+              "good_boundary_precision_iou50": 0.5106313164457278,
+              "gt_foreground_anchor_coverage": 0.274735310065352,
+              "proposal_to_anchor_amplification": 3.115518298916377
+            },
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          }
+        }
+      }
+    },
+    "anchor_exact_budget": {
+      "global": {
+        "0.25": {
+          "confidence": {
+            "pseudo_positive": 3810,
+            "student_anchor_level_counts": {
+              "0": 2726,
+              "1": 857,
+              "2": 227
+            },
+            "foreground_precision": 0.7160104986876641,
+            "good_boundary_precision_iou50": 0.6057742782152231,
+            "gt_foreground_anchor_coverage": 0.07785165948460375,
+            "good_boundary_anchor_coverage": 0.06586570017978939,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2728,
+              "teacher_win_rate": 0.5058651026392962,
+              "student_win_rate": 0.4937683284457478,
+              "tie_rate": 0.00036656891495601173,
+              "mean_delta_iou": 0.0026601249573320763,
+              "mean_teacher_student_boundary_l1": 0.2940816219863304,
+              "near_same_prediction_rate": 0.0036656891495601175
+            }
+          },
+          "apl_seed_123": {
+            "pseudo_positive": 3810,
+            "student_anchor_level_counts": {
+              "0": 2640,
+              "1": 870,
+              "2": 300
+            },
+            "foreground_precision": 0.721259842519685,
+            "good_boundary_precision_iou50": 0.6220472440944882,
+            "gt_foreground_anchor_coverage": 0.07842241945149968,
+            "good_boundary_anchor_coverage": 0.06763505607716674,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2748,
+              "teacher_win_rate": 0.5018195050946143,
+              "student_win_rate": 0.4978165938864629,
+              "tie_rate": 0.000363901018922853,
+              "mean_delta_iou": 0.0035003522584510336,
+              "mean_teacher_student_boundary_l1": 0.2774773554705636,
+              "near_same_prediction_rate": 0.0032751091703056767
+            }
+          },
+          "apl_seed_456": {
+            "pseudo_positive": 3810,
+            "student_anchor_level_counts": {
+              "0": 2531,
+              "1": 939,
+              "2": 340
+            },
+            "foreground_precision": 0.7136482939632546,
+            "good_boundary_precision_iou50": 0.6123359580052493,
+            "gt_foreground_anchor_coverage": 0.07759481749950059,
+            "good_boundary_anchor_coverage": 0.06657915013840929,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2719,
+              "teacher_win_rate": 0.5086428834130194,
+              "student_win_rate": 0.49098933431408603,
+              "tie_rate": 0.0003677822728944465,
+              "mean_delta_iou": 0.004917679415517714,
+              "mean_teacher_student_boundary_l1": 0.3019439600635513,
+              "near_same_prediction_rate": 0.004045605001838912
+            }
+          },
+          "apl_seed_789": {
+            "pseudo_positive": 3810,
+            "student_anchor_level_counts": {
+              "0": 2564,
+              "1": 922,
+              "2": 324
+            },
+            "foreground_precision": 0.7131233595800525,
+            "good_boundary_precision_iou50": 0.6128608923884514,
+            "gt_foreground_anchor_coverage": 0.077537741502811,
+            "good_boundary_anchor_coverage": 0.06663622613509888,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2717,
+              "teacher_win_rate": 0.5086492454913507,
+              "student_win_rate": 0.4909827015090173,
+              "tie_rate": 0.000368052999631947,
+              "mean_delta_iou": 0.004153932070782573,
+              "mean_teacher_student_boundary_l1": 0.294561746983042,
+              "near_same_prediction_rate": 0.003312476996687523
+            }
+          },
+          "apl_ensemble": {
+            "pseudo_positive": 3810,
+            "student_anchor_level_counts": {
+              "0": 2566,
+              "1": 910,
+              "2": 334
+            },
+            "foreground_precision": 0.7181102362204724,
+            "good_boundary_precision_iou50": 0.6194225721784777,
+            "gt_foreground_anchor_coverage": 0.07807996347136212,
+            "good_boundary_anchor_coverage": 0.06734967609371878,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2736,
+              "teacher_win_rate": 0.5116959064327485,
+              "student_win_rate": 0.48793859649122806,
+              "tie_rate": 0.0003654970760233918,
+              "mean_delta_iou": 0.00575737210606056,
+              "mean_teacher_student_boundary_l1": 0.2941767494493758,
+              "near_same_prediction_rate": 0.003654970760233918
+            }
+          }
+        },
+        "0.50": {
+          "confidence": {
+            "pseudo_positive": 7619,
+            "student_anchor_level_counts": {
+              "0": 5040,
+              "1": 1826,
+              "2": 753
+            },
+            "foreground_precision": 0.6859167869799186,
+            "good_boundary_precision_iou50": 0.5813098831867699,
+            "gt_foreground_anchor_coverage": 0.1491395793499044,
+            "good_boundary_anchor_coverage": 0.12639479466910192,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5226,
+              "teacher_win_rate": 0.5059318790662074,
+              "student_win_rate": 0.4936854190585534,
+              "tie_rate": 0.0003827018752391887,
+              "mean_delta_iou": 0.002444688144499572,
+              "mean_teacher_student_boundary_l1": 0.3477118959428705,
+              "near_same_prediction_rate": 0.003444316877152698
+            }
+          },
+          "apl_seed_123": {
+            "pseudo_positive": 7619,
+            "student_anchor_level_counts": {
+              "0": 5018,
+              "1": 1851,
+              "2": 750
+            },
+            "foreground_precision": 0.6834230213938837,
+            "good_boundary_precision_iou50": 0.580916130725817,
+            "gt_foreground_anchor_coverage": 0.14859735738135327,
+            "good_boundary_anchor_coverage": 0.12630918067406752,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5207,
+              "teacher_win_rate": 0.505665450355291,
+              "student_win_rate": 0.4937584021509506,
+              "tie_rate": 0.0005761474937584022,
+              "mean_delta_iou": 0.002848174784991433,
+              "mean_teacher_student_boundary_l1": 0.32167343466483816,
+              "near_same_prediction_rate": 0.003840983291722681
+            }
+          },
+          "apl_seed_456": {
+            "pseudo_positive": 7619,
+            "student_anchor_level_counts": {
+              "0": 4884,
+              "1": 1914,
+              "2": 821
+            },
+            "foreground_precision": 0.6815855099094369,
+            "good_boundary_precision_iou50": 0.5793411208820055,
+            "gt_foreground_anchor_coverage": 0.14819782540452614,
+            "good_boundary_anchor_coverage": 0.12596672469392997,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5193,
+              "teacher_win_rate": 0.5083766608896592,
+              "student_win_rate": 0.49104563835932985,
+              "tie_rate": 0.0005777007510109763,
+              "mean_delta_iou": 0.00349138651510183,
+              "mean_teacher_student_boundary_l1": 0.34864777649112366,
+              "near_same_prediction_rate": 0.0034662045060658577
+            }
+          },
+          "apl_seed_789": {
+            "pseudo_positive": 7619,
+            "student_anchor_level_counts": {
+              "0": 4932,
+              "1": 1879,
+              "2": 808
+            },
+            "foreground_precision": 0.68473552959706,
+            "good_boundary_precision_iou50": 0.5840661504134401,
+            "gt_foreground_anchor_coverage": 0.14888273736480123,
+            "good_boundary_anchor_coverage": 0.12699409263434264,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5217,
+              "teacher_win_rate": 0.5081464443166571,
+              "student_win_rate": 0.4912785125551083,
+              "tie_rate": 0.0005750431282346176,
+              "mean_delta_iou": 0.003506713541635545,
+              "mean_teacher_student_boundary_l1": 0.34537217976696444,
+              "near_same_prediction_rate": 0.0034502587694077054
+            }
+          },
+          "apl_ensemble": {
+            "pseudo_positive": 7619,
+            "student_anchor_level_counts": {
+              "0": 4958,
+              "1": 1871,
+              "2": 790
+            },
+            "foreground_precision": 0.6831605197532484,
+            "good_boundary_precision_iou50": 0.5836723979524872,
+            "gt_foreground_anchor_coverage": 0.14854028138466369,
+            "good_boundary_anchor_coverage": 0.12690847863930824,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5205,
+              "teacher_win_rate": 0.5087415946205571,
+              "student_win_rate": 0.4906820365033622,
+              "tie_rate": 0.0005763688760806917,
+              "mean_delta_iou": 0.0035278269990663136,
+              "mean_teacher_student_boundary_l1": 0.33740626082296676,
+              "near_same_prediction_rate": 0.00345821325648415
+            }
+          }
+        },
+        "0.75": {
+          "confidence": {
+            "pseudo_positive": 11429,
+            "student_anchor_level_counts": {
+              "0": 7297,
+              "1": 2875,
+              "2": 1257
+            },
+            "foreground_precision": 0.6594627701461195,
+            "good_boundary_precision_iou50": 0.546504506081022,
+            "gt_foreground_anchor_coverage": 0.21509089352472818,
+            "good_boundary_anchor_coverage": 0.17824833766159642,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7537,
+              "teacher_win_rate": 0.5053734907788244,
+              "student_win_rate": 0.4938304365132015,
+              "tie_rate": 0.000796072707973995,
+              "mean_delta_iou": 0.002295147835184222,
+              "mean_teacher_student_boundary_l1": 0.3952597877747408,
+              "near_same_prediction_rate": 0.0030516120472336475
+            }
+          },
+          "apl_seed_123": {
+            "pseudo_positive": 11429,
+            "student_anchor_level_counts": {
+              "0": 7421,
+              "1": 2810,
+              "2": 1198
+            },
+            "foreground_precision": 0.6627001487444221,
+            "good_boundary_precision_iou50": 0.5495668912415784,
+            "gt_foreground_anchor_coverage": 0.21614679946348564,
+            "good_boundary_anchor_coverage": 0.17924716760366427,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7574,
+              "teacher_win_rate": 0.5081858991285978,
+              "student_win_rate": 0.4908898864536573,
+              "tie_rate": 0.0009242144177449168,
+              "mean_delta_iou": 0.002523949353065187,
+              "mean_teacher_student_boundary_l1": 0.3732956321715742,
+              "near_same_prediction_rate": 0.003036704515447584
+            }
+          },
+          "apl_seed_456": {
+            "pseudo_positive": 11429,
+            "student_anchor_level_counts": {
+              "0": 7246,
+              "1": 2909,
+              "2": 1274
+            },
+            "foreground_precision": 0.6597252603027386,
+            "good_boundary_precision_iou50": 0.5480794470207367,
+            "gt_foreground_anchor_coverage": 0.21517650751976256,
+            "good_boundary_anchor_coverage": 0.17876202163180274,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7540,
+              "teacher_win_rate": 0.5094164456233422,
+              "student_win_rate": 0.4897877984084881,
+              "tie_rate": 0.0007957559681697613,
+              "mean_delta_iou": 0.003211314261295593,
+              "mean_teacher_student_boundary_l1": 0.39215141349825366,
+              "near_same_prediction_rate": 0.003050397877984085
+            }
+          },
+          "apl_seed_789": {
+            "pseudo_positive": 11429,
+            "student_anchor_level_counts": {
+              "0": 7289,
+              "1": 2884,
+              "2": 1256
+            },
+            "foreground_precision": 0.6599877504593578,
+            "good_boundary_precision_iou50": 0.546679499518768,
+            "gt_foreground_anchor_coverage": 0.21526212151479696,
+            "good_boundary_anchor_coverage": 0.178305413658286,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7543,
+              "teacher_win_rate": 0.5061646559724248,
+              "student_win_rate": 0.4930399045472624,
+              "tie_rate": 0.0007954394803128729,
+              "mean_delta_iou": 0.002203117598731717,
+              "mean_teacher_student_boundary_l1": 0.38934473425296107,
+              "near_same_prediction_rate": 0.002916611427813867
+            }
+          },
+          "apl_ensemble": {
+            "pseudo_positive": 11429,
+            "student_anchor_level_counts": {
+              "0": 7332,
+              "1": 2859,
+              "2": 1238
+            },
+            "foreground_precision": 0.6619126782745647,
+            "good_boundary_precision_iou50": 0.5488669174905941,
+            "gt_foreground_anchor_coverage": 0.21588995747838247,
+            "good_boundary_anchor_coverage": 0.17901886361690592,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7565,
+              "teacher_win_rate": 0.5065432914738929,
+              "student_win_rate": 0.4926635822868473,
+              "tie_rate": 0.0007931262392597488,
+              "mean_delta_iou": 0.0019130166479671387,
+              "mean_teacher_student_boundary_l1": 0.3835699452364279,
+              "near_same_prediction_rate": 0.003040317250495704
+            }
+          }
+        },
+        "1.00": {
+          "confidence": {
+            "pseudo_positive": 15238,
+            "student_anchor_level_counts": {
+              "0": 9663,
+              "1": 3863,
+              "2": 1712
+            },
+            "foreground_precision": 0.6317758235988975,
+            "good_boundary_precision_iou50": 0.5106313164457278,
+            "gt_foreground_anchor_coverage": 0.274735310065352,
+            "good_boundary_anchor_coverage": 0.22205416512085843,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          },
+          "apl_seed_123": {
+            "pseudo_positive": 15238,
+            "student_anchor_level_counts": {
+              "0": 9663,
+              "1": 3863,
+              "2": 1712
+            },
+            "foreground_precision": 0.6317758235988975,
+            "good_boundary_precision_iou50": 0.5106313164457278,
+            "gt_foreground_anchor_coverage": 0.274735310065352,
+            "good_boundary_anchor_coverage": 0.22205416512085843,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          },
+          "apl_seed_456": {
+            "pseudo_positive": 15238,
+            "student_anchor_level_counts": {
+              "0": 9663,
+              "1": 3863,
+              "2": 1712
+            },
+            "foreground_precision": 0.6317758235988975,
+            "good_boundary_precision_iou50": 0.5106313164457278,
+            "gt_foreground_anchor_coverage": 0.274735310065352,
+            "good_boundary_anchor_coverage": 0.22205416512085843,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          },
+          "apl_seed_789": {
+            "pseudo_positive": 15238,
+            "student_anchor_level_counts": {
+              "0": 9663,
+              "1": 3863,
+              "2": 1712
+            },
+            "foreground_precision": 0.6317758235988975,
+            "good_boundary_precision_iou50": 0.5106313164457278,
+            "gt_foreground_anchor_coverage": 0.274735310065352,
+            "good_boundary_anchor_coverage": 0.22205416512085843,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          },
+          "apl_ensemble": {
+            "pseudo_positive": 15238,
+            "student_anchor_level_counts": {
+              "0": 9663,
+              "1": 3863,
+              "2": 1712
+            },
+            "foreground_precision": 0.6317758235988975,
+            "good_boundary_precision_iou50": 0.5106313164457278,
+            "gt_foreground_anchor_coverage": 0.274735310065352,
+            "good_boundary_anchor_coverage": 0.22205416512085843,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          }
+        }
+      },
+      "within_fpn_level": {
+        "0.25": {
+          "confidence": {
+            "pseudo_positive": 3810,
+            "student_anchor_level_counts": {
+              "0": 2416,
+              "1": 966,
+              "2": 428
+            },
+            "foreground_precision": 0.7118110236220473,
+            "good_boundary_precision_iou50": 0.6120734908136483,
+            "gt_foreground_anchor_coverage": 0.07739505151108701,
+            "good_boundary_anchor_coverage": 0.0665506121400645,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2712,
+              "teacher_win_rate": 0.5081120943952803,
+              "student_win_rate": 0.4918879056047198,
+              "tie_rate": 0.0,
+              "mean_delta_iou": 0.004365364082740032,
+              "mean_teacher_student_boundary_l1": 0.32074362492315184,
+              "near_same_prediction_rate": 0.0029498525073746312
+            }
+          },
+          "apl_seed_123": {
+            "pseudo_positive": 3810,
+            "student_anchor_level_counts": {
+              "0": 2416,
+              "1": 966,
+              "2": 428
+            },
+            "foreground_precision": 0.715748031496063,
+            "good_boundary_precision_iou50": 0.6236220472440945,
+            "gt_foreground_anchor_coverage": 0.07782312148625896,
+            "good_boundary_anchor_coverage": 0.06780628406723553,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2727,
+              "teacher_win_rate": 0.5053171983865054,
+              "student_win_rate": 0.4943160982764943,
+              "tie_rate": 0.0003667033370003667,
+              "mean_delta_iou": 0.004303371288540777,
+              "mean_teacher_student_boundary_l1": 0.29951493225125636,
+              "near_same_prediction_rate": 0.0029336266960029336
+            }
+          },
+          "apl_seed_456": {
+            "pseudo_positive": 3810,
+            "student_anchor_level_counts": {
+              "0": 2416,
+              "1": 966,
+              "2": 428
+            },
+            "foreground_precision": 0.7152230971128609,
+            "good_boundary_precision_iou50": 0.6162729658792651,
+            "gt_foreground_anchor_coverage": 0.07776604548956936,
+            "good_boundary_anchor_coverage": 0.06700722011358123,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2725,
+              "teacher_win_rate": 0.5078899082568807,
+              "student_win_rate": 0.4917431192660551,
+              "tie_rate": 0.0003669724770642202,
+              "mean_delta_iou": 0.006011042008432773,
+              "mean_teacher_student_boundary_l1": 0.3169491495779895,
+              "near_same_prediction_rate": 0.0033027522935779817
+            }
+          },
+          "apl_seed_789": {
+            "pseudo_positive": 3810,
+            "student_anchor_level_counts": {
+              "0": 2416,
+              "1": 966,
+              "2": 428
+            },
+            "foreground_precision": 0.7097112860892388,
+            "good_boundary_precision_iou50": 0.6131233595800525,
+            "gt_foreground_anchor_coverage": 0.07716674752432864,
+            "good_boundary_anchor_coverage": 0.06666476413344367,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2704,
+              "teacher_win_rate": 0.5059171597633136,
+              "student_win_rate": 0.4937130177514793,
+              "tie_rate": 0.0003698224852071006,
+              "mean_delta_iou": 0.003788449111278858,
+              "mean_teacher_student_boundary_l1": 0.30845857799582227,
+              "near_same_prediction_rate": 0.0029585798816568047
+            }
+          },
+          "apl_ensemble": {
+            "pseudo_positive": 3810,
+            "student_anchor_level_counts": {
+              "0": 2416,
+              "1": 966,
+              "2": 428
+            },
+            "foreground_precision": 0.7136482939632546,
+            "good_boundary_precision_iou50": 0.6183727034120735,
+            "gt_foreground_anchor_coverage": 0.07759481749950059,
+            "good_boundary_anchor_coverage": 0.0672355241003396,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 2719,
+              "teacher_win_rate": 0.5060684075027584,
+              "student_win_rate": 0.4935638102243472,
+              "tie_rate": 0.0003677822728944465,
+              "mean_delta_iou": 0.004535965217293164,
+              "mean_teacher_student_boundary_l1": 0.3073809210891976,
+              "near_same_prediction_rate": 0.0033100404560500183
+            }
+          }
+        },
+        "0.50": {
+          "confidence": {
+            "pseudo_positive": 7620,
+            "student_anchor_level_counts": {
+              "0": 4832,
+              "1": 1932,
+              "2": 856
+            },
+            "foreground_precision": 0.6838582677165355,
+            "good_boundary_precision_iou50": 0.5812335958005249,
+            "gt_foreground_anchor_coverage": 0.14871150937473246,
+            "good_boundary_anchor_coverage": 0.12639479466910192,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5211,
+              "teacher_win_rate": 0.5075801189790827,
+              "student_win_rate": 0.4920360775283055,
+              "tie_rate": 0.00038380349261178274,
+              "mean_delta_iou": 0.0034659578645613665,
+              "mean_teacher_student_boundary_l1": 0.36195236752161797,
+              "near_same_prediction_rate": 0.0034542314335060447
+            }
+          },
+          "apl_seed_123": {
+            "pseudo_positive": 7620,
+            "student_anchor_level_counts": {
+              "0": 4832,
+              "1": 1932,
+              "2": 856
+            },
+            "foreground_precision": 0.6846456692913386,
+            "good_boundary_precision_iou50": 0.5837270341207349,
+            "gt_foreground_anchor_coverage": 0.14888273736480123,
+            "good_boundary_anchor_coverage": 0.12693701663765303,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5217,
+              "teacher_win_rate": 0.5110216599578302,
+              "student_win_rate": 0.4884032969139352,
+              "tie_rate": 0.0005750431282346176,
+              "mean_delta_iou": 0.004294703918951372,
+              "mean_teacher_student_boundary_l1": 0.3361664703803111,
+              "near_same_prediction_rate": 0.003641939812152578
+            }
+          },
+          "apl_seed_456": {
+            "pseudo_positive": 7620,
+            "student_anchor_level_counts": {
+              "0": 4832,
+              "1": 1932,
+              "2": 856
+            },
+            "foreground_precision": 0.6825459317585302,
+            "good_boundary_precision_iou50": 0.5804461942257217,
+            "gt_foreground_anchor_coverage": 0.1484261293912845,
+            "good_boundary_anchor_coverage": 0.12622356667903314,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5201,
+              "teacher_win_rate": 0.5087483176312247,
+              "student_win_rate": 0.4906748702172659,
+              "tie_rate": 0.0005768121515093252,
+              "mean_delta_iou": 0.00358881658185585,
+              "mean_teacher_student_boundary_l1": 0.3544267057180634,
+              "near_same_prediction_rate": 0.003460872909055951
+            }
+          },
+          "apl_seed_789": {
+            "pseudo_positive": 7620,
+            "student_anchor_level_counts": {
+              "0": 4832,
+              "1": 1932,
+              "2": 856
+            },
+            "foreground_precision": 0.6835958005249344,
+            "good_boundary_precision_iou50": 0.583989501312336,
+            "gt_foreground_anchor_coverage": 0.14865443337804288,
+            "good_boundary_anchor_coverage": 0.12699409263434264,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5209,
+              "teacher_win_rate": 0.5075830293722403,
+              "student_win_rate": 0.4918410443463237,
+              "tie_rate": 0.0005759262814359762,
+              "mean_delta_iou": 0.0037131792895909255,
+              "mean_teacher_student_boundary_l1": 0.35210647173819465,
+              "near_same_prediction_rate": 0.003455557688615857
+            }
+          },
+          "apl_ensemble": {
+            "pseudo_positive": 7620,
+            "student_anchor_level_counts": {
+              "0": 4832,
+              "1": 1932,
+              "2": 856
+            },
+            "foreground_precision": 0.6841207349081365,
+            "good_boundary_precision_iou50": 0.5845144356955381,
+            "gt_foreground_anchor_coverage": 0.14876858537142204,
+            "good_boundary_anchor_coverage": 0.1271082446277218,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 5213,
+              "teacher_win_rate": 0.5083445233071168,
+              "student_win_rate": 0.4910799923268751,
+              "tie_rate": 0.0005754843660080568,
+              "mean_delta_iou": 0.003482679158460607,
+              "mean_teacher_student_boundary_l1": 0.34631704689558607,
+              "near_same_prediction_rate": 0.0034529061960483407
+            }
+          }
+        },
+        "0.75": {
+          "confidence": {
+            "pseudo_positive": 11430,
+            "student_anchor_level_counts": {
+              "0": 7248,
+              "1": 2898,
+              "2": 1284
+            },
+            "foreground_precision": 0.6596675415573053,
+            "good_boundary_precision_iou50": 0.5463692038495188,
+            "gt_foreground_anchor_coverage": 0.21517650751976256,
+            "good_boundary_anchor_coverage": 0.17821979966325163,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7540,
+              "teacher_win_rate": 0.5051724137931034,
+              "student_win_rate": 0.49403183023872677,
+              "tie_rate": 0.0007957559681697613,
+              "mean_delta_iou": 0.0022270891573329503,
+              "mean_teacher_student_boundary_l1": 0.39798110745629833,
+              "near_same_prediction_rate": 0.0029177718832891246
+            }
+          },
+          "apl_seed_123": {
+            "pseudo_positive": 11430,
+            "student_anchor_level_counts": {
+              "0": 7248,
+              "1": 2898,
+              "2": 1284
+            },
+            "foreground_precision": 0.663079615048119,
+            "good_boundary_precision_iou50": 0.5512685914260718,
+            "gt_foreground_anchor_coverage": 0.21628948945520962,
+            "good_boundary_anchor_coverage": 0.1798179275705602,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7579,
+              "teacher_win_rate": 0.5086423010951313,
+              "student_win_rate": 0.49043409420767914,
+              "tie_rate": 0.0009236046971896029,
+              "mean_delta_iou": 0.0032314806306585502,
+              "mean_teacher_student_boundary_l1": 0.37900219473317864,
+              "near_same_prediction_rate": 0.003034701147908695
+            }
+          },
+          "apl_seed_456": {
+            "pseudo_positive": 11430,
+            "student_anchor_level_counts": {
+              "0": 7248,
+              "1": 2898,
+              "2": 1284
+            },
+            "foreground_precision": 0.6600174978127734,
+            "good_boundary_precision_iou50": 0.5484689413823272,
+            "gt_foreground_anchor_coverage": 0.21529065951314175,
+            "good_boundary_anchor_coverage": 0.17890471162352672,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7544,
+              "teacher_win_rate": 0.5094114528101803,
+              "student_win_rate": 0.4897932131495228,
+              "tie_rate": 0.0007953340402969247,
+              "mean_delta_iou": 0.003190950731018979,
+              "mean_teacher_student_boundary_l1": 0.3922138763542266,
+              "near_same_prediction_rate": 0.003048780487804878
+            }
+          },
+          "apl_seed_789": {
+            "pseudo_positive": 11430,
+            "student_anchor_level_counts": {
+              "0": 7248,
+              "1": 2898,
+              "2": 1284
+            },
+            "foreground_precision": 0.6613298337707787,
+            "good_boundary_precision_iou50": 0.5482939632545932,
+            "gt_foreground_anchor_coverage": 0.2157187294883137,
+            "good_boundary_anchor_coverage": 0.17884763562683714,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7559,
+              "teacher_win_rate": 0.5064161926180711,
+              "student_win_rate": 0.4927900515941262,
+              "tie_rate": 0.0007937557878026194,
+              "mean_delta_iou": 0.0024788795926888197,
+              "mean_teacher_student_boundary_l1": 0.39394501427649065,
+              "near_same_prediction_rate": 0.0029104378886096044
+            }
+          },
+          "apl_ensemble": {
+            "pseudo_positive": 11430,
+            "student_anchor_level_counts": {
+              "0": 7248,
+              "1": 2898,
+              "2": 1284
+            },
+            "foreground_precision": 0.6615048118985127,
+            "good_boundary_precision_iou50": 0.5496937882764654,
+            "gt_foreground_anchor_coverage": 0.21577580548500327,
+            "good_boundary_anchor_coverage": 0.17930424360035388,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 7561,
+              "teacher_win_rate": 0.509456421108319,
+              "student_win_rate": 0.48975003306440945,
+              "tie_rate": 0.0007935458272715249,
+              "mean_delta_iou": 0.003098182688135742,
+              "mean_teacher_student_boundary_l1": 0.3875724732000792,
+              "near_same_prediction_rate": 0.0030419256712075123
+            }
+          }
+        },
+        "1.00": {
+          "confidence": {
+            "pseudo_positive": 15238,
+            "student_anchor_level_counts": {
+              "0": 9663,
+              "1": 3863,
+              "2": 1712
+            },
+            "foreground_precision": 0.6317758235988975,
+            "good_boundary_precision_iou50": 0.5106313164457278,
+            "gt_foreground_anchor_coverage": 0.274735310065352,
+            "good_boundary_anchor_coverage": 0.22205416512085843,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          },
+          "apl_seed_123": {
+            "pseudo_positive": 15238,
+            "student_anchor_level_counts": {
+              "0": 9663,
+              "1": 3863,
+              "2": 1712
+            },
+            "foreground_precision": 0.6317758235988975,
+            "good_boundary_precision_iou50": 0.5106313164457278,
+            "gt_foreground_anchor_coverage": 0.274735310065352,
+            "good_boundary_anchor_coverage": 0.22205416512085843,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          },
+          "apl_seed_456": {
+            "pseudo_positive": 15238,
+            "student_anchor_level_counts": {
+              "0": 9663,
+              "1": 3863,
+              "2": 1712
+            },
+            "foreground_precision": 0.6317758235988975,
+            "good_boundary_precision_iou50": 0.5106313164457278,
+            "gt_foreground_anchor_coverage": 0.274735310065352,
+            "good_boundary_anchor_coverage": 0.22205416512085843,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          },
+          "apl_seed_789": {
+            "pseudo_positive": 15238,
+            "student_anchor_level_counts": {
+              "0": 9663,
+              "1": 3863,
+              "2": 1712
+            },
+            "foreground_precision": 0.6317758235988975,
+            "good_boundary_precision_iou50": 0.5106313164457278,
+            "gt_foreground_anchor_coverage": 0.274735310065352,
+            "good_boundary_anchor_coverage": 0.22205416512085843,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          },
+          "apl_ensemble": {
+            "pseudo_positive": 15238,
+            "student_anchor_level_counts": {
+              "0": 9663,
+              "1": 3863,
+              "2": 1712
+            },
+            "foreground_precision": 0.6317758235988975,
+            "good_boundary_precision_iou50": 0.5106313164457278,
+            "gt_foreground_anchor_coverage": 0.274735310065352,
+            "good_boundary_anchor_coverage": 0.22205416512085843,
+            "teacher_vs_student_on_gt_foreground_anchors": {
+              "n": 9627,
+              "teacher_win_rate": 0.5003635608185312,
+              "student_win_rate": 0.49890931754440637,
+              "tie_rate": 0.0007271216370624286,
+              "mean_delta_iou": -0.000873070931516977,
+              "mean_teacher_student_boundary_l1": 0.4301397628417401,
+              "near_same_prediction_rate": 0.0024929884699283265
+            }
+          }
+        }
+      }
+    }
+  }
+}
