@@ -105,8 +105,7 @@ def proposal_rois(
 
 
 def collect_source_samples(
-        model, dataset, device, batch_size, seed, roi_size, mode,
-        foreground_iou):
+        model, dataset, device, batch_size, seed, roi_size, foreground_iou):
     reset_audit_rng(seed)
     all_rois, all_segments, all_gt = [], [], []
     all_classes, all_foreground, all_iou = [], [], []
@@ -796,7 +795,7 @@ def main():
         cfg["dataset_name"], True, cfg["src_train_split"], **cfg["dataset"]
     )
     source_val = make_dataset(
-        cfg["dataset_name"], False, cfg["src_val_split"], **cfg["dataset"]
+        cfg["dataset_name"], True, cfg["src_val_split"], **cfg["dataset"]
     )
     target_train = make_dataset(
         cfg["dataset_name"], True, cfg["tgt_train_split"], **cfg["dataset"]
@@ -810,11 +809,11 @@ def main():
 
     train_samples = collect_source_samples(
         model, source_train, args.device, batch_size,
-        args.source_seed, args.roi_size, "train", args.foreground_iou,
+        args.source_seed, args.roi_size, args.foreground_iou,
     )
     val_samples = collect_source_samples(
         model, source_val, args.device, batch_size,
-        args.source_seed, args.roi_size, "validation", args.foreground_iou,
+        args.source_seed, args.roi_size, args.foreground_iou,
     )
     feature_dim = train_samples["rois"].shape[1]
     refiners, training = {}, {}
@@ -858,6 +857,9 @@ def main():
         "protocol": {
             "refiner_supervision": "source GT only",
             "target_gt_usage": "offline evaluation only",
+            "source_validation": (
+                "fixed-seed 2304-window crop for proposal-compatible early stop"
+            ),
             "candidate_pipeline": (
                 "EMA -> alpha -> hard class-agnostic NMS; proposal set fixed"
             ),
