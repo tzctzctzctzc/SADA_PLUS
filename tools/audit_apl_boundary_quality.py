@@ -280,7 +280,7 @@ def matched_budget_summary(
 
 
 def collect_target_records(
-        model, quality_heads, dataset, annotations, cfg, device,
+        model, student_model, quality_heads, dataset, annotations, cfg, device,
         levels, batch_size, seed):
     reset_audit_rng(seed)
     proposal_records, anchor_records = [], []
@@ -305,6 +305,9 @@ def collect_target_records(
             )
             hidden, offsets, fpn_masks, points = encode_batch(
                 model, batch, "train"
+            )
+            _, student_level_offsets, _, _ = encode_batch(
+                student_model, batch, "train"
             )
             quality_maps = {
                 str(head_seed): [
@@ -335,7 +338,7 @@ def collect_target_records(
         ])
         student_offsets = torch.cat([
             level_offsets.permute(0, 2, 1)
-            for level_offsets in offsets
+            for level_offsets in student_level_offsets
         ], dim=1)
 
         gt_segments, gt_labels = [], []
@@ -630,6 +633,11 @@ def main():
     ).to(args.device)
     model.load_state_dict(checkpoint["ema_state_dict"])
     model.eval()
+    student_model = make_meta_arch(
+        cfg["model_name"], cfg, device=args.device
+    ).to(args.device)
+    student_model.load_state_dict(checkpoint["state_dict"])
+    student_model.eval()
 
     source_train = make_dataset(
         cfg["dataset_name"], True, cfg["src_train_split"], **cfg["dataset"]
@@ -667,8 +675,8 @@ def main():
         head_training[str(head_seed)] = metrics
 
     proposal_records, anchor_records, dataset_summary = collect_target_records(
-        model, quality_heads, target_train, annotations, cfg, args.device,
-        levels, batch_size, args.target_seed,
+        model, student_model, quality_heads, target_train, annotations, cfg,
+        args.device, levels, batch_size, args.target_seed,
     )
     proposal_rankings = quality_predictions(proposal_records, head_seeds)
     anchor_rankings = quality_predictions(anchor_records, head_seeds)
