@@ -3,6 +3,67 @@ import math
 import torch
 
 
+def temporal_roi_interpolate(
+        features, segment, point_centers, valid_length, output_size):
+    """Linearly sample a CxT feature map inside one temporal segment."""
+    if features.ndim != 2:
+        raise ValueError("features must have shape [C, T]")
+    if segment.shape != (2,):
+        raise ValueError("segment must have shape [2]")
+    if output_size < 2 or valid_length < 1:
+        raise ValueError("output_size must be >=2 and valid_length >=1")
+    valid_length = min(int(valid_length), features.shape[-1])
+    centers = point_centers[:valid_length]
+    if centers.numel() == 1:
+        return features[:, :1].expand(-1, output_size)
+    step = (centers[-1] - centers[0]) / (centers.numel() - 1)
+    positions = torch.linspace(
+        0.0, 1.0, output_size,
+        dtype=features.dtype, device=features.device,
+    )
+    positions = segment[0] + positions * (segment[1] - segment[0])
+    indices = ((positions - centers[0]) / step.clamp_min(1e-6)).clamp(
+        0, valid_length - 1
+    )
+    left = indices.floor().long()
+    right = (left + 1).clamp_max(valid_length - 1)
+    weight = (indices - left.to(indices.dtype)).unsqueeze(0)
+    return (
+        features[:, left] * (1.0 - weight)
+        + features[:, right] * weight
+    )
+
+
+def apply_boundary_offsets(segments, normalized_offsets, max_scale):
+    """Add duration-normalized start/end offsets while keeping positive length."""
+    if segments.shape != normalized_offsets.shape or segments.shape[-1] != 2:
+        raise ValueError("segments and offsets must both have shape [N, 2]")
+    duration = (segments[:, 1] - segments[:, 0]).clamp_min(1e-6)
+    scaled = normalized_offsets.clamp(-1.0, 1.0) * max_scale
+    return torch.stack((
+        segments[:, 0] + scaled[:, 0] * duration,
+        segments[:, 1] + scaled[:, 1] * duration,
+    ), dim=-1)
+
+
+def clip_segments(segments, valid_lengths, fallback=None):
+    """Clip per-video segments and fall back if clipping collapses a segment."""
+    clipped = segments.clone()
+    clipped[:, 0].clamp_(min=0.0)
+    clipped[:, 1].clamp_(min=0.0)
+    clipped[:, 0] = torch.minimum(clipped[:, 0], valid_lengths)
+    clipped[:, 1] = torch.minimum(clipped[:, 1], valid_lengths)
+    invalid = (
+        ~torch.isfinite(clipped).all(dim=-1)
+        | ((clipped[:, 1] - clipped[:, 0]) <= 1e-6)
+    )
+    if invalid.any():
+        if fallback is None:
+            raise RuntimeError("boundary refinement produced invalid segments")
+        clipped[invalid] = fallback[invalid]
+    return clipped
+
+
 def npl_boundary_ambiguity(segments, valid_mask, radii, eps=1e-6):
     """Compute NPL boundary variance from adjacent dense predictions.
 
