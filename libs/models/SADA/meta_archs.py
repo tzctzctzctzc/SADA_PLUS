@@ -1094,12 +1094,9 @@ class SADA(nn.Module):
                         dense_points[:, 0]
                         + dense_offsets[:, 1] * dense_points[:, 3],
                     ), dim=-1)
-                    dense_segments[:, 0].clamp_(
-                        min=0.0, max=valid_length
-                    )
-                    dense_segments[:, 1].clamp_(
-                        min=0.0, max=valid_length
-                    )
+                    # NPL measures dense predictions before post-processing.
+                    # Keep raw boundaries here; clipping can create artificial
+                    # zero variance at crop edges.
                     dense_duration = (
                         dense_segments[:, 1] - dense_segments[:, 0]
                     )

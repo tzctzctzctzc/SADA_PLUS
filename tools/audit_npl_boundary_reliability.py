@@ -85,9 +85,14 @@ def summarize_selection(
     teacher_wins = sum(value > tie_eps for value in deltas)
     student_wins = sum(value < -tie_eps for value in deltas)
     ties = len(deltas) - teacher_wins - student_wins
+    level_counts = {}
+    for record in selected:
+        key = str(record["level"])
+        level_counts[key] = level_counts.get(key, 0) + 1
     return {
         "proposal": {
             "n": proposal_count,
+            "fpn_level_counts": level_counts,
             "foreground_precision_iou50": ratio(
                 foreground_count, proposal_count
             ),
@@ -139,6 +144,22 @@ def summarize_selection(
     }
 
 
+def select_within_fpn_level(records, values, fraction):
+    selected = []
+    levels = sorted({record["level"] for record in records})
+    for level in levels:
+        global_indices = [
+            index for index, record in enumerate(records)
+            if record["level"] == level
+        ]
+        local_values = values[global_indices]
+        local_indices = matched_budget_indices(
+            local_values, fraction
+        ).tolist()
+        selected.extend(global_indices[index] for index in local_indices)
+    return selected
+
+
 def summarize_rankings(
         records, radii, fractions, total_gt_segments, total_gt_anchors,
         tie_eps, near_same_l1):
@@ -159,6 +180,7 @@ def summarize_rankings(
             ),
         },
         "matched_budget": {},
+        "matched_budget_within_fpn_level": {},
     }
 
     ranking_values = {"confidence": confidence}
@@ -175,8 +197,17 @@ def summarize_rankings(
         finite_indices = torch.where(finite_ambiguity)[0].tolist()
         finite_ambiguity_values = ambiguity[finite_ambiguity].tolist()
         finite_gt_iou = [max_gt_iou[index] for index in finite_indices]
+        neighbor_counts = [
+            record["neighbor_counts"][radius_index] for record in records
+        ]
         result["correlation"]["radius_{}".format(radius)] = {
             "finite_rate": ratio(len(finite_indices), len(records)),
+            "zero_ambiguity_rate": ratio(
+                int((ambiguity == 0).sum()), len(records)
+            ),
+            "mean_neighbor_count": ratio(
+                sum(neighbor_counts), len(neighbor_counts)
+            ),
             "ambiguity_vs_max_gt_iou_pearson": pearson(
                 finite_ambiguity_values, finite_gt_iou
             ),
@@ -195,6 +226,7 @@ def summarize_rankings(
     for fraction in fractions:
         fraction_key = "{:.2f}".format(fraction)
         result["matched_budget"][fraction_key] = {}
+        result["matched_budget_within_fpn_level"][fraction_key] = {}
         expected_count = min(
             len(records), max(1, math.ceil(len(records) * fraction))
         )
@@ -204,6 +236,16 @@ def summarize_rankings(
                 raise RuntimeError("matched-budget selection size drifted")
             result["matched_budget"][fraction_key][name] = summarize_selection(
                 records, indices, total_gt_segments, total_gt_anchors,
+                tie_eps, near_same_l1,
+            )
+            stratified_indices = select_within_fpn_level(
+                records, values, fraction
+            )
+            result["matched_budget_within_fpn_level"][
+                fraction_key
+            ][name] = summarize_selection(
+                records, stratified_indices,
+                total_gt_segments, total_gt_anchors,
                 tie_eps, near_same_l1,
             )
     return result
