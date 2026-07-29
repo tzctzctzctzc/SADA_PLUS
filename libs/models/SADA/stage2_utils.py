@@ -78,3 +78,37 @@ def matched_budget_indices(values, fraction, largest=True):
         return torch.empty((0,), dtype=torch.long, device=values.device)
     count = min(values.numel(), max(1, math.ceil(values.numel() * fraction)))
     return torch.argsort(values, descending=largest, stable=True)[:count]
+
+
+def aligned_tiou_tnd(predicted_segments, target_segments, eps=1e-6):
+    """Compute aligned temporal IoU and normalized center distance."""
+    if (
+        predicted_segments.shape != target_segments.shape
+        or predicted_segments.ndim != 2
+        or predicted_segments.shape[-1] != 2
+    ):
+        raise ValueError("aligned segments must both have shape [N, 2]")
+    left = torch.maximum(predicted_segments[:, 0], target_segments[:, 0])
+    right = torch.minimum(predicted_segments[:, 1], target_segments[:, 1])
+    intersection = (right - left).clamp_min(0)
+    pred_length = (
+        predicted_segments[:, 1] - predicted_segments[:, 0]
+    ).clamp_min(0)
+    target_length = (
+        target_segments[:, 1] - target_segments[:, 0]
+    ).clamp_min(0)
+    tiou = intersection / (
+        pred_length + target_length - intersection
+    ).clamp_min(eps)
+
+    pred_center = predicted_segments.mean(dim=-1)
+    target_center = target_segments.mean(dim=-1)
+    cover_left = torch.minimum(
+        predicted_segments[:, 0], target_segments[:, 0]
+    )
+    cover_right = torch.maximum(
+        predicted_segments[:, 1], target_segments[:, 1]
+    )
+    cover_length = (cover_right - cover_left).clamp_min(eps)
+    tnd = (pred_center - target_center).square() / cover_length.square()
+    return tiou, tnd

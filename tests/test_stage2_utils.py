@@ -55,6 +55,22 @@ class Stage2UtilsTest(unittest.TestCase):
         )
         self.assertEqual(indices.tolist(), [0, 1])
 
+    def test_aligned_tiou_tnd(self):
+        tiou, tnd = stage2_utils.aligned_tiou_tnd(
+            torch.tensor([[0.0, 10.0], [2.0, 8.0]]),
+            torch.tensor([[0.0, 10.0], [0.0, 10.0]]),
+        )
+        self.assertTrue(torch.allclose(tiou, torch.tensor([1.0, 0.6])))
+        self.assertTrue(torch.allclose(tnd, torch.tensor([0.0, 0.0])))
+
+    def test_aligned_tiou_tnd_penalizes_center_shift(self):
+        tiou, tnd = stage2_utils.aligned_tiou_tnd(
+            torch.tensor([[2.0, 12.0]]),
+            torch.tensor([[0.0, 10.0]]),
+        )
+        self.assertAlmostEqual(float(tiou), 8.0 / 12.0, places=6)
+        self.assertAlmostEqual(float(tnd), 4.0 / 144.0, places=6)
+
 
 if __name__ == "__main__":
     unittest.main()
