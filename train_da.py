@@ -522,7 +522,7 @@ def create_argparser():
         choices=[
             'off', 'pseudo', 'alqa', 'static', 'static-full',
             'static-full-stability', 'static-full-semantic', 'output-moment',
-            'student-consistency',
+            'student-consistency', 'student-mirror',
         ],
         default='off',
         help='target pseudo-boundary regression after warm-up',
@@ -722,7 +722,11 @@ if __name__ == '__main__':
                         else (
                             'student_consistency'
                             if args.stage2 == 'student-consistency'
-                            else 'confidence'
+                            else (
+                                'student_mirror'
+                                if args.stage2 == 'student-mirror'
+                                else 'confidence'
+                            )
                         )
                     )
                 )
@@ -760,6 +764,7 @@ if __name__ == '__main__':
         'student_consistency_weighting': (
             args.stage2 == 'student-consistency'
         ),
+        'student_mirror_weighting': args.stage2 == 'student-mirror',
         'alqa_head_seeds': [
             int(value.strip())
             for value in args.alqa_head_seeds.split(',')
@@ -790,7 +795,12 @@ if __name__ == '__main__':
                             'sada_student_channel_dropout_log_offset_'
                             'consistency_v1'
                             if args.stage2 == 'student-consistency'
-                            else 'sada_static_full_path_offset_mse_v1'
+                            else (
+                                'sada_student_temporal_mirror_log_offset_'
+                                'equivariance_v1'
+                                if args.stage2 == 'student-mirror'
+                                else 'sada_static_full_path_offset_mse_v1'
+                            )
                             if (
                                 args.stage2 == 'static-full'
                                 and args.stage2_boundary_residual_calibration is None
@@ -827,7 +837,7 @@ if __name__ == '__main__':
             if args.stage2 in (
                 'static', 'static-full', 'static-full-stability',
                 'static-full-semantic', 'output-moment',
-                'student-consistency'
+                'student-consistency', 'student-mirror'
             )
             else 'source_gt_calibrated_then_frozen'
         ),
@@ -837,10 +847,12 @@ if __name__ == '__main__':
             else 'original_sada_high_confidence_dense_anchors'
             if args.stage2 == 'student-consistency'
             else 'original_sada_high_confidence_dense_anchors'
+            if args.stage2 == 'student-mirror'
+            else 'original_sada_high_confidence_dense_anchors'
             if args.stage2 in (
                 'static', 'static-full', 'static-full-stability',
                 'static-full-semantic', 'output-moment',
-                'student-consistency'
+                'student-consistency', 'student-mirror'
             )
             else 'per_video_per_fpn_original_alpha_count'
         ),
@@ -868,6 +880,8 @@ if __name__ == '__main__':
             if args.stage2 == 'output-moment'
             else 'student_channel_dropout_log_offset_consistency'
             if args.stage2 == 'student-consistency'
+            else 'student_temporal_mirror_log_offset_equivariance'
+            if args.stage2 == 'student-mirror'
             else 'offset_mse'
             if args.stage2 in (
                 'static-full', 'static-full-stability', 'static-full-semantic'
@@ -881,7 +895,8 @@ if __name__ == '__main__':
     if (
         args.stage2 in (
             'static', 'static-full', 'static-full-stability',
-            'static-full-semantic', 'output-moment', 'student-consistency'
+            'static-full-semantic', 'output-moment', 'student-consistency',
+            'student-mirror'
         )
         and args.stage2_loss_weighting != 'anchor_equal'
     ):
