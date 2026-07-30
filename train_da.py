@@ -551,6 +551,10 @@ def create_argparser():
         help='per-target-crop fraction retained by stability ranking',
     )
     parser.add_argument(
+        '--stage2-static-teacher', choices=('frozen', 'ema'), default='frozen',
+        help='teacher path for static-full Stage 2',
+    )
+    parser.add_argument(
         '--stage2-loss-weighting',
         choices=[
             'anchor_equal', 'proposal_equal',
@@ -683,6 +687,7 @@ if __name__ == '__main__':
         'stability_noise_std': args.stage2_stability_noise_std,
         'stability_seed': args.stage2_stability_seed,
         'stability_keep_ratio': args.stage2_stability_keep_ratio,
+        'static_teacher': args.stage2_static_teacher,
         'alqa_head_seeds': [
             int(value.strip())
             for value in args.alqa_head_seeds.split(',')
@@ -707,12 +712,16 @@ if __name__ == '__main__':
                     if args.stage2 == 'static-full'
                     else (
                         (
-                            'sada_static_full_path_stability_'
-                            'top_fraction_offset_mse_v2'
+                            'sada_static_full_path_{}_stability_'
+                            'top_fraction_offset_mse_v2'.format(
+                                args.stage2_static_teacher
+                            )
                             if args.stage2_stability_keep_ratio < 1.0
                             else (
-                                'sada_static_full_path_stability_'
-                                'weighted_offset_mse_v1'
+                                'sada_static_full_path_{}_stability_'
+                                'weighted_offset_mse_v1'.format(
+                                    args.stage2_static_teacher
+                                )
                             )
                         )
                         if args.stage2 == 'static-full-stability'
@@ -743,7 +752,10 @@ if __name__ == '__main__':
             else 'hard_class_agnostic_ranked_by_classification_confidence'
         ),
         'pseudo_path': (
-            'frozen_warmup_sgp_fpn_localization'
+            '{}_sgp_fpn_localization'.format(
+                'ema' if args.stage2_static_teacher == 'ema'
+                else 'frozen_warmup'
+            )
             if args.stage2 in (
                 'static-full', 'static-full-stability'
             )
@@ -776,6 +788,13 @@ if __name__ == '__main__':
     ):
         raise ValueError(
             'Stage 2 stability noise std and keep ratio are invalid'
+        )
+    if (
+        args.stage2_static_teacher == 'ema'
+        and args.stage2 != 'static-full-stability'
+    ):
+        raise ValueError(
+            'EMA Stage 2 teacher requires static-full-stability Stage 2'
         )
     if (
         args.stage2 != 'static-full-stability'

@@ -355,6 +355,9 @@ class SADA(nn.Module):
         self.stage2_stability_keep_ratio = float(
             stage2_cfg.get('stability_keep_ratio', 1.0)
         )
+        self.stage2_static_teacher = stage2_cfg.get(
+            'static_teacher', 'frozen'
+        )
         self.stage2_alqa_head_seeds = stage2_cfg.get(
             'alqa_head_seeds', [123, 456, 789]
         )
@@ -386,6 +389,15 @@ class SADA(nn.Module):
                 'confidence', 'alqa_same_budget',
                 'static_dense', 'static_full_dense'):
             raise ValueError('unknown Stage 2 routing mode')
+        if self.stage2_static_teacher not in ('frozen', 'ema'):
+            raise ValueError('unknown static Stage 2 teacher mode')
+        if (
+            self.stage2_static_teacher == 'ema'
+            and self.stage2_routing != 'static_full_dense'
+        ):
+            raise ValueError(
+                'EMA Stage 2 teacher requires static-full routing'
+            )
         self.stage2_uses_external_teacher = (
             self.stage2_routing
             not in ('static_dense', 'static_full_dense')
@@ -412,6 +424,11 @@ class SADA(nn.Module):
             raise ValueError('Stage 2 and Oracle target regression cannot both be enabled')
         if (
             ((self.stage2_enabled and self.stage2_uses_external_teacher)
+             or (
+                 self.stage2_enabled
+                 and self.stage2_routing == 'static_full_dense'
+                 and self.stage2_static_teacher == 'ema'
+             )
              or self.oracle_target_regression_mode
              in ('clean_pseudo', 'same_selection'))
             and not cfg['train_cfg'].get('ema_active', False)
@@ -730,6 +747,7 @@ class SADA(nn.Module):
         if (
             self.stage2_enabled
             and self.stage2_routing == 'static_full_dense'
+            and self.stage2_static_teacher == 'frozen'
         ):
             self.backbone_pl = copy.deepcopy(self.backbone_source)
             self.neck_pl = copy.deepcopy(self.neck_source)
@@ -882,6 +900,7 @@ class SADA(nn.Module):
         if not (
             self.stage2_enabled
             and self.stage2_routing == 'static_full_dense'
+            and self.stage2_static_teacher == 'frozen'
         ):
             return
         self.backbone_pl.load_state_dict(self.backbone_target.state_dict())
@@ -893,6 +912,18 @@ class SADA(nn.Module):
             module.eval()
             for parameter in module.parameters():
                 parameter.requires_grad_(False)
+
+    def _stage2_full_teacher_modules(self, stage2_teacher):
+        """Return the frozen or EMA feature-to-localization teacher path."""
+        if self.stage2_static_teacher == 'ema':
+            if stage2_teacher is None:
+                raise RuntimeError('Stage 2 EMA teacher was not provided')
+            return (
+                stage2_teacher.backbone_target,
+                stage2_teacher.neck_target,
+                stage2_teacher.reg_head_target,
+            )
+        return self.backbone_pl, self.neck_pl, self.reg_head_pl
 
     @torch.no_grad()
     def _stage2_perturbed_inputs(
@@ -1420,7 +1451,7 @@ class SADA(nn.Module):
             targets.append(target)
         return (targets, pre_nms_targets) if return_pre_nms else targets
 
-    def forward(self, video_list_src, video_list_tgt, mode=None, domain='src', curr_epoch=0, cls_static_anchors=None, mean_class_conf=None, stage2_pseudo_targets=None):
+    def forward(self, video_list_src, video_list_tgt, mode=None, domain='src', curr_epoch=0, cls_static_anchors=None, mean_class_conf=None, stage2_pseudo_targets=None, stage2_teacher=None):
         
         # Note: The domain is by default src, which indicates in the case of training that we care about applying supervision on the source domain (upper part of the architecture)
         # While during validation, we may want to evaluate the losses on the target domain only (lower part of the architecture)
@@ -1456,15 +1487,22 @@ class SADA(nn.Module):
             self.stage2_enabled
             and self.stage2_routing == 'static_full_dense'
         ):
+            (
+                stage2_backbone_teacher,
+                stage2_neck_teacher,
+                stage2_reg_teacher,
+            ) = self._stage2_full_teacher_modules(stage2_teacher)
             for module in (
-                self.backbone_pl, self.neck_pl, self.reg_head_pl
+                stage2_backbone_teacher,
+                stage2_neck_teacher,
+                stage2_reg_teacher,
             ):
                 module.eval()
             with torch.no_grad():
-                feats_tgt_pl, masks_tgt_pl, _ = self.backbone_pl(
+                feats_tgt_pl, masks_tgt_pl, _ = stage2_backbone_teacher(
                     batched_inputs_tgt, batched_masks_tgt
                 )
-                fpn_feats_tgt_pl, fpn_masks_tgt_pl = self.neck_pl(
+                fpn_feats_tgt_pl, fpn_masks_tgt_pl = stage2_neck_teacher(
                     feats_tgt_pl, masks_tgt_pl
                 )
                 fpn_feats_tgt_pl_perturbed = None
@@ -1479,13 +1517,13 @@ class SADA(nn.Module):
                         video_list_tgt,
                         curr_epoch,
                     )
-                    perturbed_feats, perturbed_masks, _ = self.backbone_pl(
+                    perturbed_feats, perturbed_masks, _ = stage2_backbone_teacher(
                         perturbed_inputs, batched_masks_tgt
                     )
                     (
                         fpn_feats_tgt_pl_perturbed,
                         _,
-                    ) = self.neck_pl(perturbed_feats, perturbed_masks)
+                    ) = stage2_neck_teacher(perturbed_feats, perturbed_masks)
         else:
             feats_tgt_pl, masks_tgt_pl, _ = self.backbone_pl(
                 batched_inputs_tgt, batched_masks_tgt
@@ -1577,7 +1615,8 @@ class SADA(nn.Module):
             and self.stage2_routing
             in ('static_dense', 'static_full_dense')
         ):
-            self.reg_head_pl.eval()
+            if self.stage2_routing != 'static_full_dense':
+                self.reg_head_pl.eval()
             with torch.no_grad():
                 pseudo_features = (
                     fpn_feats_tgt_pl
@@ -1589,7 +1628,12 @@ class SADA(nn.Module):
                     if self.stage2_routing == 'static_full_dense'
                     else fpn_masks_tgt
                 )
-                out_offsets_tgt_pl, out_actionness_tgt_pl = self.reg_head_pl(
+                stage2_regression_teacher = (
+                    stage2_reg_teacher
+                    if self.stage2_routing == 'static_full_dense'
+                    else self.reg_head_pl
+                )
+                out_offsets_tgt_pl, out_actionness_tgt_pl = stage2_regression_teacher(
                     pseudo_features, pseudo_masks
                 )
                 out_offsets_tgt_pl_perturbed = None
@@ -1597,7 +1641,7 @@ class SADA(nn.Module):
                     (
                         out_offsets_tgt_pl_perturbed,
                         _,
-                    ) = self.reg_head_pl(
+                    ) = stage2_regression_teacher(
                         fpn_feats_tgt_pl_perturbed, fpn_masks_tgt_pl
                     )
         else:

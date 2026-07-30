@@ -374,6 +374,7 @@ class Trainer(BaseTrainerDA):
         if (
             self.model.stage2_enabled
             and self.model.stage2_routing == 'static_full_dense'
+            and self.model.stage2_static_teacher == 'frozen'
             and curr_epoch == self.model.stage2_start_epoch
         ):
             self.model.initialize_static_stage2_path()
@@ -400,6 +401,15 @@ class Trainer(BaseTrainerDA):
             video_list_tgt = move_to_device(video_list_tgt, self.model.device)
 
             stage2_pseudo_targets = None
+            stage2_teacher = None
+            if (
+                self.model.stage2_enabled
+                and self.model.stage2_routing == 'static_full_dense'
+                and self.model.stage2_static_teacher == 'ema'
+                and curr_epoch >= self.model.stage2_start_epoch
+            ):
+                stage2_teacher = self.model_ema.module
+                stage2_teacher.eval()
             if (
                 (
                     (
@@ -427,7 +437,8 @@ class Trainer(BaseTrainerDA):
                                 curr_epoch=curr_epoch,
                                 cls_static_anchors=cls_static_anchors,
                                 mean_class_conf=mean_class_conf,
-                                stage2_pseudo_targets=stage2_pseudo_targets)
+                                stage2_pseudo_targets=stage2_pseudo_targets,
+                                stage2_teacher=stage2_teacher)
 
             # Update the final loss with the adversarial loss
             
