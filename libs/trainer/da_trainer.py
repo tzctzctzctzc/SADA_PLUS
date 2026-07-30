@@ -581,7 +581,15 @@ class Trainer(BaseTrainerDA):
         return avg_loss.avg
 
 
-    def _test_epoch(self, curr_epoch, data_loader, mode, domain='src'):
+    def _test_epoch(
+        self,
+        curr_epoch,
+        data_loader,
+        mode,
+        domain='src',
+        evaluation_model=None,
+        evaluation_role=None,
+    ):
         """
         Validate after training an epoch
         :param epoch: Integer, current training epoch.
@@ -592,10 +600,23 @@ class Trainer(BaseTrainerDA):
         prefix = "tr_" if mode == "train" else ""
         prefix += "src_" if domain == "src" else "tgt_" # Add the domain in the prefix of the visualizations
         
-        print(f"evaluating on {mode} set + visualizing...")
+        role = (
+            evaluation_role
+            if evaluation_role is not None
+            else ('ema' if self.ema_active else 'student')
+        )
+        print(
+            "evaluating {} on {} {} set + visualizing...".format(
+                role, domain, mode
+            )
+        )
 
         # Set the model to evaluation mode
-        model = self.get_evaluation_model()
+        model = (
+            self.get_evaluation_model()
+            if evaluation_model is None
+            else evaluation_model
+        )
         #model = self.model_ema
 
         # dict for results (for our evaluation code)

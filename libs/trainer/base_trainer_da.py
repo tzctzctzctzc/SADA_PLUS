@@ -361,6 +361,24 @@ class BaseTrainerDA:
                 target_metrics_val = {'v_tgt_'+k : v for k, v in list(target_metrics_val.items())}
                 wandb.log(target_metrics_val, step=epoch)
 
+                if self.cfg.get('diagnostic', {}).get(
+                    'dual_eval_target', False
+                ):
+                    student_target_metrics_val = self._test_epoch(
+                        epoch,
+                        self.val_loader_tgt,
+                        'test',
+                        domain='tgt',
+                        evaluation_model=self.model,
+                        evaluation_role='student',
+                    )
+                    student_target_metrics_val = {
+                        'v_tgt_student_' + key: value
+                        for key, value
+                        in student_target_metrics_val.items()
+                    }
+                    wandb.log(student_target_metrics_val, step=epoch)
+
         # Save the last model
         self.save_ckpt(mode='latest', epoch=epoch)
 

@@ -598,6 +598,13 @@ def create_argparser():
         help='comma-separated FPN levels used only for diagnostic runs',
     )
     parser.add_argument(
+        '--dual-eval-target', action='store_true',
+        help=(
+            'at each test epoch, additionally evaluate the student on '
+            'target validation while retaining the standard EMA evaluation'
+        ),
+    )
+    parser.add_argument(
         '--stop-after-epoch', type=int, default=None,
         help='stop after this epoch without changing the scheduler horizon',
     )
@@ -780,6 +787,7 @@ if __name__ == '__main__':
         'stop_after_epoch': args.stop_after_epoch,
         'no_conditional_update': args.diagnostic_no_ca,
         'alignment_levels': diagnostic_levels,
+        'dual_eval_target': args.dual_eval_target,
     }
 
     update_config_with_arguments(config_dict, args, ARGS_TYPES, ARGS_CONFIGPATH)
