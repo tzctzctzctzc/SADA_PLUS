@@ -143,6 +143,52 @@ def corrected_offsets(features, offsets, calibration, gamma, device):
     return (offsets + gamma * correction).clamp_min(0).float()
 
 
+def predicted_residual_error(features, calibration, device):
+    features = features.to(device, dtype=torch.float64)
+    normalized = (
+        features - calibration["mean"].to(device)
+    ) / calibration["std"].to(device)
+    augmented = torch.cat((normalized, torch.ones_like(normalized[:, :1])), dim=1)
+    residual = augmented.matmul(calibration["weight"].to(device))
+    return residual.abs().mean(dim=1).float()
+
+
+def correlation(left, right):
+    if left.numel() < 2:
+        return None
+    centered_left = left.float() - left.float().mean()
+    centered_right = right.float() - right.float().mean()
+    denominator = centered_left.norm() * centered_right.norm()
+    if float(denominator) == 0:
+        return None
+    return float(centered_left.matmul(centered_right) / denominator)
+
+
+def rank(values):
+    order = torch.argsort(values, stable=True)
+    result = torch.empty_like(order, dtype=torch.float32)
+    result[order] = torch.arange(len(values), dtype=torch.float32)
+    return result
+
+
+def reliability_weights(predicted_error, beta, floor):
+    weights = floor + (1.0 - floor) * torch.exp(-beta * predicted_error)
+    return weights / weights.mean().clamp_min(1e-6)
+
+
+def reliability_metrics(offsets, targets, predicted_error, beta, floor):
+    per_anchor_error = (offsets - targets).square().mean(dim=1)
+    weights = reliability_weights(predicted_error, beta, floor)
+    return {
+        "offset_mse": float(per_anchor_error.mean()),
+        "weighted_offset_mse": float((weights * per_anchor_error).mean()),
+        "weight_min": float(weights.min()),
+        "weight_max": float(weights.max()),
+        "error_pearson": correlation(predicted_error, per_anchor_error),
+        "error_spearman": correlation(rank(predicted_error), rank(per_anchor_error)),
+    }
+
+
 def metrics(offsets, targets):
     iou = aligned_boundary_iou_from_offsets(offsets, targets)
     return {
@@ -150,6 +196,109 @@ def metrics(offsets, targets):
         "mean_boundary_iou": float(iou.mean()),
         "iou50_rate": float((iou >= 0.5).float().mean()),
         "offset_mse": float(torch.mean((offsets - targets).square())),
+    }
+
+
+def source_weight_select(args):
+    seed_everything(args.seed)
+    cfg = read_yaml(args.config)
+    cfg["stage1"] = {"enabled": False, "perturbation": "shift"}
+    _update_config(cfg)
+    checkpoint = torch.load(args.checkpoint, map_location=args.device)
+    model = make_meta_arch(cfg["model_name"], cfg, device=args.device).to(args.device)
+    model.load_state_dict(checkpoint["state_dict"])
+    model.eval()
+    annotations = json.loads(
+        Path(cfg["dataset"]["json_file"]).read_text(encoding="utf-8")
+    )["database"]
+    levels = [int(value) for value in args.levels.split(",")]
+    train = make_dataset(cfg["dataset_name"], True, cfg["src_train_split"], **cfg["dataset"])
+    val = make_dataset(cfg["dataset_name"], False, cfg["src_val_split"], **cfg["dataset"])
+    train_records = collect_records(model, train, annotations, cfg, "source", "train", levels, args.device)
+    val_records = collect_records(model, val, annotations, cfg, "source", "val", levels, args.device)
+    candidates = []
+    best = None
+    for l2 in parse_numbers(args.ridge_l2):
+        calibration = fit_ridge(
+            train_records["hidden"],
+            train_records["gt_offsets"] - train_records["offsets"],
+            l2,
+            args.device,
+        )
+        predicted_error = predicted_residual_error(
+            val_records["hidden"], calibration, args.device,
+        ).cpu()
+        for beta in parse_numbers(args.reliability_betas):
+            result = {
+                "l2": l2,
+                "beta": beta,
+                "metrics": reliability_metrics(
+                    val_records["offsets"], val_records["gt_offsets"],
+                    predicted_error, beta, args.reliability_floor,
+                ),
+            }
+            candidates.append(result)
+            if best is None or (
+                result["metrics"]["weighted_offset_mse"]
+                < best["metrics"]["weighted_offset_mse"]
+            ):
+                best = result
+                best_calibration = calibration
+    artifact = {
+        "calibration": best_calibration,
+        "l2": best["l2"],
+        "beta": best["beta"],
+        "floor": args.reliability_floor,
+        "config": args.config,
+        "checkpoint": args.checkpoint,
+        "levels": levels,
+    }
+    torch.save(artifact, args.calibration_output)
+    return {
+        "audit": "source_only_boundary_residual_reliability_selection",
+        "checkpoint_epoch": checkpoint.get("epoch"),
+        "train_anchors": int(train_records["hidden"].shape[0]),
+        "source_val_baseline": metrics(
+            val_records["offsets"], val_records["gt_offsets"],
+        ),
+        "candidates": candidates,
+        "selected": best,
+        "selection_metric": "source_val_weighted_offset_mse",
+        "calibration_output": args.calibration_output,
+        "target_gt_usage": "none",
+    }
+
+
+def target_weight_eval(args):
+    seed_everything(args.seed)
+    artifact = torch.load(args.calibration, map_location="cpu")
+    cfg = read_yaml(args.config)
+    cfg["stage1"] = {"enabled": False, "perturbation": "shift"}
+    _update_config(cfg)
+    checkpoint = torch.load(args.checkpoint, map_location=args.device)
+    model = make_meta_arch(cfg["model_name"], cfg, device=args.device).to(args.device)
+    model.load_state_dict(checkpoint["state_dict"])
+    model.eval()
+    annotations = json.loads(
+        Path(cfg["dataset"]["json_file"]).read_text(encoding="utf-8")
+    )["database"]
+    val = make_dataset(cfg["dataset_name"], False, cfg["tgt_val_split"], **cfg["dataset"])
+    records = collect_records(model, val, annotations, cfg, "target", "val", artifact["levels"], args.device)
+    predicted_error = predicted_residual_error(
+        records["hidden"], artifact["calibration"], args.device,
+    ).cpu()
+    return {
+        "audit": "fixed_source_only_boundary_residual_reliability_target_evaluation",
+        "checkpoint_epoch": checkpoint.get("epoch"),
+        "fixed_source_selection": {
+            "l2": artifact["l2"], "beta": artifact["beta"],
+            "floor": artifact["floor"],
+        },
+        "target_metrics": reliability_metrics(
+            records["offsets"], records["gt_offsets"], predicted_error,
+            artifact["beta"], artifact["floor"],
+        ),
+        "target_gt_usage": "offline evaluation only",
     }
 
 
@@ -244,7 +393,14 @@ def target_eval(args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=("source_select", "target_eval"), required=True)
+    parser.add_argument(
+        "--mode",
+        choices=(
+            "source_select", "target_eval",
+            "source_weight_select", "target_weight_eval",
+        ),
+        required=True,
+    )
     parser.add_argument("--config", required=True)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--output", required=True)
@@ -254,13 +410,24 @@ def main():
     parser.add_argument("--levels", default="0,1,2")
     parser.add_argument("--ridge-l2", default="0.1,1,10,100")
     parser.add_argument("--correction-scales", default="0.25,0.5,0.75,1.0")
+    parser.add_argument("--reliability-betas", default="0.25,0.5,1,2")
+    parser.add_argument("--reliability-floor", type=float, default=0.25)
     parser.add_argument("--seed", type=int, default=20260731)
     args = parser.parse_args()
-    if args.mode == "source_select" and not args.calibration_output:
-        parser.error("--calibration-output is required for source_select")
-    if args.mode == "target_eval" and not args.calibration:
-        parser.error("--calibration is required for target_eval")
-    result = source_select(args) if args.mode == "source_select" else target_eval(args)
+    if args.mode in ("source_select", "source_weight_select") and not args.calibration_output:
+        parser.error("--calibration-output is required for source selection")
+    if args.mode in ("target_eval", "target_weight_eval") and not args.calibration:
+        parser.error("--calibration is required for target evaluation")
+    if not 0 <= args.reliability_floor <= 1:
+        parser.error("--reliability-floor must be in [0, 1]")
+    if args.mode == "source_select":
+        result = source_select(args)
+    elif args.mode == "target_eval":
+        result = target_eval(args)
+    elif args.mode == "source_weight_select":
+        result = source_weight_select(args)
+    else:
+        result = target_weight_eval(args)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2), encoding="utf-8")
