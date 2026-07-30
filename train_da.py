@@ -522,6 +522,7 @@ def create_argparser():
         choices=[
             'off', 'pseudo', 'alqa', 'static', 'static-full',
             'static-full-stability', 'static-full-semantic', 'output-moment',
+            'student-consistency',
         ],
         default='off',
         help='target pseudo-boundary regression after warm-up',
@@ -715,7 +716,15 @@ if __name__ == '__main__':
                         'static-full', 'static-full-stability',
                         'static-full-semantic',
                     )
-                    else ('output_moment' if args.stage2 == 'output-moment' else 'confidence')
+                    else (
+                        'output_moment'
+                        if args.stage2 == 'output-moment'
+                        else (
+                            'student_consistency'
+                            if args.stage2 == 'student-consistency'
+                            else 'confidence'
+                        )
+                    )
                 )
             )
         ),
@@ -748,6 +757,9 @@ if __name__ == '__main__':
             args.stage2 == 'static-full-semantic'
         ),
         'output_moment_weighting': args.stage2 == 'output-moment',
+        'student_consistency_weighting': (
+            args.stage2 == 'student-consistency'
+        ),
         'alqa_head_seeds': [
             int(value.strip())
             for value in args.alqa_head_seeds.split(',')
@@ -775,7 +787,10 @@ if __name__ == '__main__':
                         'sada_class_conditional_output_moment_offset_v1'
                         if args.stage2 == 'output-moment'
                         else (
-                            'sada_static_full_path_offset_mse_v1'
+                            'sada_student_channel_dropout_log_offset_'
+                            'consistency_v1'
+                            if args.stage2 == 'student-consistency'
+                            else 'sada_static_full_path_offset_mse_v1'
                             if (
                                 args.stage2 == 'static-full'
                                 and args.stage2_boundary_residual_calibration is None
@@ -811,7 +826,8 @@ if __name__ == '__main__':
             'none'
             if args.stage2 in (
                 'static', 'static-full', 'static-full-stability',
-                'static-full-semantic', 'output-moment'
+                'static-full-semantic', 'output-moment',
+                'student-consistency'
             )
             else 'source_gt_calibrated_then_frozen'
         ),
@@ -819,9 +835,12 @@ if __name__ == '__main__':
             'per_level_high_confidence_class_conditional_moments'
             if args.stage2 == 'output-moment'
             else 'original_sada_high_confidence_dense_anchors'
+            if args.stage2 == 'student-consistency'
+            else 'original_sada_high_confidence_dense_anchors'
             if args.stage2 in (
                 'static', 'static-full', 'static-full-stability',
-                'static-full-semantic', 'output-moment'
+                'static-full-semantic', 'output-moment',
+                'student-consistency'
             )
             else 'per_video_per_fpn_original_alpha_count'
         ),
@@ -829,7 +848,8 @@ if __name__ == '__main__':
             'none'
             if args.stage2 in (
                 'static', 'static-full', 'static-full-stability',
-                'static-full-semantic', 'output-moment'
+                'static-full-semantic', 'output-moment',
+                'student-consistency'
             )
             else 'hard_class_agnostic_ranked_by_classification_confidence'
         ),
@@ -846,6 +866,8 @@ if __name__ == '__main__':
         'regression_loss': (
             'class_conditional_log_offset_moments'
             if args.stage2 == 'output-moment'
+            else 'student_channel_dropout_log_offset_consistency'
+            if args.stage2 == 'student-consistency'
             else 'offset_mse'
             if args.stage2 in (
                 'static-full', 'static-full-stability', 'static-full-semantic'
@@ -859,7 +881,7 @@ if __name__ == '__main__':
     if (
         args.stage2 in (
             'static', 'static-full', 'static-full-stability',
-            'static-full-semantic', 'output-moment'
+            'static-full-semantic', 'output-moment', 'student-consistency'
         )
         and args.stage2_loss_weighting != 'anchor_equal'
     ):

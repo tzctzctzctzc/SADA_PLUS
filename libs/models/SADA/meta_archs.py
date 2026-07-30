@@ -408,6 +408,9 @@ class SADA(nn.Module):
         self.stage2_output_moment_weighting = bool(
             stage2_cfg.get('output_moment_weighting', False)
         )
+        self.stage2_student_consistency_weighting = bool(
+            stage2_cfg.get('student_consistency_weighting', False)
+        )
         if self.stage2_semantic_boundary_weighting:
             if self.stage2_semantic_boundary_calibration is None:
                 raise ValueError('Semantic boundary calibration is required')
@@ -462,7 +465,8 @@ class SADA(nn.Module):
             raise ValueError('Stage 2 levels are invalid')
         if self.stage2_routing not in (
                 'confidence', 'alqa_same_budget',
-                'static_dense', 'static_full_dense', 'output_moment'):
+                'static_dense', 'static_full_dense', 'output_moment',
+                'student_consistency'):
             raise ValueError('unknown Stage 2 routing mode')
         if self.stage2_static_teacher not in ('frozen', 'ema'):
             raise ValueError('unknown static Stage 2 teacher mode')
@@ -501,9 +505,23 @@ class SADA(nn.Module):
             raise ValueError(
                 'Output moment weighting requires output-moment routing'
             )
+        if (
+            self.stage2_student_consistency_weighting
+            and (
+                self.stage2_routing != 'student_consistency'
+                or self.stage2_stability_perturbation != 'channel_dropout'
+                or not 0 < self.stage2_stability_channel_drop_probability < 1
+            )
+        ):
+            raise ValueError(
+                'Student consistency requires channel-dropout routing'
+            )
         self.stage2_uses_external_teacher = (
             self.stage2_routing
-            not in ('static_dense', 'static_full_dense', 'output_moment')
+            not in (
+                'static_dense', 'static_full_dense', 'output_moment',
+                'student_consistency'
+            )
         )
         if self.stage2_loss_weighting not in (
                 'anchor_equal', 'proposal_equal',
@@ -1705,6 +1723,10 @@ class SADA(nn.Module):
                         fpn_feats_tgt_pl_perturbed.append(
                             perturbed_fpn_feats
                         )
+        elif self.stage2_routing in (
+                'output_moment', 'student_consistency'):
+            fpn_feats_tgt_pl, fpn_masks_tgt_pl = fpn_feats_tgt, fpn_masks_tgt
+            fpn_feats_tgt_pl_perturbed = None
         else:
             feats_tgt_pl, masks_tgt_pl, _ = self.backbone_pl(
                 batched_inputs_tgt, batched_masks_tgt
@@ -1757,7 +1779,8 @@ class SADA(nn.Module):
         out_cls_logits = [torch.cat((out_cls_logits_src[i], out_cls_logits_tgt[i]), dim=0) for i in range(len(out_cls_logits_src))]
 
         # Generate the logits using the pseudo-label network (frozen in the case of static, or changing in the case of dynamic)
-        if self.stage2_routing == 'static_full_dense':
+        if self.stage2_routing in (
+                'static_full_dense', 'output_moment', 'student_consistency'):
             out_cls_logits_tgt_pl = [
                 logits.detach() for logits in out_cls_logits_tgt
             ]
@@ -1786,6 +1809,34 @@ class SADA(nn.Module):
         # out_offset: List[B, 2, T_i]
         out_offsets_src, out_actionness_src = self.reg_head(fpn_feats_src, fpn_masks_src)
         out_offsets_tgt, out_actionness_tgt= self.reg_head_target(fpn_feats_tgt, fpn_masks_tgt)
+        student_consistency_offsets = None
+        if (
+            self.stage2_enabled
+            and self.stage2_student_consistency_weighting
+            and mode == 'train'
+            and curr_epoch >= self.stage2_start_epoch
+        ):
+            sample_keys = []
+            for index, item in enumerate(video_list_tgt):
+                metadata = item.get('metadata', {})
+                sample_keys.append('{}:{}'.format(
+                    metadata.get('video_id', index),
+                    metadata.get('crop_start', 0),
+                ))
+            perturbed_fpn_feats = [
+                deterministic_channel_dropout_perturbation(
+                    features,
+                    masks,
+                    sample_keys,
+                    self.stage2_stability_channel_drop_probability,
+                    self.stage2_stability_seed,
+                    curr_epoch,
+                )
+                for features, masks in zip(fpn_feats_tgt, fpn_masks_tgt)
+            ]
+            student_consistency_offsets, _ = self.reg_head_target(
+                perturbed_fpn_feats, fpn_masks_tgt
+            )
         
         out_offsets = [torch.cat((out_offsets_src[i], out_offsets_tgt[i]), dim=0) for i in range(len(out_offsets_src))]
         out_actionness = [torch.cat((out_actionness_src[i], out_actionness_tgt[i]), dim=0) for i in range(len(out_offsets_src))]
@@ -1839,6 +1890,14 @@ class SADA(nn.Module):
                             perturbed_fpn_feats, fpn_masks_tgt_pl
                         )
                         out_offsets_tgt_pl_perturbed.append(perturbed_offsets)
+        elif self.stage2_routing in (
+                'output_moment', 'student_consistency'):
+            out_offsets_tgt_pl = [offset.detach() for offset in out_offsets_tgt]
+            out_actionness_tgt_pl = [
+                actionness.detach() for actionness in out_actionness_tgt
+            ]
+            out_offsets_tgt_pl_perturbed = None
+            stage2_dense_semantic_scores = None
         else:
             out_offsets_tgt_pl, out_actionness_tgt_pl = self.reg_head_pl(
                 fpn_feats_tgt, fpn_masks_tgt
@@ -1855,6 +1914,11 @@ class SADA(nn.Module):
         # out_offset: F List[B, 2 (xC), T_i] -> F List[B, T_i, 2 (xC)]
         out_offsets = [x.permute(0, 2, 1) for x in out_offsets]
         out_offsets_tgt_pl = [x.permute(0, 2, 1) for x in out_offsets_tgt_pl]
+        if student_consistency_offsets is not None:
+            student_consistency_offsets = [
+                offsets.permute(0, 2, 1)
+                for offsets in student_consistency_offsets
+            ]
         if out_offsets_tgt_pl_perturbed is not None:
             out_offsets_tgt_pl_perturbed = [
                 [x.permute(0, 2, 1) for x in offsets]
@@ -1890,6 +1954,7 @@ class SADA(nn.Module):
             stage2_dense_pseudo_offsets = None
             stage2_dense_perturbed_offsets = None
             stage2_dense_semantic_scores_active = None
+            stage2_student_consistency_offsets_active = None
             stage2_proposal_count = 0
             stage2_pre_nms_budget = 0
             stage2_rescued_pre_nms = 0
@@ -1956,6 +2021,15 @@ class SADA(nn.Module):
                 stage2_dense_semantic_scores_active = (
                     stage2_dense_semantic_scores
                 )
+            elif (
+                self.stage2_enabled
+                and self.stage2_routing == 'student_consistency'
+                and mode == 'train'
+                and curr_epoch >= self.stage2_start_epoch
+            ):
+                stage2_student_consistency_offsets_active = (
+                    student_consistency_offsets
+                )
             
             
             # For debugging ...
@@ -2016,6 +2090,9 @@ class SADA(nn.Module):
                 ),
                 stage2_dense_semantic_scores=(
                     stage2_dense_semantic_scores_active
+                ),
+                stage2_student_consistency_offsets=(
+                    stage2_student_consistency_offsets_active
                 ),
             )
             losses.update({
@@ -2296,7 +2373,8 @@ class SADA(nn.Module):
             stage2_proposal_count=0,
             stage2_dense_pseudo_offsets=None,
             stage2_dense_perturbed_offsets=None,
-            stage2_dense_semantic_scores=None,):
+            stage2_dense_semantic_scores=None,
+            stage2_student_consistency_offsets=None,):
         bs = int(fpn_masks[0].shape[0] / 2)
         
         # gt_cls_labels is a list of 2B elements, each of shape FT x C
@@ -2799,6 +2877,51 @@ class SADA(nn.Module):
             stage2_output_moment_classes = torch.tensor(
                 float(matched_classes), device=self.device
             )
+        elif (
+            self.stage2_enabled
+            and self.stage2_student_consistency_weighting
+            and stage2_student_consistency_offsets is not None
+        ):
+            stage2_predictions = torch.cat(
+                stage2_student_consistency_offsets, dim=1
+            )
+            stage2_targets = torch.cat(out_offsets_tgt, dim=1).detach()
+            stage2_level_mask = torch.cat([
+                torch.full_like(
+                    fpn_masks_tgt[level],
+                    level in self.stage2_levels,
+                    dtype=torch.bool,
+                )
+                for level in range(self.n_levels)
+            ], dim=1)
+            stage2_scores = torch.cat(out_cls_logits_tgt, dim=1).sigmoid(
+            ).amax(dim=-1)
+            stage2_reg_mask = (
+                valid_mask_tgt
+                & stage2_level_mask
+                & (stage2_scores >= self.stage2_alpha)
+            )
+            stage2_reg_positive = stage2_reg_mask.sum().float()
+            offset = 0
+            for level, level_mask in enumerate(fpn_masks_tgt):
+                next_offset = offset + level_mask.shape[1]
+                stage2_level_positive[level] = stage2_reg_mask[
+                    :, offset:next_offset
+                ].sum().float()
+                offset = next_offset
+            if stage2_reg_mask.any():
+                stage2_reg_loss = F.smooth_l1_loss(
+                    torch.log1p(stage2_predictions[stage2_reg_mask]),
+                    torch.log1p(stage2_targets[stage2_reg_mask]),
+                    reduction='mean',
+                )
+                stage2_active_batch = torch.ones_like(stage2_reg_loss)
+                stage2_offset_l1 = (
+                    stage2_predictions[stage2_reg_mask]
+                    - stage2_targets[stage2_reg_mask]
+                ).abs().mean()
+            else:
+                stage2_reg_loss = 0 * stage2_predictions.sum()
         elif self.stage2_enabled and stage2_cls_tgt is not None:
             stage2_predictions = self.decode_offset(
                 out_offsets_tgt, None, None, mode=mode
@@ -2876,6 +2999,7 @@ class SADA(nn.Module):
                 stage2_dense_pseudo_offsets is not None
                 or stage2_cls_tgt is not None
                 or self.stage2_output_moment_weighting
+                or self.stage2_student_consistency_weighting
             )
         ):
             stage2_reg_ratio = (
