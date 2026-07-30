@@ -125,6 +125,44 @@ class Stage2UtilsTest(unittest.TestCase):
         self.assertIsNone(weights.grad)
         self.assertAlmostEqual(float(loss), 2.5)
 
+    def test_aligned_boundary_iou_from_offsets(self):
+        first = torch.tensor([[2.0, 3.0], [1.0, 1.0]])
+        second = torch.tensor([[2.0, 3.0], [3.0, 3.0]])
+        stability = stage2_utils.aligned_boundary_iou_from_offsets(
+            first, second
+        )
+        self.assertTrue(torch.allclose(
+            stability, torch.tensor([1.0, 1.0 / 3.0])
+        ))
+
+    def test_weighted_anchor_mse_matches_equal_mse_for_unit_weights(self):
+        predictions = torch.tensor(
+            [[[1.0, 3.0], [2.0, 4.0]]], requires_grad=True
+        )
+        targets = torch.tensor([[[0.0, 1.0], [1.0, 1.0]]])
+        mask = torch.tensor([[True, True]])
+        loss = stage2_utils.weighted_anchor_mse(
+            predictions, targets, torch.ones_like(mask, dtype=torch.float), mask
+        )
+        expected = torch.nn.functional.mse_loss(predictions, targets)
+        self.assertTrue(torch.allclose(loss, expected))
+
+    def test_weighted_anchor_mse_detaches_stability(self):
+        predictions = torch.tensor(
+            [[[1.0, 1.0], [3.0, 3.0]]], requires_grad=True
+        )
+        targets = torch.zeros_like(predictions)
+        weights = torch.tensor([[1.0, 3.0]], requires_grad=True)
+        loss = stage2_utils.weighted_anchor_mse(
+            predictions,
+            targets,
+            weights,
+            torch.tensor([[True, True]]),
+        )
+        loss.backward()
+        self.assertIsNone(weights.grad)
+        self.assertAlmostEqual(float(loss), 7.0)
+
 
 if __name__ == "__main__":
     unittest.main()

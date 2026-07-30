@@ -1,3 +1,4 @@
+import hashlib
 import math
 import torch
 from torch import nn
@@ -21,9 +22,11 @@ from .stage1_utils import (
     source_action_eligible,
 )
 from .stage2_utils import (
+    aligned_boundary_iou_from_offsets,
     match_post_nms_to_pre_nms,
     npl_boundary_ambiguity,
     proposal_loss_terms,
+    weighted_anchor_mse,
 )
 from .stage2_alqa import (
     ALQAQualityHead,
@@ -339,6 +342,15 @@ class SADA(nn.Module):
         self.stage2_loss_weighting = stage2_cfg.get(
             'loss_weighting', 'anchor_equal'
         )
+        self.stage2_stability_weighting = bool(
+            stage2_cfg.get('stability_weighting', False)
+        )
+        self.stage2_stability_noise_std = float(
+            stage2_cfg.get('stability_noise_std', 0.01)
+        )
+        self.stage2_stability_seed = int(
+            stage2_cfg.get('stability_seed', 20260730)
+        )
         self.stage2_alqa_head_seeds = stage2_cfg.get(
             'alqa_head_seeds', [123, 456, 789]
         )
@@ -348,6 +360,17 @@ class SADA(nn.Module):
         self.stage2_alpha = cfg['model'].get('pl_threshold', 0.7)
         if self.stage2_start_epoch < 1 or self.stage2_weight < 0:
             raise ValueError('Stage 2 start epoch and weight are invalid')
+        if (
+            self.stage2_stability_weighting
+            and (
+                self.stage2_routing != 'static_full_dense'
+                or self.stage2_stability_noise_std <= 0
+            )
+        ):
+            raise ValueError(
+                'Stage 2 stability weighting requires static-full routing '
+                'and a positive noise standard deviation'
+            )
         if (
             not self.stage2_levels
             or len(set(self.stage2_levels)) != len(self.stage2_levels)
@@ -865,6 +888,31 @@ class SADA(nn.Module):
             module.eval()
             for parameter in module.parameters():
                 parameter.requires_grad_(False)
+
+    @torch.no_grad()
+    def _stage2_perturbed_inputs(
+            self, inputs, masks, video_list_tgt, curr_epoch):
+        """Create deterministic Gaussian-noise target features for V1."""
+        identity = '|'.join(
+            str(item.get('video_id', index))
+            for index, item in enumerate(video_list_tgt)
+        )
+        token = '{}|{}|{}'.format(
+            self.stage2_stability_seed, curr_epoch, identity
+        )
+        seed = int.from_bytes(
+            hashlib.sha256(token.encode('utf-8')).digest()[:8], 'little'
+        ) % (2 ** 31)
+        generator = torch.Generator(device=inputs.device)
+        generator.manual_seed(seed)
+        noise = torch.randn(
+            inputs.shape,
+            dtype=inputs.dtype,
+            device=inputs.device,
+            generator=generator,
+        )
+        noise = noise * masks.to(inputs.dtype)
+        return inputs + self.stage2_stability_noise_std * noise
 
     @torch.no_grad()
     def _stage1_shift_routing(self, video_list_tgt, points, rng=None):
@@ -1419,6 +1467,25 @@ class SADA(nn.Module):
                 fpn_feats_tgt_pl, fpn_masks_tgt_pl = self.neck_pl(
                     feats_tgt_pl, masks_tgt_pl
                 )
+                fpn_feats_tgt_pl_perturbed = None
+                if (
+                    self.stage2_stability_weighting
+                    and mode == 'train'
+                    and curr_epoch >= self.stage2_start_epoch
+                ):
+                    perturbed_inputs = self._stage2_perturbed_inputs(
+                        batched_inputs_tgt,
+                        batched_masks_tgt,
+                        video_list_tgt,
+                        curr_epoch,
+                    )
+                    perturbed_feats, perturbed_masks, _ = self.backbone_pl(
+                        perturbed_inputs, batched_masks_tgt
+                    )
+                    (
+                        fpn_feats_tgt_pl_perturbed,
+                        _,
+                    ) = self.neck_pl(perturbed_feats, perturbed_masks)
         else:
             feats_tgt_pl, masks_tgt_pl, _ = self.backbone_pl(
                 batched_inputs_tgt, batched_masks_tgt
@@ -1426,6 +1493,7 @@ class SADA(nn.Module):
             fpn_feats_tgt_pl, fpn_masks_tgt_pl = self.neck_pl(
                 feats_tgt_pl, masks_tgt_pl
             )
+            fpn_feats_tgt_pl_perturbed = None
         
 
         # Concatenate the two lists L features levels, each of which with shape [B x F x T] into L feature levels of shape [2B x F x T]
@@ -1524,10 +1592,19 @@ class SADA(nn.Module):
                 out_offsets_tgt_pl, out_actionness_tgt_pl = self.reg_head_pl(
                     pseudo_features, pseudo_masks
                 )
+                out_offsets_tgt_pl_perturbed = None
+                if fpn_feats_tgt_pl_perturbed is not None:
+                    (
+                        out_offsets_tgt_pl_perturbed,
+                        _,
+                    ) = self.reg_head_pl(
+                        fpn_feats_tgt_pl_perturbed, fpn_masks_tgt_pl
+                    )
         else:
             out_offsets_tgt_pl, out_actionness_tgt_pl = self.reg_head_pl(
                 fpn_feats_tgt, fpn_masks_tgt
             )
+            out_offsets_tgt_pl_perturbed = None
 
         # ------------------------------------------------------------
         # permute the outputs
@@ -1538,6 +1615,11 @@ class SADA(nn.Module):
         # out_offset: F List[B, 2 (xC), T_i] -> F List[B, T_i, 2 (xC)]
         out_offsets = [x.permute(0, 2, 1) for x in out_offsets]
         out_offsets_tgt_pl = [x.permute(0, 2, 1) for x in out_offsets_tgt_pl]
+        if out_offsets_tgt_pl_perturbed is not None:
+            out_offsets_tgt_pl_perturbed = [
+                x.permute(0, 2, 1)
+                for x in out_offsets_tgt_pl_perturbed
+            ]
         
         # out_offset: F List[B, 2 (xC), T_i] -> F List[B, T_i, 1 (xC)]
         out_actionness = [x.permute(0, 2, 1) for x in out_actionness]
@@ -1566,6 +1648,7 @@ class SADA(nn.Module):
             stage2_pseudo_assignments = None
             stage2_proposal_weights = None
             stage2_dense_pseudo_offsets = None
+            stage2_dense_perturbed_offsets = None
             stage2_proposal_count = 0
             stage2_pre_nms_budget = 0
             stage2_rescued_pre_nms = 0
@@ -1626,6 +1709,9 @@ class SADA(nn.Module):
                 and curr_epoch >= self.stage2_start_epoch
             ):
                 stage2_dense_pseudo_offsets = out_offsets_tgt_pl
+                stage2_dense_perturbed_offsets = (
+                    out_offsets_tgt_pl_perturbed
+                )
             
             
             # For debugging ...
@@ -2226,6 +2312,11 @@ class SADA(nn.Module):
         stage2_weight_ess = 0 * decoded_offsets.sum()
         stage2_weight_mean = 0 * decoded_offsets.sum()
         stage2_offset_l1 = 0 * decoded_offsets.sum()
+        stage2_stability_weight_sum = 0 * decoded_offsets.sum()
+        stage2_stability_mean = 0 * decoded_offsets.sum()
+        stage2_stability_low = 0 * decoded_offsets.sum()
+        stage2_stability_mid = 0 * decoded_offsets.sum()
+        stage2_stability_high = 0 * decoded_offsets.sum()
         stage2_level_positive = [
             0 * decoded_offsets.sum() for _ in range(self.n_levels)
         ]
@@ -2266,7 +2357,47 @@ class SADA(nn.Module):
                 ].sum().float()
                 offset = next_offset
             if stage2_reg_mask.any():
-                if self.stage2_routing == 'static_full_dense':
+                if (
+                    self.stage2_routing == 'static_full_dense'
+                    and self.stage2_stability_weighting
+                ):
+                    if stage2_dense_perturbed_offsets is None:
+                        raise RuntimeError(
+                            'Stage 2 stability offsets were not generated'
+                        )
+                    perturbed_targets = self.decode_offset(
+                        stage2_dense_perturbed_offsets,
+                        None,
+                        None,
+                        mode=mode,
+                    ).detach()
+                    stability = aligned_boundary_iou_from_offsets(
+                        stage2_targets, perturbed_targets
+                    ).detach()
+                    selected_stability = stability[stage2_reg_mask]
+                    stage2_reg_loss = weighted_anchor_mse(
+                        stage2_predictions,
+                        stage2_targets,
+                        stability,
+                        stage2_reg_mask,
+                    )
+                    stage2_stability_weight_sum = (
+                        selected_stability.sum()
+                    )
+                    stage2_stability_mean = (
+                        selected_stability.mean()
+                    )
+                    stage2_stability_low = (
+                        selected_stability < 0.2
+                    ).float().mean()
+                    stage2_stability_mid = (
+                        (selected_stability >= 0.2)
+                        & (selected_stability < 0.5)
+                    ).float().mean()
+                    stage2_stability_high = (
+                        selected_stability >= 0.5
+                    ).float().mean()
+                elif self.stage2_routing == 'static_full_dense':
                     stage2_reg_loss = F.mse_loss(
                         stage2_predictions[stage2_reg_mask],
                         stage2_targets[stage2_reg_mask],
@@ -2386,6 +2517,11 @@ class SADA(nn.Module):
                    'stage2_weight_ess': stage2_weight_ess,
                    'stage2_weight_mean': stage2_weight_mean,
                    'stage2_pseudo_offset_l1': stage2_offset_l1,
+                   'stage2_stability_weight_sum': stage2_stability_weight_sum,
+                   'stage2_stability_mean': stage2_stability_mean,
+                   'stage2_stability_low_fraction': stage2_stability_low,
+                   'stage2_stability_mid_fraction': stage2_stability_mid,
+                   'stage2_stability_high_fraction': stage2_stability_high,
                    'downstream_loss': downstream_loss}
         for level, count in enumerate(stage2_level_positive):
             losses['stage2_pseudo_l{}_positive'.format(level)] = count

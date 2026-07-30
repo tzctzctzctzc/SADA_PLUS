@@ -51,6 +51,41 @@ def proposal_loss_terms(anchor_losses, proposal_ids, proposal_weights):
     return numerator, denominator, weight_square_sum, proposal_count
 
 
+def aligned_boundary_iou_from_offsets(first, second, eps=1e-6):
+    """Compute same-anchor segment IoU from left/right boundary offsets."""
+    if first.shape != second.shape or first.shape[-1] != 2:
+        raise ValueError("offset tensors must have the same [..., 2] shape")
+    first = first.clamp_min(0)
+    second = second.clamp_min(0)
+    intersection = (
+        torch.minimum(first[..., 0], second[..., 0])
+        + torch.minimum(first[..., 1], second[..., 1])
+    )
+    union = (
+        torch.maximum(first[..., 0], second[..., 0])
+        + torch.maximum(first[..., 1], second[..., 1])
+    )
+    return (intersection / union.clamp_min(eps)).clamp(0.0, 1.0)
+
+
+def weighted_anchor_mse(predictions, targets, weights, mask, eps=1e-8):
+    """Return detached-weight MSE normalized by the selected weight sum."""
+    if predictions.shape != targets.shape or predictions.shape[-1] != 2:
+        raise ValueError("prediction and target offsets must align as [..., 2]")
+    if weights.shape != predictions.shape[:-1] or mask.shape != weights.shape:
+        raise ValueError("weights and mask must align with anchor dimensions")
+    selected = mask.bool()
+    if not selected.any():
+        return predictions.sum() * 0.0
+    selected_weights = weights.detach()[selected].to(predictions.dtype)
+    per_anchor = (
+        predictions[selected] - targets.detach()[selected]
+    ).square().mean(dim=-1)
+    return (
+        selected_weights * per_anchor
+    ).sum() / selected_weights.sum().clamp_min(eps)
+
+
 def temporal_roi_interpolate(
         features, segment, point_centers, valid_length, output_size):
     """Linearly sample a CxT feature map inside one temporal segment."""

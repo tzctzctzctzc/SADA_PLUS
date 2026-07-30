@@ -475,6 +475,19 @@ class Trainer(BaseTrainerDA):
             self.optimizer_disc.zero_grad(set_to_none=True)
             
             final_loss.backward()
+
+            reg_grad_square = torch.zeros(
+                (), device=self.model.device
+            )
+            for parameter in self.model.reg_head_target.parameters():
+                if parameter.grad is not None:
+                    reg_grad_square = (
+                        reg_grad_square
+                        + parameter.grad.detach().square().sum()
+                    )
+            losses['stage2_student_reg_grad_norm'] = (
+                reg_grad_square.sqrt()
+            )
             
             clip_value = self.cfg['model']['weight_clip_value']
             if clip_value > 0.0:

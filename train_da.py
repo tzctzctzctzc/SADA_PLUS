@@ -519,7 +519,10 @@ def create_argparser():
     )
     parser.add_argument(
         '--stage2',
-        choices=['off', 'pseudo', 'alqa', 'static', 'static-full'],
+        choices=[
+            'off', 'pseudo', 'alqa', 'static', 'static-full',
+            'static-full-stability',
+        ],
         default='off',
         help='target pseudo-boundary regression after warm-up',
     )
@@ -534,6 +537,14 @@ def create_argparser():
     parser.add_argument(
         '--stage2-levels', default='0,1,2',
         help='comma-separated FPN levels used for Stage 2 proposals and loss',
+    )
+    parser.add_argument(
+        '--stage2-stability-noise-std', type=float, default=0.01,
+        help='absolute Gaussian feature-noise std for static-full stability',
+    )
+    parser.add_argument(
+        '--stage2-stability-seed', type=int, default=20260730,
+        help='independent deterministic stability perturbation seed',
     )
     parser.add_argument(
         '--stage2-loss-weighting',
@@ -651,7 +662,9 @@ if __name__ == '__main__':
                 if args.stage2 == 'static'
                 else (
                     'static_full_dense'
-                    if args.stage2 == 'static-full'
+                    if args.stage2 in (
+                        'static-full', 'static-full-stability'
+                    )
                     else 'confidence'
                 )
             )
@@ -660,6 +673,11 @@ if __name__ == '__main__':
         'weight': args.stage2_weight,
         'levels': stage2_levels,
         'loss_weighting': args.stage2_loss_weighting,
+        'stability_weighting': (
+            args.stage2 == 'static-full-stability'
+        ),
+        'stability_noise_std': args.stage2_stability_noise_std,
+        'stability_seed': args.stage2_stability_seed,
         'alqa_head_seeds': [
             int(value.strip())
             for value in args.alqa_head_seeds.split(',')
@@ -682,32 +700,47 @@ if __name__ == '__main__':
                 else (
                     'sada_static_full_path_offset_mse_v1'
                     if args.stage2 == 'static-full'
-                    else 'confidence_fixed_routing_loss_weighting_v1'
+                    else (
+                        'sada_static_full_path_stability_weighted_offset_mse_v1'
+                        if args.stage2 == 'static-full-stability'
+                        else 'confidence_fixed_routing_loss_weighting_v1'
+                    )
                 )
             )
         ),
         'quality_head_mode': (
             'none'
-            if args.stage2 in ('static', 'static-full')
+            if args.stage2 in (
+                'static', 'static-full', 'static-full-stability'
+            )
             else 'source_gt_calibrated_then_frozen'
         ),
         'selection_budget': (
             'original_sada_high_confidence_dense_anchors'
-            if args.stage2 in ('static', 'static-full')
+            if args.stage2 in (
+                'static', 'static-full', 'static-full-stability'
+            )
             else 'per_video_per_fpn_original_alpha_count'
         ),
         'nms': (
-            'none' if args.stage2 in ('static', 'static-full')
+            'none'
+            if args.stage2 in (
+                'static', 'static-full', 'static-full-stability'
+            )
             else 'hard_class_agnostic_ranked_by_classification_confidence'
         ),
         'pseudo_path': (
             'frozen_warmup_sgp_fpn_localization'
-            if args.stage2 == 'static-full'
+            if args.stage2 in (
+                'static-full', 'static-full-stability'
+            )
             else 'none'
         ),
         'regression_loss': (
             'offset_mse'
-            if args.stage2 == 'static-full'
+            if args.stage2 in (
+                'static-full', 'static-full-stability'
+            )
             else 'diou'
         ),
         'target_gt_usage': 'none',
@@ -715,10 +748,17 @@ if __name__ == '__main__':
     if args.stage2 == 'off' and args.stage2_loss_weighting != 'anchor_equal':
         raise ValueError('Stage 2 loss weighting requires Stage 2')
     if (
-        args.stage2 in ('static', 'static-full')
+        args.stage2 in (
+            'static', 'static-full', 'static-full-stability'
+        )
         and args.stage2_loss_weighting != 'anchor_equal'
     ):
         raise ValueError('Static dense Stage 2 uses anchor-equal regression')
+    if (
+        args.stage2 == 'static-full-stability'
+        and args.stage2_stability_noise_std <= 0
+    ):
+        raise ValueError('Stage 2 stability noise std must be positive')
     if (
         (
             args.stage2 == 'alqa'
