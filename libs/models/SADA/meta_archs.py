@@ -26,6 +26,7 @@ from .stage2_utils import (
     match_post_nms_to_pre_nms,
     npl_boundary_ambiguity,
     proposal_loss_terms,
+    top_fraction_per_sample_mask,
     weighted_anchor_mse,
 )
 from .stage2_alqa import (
@@ -351,6 +352,9 @@ class SADA(nn.Module):
         self.stage2_stability_seed = int(
             stage2_cfg.get('stability_seed', 20260730)
         )
+        self.stage2_stability_keep_ratio = float(
+            stage2_cfg.get('stability_keep_ratio', 1.0)
+        )
         self.stage2_alqa_head_seeds = stage2_cfg.get(
             'alqa_head_seeds', [123, 456, 789]
         )
@@ -365,6 +369,7 @@ class SADA(nn.Module):
             and (
                 self.stage2_routing != 'static_full_dense'
                 or self.stage2_stability_noise_std <= 0
+                or not 0 < self.stage2_stability_keep_ratio <= 1
             )
         ):
             raise ValueError(
@@ -2316,6 +2321,7 @@ class SADA(nn.Module):
         stage2_stability_low = 0 * decoded_offsets.sum()
         stage2_stability_mid = 0 * decoded_offsets.sum()
         stage2_stability_high = 0 * decoded_offsets.sum()
+        stage2_stability_keep_fraction = 0 * decoded_offsets.sum()
         stage2_level_positive = [
             0 * decoded_offsets.sum() for _ in range(self.n_levels)
         ]
@@ -2374,14 +2380,22 @@ class SADA(nn.Module):
                         stage2_targets, perturbed_targets
                     ).detach()
                     selected_stability = stability[stage2_reg_mask]
+                    stability_gate = top_fraction_per_sample_mask(
+                        stability,
+                        stage2_reg_mask,
+                        self.stage2_stability_keep_ratio,
+                    )
+                    stability_weights = (
+                        stability * stability_gate.to(stability.dtype)
+                    )
                     stage2_reg_loss = weighted_anchor_mse(
                         stage2_predictions,
                         stage2_targets,
-                        stability,
+                        stability_weights,
                         stage2_reg_mask,
                     )
                     stage2_stability_weight_sum = (
-                        selected_stability.sum()
+                        stability_weights[stage2_reg_mask].sum()
                     )
                     stage2_stability_mean = (
                         selected_stability.mean()
@@ -2396,6 +2410,10 @@ class SADA(nn.Module):
                     stage2_stability_high = (
                         selected_stability >= 0.5
                     ).float().mean()
+                    stage2_stability_keep_fraction = (
+                        stability_gate.sum().float()
+                        / stage2_reg_positive.clamp_min(1.0)
+                    )
                 elif self.stage2_routing == 'static_full_dense':
                     stage2_reg_loss = F.mse_loss(
                         stage2_predictions[stage2_reg_mask],
@@ -2521,6 +2539,9 @@ class SADA(nn.Module):
                    'stage2_stability_low_fraction': stage2_stability_low,
                    'stage2_stability_mid_fraction': stage2_stability_mid,
                    'stage2_stability_high_fraction': stage2_stability_high,
+                   'stage2_stability_keep_fraction': (
+                       stage2_stability_keep_fraction
+                   ),
                    'downstream_loss': downstream_loss}
         for level, count in enumerate(stage2_level_positive):
             losses['stage2_pseudo_l{}_positive'.format(level)] = count

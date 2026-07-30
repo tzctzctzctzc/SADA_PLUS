@@ -87,6 +87,30 @@ def weighted_anchor_mse(predictions, targets, weights, mask, eps=1e-8):
     ).sum() / selected_weights.sum().clamp_min(eps)
 
 
+def top_fraction_per_sample_mask(scores, eligible, fraction):
+    """Keep the highest-scoring fraction independently in each sample."""
+    if scores.shape != eligible.shape or scores.ndim != 2:
+        raise ValueError("scores and eligible must be aligned [B, N] tensors")
+    if not 0.0 < fraction <= 1.0:
+        raise ValueError("fraction must be in (0, 1]")
+    kept = torch.zeros_like(eligible, dtype=torch.bool)
+    for sample_index in range(scores.shape[0]):
+        indices = torch.where(eligible[sample_index])[0]
+        if not indices.numel():
+            continue
+        count = min(
+            indices.numel(),
+            max(1, math.ceil(indices.numel() * fraction)),
+        )
+        order = torch.argsort(
+            scores[sample_index, indices],
+            descending=True,
+            stable=True,
+        )
+        kept[sample_index, indices[order[:count]]] = True
+    return kept
+
+
 def deterministic_gaussian_perturbation(
         inputs, masks, sample_keys, noise_std, base_seed, epoch):
     """Apply independent reproducible Gaussian noise to each valid sample."""

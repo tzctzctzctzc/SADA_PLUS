@@ -547,6 +547,10 @@ def create_argparser():
         help='independent deterministic stability perturbation seed',
     )
     parser.add_argument(
+        '--stage2-stability-keep-ratio', type=float, default=1.0,
+        help='per-target-crop fraction retained by stability ranking',
+    )
+    parser.add_argument(
         '--stage2-loss-weighting',
         choices=[
             'anchor_equal', 'proposal_equal',
@@ -678,6 +682,7 @@ if __name__ == '__main__':
         ),
         'stability_noise_std': args.stage2_stability_noise_std,
         'stability_seed': args.stage2_stability_seed,
+        'stability_keep_ratio': args.stage2_stability_keep_ratio,
         'alqa_head_seeds': [
             int(value.strip())
             for value in args.alqa_head_seeds.split(',')
@@ -701,7 +706,15 @@ if __name__ == '__main__':
                     'sada_static_full_path_offset_mse_v1'
                     if args.stage2 == 'static-full'
                     else (
-                        'sada_static_full_path_stability_weighted_offset_mse_v1'
+                        (
+                            'sada_static_full_path_stability_'
+                            'top_fraction_offset_mse_v2'
+                            if args.stage2_stability_keep_ratio < 1.0
+                            else (
+                                'sada_static_full_path_stability_'
+                                'weighted_offset_mse_v1'
+                            )
+                        )
                         if args.stage2 == 'static-full-stability'
                         else 'confidence_fixed_routing_loss_weighting_v1'
                     )
@@ -756,9 +769,21 @@ if __name__ == '__main__':
         raise ValueError('Static dense Stage 2 uses anchor-equal regression')
     if (
         args.stage2 == 'static-full-stability'
-        and args.stage2_stability_noise_std <= 0
+        and (
+            args.stage2_stability_noise_std <= 0
+            or not 0 < args.stage2_stability_keep_ratio <= 1
+        )
     ):
-        raise ValueError('Stage 2 stability noise std must be positive')
+        raise ValueError(
+            'Stage 2 stability noise std and keep ratio are invalid'
+        )
+    if (
+        args.stage2 != 'static-full-stability'
+        and args.stage2_stability_keep_ratio != 1.0
+    ):
+        raise ValueError(
+            'Stage 2 stability keep ratio requires stability weighting'
+        )
     if (
         (
             args.stage2 == 'alqa'

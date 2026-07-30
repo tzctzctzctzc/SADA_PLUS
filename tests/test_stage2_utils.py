@@ -163,6 +163,31 @@ class Stage2UtilsTest(unittest.TestCase):
         self.assertIsNone(weights.grad)
         self.assertAlmostEqual(float(loss), 7.0)
 
+    def test_top_fraction_mask_is_independent_per_sample(self):
+        scores = torch.tensor([
+            [0.9, 0.8, 0.7, 0.6],
+            [0.1, 0.4, 0.3, 0.2],
+        ])
+        eligible = torch.tensor([
+            [True, True, True, True],
+            [False, True, True, True],
+        ])
+        kept = stage2_utils.top_fraction_per_sample_mask(
+            scores, eligible, 0.5
+        )
+        self.assertEqual(kept.tolist(), [
+            [True, True, False, False],
+            [False, True, True, False],
+        ])
+
+    def test_top_fraction_mask_keeps_one_sparse_anchor(self):
+        kept = stage2_utils.top_fraction_per_sample_mask(
+            torch.tensor([[0.2, 0.9]]),
+            torch.tensor([[False, True]]),
+            0.25,
+        )
+        self.assertEqual(kept.tolist(), [[False, True]])
+
     def test_gaussian_perturbation_is_sample_independent_and_reproducible(self):
         inputs = torch.zeros(2, 3, 4)
         masks = torch.ones(2, 1, 4, dtype=torch.bool)
