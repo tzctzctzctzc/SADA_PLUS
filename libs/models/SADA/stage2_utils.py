@@ -1,3 +1,4 @@
+import hashlib
 import math
 
 import torch
@@ -84,6 +85,34 @@ def weighted_anchor_mse(predictions, targets, weights, mask, eps=1e-8):
     return (
         selected_weights * per_anchor
     ).sum() / selected_weights.sum().clamp_min(eps)
+
+
+def deterministic_gaussian_perturbation(
+        inputs, masks, sample_keys, noise_std, base_seed, epoch):
+    """Apply independent reproducible Gaussian noise to each valid sample."""
+    if inputs.ndim != 3 or masks.shape != (inputs.shape[0], 1, inputs.shape[2]):
+        raise ValueError("inputs and masks must have shapes [B,C,T] and [B,1,T]")
+    if len(sample_keys) != inputs.shape[0] or noise_std <= 0:
+        raise ValueError("sample keys must align and noise std must be positive")
+    perturbed = inputs.clone()
+    for index, sample_key in enumerate(sample_keys):
+        token = '{}|{}|{}'.format(base_seed, epoch, sample_key)
+        seed = int.from_bytes(
+            hashlib.sha256(token.encode('utf-8')).digest()[:8], 'little'
+        ) % (2 ** 31)
+        generator = torch.Generator(device=inputs.device)
+        generator.manual_seed(seed)
+        noise = torch.randn(
+            inputs[index].shape,
+            dtype=inputs.dtype,
+            device=inputs.device,
+            generator=generator,
+        )
+        perturbed[index] = (
+            inputs[index]
+            + noise_std * noise * masks[index].to(inputs.dtype)
+        )
+    return perturbed
 
 
 def temporal_roi_interpolate(

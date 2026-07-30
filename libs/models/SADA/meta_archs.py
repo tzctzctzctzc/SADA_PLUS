@@ -1,4 +1,3 @@
-import hashlib
 import math
 import torch
 from torch import nn
@@ -23,6 +22,7 @@ from .stage1_utils import (
 )
 from .stage2_utils import (
     aligned_boundary_iou_from_offsets,
+    deterministic_gaussian_perturbation,
     match_post_nms_to_pre_nms,
     npl_boundary_ambiguity,
     proposal_loss_terms,
@@ -893,26 +893,21 @@ class SADA(nn.Module):
     def _stage2_perturbed_inputs(
             self, inputs, masks, video_list_tgt, curr_epoch):
         """Create deterministic Gaussian-noise target features for V1."""
-        identity = '|'.join(
-            str(item.get('video_id', index))
-            for index, item in enumerate(video_list_tgt)
+        sample_keys = []
+        for index, item in enumerate(video_list_tgt):
+            metadata = item.get('metadata', {})
+            sample_keys.append('{}:{}'.format(
+                metadata.get('video_id', index),
+                metadata.get('crop_start', 0),
+            ))
+        return deterministic_gaussian_perturbation(
+            inputs,
+            masks,
+            sample_keys,
+            self.stage2_stability_noise_std,
+            self.stage2_stability_seed,
+            curr_epoch,
         )
-        token = '{}|{}|{}'.format(
-            self.stage2_stability_seed, curr_epoch, identity
-        )
-        seed = int.from_bytes(
-            hashlib.sha256(token.encode('utf-8')).digest()[:8], 'little'
-        ) % (2 ** 31)
-        generator = torch.Generator(device=inputs.device)
-        generator.manual_seed(seed)
-        noise = torch.randn(
-            inputs.shape,
-            dtype=inputs.dtype,
-            device=inputs.device,
-            generator=generator,
-        )
-        noise = noise * masks.to(inputs.dtype)
-        return inputs + self.stage2_stability_noise_std * noise
 
     @torch.no_grad()
     def _stage1_shift_routing(self, video_list_tgt, points, rng=None):
