@@ -152,6 +152,7 @@ def summarize_noise(records, stability_key, thresholds, retain_fractions):
         },
         "thresholds": {},
         "top_stability_budget": {},
+        "top_stability_budget_per_crop": {},
         "stability_deciles_low_to_high": [],
         "per_fpn_level": {},
     }
@@ -163,6 +164,10 @@ def summarize_noise(records, stability_key, thresholds, retain_fractions):
         )
 
     descending = torch.argsort(stability, descending=True, stable=True)
+    crop_groups = {}
+    for index, record in enumerate(records):
+        crop_key = (record["video_id"], record["crop_start"])
+        crop_groups.setdefault(crop_key, []).append(index)
     for fraction in retain_fractions:
         count = min(
             len(records),
@@ -172,6 +177,25 @@ def summarize_noise(records, stability_key, thresholds, retain_fractions):
         output["top_stability_budget"]["{:.2f}".format(
             fraction
         )] = summarize_subset(records, indices, baseline_foreground)
+        crop_indices = []
+        for group_indices in crop_groups.values():
+            group_stability = stability[group_indices]
+            group_count = min(
+                len(group_indices),
+                max(1, int(np.ceil(len(group_indices) * fraction))),
+            )
+            local_order = torch.argsort(
+                group_stability, descending=True, stable=True
+            )[:group_count]
+            crop_indices.extend(
+                group_indices[int(local_index)]
+                for local_index in local_order
+            )
+        output["top_stability_budget_per_crop"]["{:.2f}".format(
+            fraction
+        )] = summarize_subset(
+            records, crop_indices, baseline_foreground
+        )
 
     ascending = torch.argsort(stability, stable=True)
     for chunk in torch.tensor_split(ascending, 10):
