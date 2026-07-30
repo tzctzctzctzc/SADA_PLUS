@@ -1767,6 +1767,9 @@ class SADA(nn.Module):
                 stage2_proposal_weights=stage2_proposal_weights,
                 stage2_proposal_count=stage2_proposal_count,
                 stage2_dense_pseudo_offsets=stage2_dense_pseudo_offsets,
+                stage2_dense_perturbed_offsets=(
+                    stage2_dense_perturbed_offsets
+                ),
             )
             losses.update({
                 'stage2_pre_nms_budget': torch.tensor(
@@ -2044,7 +2047,8 @@ class SADA(nn.Module):
             stage2_pseudo_assignments=None,
             stage2_proposal_weights=None,
             stage2_proposal_count=0,
-            stage2_dense_pseudo_offsets=None,):
+            stage2_dense_pseudo_offsets=None,
+            stage2_dense_perturbed_offsets=None,):
         bs = int(fpn_masks[0].shape[0] / 2)
         
         # gt_cls_labels is a list of 2B elements, each of shape FT x C
