@@ -187,8 +187,8 @@ def source_select(args):
             ).cpu()
             result = {"l2": l2, "gamma": gamma, "metrics": metrics(corrected, val_records["gt_offsets"])}
             candidates.append(result)
-            score = result["metrics"]["mean_boundary_iou"]
-            if best is None or score > best["metrics"]["mean_boundary_iou"]:
+            score = result["metrics"]["offset_mse"]
+            if best is None or score < best["metrics"]["offset_mse"]:
                 best = result
                 best_calibration = calibration
     artifact = {
@@ -207,6 +207,7 @@ def source_select(args):
         "source_val_baseline": baseline,
         "candidates": candidates,
         "selected": best,
+        "selection_metric": "source_val_offset_mse",
         "calibration_output": args.calibration_output,
         "target_gt_usage": "none",
     }
