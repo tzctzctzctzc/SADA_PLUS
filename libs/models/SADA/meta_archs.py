@@ -399,6 +399,23 @@ class SADA(nn.Module):
                 calibration['weight'].float(),
                 persistent=False,
             )
+        self.stage2_semantic_boundary_calibration = stage2_cfg.get(
+            'semantic_boundary_calibration'
+        )
+        self.stage2_semantic_boundary_weighting = bool(
+            stage2_cfg.get('semantic_boundary_weighting', False)
+        )
+        if self.stage2_semantic_boundary_weighting:
+            if self.stage2_semantic_boundary_calibration is None:
+                raise ValueError('Semantic boundary calibration is required')
+            artifact = torch.load(
+                self.stage2_semantic_boundary_calibration,
+                map_location='cpu',
+            )
+            self.stage2_semantic_confidence_power = float(artifact['power'])
+            self.stage2_semantic_keep_fraction = float(artifact['fraction'])
+            if artifact['levels'] != self.stage2_levels:
+                raise ValueError('Semantic calibration levels must match Stage 2')
         self.stage2_alqa_head_seeds = stage2_cfg.get(
             'alqa_head_seeds', [123, 456, 789]
         )
@@ -459,6 +476,20 @@ class SADA(nn.Module):
         ):
             raise ValueError(
                 'Boundary residual correction requires static-full routing'
+            )
+        if (
+            self.stage2_semantic_boundary_weighting
+            and (
+                self.stage2_routing != 'static_full_dense'
+                or self.stage2_static_teacher != 'frozen'
+                or self.stage2_stability_weighting
+                or self.stage2_boundary_residual_enabled
+                or not 0 < self.stage2_semantic_keep_fraction <= 1
+                or self.stage2_semantic_confidence_power < 0
+            )
+        ):
+            raise ValueError(
+                'Semantic boundary weighting requires frozen static-full routing'
             )
         self.stage2_uses_external_teacher = (
             self.stage2_routing
@@ -1012,6 +1043,37 @@ class SADA(nn.Module):
                 0.0,
             ))
         return tuple(corrected)
+
+    @torch.no_grad()
+    def _stage2_semantic_boundary_scores(self, cls_logits, offsets, points):
+        """Score anchors by the predicted class contrast outside both boundaries."""
+        scores = []
+        for logits, level_offsets, point in zip(cls_logits, offsets, points):
+            probabilities = logits.detach().sigmoid().permute(0, 2, 1)
+            confidence, predicted_class = probabilities.max(dim=-1)
+            grid, stride = point[:, 0], point[:, 3]
+            starts = grid[None, :] - level_offsets[:, 0] * stride[None, :]
+            ends = grid[None, :] + level_offsets[:, 1] * stride[None, :]
+            left = torch.searchsorted(
+                grid.contiguous(), (starts - stride[None, :]).contiguous()
+            ).clamp(0, grid.numel() - 1)
+            right = torch.searchsorted(
+                grid.contiguous(), (ends + stride[None, :]).contiguous()
+            ).clamp(0, grid.numel() - 1)
+            classes = predicted_class.unsqueeze(-1)
+            left_prob = probabilities.gather(
+                1, left.unsqueeze(-1).expand_as(probabilities)
+            ).gather(-1, classes).squeeze(-1)
+            right_prob = probabilities.gather(
+                1, right.unsqueeze(-1).expand_as(probabilities)
+            ).gather(-1, classes).squeeze(-1)
+            contrast = (
+                confidence - 0.5 * (left_prob + right_prob)
+            ).clamp_min(0.0)
+            scores.append(
+                contrast * confidence.pow(self.stage2_semantic_confidence_power)
+            )
+        return scores
 
     @torch.no_grad()
     def _stage2_perturbed_inputs(
@@ -1752,6 +1814,13 @@ class SADA(nn.Module):
                         pseudo_masks,
                         out_offsets_tgt_pl,
                     )
+                stage2_dense_semantic_scores = (
+                    self._stage2_semantic_boundary_scores(
+                        out_cls_logits_tgt, out_offsets_tgt_pl, points,
+                    )
+                    if self.stage2_semantic_boundary_weighting
+                    else None
+                )
                 out_offsets_tgt_pl_perturbed = None
                 if fpn_feats_tgt_pl_perturbed is not None:
                     out_offsets_tgt_pl_perturbed = []
@@ -1765,6 +1834,7 @@ class SADA(nn.Module):
                 fpn_feats_tgt, fpn_masks_tgt
             )
             out_offsets_tgt_pl_perturbed = None
+            stage2_dense_semantic_scores = None
 
         # ------------------------------------------------------------
         # permute the outputs
@@ -1809,6 +1879,7 @@ class SADA(nn.Module):
             stage2_proposal_weights = None
             stage2_dense_pseudo_offsets = None
             stage2_dense_perturbed_offsets = None
+            stage2_dense_semantic_scores_active = None
             stage2_proposal_count = 0
             stage2_pre_nms_budget = 0
             stage2_rescued_pre_nms = 0
@@ -1872,6 +1943,9 @@ class SADA(nn.Module):
                 stage2_dense_perturbed_offsets = (
                     out_offsets_tgt_pl_perturbed
                 )
+                stage2_dense_semantic_scores_active = (
+                    stage2_dense_semantic_scores
+                )
             
             
             # For debugging ...
@@ -1929,6 +2003,9 @@ class SADA(nn.Module):
                 stage2_dense_pseudo_offsets=stage2_dense_pseudo_offsets,
                 stage2_dense_perturbed_offsets=(
                     stage2_dense_perturbed_offsets
+                ),
+                stage2_dense_semantic_scores=(
+                    stage2_dense_semantic_scores_active
                 ),
             )
             losses.update({
@@ -2208,7 +2285,8 @@ class SADA(nn.Module):
             stage2_proposal_weights=None,
             stage2_proposal_count=0,
             stage2_dense_pseudo_offsets=None,
-            stage2_dense_perturbed_offsets=None,):
+            stage2_dense_perturbed_offsets=None,
+            stage2_dense_semantic_scores=None,):
         bs = int(fpn_masks[0].shape[0] / 2)
         
         # gt_cls_labels is a list of 2B elements, each of shape FT x C
@@ -2482,6 +2560,9 @@ class SADA(nn.Module):
         stage2_stability_mid = 0 * decoded_offsets.sum()
         stage2_stability_high = 0 * decoded_offsets.sum()
         stage2_stability_keep_fraction = 0 * decoded_offsets.sum()
+        stage2_semantic_weight_sum = 0 * decoded_offsets.sum()
+        stage2_semantic_mean = 0 * decoded_offsets.sum()
+        stage2_semantic_keep_fraction = 0 * decoded_offsets.sum()
         stage2_level_positive = [
             0 * decoded_offsets.sum() for _ in range(self.n_levels)
         ]
@@ -2522,7 +2603,39 @@ class SADA(nn.Module):
                 ].sum().float()
                 offset = next_offset
             if stage2_reg_mask.any():
-                if (
+                if self.stage2_semantic_boundary_weighting:
+                    if stage2_dense_semantic_scores is None:
+                        raise RuntimeError(
+                            'Stage 2 semantic scores were not generated'
+                        )
+                    semantic_scores = torch.cat(
+                        stage2_dense_semantic_scores, dim=1
+                    ).detach()
+                    semantic_gate = top_fraction_per_sample_mask(
+                        semantic_scores,
+                        stage2_reg_mask,
+                        self.stage2_semantic_keep_fraction,
+                    )
+                    semantic_weights = semantic_scores * semantic_gate.to(
+                        semantic_scores.dtype
+                    )
+                    stage2_reg_loss = weighted_anchor_mse(
+                        stage2_predictions,
+                        stage2_targets,
+                        semantic_weights,
+                        stage2_reg_mask,
+                    )
+                    stage2_semantic_weight_sum = semantic_weights[
+                        stage2_reg_mask
+                    ].sum()
+                    stage2_semantic_mean = semantic_scores[
+                        stage2_reg_mask
+                    ].mean()
+                    stage2_semantic_keep_fraction = (
+                        semantic_gate.sum().float()
+                        / stage2_reg_positive.clamp_min(1.0)
+                    )
+                elif (
                     self.stage2_routing == 'static_full_dense'
                     and self.stage2_stability_weighting
                 ):
@@ -2714,6 +2827,11 @@ class SADA(nn.Module):
                    'stage2_stability_high_fraction': stage2_stability_high,
                    'stage2_stability_keep_fraction': (
                        stage2_stability_keep_fraction
+                   ),
+                   'stage2_semantic_weight_sum': stage2_semantic_weight_sum,
+                   'stage2_semantic_mean': stage2_semantic_mean,
+                   'stage2_semantic_keep_fraction': (
+                       stage2_semantic_keep_fraction
                    ),
                    'downstream_loss': downstream_loss}
         for level, count in enumerate(stage2_level_positive):

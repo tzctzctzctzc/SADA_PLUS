@@ -521,7 +521,7 @@ def create_argparser():
         '--stage2',
         choices=[
             'off', 'pseudo', 'alqa', 'static', 'static-full',
-            'static-full-stability',
+            'static-full-stability', 'static-full-semantic',
         ],
         default='off',
         help='target pseudo-boundary regression after warm-up',
@@ -575,6 +575,10 @@ def create_argparser():
     parser.add_argument(
         '--stage2-boundary-residual-calibration', default=None,
         help='source-only frozen-teacher boundary residual calibration artifact',
+    )
+    parser.add_argument(
+        '--stage2-semantic-boundary-calibration', default=None,
+        help='source-only semantic boundary contrast calibration artifact',
     )
     parser.add_argument(
         '--stage2-loss-weighting',
@@ -708,7 +712,8 @@ if __name__ == '__main__':
                 else (
                     'static_full_dense'
                     if args.stage2 in (
-                        'static-full', 'static-full-stability'
+                        'static-full', 'static-full-stability',
+                        'static-full-semantic',
                     )
                     else 'confidence'
                 )
@@ -736,6 +741,12 @@ if __name__ == '__main__':
         'boundary_residual_calibration': (
             args.stage2_boundary_residual_calibration
         ),
+        'semantic_boundary_calibration': (
+            args.stage2_semantic_boundary_calibration
+        ),
+        'semantic_boundary_weighting': (
+            args.stage2 == 'static-full-semantic'
+        ),
         'alqa_head_seeds': [
             int(value.strip())
             for value in args.alqa_head_seeds.split(',')
@@ -756,6 +767,10 @@ if __name__ == '__main__':
                 'sada_static_dense_localization_v1'
                 if args.stage2 == 'static'
                 else (
+                    'sada_static_full_path_semantic_boundary_contrast_'
+                    'top_fraction_offset_mse_v1'
+                    if args.stage2 == 'static-full-semantic'
+                    else (
                     'sada_static_full_path_offset_mse_v1'
                     if (
                         args.stage2 == 'static-full'
@@ -787,25 +802,29 @@ if __name__ == '__main__':
                     )
                 )
             )
+            )
         ),
         'quality_head_mode': (
             'none'
             if args.stage2 in (
-                'static', 'static-full', 'static-full-stability'
+                'static', 'static-full', 'static-full-stability',
+                'static-full-semantic'
             )
             else 'source_gt_calibrated_then_frozen'
         ),
         'selection_budget': (
             'original_sada_high_confidence_dense_anchors'
             if args.stage2 in (
-                'static', 'static-full', 'static-full-stability'
+                'static', 'static-full', 'static-full-stability',
+                'static-full-semantic'
             )
             else 'per_video_per_fpn_original_alpha_count'
         ),
         'nms': (
             'none'
             if args.stage2 in (
-                'static', 'static-full', 'static-full-stability'
+                'static', 'static-full', 'static-full-stability',
+                'static-full-semantic'
             )
             else 'hard_class_agnostic_ranked_by_classification_confidence'
         ),
@@ -815,14 +834,14 @@ if __name__ == '__main__':
                 else 'frozen_warmup'
             )
             if args.stage2 in (
-                'static-full', 'static-full-stability'
+                'static-full', 'static-full-stability', 'static-full-semantic'
             )
             else 'none'
         ),
         'regression_loss': (
             'offset_mse'
             if args.stage2 in (
-                'static-full', 'static-full-stability'
+                'static-full', 'static-full-stability', 'static-full-semantic'
             )
             else 'diou'
         ),
@@ -832,7 +851,8 @@ if __name__ == '__main__':
         raise ValueError('Stage 2 loss weighting requires Stage 2')
     if (
         args.stage2 in (
-            'static', 'static-full', 'static-full-stability'
+            'static', 'static-full', 'static-full-stability',
+            'static-full-semantic'
         )
         and args.stage2_loss_weighting != 'anchor_equal'
     ):
@@ -867,6 +887,23 @@ if __name__ == '__main__':
     ):
         raise ValueError(
             'Boundary residual correction requires static-full Stage 2'
+        )
+    if (
+        args.stage2 == 'static-full-semantic'
+        and (
+            args.stage2_semantic_boundary_calibration is None
+            or args.stage2_static_teacher != 'frozen'
+        )
+    ):
+        raise ValueError(
+            'Semantic boundary weighting requires a frozen-teacher calibration'
+        )
+    if (
+        args.stage2_semantic_boundary_calibration is not None
+        and args.stage2 != 'static-full-semantic'
+    ):
+        raise ValueError(
+            'Semantic boundary calibration requires static-full-semantic Stage 2'
         )
     if (
         args.stage2 != 'static-full-stability'
