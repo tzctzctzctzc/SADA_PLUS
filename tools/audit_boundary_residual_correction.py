@@ -49,7 +49,11 @@ def current_logits(model, inputs, masks, domain):
 
 
 def collect_records(model, dataset, annotations, cfg, domain, split, levels, device):
-    records = {key: [] for key in ("hidden", "offsets", "gt_offsets", "selected")}
+    records = {
+        key: [] for key in (
+            "hidden", "offsets", "gt_offsets", "selected", "level_ids",
+        )
+    }
     alpha = float(cfg["model"].get("pl_threshold", 0.7))
     batch_size = int(cfg.get("loader", {}).get("batch_size", 1))
     preprocessing_mode = "train" if split == "train" else "validation"
@@ -112,6 +116,9 @@ def collect_records(model, dataset, annotations, cfg, domain, split, levels, dev
                     records["selected"].append(
                         torch.ones(int(selected.sum()), dtype=torch.bool)
                     )
+                    records["level_ids"].append(torch.full(
+                        (int(selected.sum()),), level, dtype=torch.long,
+                    ))
                 offset = next_offset
     if not records["hidden"]:
         raise RuntimeError("No selected anchors")
@@ -302,6 +309,139 @@ def target_weight_eval(args):
     }
 
 
+def levelwise_corrected_offsets(features, offsets, level_ids, calibrations, device):
+    result = offsets.clone()
+    for level, artifact in calibrations.items():
+        selected = level_ids == int(level)
+        if not selected.any():
+            continue
+        result[selected] = corrected_offsets(
+            features[selected], offsets[selected], artifact["calibration"],
+            artifact["gamma"], device,
+        ).cpu()
+    return result
+
+
+def source_level_select(args):
+    seed_everything(args.seed)
+    cfg = read_yaml(args.config)
+    cfg["stage1"] = {"enabled": False, "perturbation": "shift"}
+    _update_config(cfg)
+    checkpoint = torch.load(args.checkpoint, map_location=args.device)
+    model = make_meta_arch(cfg["model_name"], cfg, device=args.device).to(args.device)
+    model.load_state_dict(checkpoint["state_dict"])
+    model.eval()
+    annotations = json.loads(
+        Path(cfg["dataset"]["json_file"]).read_text(encoding="utf-8")
+    )["database"]
+    levels = [int(value) for value in args.levels.split(",")]
+    train = make_dataset(cfg["dataset_name"], True, cfg["src_train_split"], **cfg["dataset"])
+    val = make_dataset(cfg["dataset_name"], False, cfg["src_val_split"], **cfg["dataset"])
+    train_records = collect_records(model, train, annotations, cfg, "source", "train", levels, args.device)
+    val_records = collect_records(model, val, annotations, cfg, "source", "val", levels, args.device)
+    selected = {}
+    candidates = {}
+    for level in levels:
+        train_mask = train_records["level_ids"] == level
+        val_mask = val_records["level_ids"] == level
+        if not train_mask.any() or not val_mask.any():
+            raise RuntimeError("Missing selected anchors for level {}".format(level))
+        best = None
+        level_candidates = []
+        for l2 in parse_numbers(args.ridge_l2):
+            calibration = fit_ridge(
+                train_records["hidden"][train_mask],
+                train_records["gt_offsets"][train_mask]
+                - train_records["offsets"][train_mask],
+                l2, args.device,
+            )
+            for gamma in parse_numbers(args.correction_scales):
+                corrected = corrected_offsets(
+                    val_records["hidden"][val_mask],
+                    val_records["offsets"][val_mask], calibration, gamma,
+                    args.device,
+                ).cpu()
+                candidate = {
+                    "l2": l2, "gamma": gamma,
+                    "metrics": metrics(
+                        corrected, val_records["gt_offsets"][val_mask],
+                    ),
+                }
+                level_candidates.append(candidate)
+                if best is None or (
+                    candidate["metrics"]["offset_mse"]
+                    < best["metrics"]["offset_mse"]
+                ):
+                    best = candidate
+                    best_calibration = calibration
+        selected[str(level)] = {
+            "calibration": best_calibration,
+            "l2": best["l2"], "gamma": best["gamma"],
+        }
+        candidates[str(level)] = level_candidates
+    corrected = levelwise_corrected_offsets(
+        val_records["hidden"], val_records["offsets"],
+        val_records["level_ids"], selected, args.device,
+    )
+    artifact = {
+        "calibrations": selected,
+        "config": args.config,
+        "checkpoint": args.checkpoint,
+        "levels": levels,
+    }
+    torch.save(artifact, args.calibration_output)
+    return {
+        "audit": "source_only_levelwise_signed_boundary_residual_selection",
+        "checkpoint_epoch": checkpoint.get("epoch"),
+        "source_val_baseline": metrics(
+            val_records["offsets"], val_records["gt_offsets"],
+        ),
+        "source_val_corrected": metrics(corrected, val_records["gt_offsets"]),
+        "candidates": candidates,
+        "selected": {
+            level: {key: value for key, value in values.items()
+                    if key != "calibration"}
+            for level, values in selected.items()
+        },
+        "selection_metric": "per_level_source_val_offset_mse",
+        "calibration_output": args.calibration_output,
+        "target_gt_usage": "none",
+    }
+
+
+def target_level_eval(args):
+    seed_everything(args.seed)
+    artifact = torch.load(args.calibration, map_location="cpu")
+    cfg = read_yaml(args.config)
+    cfg["stage1"] = {"enabled": False, "perturbation": "shift"}
+    _update_config(cfg)
+    checkpoint = torch.load(args.checkpoint, map_location=args.device)
+    model = make_meta_arch(cfg["model_name"], cfg, device=args.device).to(args.device)
+    model.load_state_dict(checkpoint["state_dict"])
+    model.eval()
+    annotations = json.loads(
+        Path(cfg["dataset"]["json_file"]).read_text(encoding="utf-8")
+    )["database"]
+    val = make_dataset(cfg["dataset_name"], False, cfg["tgt_val_split"], **cfg["dataset"])
+    records = collect_records(model, val, annotations, cfg, "target", "val", artifact["levels"], args.device)
+    corrected = levelwise_corrected_offsets(
+        records["hidden"], records["offsets"], records["level_ids"],
+        artifact["calibrations"], args.device,
+    )
+    return {
+        "audit": "fixed_source_only_levelwise_signed_boundary_residual_target_evaluation",
+        "checkpoint_epoch": checkpoint.get("epoch"),
+        "target_baseline": metrics(records["offsets"], records["gt_offsets"]),
+        "target_corrected": metrics(corrected, records["gt_offsets"]),
+        "fixed_source_selection": {
+            level: {key: value for key, value in values.items()
+                    if key != "calibration"}
+            for level, values in artifact["calibrations"].items()
+        },
+        "target_gt_usage": "offline evaluation only",
+    }
+
+
 def source_select(args):
     seed_everything(args.seed)
     cfg = read_yaml(args.config)
@@ -398,6 +538,7 @@ def main():
         choices=(
             "source_select", "target_eval",
             "source_weight_select", "target_weight_eval",
+            "source_level_select", "target_level_eval",
         ),
         required=True,
     )
@@ -414,9 +555,13 @@ def main():
     parser.add_argument("--reliability-floor", type=float, default=0.25)
     parser.add_argument("--seed", type=int, default=20260731)
     args = parser.parse_args()
-    if args.mode in ("source_select", "source_weight_select") and not args.calibration_output:
+    if args.mode in (
+            "source_select", "source_weight_select", "source_level_select",
+    ) and not args.calibration_output:
         parser.error("--calibration-output is required for source selection")
-    if args.mode in ("target_eval", "target_weight_eval") and not args.calibration:
+    if args.mode in (
+            "target_eval", "target_weight_eval", "target_level_eval",
+    ) and not args.calibration:
         parser.error("--calibration is required for target evaluation")
     if not 0 <= args.reliability_floor <= 1:
         parser.error("--reliability-floor must be in [0, 1]")
@@ -426,8 +571,12 @@ def main():
         result = target_eval(args)
     elif args.mode == "source_weight_select":
         result = source_weight_select(args)
-    else:
+    elif args.mode == "target_weight_eval":
         result = target_weight_eval(args)
+    elif args.mode == "source_level_select":
+        result = source_level_select(args)
+    else:
+        result = target_level_eval(args)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2), encoding="utf-8")
