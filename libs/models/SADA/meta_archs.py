@@ -917,7 +917,8 @@ class SADA(nn.Module):
         """Return the frozen or EMA feature-to-localization teacher path."""
         if self.stage2_static_teacher == 'ema':
             if stage2_teacher is None:
-                raise RuntimeError('Stage 2 EMA teacher was not provided')
+                # Validation invokes the evaluation EMA model directly.
+                stage2_teacher = self
             return (
                 stage2_teacher.backbone_target,
                 stage2_teacher.neck_target,
