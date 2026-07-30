@@ -3,10 +3,15 @@
 import argparse
 import json
 import random
+import sys
 from pathlib import Path
 
 import numpy as np
 import torch
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from libs.datasets import make_dataset
 from libs.models.SADA import make_meta_arch
@@ -114,9 +119,54 @@ def summarize_subset(records, indices, baseline_foreground):
     }
 
 
-def summarize_noise(records, stability_key, thresholds, retain_fractions):
+def summarize_ranking(records, score, retain_fractions):
+    foreground = torch.tensor([
+        record["foreground"] for record in records
+    ], dtype=torch.bool)
+    baseline_foreground = int(foreground.sum())
+    descending = torch.argsort(score, descending=True, stable=True)
+    crop_groups = {}
+    for index, record in enumerate(records):
+        crop_key = (record["video_id"], record["crop_start"])
+        crop_groups.setdefault(crop_key, []).append(index)
+
+    output = {"top_budget": {}, "top_budget_per_crop": {}}
+    for fraction in retain_fractions:
+        count = min(
+            len(records),
+            max(1, int(np.ceil(len(records) * fraction))),
+        )
+        fraction_key = "{:.2f}".format(fraction)
+        output["top_budget"][fraction_key] = summarize_subset(
+            records, descending[:count].tolist(), baseline_foreground
+        )
+        crop_indices = []
+        for group_indices in crop_groups.values():
+            group_count = min(
+                len(group_indices),
+                max(1, int(np.ceil(len(group_indices) * fraction))),
+            )
+            local_order = torch.argsort(
+                score[group_indices], descending=True, stable=True
+            )[:group_count]
+            crop_indices.extend(
+                group_indices[int(local_index)]
+                for local_index in local_order
+            )
+        output["top_budget_per_crop"][fraction_key] = summarize_subset(
+            records, crop_indices, baseline_foreground
+        )
+    return output
+
+
+def summarize_noise(
+    records, stability_key, thresholds, retain_fractions, confidence_powers
+):
     stability = torch.tensor([
         record[stability_key] for record in records
+    ], dtype=torch.float64)
+    confidence = torch.tensor([
+        record["confidence"] for record in records
     ], dtype=torch.float64)
     boundary_iou = torch.tensor([
         record["boundary_iou"] for record in records
@@ -151,8 +201,14 @@ def summarize_noise(records, stability_key, thresholds, retain_fractions):
             ),
         },
         "thresholds": {},
-        "top_stability_budget": {},
-        "top_stability_budget_per_crop": {},
+        "ranking_results": {
+            "confidence": summarize_ranking(
+                records, confidence, retain_fractions
+            ),
+            "stability": summarize_ranking(
+                records, stability, retain_fractions
+            ),
+        },
         "stability_deciles_low_to_high": [],
         "per_fpn_level": {},
     }
@@ -163,38 +219,12 @@ def summarize_noise(records, stability_key, thresholds, retain_fractions):
             records, indices, baseline_foreground
         )
 
-    descending = torch.argsort(stability, descending=True, stable=True)
-    crop_groups = {}
-    for index, record in enumerate(records):
-        crop_key = (record["video_id"], record["crop_start"])
-        crop_groups.setdefault(crop_key, []).append(index)
-    for fraction in retain_fractions:
-        count = min(
-            len(records),
-            max(1, int(np.ceil(len(records) * fraction))),
-        )
-        indices = descending[:count].tolist()
-        output["top_stability_budget"]["{:.2f}".format(
-            fraction
-        )] = summarize_subset(records, indices, baseline_foreground)
-        crop_indices = []
-        for group_indices in crop_groups.values():
-            group_stability = stability[group_indices]
-            group_count = min(
-                len(group_indices),
-                max(1, int(np.ceil(len(group_indices) * fraction))),
-            )
-            local_order = torch.argsort(
-                group_stability, descending=True, stable=True
-            )[:group_count]
-            crop_indices.extend(
-                group_indices[int(local_index)]
-                for local_index in local_order
-            )
-        output["top_stability_budget_per_crop"]["{:.2f}".format(
-            fraction
-        )] = summarize_subset(
-            records, crop_indices, baseline_foreground
+    for power in confidence_powers:
+        if power == 0:
+            continue
+        key = "stability_x_confidence_pow_{:.3f}".format(power)
+        output["ranking_results"][key] = summarize_ranking(
+            records, stability * confidence.pow(power), retain_fractions
         )
 
     ascending = torch.argsort(stability, stable=True)
@@ -275,13 +305,19 @@ def audit(args):
     perturbation_seeds = parse_numbers(args.perturbation_seeds, int)
     thresholds = parse_numbers(args.thresholds, float)
     retain_fractions = parse_numbers(args.retain_fractions, float)
+    confidence_powers = parse_numbers(args.confidence_powers, float)
     if (
         not levels
         or not noise_stds
         or not perturbation_seeds
+        or not confidence_powers
         or any(value <= 0 for value in noise_stds)
+        or any(value < 0 for value in confidence_powers)
     ):
-        raise ValueError("levels, noise stds, and perturbation seeds are required")
+        raise ValueError(
+            "levels, noise stds, perturbation seeds, and confidence powers "
+            "are required"
+        )
 
     split_key = "{}_{}_split".format(
         "src" if args.domain == "source" else "tgt",
@@ -479,6 +515,7 @@ def audit(args):
             "perturbation": "sample-specific deterministic Gaussian input noise",
             "noise_stds": noise_stds,
             "perturbation_seeds": perturbation_seeds,
+            "confidence_powers": confidence_powers,
             "perturbation_epoch": audit_epoch,
             "stability": (
                 "mean same-anchor boundary IoU across perturbation seeds"
@@ -496,7 +533,11 @@ def audit(args):
         key = "stability_{:.6f}".format(noise_std)
         output["noise_results"]["{:.6f}".format(noise_std)] = (
             summarize_noise(
-                records, key, thresholds, retain_fractions
+                records,
+                key,
+                thresholds,
+                retain_fractions,
+                confidence_powers,
             )
         )
     return output
@@ -529,6 +570,7 @@ def main():
     parser.add_argument(
         "--retain-fractions", default="0.25,0.5,0.75,1.0"
     )
+    parser.add_argument("--confidence-powers", default="0,0.5,1,2")
     parser.add_argument("--seed", type=int, default=20260730)
     args = parser.parse_args()
 

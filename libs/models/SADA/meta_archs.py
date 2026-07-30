@@ -352,6 +352,12 @@ class SADA(nn.Module):
         self.stage2_stability_seed = int(
             stage2_cfg.get('stability_seed', 20260730)
         )
+        self.stage2_stability_seeds = stage2_cfg.get(
+            'stability_seeds', [self.stage2_stability_seed]
+        )
+        self.stage2_stability_confidence_power = float(
+            stage2_cfg.get('stability_confidence_power', 0.0)
+        )
         self.stage2_stability_keep_ratio = float(
             stage2_cfg.get('stability_keep_ratio', 1.0)
         )
@@ -373,11 +379,16 @@ class SADA(nn.Module):
                 self.stage2_routing != 'static_full_dense'
                 or self.stage2_stability_noise_std <= 0
                 or not 0 < self.stage2_stability_keep_ratio <= 1
+                or not self.stage2_stability_seeds
+                or any(not isinstance(seed, int)
+                       for seed in self.stage2_stability_seeds)
+                or self.stage2_stability_confidence_power < 0
             )
         ):
             raise ValueError(
                 'Stage 2 stability weighting requires static-full routing '
-                'and a positive noise standard deviation'
+                'with valid seeds, confidence power, and positive noise '
+                'standard deviation'
             )
         if (
             not self.stage2_levels
@@ -937,14 +948,17 @@ class SADA(nn.Module):
                 metadata.get('video_id', index),
                 metadata.get('crop_start', 0),
             ))
-        return deterministic_gaussian_perturbation(
-            inputs,
-            masks,
-            sample_keys,
-            self.stage2_stability_noise_std,
-            self.stage2_stability_seed,
-            curr_epoch,
-        )
+        return [
+            deterministic_gaussian_perturbation(
+                inputs,
+                masks,
+                sample_keys,
+                self.stage2_stability_noise_std,
+                seed,
+                curr_epoch,
+            )
+            for seed in self.stage2_stability_seeds
+        ]
 
     @torch.no_grad()
     def _stage1_shift_routing(self, video_list_tgt, points, rng=None):
@@ -1518,13 +1532,19 @@ class SADA(nn.Module):
                         video_list_tgt,
                         curr_epoch,
                     )
-                    perturbed_feats, perturbed_masks, _ = stage2_backbone_teacher(
-                        perturbed_inputs, batched_masks_tgt
-                    )
-                    (
-                        fpn_feats_tgt_pl_perturbed,
-                        _,
-                    ) = stage2_neck_teacher(perturbed_feats, perturbed_masks)
+                    fpn_feats_tgt_pl_perturbed = []
+                    for inputs_view in perturbed_inputs:
+                        perturbed_feats, perturbed_masks, _ = (
+                            stage2_backbone_teacher(
+                                inputs_view, batched_masks_tgt
+                            )
+                        )
+                        perturbed_fpn_feats, _ = stage2_neck_teacher(
+                            perturbed_feats, perturbed_masks
+                        )
+                        fpn_feats_tgt_pl_perturbed.append(
+                            perturbed_fpn_feats
+                        )
         else:
             feats_tgt_pl, masks_tgt_pl, _ = self.backbone_pl(
                 batched_inputs_tgt, batched_masks_tgt
@@ -1639,12 +1659,12 @@ class SADA(nn.Module):
                 )
                 out_offsets_tgt_pl_perturbed = None
                 if fpn_feats_tgt_pl_perturbed is not None:
-                    (
-                        out_offsets_tgt_pl_perturbed,
-                        _,
-                    ) = stage2_regression_teacher(
-                        fpn_feats_tgt_pl_perturbed, fpn_masks_tgt_pl
-                    )
+                    out_offsets_tgt_pl_perturbed = []
+                    for perturbed_fpn_feats in fpn_feats_tgt_pl_perturbed:
+                        perturbed_offsets, _ = stage2_regression_teacher(
+                            perturbed_fpn_feats, fpn_masks_tgt_pl
+                        )
+                        out_offsets_tgt_pl_perturbed.append(perturbed_offsets)
         else:
             out_offsets_tgt_pl, out_actionness_tgt_pl = self.reg_head_pl(
                 fpn_feats_tgt, fpn_masks_tgt
@@ -1662,8 +1682,8 @@ class SADA(nn.Module):
         out_offsets_tgt_pl = [x.permute(0, 2, 1) for x in out_offsets_tgt_pl]
         if out_offsets_tgt_pl_perturbed is not None:
             out_offsets_tgt_pl_perturbed = [
-                x.permute(0, 2, 1)
-                for x in out_offsets_tgt_pl_perturbed
+                [x.permute(0, 2, 1) for x in offsets]
+                for offsets in out_offsets_tgt_pl_perturbed
             ]
         
         # out_offset: F List[B, 2 (xC), T_i] -> F List[B, T_i, 1 (xC)]
@@ -2415,23 +2435,36 @@ class SADA(nn.Module):
                         raise RuntimeError(
                             'Stage 2 stability offsets were not generated'
                         )
-                    perturbed_targets = self.decode_offset(
-                        stage2_dense_perturbed_offsets,
-                        None,
-                        None,
-                        mode=mode,
-                    ).detach()
-                    stability = aligned_boundary_iou_from_offsets(
-                        stage2_targets, perturbed_targets
-                    ).detach()
+                    stability_views = []
+                    for perturbed_offsets in stage2_dense_perturbed_offsets:
+                        perturbed_targets = self.decode_offset(
+                            perturbed_offsets,
+                            None,
+                            None,
+                            mode=mode,
+                        ).detach()
+                        stability_views.append(
+                            aligned_boundary_iou_from_offsets(
+                                stage2_targets, perturbed_targets
+                            )
+                        )
+                    stability = torch.stack(stability_views).mean(dim=0).detach()
                     selected_stability = stability[stage2_reg_mask]
                     stability_gate = top_fraction_per_sample_mask(
-                        stability,
+                        stability * torch.cat(
+                            out_cls_logits_tgt, dim=1
+                        ).sigmoid().amax(dim=-1).pow(
+                            self.stage2_stability_confidence_power
+                        ),
                         stage2_reg_mask,
                         self.stage2_stability_keep_ratio,
                     )
                     stability_weights = (
-                        stability * stability_gate.to(stability.dtype)
+                        stability
+                        * torch.cat(out_cls_logits_tgt, dim=1).sigmoid().amax(
+                            dim=-1
+                        ).pow(self.stage2_stability_confidence_power)
+                        * stability_gate.to(stability.dtype)
                     )
                     stage2_reg_loss = weighted_anchor_mse(
                         stage2_predictions,

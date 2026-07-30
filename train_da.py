@@ -547,6 +547,14 @@ def create_argparser():
         help='independent deterministic stability perturbation seed',
     )
     parser.add_argument(
+        '--stage2-stability-seeds', default=None,
+        help='comma-separated stability seeds; defaults to stability-seed',
+    )
+    parser.add_argument(
+        '--stage2-stability-confidence-power', type=float, default=0.0,
+        help='confidence exponent multiplied into the stability ranking',
+    )
+    parser.add_argument(
         '--stage2-stability-keep-ratio', type=float, default=1.0,
         help='per-target-crop fraction retained by stability ranking',
     )
@@ -660,6 +668,21 @@ if __name__ == '__main__':
         or any(level < 0 or level > 5 for level in stage2_levels)
     ):
         raise ValueError('Stage 2 levels must be unique values from 0 to 5')
+    stage2_stability_seeds = (
+        [args.stage2_stability_seed]
+        if args.stage2_stability_seeds is None
+        else [
+            int(seed.strip())
+            for seed in args.stage2_stability_seeds.split(',')
+            if seed.strip()
+        ]
+    )
+    if (
+        not stage2_stability_seeds
+        or len(set(stage2_stability_seeds)) != len(stage2_stability_seeds)
+        or args.stage2_stability_confidence_power < 0
+    ):
+        raise ValueError('Stage 2 stability seeds or confidence power are invalid')
     config_dict['stage2'] = {
         'enabled': args.stage2 != 'off',
         'routing': (
@@ -686,6 +709,10 @@ if __name__ == '__main__':
         ),
         'stability_noise_std': args.stage2_stability_noise_std,
         'stability_seed': args.stage2_stability_seed,
+        'stability_seeds': stage2_stability_seeds,
+        'stability_confidence_power': (
+            args.stage2_stability_confidence_power
+        ),
         'stability_keep_ratio': args.stage2_stability_keep_ratio,
         'static_teacher': args.stage2_static_teacher,
         'alqa_head_seeds': [
@@ -713,7 +740,7 @@ if __name__ == '__main__':
                     else (
                         (
                             'sada_static_full_path_{}_stability_'
-                            'top_fraction_offset_mse_v2'.format(
+                            'top_fraction_offset_mse_multiview_v3'.format(
                                 args.stage2_static_teacher
                             )
                             if args.stage2_stability_keep_ratio < 1.0
