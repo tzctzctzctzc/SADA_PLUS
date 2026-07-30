@@ -17,6 +17,7 @@ from libs.datasets import make_dataset
 from libs.models.SADA import make_meta_arch
 from libs.models.SADA.stage2_utils import (
     aligned_boundary_iou_from_offsets,
+    deterministic_channel_dropout_perturbation,
     deterministic_gaussian_perturbation,
 )
 from libs.utils.utils import _update_config, read_yaml
@@ -302,20 +303,32 @@ def audit(args):
     _update_config(cfg)
     levels = parse_numbers(args.levels, int)
     noise_stds = parse_numbers(args.noise_stds, float)
+    channel_drop_probabilities = parse_numbers(
+        args.channel_drop_probabilities, float
+    )
+    perturbation_values = (
+        noise_stds if args.perturbation == "gaussian"
+        else channel_drop_probabilities
+    )
     perturbation_seeds = parse_numbers(args.perturbation_seeds, int)
     thresholds = parse_numbers(args.thresholds, float)
     retain_fractions = parse_numbers(args.retain_fractions, float)
     confidence_powers = parse_numbers(args.confidence_powers, float)
     if (
         not levels
-        or not noise_stds
+        or not perturbation_values
         or not perturbation_seeds
         or not confidence_powers
         or any(value <= 0 for value in noise_stds)
+        or any(
+            value <= 0 or value >= 1
+            for value in channel_drop_probabilities
+        )
         or any(value < 0 for value in confidence_powers)
     ):
         raise ValueError(
-            "levels, noise stds, perturbation seeds, and confidence powers "
+            "levels, perturbation values, perturbation seeds, and confidence "
+            "powers "
             "are required"
         )
 
@@ -433,17 +446,27 @@ def audit(args):
                 )
                 for index, video in enumerate(videos)
             ]
-            for noise_std in noise_stds:
+            for perturbation_value in perturbation_values:
                 seed_stabilities = []
                 for perturbation_seed in perturbation_seeds:
-                    perturbed = deterministic_gaussian_perturbation(
-                        inputs,
-                        masks,
-                        sample_keys,
-                        noise_std,
-                        perturbation_seed,
-                        audit_epoch,
-                    )
+                    if args.perturbation == "gaussian":
+                        perturbed = deterministic_gaussian_perturbation(
+                            inputs,
+                            masks,
+                            sample_keys,
+                            perturbation_value,
+                            perturbation_seed,
+                            audit_epoch,
+                        )
+                    else:
+                        perturbed = deterministic_channel_dropout_perturbation(
+                            inputs,
+                            masks,
+                            sample_keys,
+                            perturbation_value,
+                            perturbation_seed,
+                            audit_epoch,
+                        )
                     perturbed_offsets, _, _ = run_frozen_path(
                         model, perturbed, masks
                     )
@@ -452,7 +475,7 @@ def audit(args):
                             pseudo_offsets, perturbed_offsets
                         )
                     )
-                batch_stability[noise_std] = torch.stack(
+                batch_stability[perturbation_value] = torch.stack(
                     seed_stabilities
                 ).mean(dim=0)
 
@@ -490,9 +513,9 @@ def audit(args):
                         boundary_iou[batch_index, anchor_index]
                     ),
                 }
-                for noise_std in noise_stds:
-                    record["stability_{:.6f}".format(noise_std)] = float(
-                        batch_stability[noise_std][
+                for perturbation_value in perturbation_values:
+                    record["stability_{:.6f}".format(perturbation_value)] = float(
+                        batch_stability[perturbation_value][
                             batch_index, anchor_index
                         ]
                     )
@@ -512,8 +535,15 @@ def audit(args):
             "alpha": alpha,
             "levels": levels,
             "pseudo_boundary": "checkpoint frozen backbone_pl/neck_pl/reg_head_pl",
-            "perturbation": "sample-specific deterministic Gaussian input noise",
+            "perturbation": (
+                "sample-specific deterministic Gaussian input noise"
+                if args.perturbation == "gaussian"
+                else "sample-specific deterministic whole-channel dropout"
+            ),
+            "perturbation_type": args.perturbation,
             "noise_stds": noise_stds,
+            "channel_drop_probabilities": channel_drop_probabilities,
+            "perturbation_values": perturbation_values,
             "perturbation_seeds": perturbation_seeds,
             "confidence_powers": confidence_powers,
             "perturbation_epoch": audit_epoch,
@@ -529,9 +559,9 @@ def audit(args):
         ),
         "noise_results": {},
     }
-    for noise_std in noise_stds:
-        key = "stability_{:.6f}".format(noise_std)
-        output["noise_results"]["{:.6f}".format(noise_std)] = (
+    for perturbation_value in perturbation_values:
+        key = "stability_{:.6f}".format(perturbation_value)
+        output["noise_results"]["{:.6f}".format(perturbation_value)] = (
             summarize_noise(
                 records,
                 key,
@@ -558,6 +588,13 @@ def main():
     parser.add_argument("--levels", default="0,1,2")
     parser.add_argument(
         "--noise-stds", default="0.005,0.01,0.02,0.05,0.1"
+    )
+    parser.add_argument(
+        "--perturbation", choices=("gaussian", "channel_dropout"),
+        default="gaussian",
+    )
+    parser.add_argument(
+        "--channel-drop-probabilities", default="0.05,0.1,0.2,0.3"
     )
     parser.add_argument(
         "--perturbation-seeds",

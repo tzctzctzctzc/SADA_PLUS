@@ -139,6 +139,39 @@ def deterministic_gaussian_perturbation(
     return perturbed
 
 
+def deterministic_channel_dropout_perturbation(
+        inputs, masks, sample_keys, drop_probability, base_seed, epoch):
+    """Drop reproducible whole feature channels without moving time steps."""
+    if inputs.ndim != 3 or masks.shape != (inputs.shape[0], 1, inputs.shape[2]):
+        raise ValueError("inputs and masks must have shapes [B,C,T] and [B,1,T]")
+    if len(sample_keys) != inputs.shape[0] or not 0.0 < drop_probability < 1.0:
+        raise ValueError("sample keys must align and drop probability must be in (0, 1)")
+    perturbed = inputs.clone()
+    keep_scale = 1.0 / (1.0 - drop_probability)
+    for index, sample_key in enumerate(sample_keys):
+        token = '{}|{}|{}|channel_dropout'.format(
+            base_seed, epoch, sample_key
+        )
+        seed = int.from_bytes(
+            hashlib.sha256(token.encode('utf-8')).digest()[:8], 'little'
+        ) % (2 ** 31)
+        generator = torch.Generator(device=inputs.device)
+        generator.manual_seed(seed)
+        keep = torch.rand(
+            (inputs.shape[1], 1),
+            dtype=inputs.dtype,
+            device=inputs.device,
+            generator=generator,
+        ) >= drop_probability
+        channel_mask = keep.to(inputs.dtype) * keep_scale
+        valid = masks[index].to(inputs.dtype)
+        perturbed[index] = (
+            inputs[index] * channel_mask * valid
+            + inputs[index] * (1.0 - valid)
+        )
+    return perturbed
+
+
 def temporal_roi_interpolate(
         features, segment, point_centers, valid_length, output_size):
     """Linearly sample a CxT feature map inside one temporal segment."""

@@ -214,6 +214,33 @@ class Stage2UtilsTest(unittest.TestCase):
         self.assertFalse(torch.equal(perturbed[..., :2], inputs[..., :2]))
         self.assertTrue(torch.equal(perturbed[..., 2:], inputs[..., 2:]))
 
+    def test_channel_dropout_is_sample_independent_and_reproducible(self):
+        inputs = torch.ones(2, 64, 4)
+        masks = torch.ones(2, 1, 4, dtype=torch.bool)
+        first = stage2_utils.deterministic_channel_dropout_perturbation(
+            inputs, masks, ['video-a:0', 'video-b:0'], 0.25, 123, 5
+        )
+        repeated = stage2_utils.deterministic_channel_dropout_perturbation(
+            inputs, masks, ['video-a:0', 'video-b:0'], 0.25, 123, 5
+        )
+        swapped = stage2_utils.deterministic_channel_dropout_perturbation(
+            inputs, masks, ['video-b:0', 'video-a:0'], 0.25, 123, 5
+        )
+        self.assertTrue(torch.equal(first, repeated))
+        self.assertFalse(torch.equal(first[0], first[1]))
+        self.assertTrue(torch.equal(first[0], swapped[1]))
+        self.assertTrue(torch.equal(first[1], swapped[0]))
+        self.assertTrue(torch.equal(first[:, :, 0], first[:, :, -1]))
+
+    def test_channel_dropout_preserves_padding(self):
+        inputs = torch.ones(1, 64, 4)
+        masks = torch.tensor([[[True, True, False, False]]])
+        perturbed = stage2_utils.deterministic_channel_dropout_perturbation(
+            inputs, masks, ['video-a:10'], 0.25, 123, 5
+        )
+        self.assertTrue(torch.equal(perturbed[..., 2:], inputs[..., 2:]))
+        self.assertTrue(torch.any(perturbed[..., :2] == 0.0))
+
 
 if __name__ == "__main__":
     unittest.main()
