@@ -266,11 +266,33 @@ def summarize_noise(
 def run_frozen_path(model, inputs, masks):
     features, feature_masks, _ = model.backbone_pl(inputs, masks)
     fpn_features, fpn_masks = model.neck_pl(features, feature_masks)
+    offsets = run_frozen_head(model, fpn_features, fpn_masks)
+    return offsets, fpn_features, fpn_masks
+
+
+def run_frozen_head(model, fpn_features, fpn_masks):
+    """Run only the frozen localization head from already computed FPN features."""
     offsets, _ = model.reg_head_pl(fpn_features, fpn_masks)
     offsets = torch.cat([
         value.permute(0, 2, 1) for value in offsets
     ], dim=1)
-    return offsets, fpn_features, fpn_masks
+    return offsets
+
+
+def head_channel_dropout_features(
+        fpn_features, fpn_masks, sample_keys, drop_probability, seed, epoch):
+    """Perturb head inputs without changing the frozen backbone or FPN path."""
+    return [
+        deterministic_channel_dropout_perturbation(
+            features,
+            masks,
+            ['{}:fpn{}'.format(key, level) for key in sample_keys],
+            drop_probability,
+            seed,
+            epoch,
+        )
+        for level, (features, masks) in enumerate(zip(fpn_features, fpn_masks))
+    ]
 
 
 def run_current_classification(model, inputs, masks, domain):
@@ -386,7 +408,7 @@ def audit(args):
                     model, inputs, masks, args.domain
                 )
             )
-            pseudo_offsets, _, pseudo_masks = run_frozen_path(
+            pseudo_offsets, pseudo_fpn_features, pseudo_masks = run_frozen_path(
                 model, inputs, masks
             )
             points = model.point_generator(current_features)
@@ -458,7 +480,10 @@ def audit(args):
                             perturbation_seed,
                             audit_epoch,
                         )
-                    else:
+                        perturbed_offsets, _, _ = run_frozen_path(
+                            model, perturbed, masks
+                        )
+                    elif args.perturbation == "channel_dropout":
                         perturbed = deterministic_channel_dropout_perturbation(
                             inputs,
                             masks,
@@ -467,9 +492,21 @@ def audit(args):
                             perturbation_seed,
                             audit_epoch,
                         )
-                    perturbed_offsets, _, _ = run_frozen_path(
-                        model, perturbed, masks
-                    )
+                        perturbed_offsets, _, _ = run_frozen_path(
+                            model, perturbed, masks
+                        )
+                    else:
+                        perturbed_features = head_channel_dropout_features(
+                            pseudo_fpn_features,
+                            pseudo_masks,
+                            sample_keys,
+                            perturbation_value,
+                            perturbation_seed,
+                            audit_epoch,
+                        )
+                        perturbed_offsets = run_frozen_head(
+                            model, perturbed_features, pseudo_masks
+                        )
                     seed_stabilities.append(
                         aligned_boundary_iou_from_offsets(
                             pseudo_offsets, perturbed_offsets
@@ -535,11 +572,16 @@ def audit(args):
             "alpha": alpha,
             "levels": levels,
             "pseudo_boundary": "checkpoint frozen backbone_pl/neck_pl/reg_head_pl",
-            "perturbation": (
-                "sample-specific deterministic Gaussian input noise"
-                if args.perturbation == "gaussian"
-                else "sample-specific deterministic whole-channel dropout"
-            ),
+            "perturbation": {
+                "gaussian": "sample-specific deterministic Gaussian input noise",
+                "channel_dropout": (
+                    "sample-specific deterministic input-channel dropout"
+                ),
+                "head_channel_dropout": (
+                    "sample-specific deterministic FPN-channel dropout before "
+                    "the frozen regression head"
+                ),
+            }[args.perturbation],
             "perturbation_type": args.perturbation,
             "noise_stds": noise_stds,
             "channel_drop_probabilities": channel_drop_probabilities,
@@ -590,7 +632,8 @@ def main():
         "--noise-stds", default="0.005,0.01,0.02,0.05,0.1"
     )
     parser.add_argument(
-        "--perturbation", choices=("gaussian", "channel_dropout"),
+        "--perturbation",
+        choices=("gaussian", "channel_dropout", "head_channel_dropout"),
         default="gaussian",
     )
     parser.add_argument(
