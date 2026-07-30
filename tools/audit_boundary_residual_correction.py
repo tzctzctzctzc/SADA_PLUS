@@ -52,6 +52,7 @@ def collect_records(model, dataset, annotations, cfg, domain, split, levels, dev
     records = {
         key: [] for key in (
             "hidden", "offsets", "gt_offsets", "selected", "level_ids",
+            "predicted_classes",
         )
     }
     alpha = float(cfg["model"].get("pl_threshold", 0.7))
@@ -119,6 +120,10 @@ def collect_records(model, dataset, annotations, cfg, domain, split, levels, dev
                     records["level_ids"].append(torch.full(
                         (int(selected.sum()),), level, dtype=torch.long,
                     ))
+                    records["predicted_classes"].append(
+                        predicted_class[:, offset:next_offset][selected]
+                        .detach().cpu()
+                    )
                 offset = next_offset
     if not records["hidden"]:
         raise RuntimeError("No selected anchors")
