@@ -543,6 +543,16 @@ def create_argparser():
         help='absolute Gaussian feature-noise std for static-full stability',
     )
     parser.add_argument(
+        '--stage2-stability-perturbation',
+        choices=('gaussian', 'channel_dropout'), default='gaussian',
+        help='feature perturbation used to estimate frozen-path stability',
+    )
+    parser.add_argument(
+        '--stage2-stability-channel-drop-probability',
+        type=float, default=0.2,
+        help='whole-channel dropout probability for stability perturbations',
+    )
+    parser.add_argument(
         '--stage2-stability-seed', type=int, default=20260730,
         help='independent deterministic stability perturbation seed',
     )
@@ -708,6 +718,10 @@ if __name__ == '__main__':
             args.stage2 == 'static-full-stability'
         ),
         'stability_noise_std': args.stage2_stability_noise_std,
+        'stability_perturbation': args.stage2_stability_perturbation,
+        'stability_channel_drop_probability': (
+            args.stage2_stability_channel_drop_probability
+        ),
         'stability_seed': args.stage2_stability_seed,
         'stability_seeds': stage2_stability_seeds,
         'stability_confidence_power': (
@@ -739,15 +753,17 @@ if __name__ == '__main__':
                     if args.stage2 == 'static-full'
                     else (
                         (
-                            'sada_static_full_path_{}_stability_'
-                            'top_fraction_offset_mse_multiview_v3'.format(
-                                args.stage2_static_teacher
+                            'sada_static_full_path_{}_{}_stability_'
+                            'top_fraction_offset_mse_multiview_v4'.format(
+                                args.stage2_static_teacher,
+                                args.stage2_stability_perturbation,
                             )
                             if args.stage2_stability_keep_ratio < 1.0
                             else (
-                                'sada_static_full_path_{}_stability_'
-                                'weighted_offset_mse_v1'.format(
-                                    args.stage2_static_teacher
+                                'sada_static_full_path_{}_{}_stability_'
+                                'weighted_offset_mse_v2'.format(
+                                    args.stage2_static_teacher,
+                                    args.stage2_stability_perturbation,
                                 )
                             )
                         )
@@ -809,12 +825,19 @@ if __name__ == '__main__':
     if (
         args.stage2 == 'static-full-stability'
         and (
-            args.stage2_stability_noise_std <= 0
+            (
+                args.stage2_stability_perturbation == 'gaussian'
+                and args.stage2_stability_noise_std <= 0
+            )
+            or (
+                args.stage2_stability_perturbation == 'channel_dropout'
+                and not 0 < args.stage2_stability_channel_drop_probability < 1
+            )
             or not 0 < args.stage2_stability_keep_ratio <= 1
         )
     ):
         raise ValueError(
-            'Stage 2 stability noise std and keep ratio are invalid'
+            'Stage 2 stability perturbation and keep ratio are invalid'
         )
     if (
         args.stage2_static_teacher == 'ema'

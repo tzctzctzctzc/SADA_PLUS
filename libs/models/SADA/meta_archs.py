@@ -22,6 +22,7 @@ from .stage1_utils import (
 )
 from .stage2_utils import (
     aligned_boundary_iou_from_offsets,
+    deterministic_channel_dropout_perturbation,
     deterministic_gaussian_perturbation,
     match_post_nms_to_pre_nms,
     npl_boundary_ambiguity,
@@ -349,6 +350,12 @@ class SADA(nn.Module):
         self.stage2_stability_noise_std = float(
             stage2_cfg.get('stability_noise_std', 0.01)
         )
+        self.stage2_stability_perturbation = stage2_cfg.get(
+            'stability_perturbation', 'gaussian'
+        )
+        self.stage2_stability_channel_drop_probability = float(
+            stage2_cfg.get('stability_channel_drop_probability', 0.2)
+        )
         self.stage2_stability_seed = int(
             stage2_cfg.get('stability_seed', 20260730)
         )
@@ -377,7 +384,17 @@ class SADA(nn.Module):
             self.stage2_stability_weighting
             and (
                 self.stage2_routing != 'static_full_dense'
-                or self.stage2_stability_noise_std <= 0
+                or (
+                    self.stage2_stability_perturbation == 'gaussian'
+                    and self.stage2_stability_noise_std <= 0
+                )
+                or (
+                    self.stage2_stability_perturbation == 'channel_dropout'
+                    and not 0 < self.stage2_stability_channel_drop_probability < 1
+                )
+                or self.stage2_stability_perturbation not in (
+                    'gaussian', 'channel_dropout'
+                )
                 or not 0 < self.stage2_stability_keep_ratio <= 1
                 or not self.stage2_stability_seeds
                 or any(not isinstance(seed, int)
@@ -387,8 +404,7 @@ class SADA(nn.Module):
         ):
             raise ValueError(
                 'Stage 2 stability weighting requires static-full routing '
-                'with valid seeds, confidence power, and positive noise '
-                'standard deviation'
+                'with valid perturbation, seeds, and confidence power'
             )
         if (
             not self.stage2_levels
@@ -940,7 +956,7 @@ class SADA(nn.Module):
     @torch.no_grad()
     def _stage2_perturbed_inputs(
             self, inputs, masks, video_list_tgt, curr_epoch):
-        """Create deterministic Gaussian-noise target features for V1."""
+        """Create deterministic target feature perturbations for stability."""
         sample_keys = []
         for index, item in enumerate(video_list_tgt):
             metadata = item.get('metadata', {})
@@ -948,6 +964,18 @@ class SADA(nn.Module):
                 metadata.get('video_id', index),
                 metadata.get('crop_start', 0),
             ))
+        if self.stage2_stability_perturbation == 'channel_dropout':
+            return [
+                deterministic_channel_dropout_perturbation(
+                    inputs,
+                    masks,
+                    sample_keys,
+                    self.stage2_stability_channel_drop_probability,
+                    seed,
+                    curr_epoch,
+                )
+                for seed in self.stage2_stability_seeds
+            ]
         return [
             deterministic_gaussian_perturbation(
                 inputs,
