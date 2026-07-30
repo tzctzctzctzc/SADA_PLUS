@@ -302,7 +302,12 @@ def audit(args):
                 )
             ]
             videos = [move_video(video, args.device) for video in raw_videos]
-            inputs, masks = model.preprocessing(videos, mode="train")
+            preprocessing_mode = (
+                "train" if args.split == "train" else "validation"
+            )
+            inputs, masks = model.preprocessing(
+                videos, mode=preprocessing_mode
+            )
             logits, current_features, current_masks = (
                 run_current_classification(
                     model, inputs, masks, args.domain
