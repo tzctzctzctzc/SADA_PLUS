@@ -295,6 +295,32 @@ def head_channel_dropout_features(
     ]
 
 
+def run_frozen_head_hidden_channel_dropout(
+        model, fpn_features, fpn_masks, sample_keys, drop_probability, seed,
+        epoch):
+    """Apply channel dropout only to the final hidden state of RegHead."""
+    reg_head = model.reg_head_pl
+    out_offsets = []
+    for level, (features, masks) in enumerate(zip(fpn_features, fpn_masks)):
+        hidden = features
+        for index in range(len(reg_head.head)):
+            hidden, _ = reg_head.head[index](hidden, masks)
+            hidden = reg_head.act(reg_head.norm[index](hidden))
+        hidden = deterministic_channel_dropout_perturbation(
+            hidden,
+            masks,
+            ['{}:reg_head{}'.format(key, level) for key in sample_keys],
+            drop_probability,
+            seed,
+            epoch,
+        )
+        offsets, _ = reg_head.offset_head(hidden, masks)
+        out_offsets.append(torch.relu(reg_head.scale[level](offsets)))
+    return torch.cat([
+        offsets.permute(0, 2, 1) for offsets in out_offsets
+    ], dim=1)
+
+
 def run_current_classification(model, inputs, masks, domain):
     if domain == "source":
         backbone = model.backbone_source
@@ -495,7 +521,7 @@ def audit(args):
                         perturbed_offsets, _, _ = run_frozen_path(
                             model, perturbed, masks
                         )
-                    else:
+                    elif args.perturbation == "head_channel_dropout":
                         perturbed_features = head_channel_dropout_features(
                             pseudo_fpn_features,
                             pseudo_masks,
@@ -506,6 +532,18 @@ def audit(args):
                         )
                         perturbed_offsets = run_frozen_head(
                             model, perturbed_features, pseudo_masks
+                        )
+                    else:
+                        perturbed_offsets = (
+                            run_frozen_head_hidden_channel_dropout(
+                                model,
+                                pseudo_fpn_features,
+                                pseudo_masks,
+                                sample_keys,
+                                perturbation_value,
+                                perturbation_seed,
+                                audit_epoch,
+                            )
                         )
                     seed_stabilities.append(
                         aligned_boundary_iou_from_offsets(
@@ -581,6 +619,10 @@ def audit(args):
                     "sample-specific deterministic FPN-channel dropout before "
                     "the frozen regression head"
                 ),
+                "reg_head_hidden_channel_dropout": (
+                    "sample-specific deterministic channel dropout in the "
+                    "final frozen regression-head hidden state"
+                ),
             }[args.perturbation],
             "perturbation_type": args.perturbation,
             "noise_stds": noise_stds,
@@ -633,7 +675,10 @@ def main():
     )
     parser.add_argument(
         "--perturbation",
-        choices=("gaussian", "channel_dropout", "head_channel_dropout"),
+        choices=(
+            "gaussian", "channel_dropout", "head_channel_dropout",
+            "reg_head_hidden_channel_dropout",
+        ),
         default="gaussian",
     )
     parser.add_argument(
