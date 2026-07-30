@@ -405,6 +405,9 @@ class SADA(nn.Module):
         self.stage2_semantic_boundary_weighting = bool(
             stage2_cfg.get('semantic_boundary_weighting', False)
         )
+        self.stage2_output_moment_weighting = bool(
+            stage2_cfg.get('output_moment_weighting', False)
+        )
         if self.stage2_semantic_boundary_weighting:
             if self.stage2_semantic_boundary_calibration is None:
                 raise ValueError('Semantic boundary calibration is required')
@@ -459,7 +462,7 @@ class SADA(nn.Module):
             raise ValueError('Stage 2 levels are invalid')
         if self.stage2_routing not in (
                 'confidence', 'alqa_same_budget',
-                'static_dense', 'static_full_dense'):
+                'static_dense', 'static_full_dense', 'output_moment'):
             raise ValueError('unknown Stage 2 routing mode')
         if self.stage2_static_teacher not in ('frozen', 'ema'):
             raise ValueError('unknown static Stage 2 teacher mode')
@@ -491,9 +494,16 @@ class SADA(nn.Module):
             raise ValueError(
                 'Semantic boundary weighting requires frozen static-full routing'
             )
+        if (
+            self.stage2_output_moment_weighting
+            and self.stage2_routing != 'output_moment'
+        ):
+            raise ValueError(
+                'Output moment weighting requires output-moment routing'
+            )
         self.stage2_uses_external_teacher = (
             self.stage2_routing
-            not in ('static_dense', 'static_full_dense')
+            not in ('static_dense', 'static_full_dense', 'output_moment')
         )
         if self.stage2_loss_weighting not in (
                 'anchor_equal', 'proposal_equal',
@@ -2350,6 +2360,7 @@ class SADA(nn.Module):
         # 1. classification loss
         # stack the list -> (B, FT) -> (# Valid, )
         gt_cls_src = torch.stack(gt_cls_labels_src) # shape: B x (T_1 + ... + T_L) x C  -> B x FT x C
+        gt_cls_src_full = gt_cls_src
         gt_cls_tgt = torch.stack(gt_cls_labels_tgt) # shape: B x (T_1 + ... + T_L) x C  -> B x FT x C
         gt_cls_tgt_full = gt_cls_tgt
         stage2_cls_tgt = (
@@ -2563,6 +2574,7 @@ class SADA(nn.Module):
         stage2_semantic_weight_sum = 0 * decoded_offsets.sum()
         stage2_semantic_mean = 0 * decoded_offsets.sum()
         stage2_semantic_keep_fraction = 0 * decoded_offsets.sum()
+        stage2_output_moment_classes = 0 * decoded_offsets.sum()
         stage2_level_positive = [
             0 * decoded_offsets.sum() for _ in range(self.n_levels)
         ]
@@ -2718,6 +2730,75 @@ class SADA(nn.Module):
                 ).abs().mean()
             else:
                 stage2_reg_loss = 0 * stage2_predictions.sum()
+        elif (
+            self.stage2_enabled
+            and self.stage2_output_moment_weighting
+            and self.stage2_routing == 'output_moment'
+        ):
+            moment_loss = 0 * decoded_offsets.sum()
+            matched_classes = 0
+            offset = 0
+            for level, (source_offsets, target_offsets) in enumerate(
+                    zip(out_offsets_src, out_offsets_tgt)):
+                next_offset = offset + source_offsets.shape[1]
+                if level not in self.stage2_levels:
+                    offset = next_offset
+                    continue
+                source_labels = gt_cls_src_full[:, offset:next_offset]
+                source_mask = (
+                    fpn_masks_src[level]
+                    & (source_labels.sum(dim=-1) > 0)
+                )
+                target_scores, target_classes = out_cls_logits_tgt[level].sigmoid(
+                ).max(dim=-1)
+                target_mask = (
+                    fpn_masks_tgt[level]
+                    & (target_scores >= self.stage2_alpha)
+                )
+                source_class_ids = torch.where(
+                    source_labels[source_mask].any(dim=0)
+                )[0]
+                for class_id in source_class_ids:
+                    source_class_mask = source_mask & source_labels[
+                        ..., class_id
+                    ].bool()
+                    target_class_mask = target_mask & (
+                        target_classes == class_id
+                    )
+                    if (
+                        source_class_mask.sum() < 4
+                        or target_class_mask.sum() < 4
+                    ):
+                        continue
+                    source_values = torch.log1p(
+                        source_offsets[source_class_mask]
+                    ).detach()
+                    target_values = torch.log1p(
+                        target_offsets[target_class_mask]
+                    )
+                    mean_loss = F.mse_loss(
+                        target_values.mean(dim=0), source_values.mean(dim=0)
+                    )
+                    std_loss = F.mse_loss(
+                        target_values.std(dim=0, unbiased=False),
+                        source_values.std(dim=0, unbiased=False),
+                    )
+                    moment_loss = moment_loss + mean_loss + std_loss
+                    matched_classes += 1
+                    stage2_reg_positive = (
+                        stage2_reg_positive + target_class_mask.sum().float()
+                    )
+                    stage2_level_positive[level] = (
+                        stage2_level_positive[level]
+                        + target_class_mask.sum().float()
+                    )
+                offset = next_offset
+            if matched_classes:
+                stage2_reg_loss = moment_loss / matched_classes
+                stage2_active_batch = torch.ones_like(stage2_reg_loss)
+            stage2_output_moment_classes = torch.tensor(
+                float(matched_classes), device=self.device
+            )
         elif self.stage2_enabled and stage2_cls_tgt is not None:
             stage2_predictions = self.decode_offset(
                 out_offsets_tgt, None, None, mode=mode
@@ -2794,6 +2875,7 @@ class SADA(nn.Module):
             and (
                 stage2_dense_pseudo_offsets is not None
                 or stage2_cls_tgt is not None
+                or self.stage2_output_moment_weighting
             )
         ):
             stage2_reg_ratio = (
@@ -2832,6 +2914,9 @@ class SADA(nn.Module):
                    'stage2_semantic_mean': stage2_semantic_mean,
                    'stage2_semantic_keep_fraction': (
                        stage2_semantic_keep_fraction
+                   ),
+                   'stage2_output_moment_classes': (
+                       stage2_output_moment_classes
                    ),
                    'downstream_loss': downstream_loss}
         for level, count in enumerate(stage2_level_positive):

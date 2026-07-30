@@ -521,7 +521,7 @@ def create_argparser():
         '--stage2',
         choices=[
             'off', 'pseudo', 'alqa', 'static', 'static-full',
-            'static-full-stability', 'static-full-semantic',
+            'static-full-stability', 'static-full-semantic', 'output-moment',
         ],
         default='off',
         help='target pseudo-boundary regression after warm-up',
@@ -715,7 +715,7 @@ if __name__ == '__main__':
                         'static-full', 'static-full-stability',
                         'static-full-semantic',
                     )
-                    else 'confidence'
+                    else ('output_moment' if args.stage2 == 'output-moment' else 'confidence')
                 )
             )
         ),
@@ -747,6 +747,7 @@ if __name__ == '__main__':
         'semantic_boundary_weighting': (
             args.stage2 == 'static-full-semantic'
         ),
+        'output_moment_weighting': args.stage2 == 'output-moment',
         'alqa_head_seeds': [
             int(value.strip())
             for value in args.alqa_head_seeds.split(',')
@@ -771,52 +772,56 @@ if __name__ == '__main__':
                     'top_fraction_offset_mse_v1'
                     if args.stage2 == 'static-full-semantic'
                     else (
-                    'sada_static_full_path_offset_mse_v1'
-                    if (
-                        args.stage2 == 'static-full'
-                        and args.stage2_boundary_residual_calibration is None
-                    )
-                    else (
-                        'sada_static_full_path_source_residual_corrected_'
-                        'offset_mse_v1'
-                        if args.stage2 == 'static-full'
+                        'sada_class_conditional_output_moment_offset_v1'
+                        if args.stage2 == 'output-moment'
                         else (
-                            (
-                                'sada_static_full_path_{}_{}_stability_'
-                                'top_fraction_offset_mse_multiview_v4'.format(
-                                    args.stage2_static_teacher,
-                                    args.stage2_stability_perturbation,
-                                )
-                                if args.stage2_stability_keep_ratio < 1.0
+                            'sada_static_full_path_offset_mse_v1'
+                            if (
+                                args.stage2 == 'static-full'
+                                and args.stage2_boundary_residual_calibration is None
+                            )
+                            else (
+                                'sada_static_full_path_source_residual_corrected_'
+                                'offset_mse_v1'
+                                if args.stage2 == 'static-full'
                                 else (
                                     'sada_static_full_path_{}_{}_stability_'
-                                    'weighted_offset_mse_v2'.format(
+                                    'top_fraction_offset_mse_multiview_v4'.format(
                                         args.stage2_static_teacher,
                                         args.stage2_stability_perturbation,
                                     )
+                                    if args.stage2_stability_keep_ratio < 1.0
+                                    else (
+                                        'sada_static_full_path_{}_{}_stability_'
+                                        'weighted_offset_mse_v2'.format(
+                                            args.stage2_static_teacher,
+                                            args.stage2_stability_perturbation,
+                                        )
+                                    )
+                                    if args.stage2 == 'static-full-stability'
+                                    else 'confidence_fixed_routing_loss_weighting_v1'
                                 )
                             )
-                            if args.stage2 == 'static-full-stability'
-                            else 'confidence_fixed_routing_loss_weighting_v1'
                         )
                     )
                 )
-            )
             )
         ),
         'quality_head_mode': (
             'none'
             if args.stage2 in (
                 'static', 'static-full', 'static-full-stability',
-                'static-full-semantic'
+                'static-full-semantic', 'output-moment'
             )
             else 'source_gt_calibrated_then_frozen'
         ),
         'selection_budget': (
-            'original_sada_high_confidence_dense_anchors'
+            'per_level_high_confidence_class_conditional_moments'
+            if args.stage2 == 'output-moment'
+            else 'original_sada_high_confidence_dense_anchors'
             if args.stage2 in (
                 'static', 'static-full', 'static-full-stability',
-                'static-full-semantic'
+                'static-full-semantic', 'output-moment'
             )
             else 'per_video_per_fpn_original_alpha_count'
         ),
@@ -824,7 +829,7 @@ if __name__ == '__main__':
             'none'
             if args.stage2 in (
                 'static', 'static-full', 'static-full-stability',
-                'static-full-semantic'
+                'static-full-semantic', 'output-moment'
             )
             else 'hard_class_agnostic_ranked_by_classification_confidence'
         ),
@@ -839,7 +844,9 @@ if __name__ == '__main__':
             else 'none'
         ),
         'regression_loss': (
-            'offset_mse'
+            'class_conditional_log_offset_moments'
+            if args.stage2 == 'output-moment'
+            else 'offset_mse'
             if args.stage2 in (
                 'static-full', 'static-full-stability', 'static-full-semantic'
             )
@@ -852,7 +859,7 @@ if __name__ == '__main__':
     if (
         args.stage2 in (
             'static', 'static-full', 'static-full-stability',
-            'static-full-semantic'
+            'static-full-semantic', 'output-moment'
         )
         and args.stage2_loss_weighting != 'anchor_equal'
     ):
