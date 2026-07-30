@@ -283,6 +283,9 @@ def main():
                         'primary_iou': float(primary_iou[sample_index, anchor_index]),
                         'consensus_iou': float(consensus_iou[sample_index, anchor_index]),
                         'agreement': float(agreement[sample_index, anchor_index]),
+                        'primary_score': float(
+                            primary_scores[sample_index, anchor_index]
+                        ),
                     })
 
     if not records:
@@ -307,6 +310,7 @@ def main():
             [index for index, record in enumerate(records) if record['class_agreement']],
             baseline_foreground,
         ),
+        'top_primary_score_per_crop': {},
         'top_agreement_per_crop': {},
         'agreement_correlation': {
             'pearson_all': pearson(
@@ -323,17 +327,24 @@ def main():
     for index, record in enumerate(records):
         grouped[(record['video_id'], record['crop_start'])].append(index)
     for fraction in fractions:
-        chosen = []
-        for indices in grouped.values():
-            scores = torch.tensor([records[index]['agreement'] for index in indices])
-            mask = torch.ones_like(scores, dtype=torch.bool).unsqueeze(0)
-            local = top_fraction_per_sample_mask(
-                scores.unsqueeze(0), mask, fraction
-            ).squeeze(0)
-            chosen.extend(indices[index] for index in torch.where(local)[0].tolist())
-        output['top_agreement_per_crop']['{:.2f}'.format(fraction)] = summarize(
-            records, chosen, baseline_foreground
-        )
+        for name, field in (
+                ('top_primary_score_per_crop', 'primary_score'),
+                ('top_agreement_per_crop', 'agreement')):
+            chosen = []
+            for indices in grouped.values():
+                scores = torch.tensor(
+                    [records[index][field] for index in indices]
+                )
+                mask = torch.ones_like(scores, dtype=torch.bool).unsqueeze(0)
+                local = top_fraction_per_sample_mask(
+                    scores.unsqueeze(0), mask, fraction
+                ).squeeze(0)
+                chosen.extend(
+                    indices[index] for index in torch.where(local)[0].tolist()
+                )
+            output[name]['{:.2f}'.format(fraction)] = summarize(
+                records, chosen, baseline_foreground
+            )
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     Path(args.output).write_text(json.dumps(output, indent=2), encoding='utf-8')
     print(json.dumps(output['baseline'], indent=2))
