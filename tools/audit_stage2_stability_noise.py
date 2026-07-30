@@ -218,10 +218,18 @@ def run_frozen_path(model, inputs, masks):
     return offsets, fpn_features, fpn_masks
 
 
-def run_current_classification(model, inputs, masks):
-    features, feature_masks, _ = model.backbone_target(inputs, masks)
-    fpn_features, fpn_masks = model.neck_target(features, feature_masks)
-    logits, _ = model.cls_head_target(fpn_features, fpn_masks)
+def run_current_classification(model, inputs, masks, domain):
+    if domain == "source":
+        backbone = model.backbone_source
+        neck = model.neck_source
+        classification_head = model.cls_head
+    else:
+        backbone = model.backbone_target
+        neck = model.neck_target
+        classification_head = model.cls_head_target
+    features, feature_masks, _ = backbone(inputs, masks)
+    fpn_features, fpn_masks = neck(features, feature_masks)
+    logits, _ = classification_head(fpn_features, fpn_masks)
     logits = torch.cat([
         value.permute(0, 2, 1) for value in logits
     ], dim=1)
@@ -251,11 +259,11 @@ def audit(args):
     ):
         raise ValueError("levels, noise stds, and perturbation seeds are required")
 
-    split = (
-        cfg["tgt_train_split"]
-        if args.split == "train"
-        else cfg["tgt_val_split"]
+    split_key = "{}_{}_split".format(
+        "src" if args.domain == "source" else "tgt",
+        args.split,
     )
+    split = cfg[split_key]
     dataset = make_dataset(
         cfg["dataset_name"], args.split == "train", split, **cfg["dataset"]
     )
@@ -296,7 +304,9 @@ def audit(args):
             videos = [move_video(video, args.device) for video in raw_videos]
             inputs, masks = model.preprocessing(videos, mode="train")
             logits, current_features, current_masks = (
-                run_current_classification(model, inputs, masks)
+                run_current_classification(
+                    model, inputs, masks, args.domain
+                )
             )
             pseudo_offsets, _, pseudo_masks = run_frozen_path(
                 model, inputs, masks
@@ -428,6 +438,7 @@ def audit(args):
         "checkpoint": args.checkpoint,
         "checkpoint_epoch": checkpoint.get("epoch"),
         "config": args.config,
+        "domain": args.domain,
         "split": args.split,
         "videos": stop,
         "selected_anchors": len(records),
@@ -467,6 +478,9 @@ def main():
     parser.add_argument("--config", required=True)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--domain", choices=("source", "target"), default="target"
+    )
     parser.add_argument("--split", choices=("train", "val"), default="train")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--batch-size", type=int, default=None)
