@@ -321,6 +321,84 @@ def run_frozen_head_hidden_channel_dropout(
     ], dim=1)
 
 
+def absolute_segment_iou(first, second, eps=1e-6):
+    """Compute IoU for absolute [start, end] segment pairs."""
+    left = torch.maximum(first[..., 0], second[..., 0])
+    right = torch.minimum(first[..., 1], second[..., 1])
+    intersection = (right - left).clamp_min(0)
+    union = (
+        (first[..., 1] - first[..., 0]).clamp_min(0)
+        + (second[..., 1] - second[..., 0]).clamp_min(0)
+        - intersection
+    )
+    return intersection / union.clamp_min(eps)
+
+
+def cross_level_boundary_agreement(
+        offsets, points, selected, classes, levels, distance_multiplier):
+    """Measure same-class absolute-boundary agreement across FPN levels."""
+    level_offsets = torch.split(
+        offsets, [point.shape[0] for point in points], dim=1
+    )
+    output = torch.zeros(offsets.shape[:2], device=offsets.device)
+    selected_levels = [level for level in levels if level < len(points)]
+    for batch_index in range(offsets.shape[0]):
+        for level in selected_levels:
+            current_points = points[level]
+            current_offset = sum(point.shape[0] for point in points[:level])
+            current_selected = torch.where(
+                selected[batch_index, current_offset:current_offset + len(current_points)]
+            )[0]
+            for point_index in current_selected.tolist():
+                point = current_points[point_index]
+                segment = torch.stack((
+                    point[0] - level_offsets[level][batch_index, point_index, 0] * point[3],
+                    point[0] + level_offsets[level][batch_index, point_index, 1] * point[3],
+                ))
+                agreement = []
+                for other_level in selected_levels:
+                    if other_level == level:
+                        continue
+                    other_points = points[other_level]
+                    other_offset = sum(
+                        item.shape[0] for item in points[:other_level]
+                    )
+                    other_selected = selected[
+                        batch_index, other_offset:other_offset + len(other_points)
+                    ]
+                    other_classes = classes[
+                        batch_index, other_offset:other_offset + len(other_points)
+                    ]
+                    candidates = torch.where(
+                        other_selected & (other_classes == classes[
+                            batch_index, current_offset + point_index
+                        ])
+                    )[0]
+                    if candidates.numel() == 0:
+                        continue
+                    distances = (other_points[candidates, 0] - point[0]).abs()
+                    nearest = candidates[distances.argmin()]
+                    max_distance = distance_multiplier * max(
+                        float(point[3]), float(other_points[nearest, 3])
+                    )
+                    if float((other_points[nearest, 0] - point[0]).abs()) > max_distance:
+                        continue
+                    other_segment = torch.stack((
+                        other_points[nearest, 0]
+                        - level_offsets[other_level][batch_index, nearest, 0]
+                        * other_points[nearest, 3],
+                        other_points[nearest, 0]
+                        + level_offsets[other_level][batch_index, nearest, 1]
+                        * other_points[nearest, 3],
+                    ))
+                    agreement.append(absolute_segment_iou(segment, other_segment))
+                if agreement:
+                    output[batch_index, current_offset + point_index] = torch.stack(
+                        agreement
+                    ).mean()
+    return output
+
+
 def run_current_classification(model, inputs, masks, domain):
     if domain == "source":
         backbone = model.backbone_source
@@ -354,9 +432,15 @@ def audit(args):
     channel_drop_probabilities = parse_numbers(
         args.channel_drop_probabilities, float
     )
+    cross_scale_distance_multipliers = parse_numbers(
+        args.cross_scale_distance_multipliers, float
+    )
     perturbation_values = (
-        noise_stds if args.perturbation == "gaussian"
-        else channel_drop_probabilities
+        noise_stds if args.perturbation == "gaussian" else (
+            cross_scale_distance_multipliers
+            if args.perturbation == "cross_level_agreement"
+            else channel_drop_probabilities
+        )
     )
     perturbation_seeds = parse_numbers(args.perturbation_seeds, int)
     thresholds = parse_numbers(args.thresholds, float)
@@ -372,6 +456,7 @@ def audit(args):
             value <= 0 or value >= 1
             for value in channel_drop_probabilities
         )
+        or any(value <= 0 for value in cross_scale_distance_multipliers)
         or any(value < 0 for value in confidence_powers)
     ):
         raise ValueError(
@@ -494,7 +579,21 @@ def audit(args):
                 )
                 for index, video in enumerate(videos)
             ]
+            if args.perturbation == "cross_level_agreement":
+                for perturbation_value in perturbation_values:
+                    batch_stability[perturbation_value] = (
+                        cross_level_boundary_agreement(
+                            pseudo_offsets,
+                            points,
+                            selected,
+                            pseudo_class,
+                            levels,
+                            perturbation_value,
+                        )
+                    )
             for perturbation_value in perturbation_values:
+                if args.perturbation == "cross_level_agreement":
+                    continue
                 seed_stabilities = []
                 for perturbation_seed in perturbation_seeds:
                     if args.perturbation == "gaussian":
@@ -623,16 +722,25 @@ def audit(args):
                     "sample-specific deterministic channel dropout in the "
                     "final frozen regression-head hidden state"
                 ),
+                "cross_level_agreement": (
+                    "same-class nearest-anchor absolute-boundary agreement "
+                    "across selected FPN levels"
+                ),
             }[args.perturbation],
             "perturbation_type": args.perturbation,
             "noise_stds": noise_stds,
             "channel_drop_probabilities": channel_drop_probabilities,
+            "cross_scale_distance_multipliers": (
+                cross_scale_distance_multipliers
+            ),
             "perturbation_values": perturbation_values,
             "perturbation_seeds": perturbation_seeds,
             "confidence_powers": confidence_powers,
             "perturbation_epoch": audit_epoch,
             "stability": (
-                "mean same-anchor boundary IoU across perturbation seeds"
+                "same-class cross-level boundary IoU"
+                if args.perturbation == "cross_level_agreement"
+                else "mean same-anchor boundary IoU across perturbation seeds"
             ),
             "target_gt_usage": "offline audit only",
         },
@@ -677,12 +785,15 @@ def main():
         "--perturbation",
         choices=(
             "gaussian", "channel_dropout", "head_channel_dropout",
-            "reg_head_hidden_channel_dropout",
+            "reg_head_hidden_channel_dropout", "cross_level_agreement",
         ),
         default="gaussian",
     )
     parser.add_argument(
         "--channel-drop-probabilities", default="0.05,0.1,0.2,0.3"
+    )
+    parser.add_argument(
+        "--cross-scale-distance-multipliers", default="0.5,1.0,2.0"
     )
     parser.add_argument(
         "--perturbation-seeds",
