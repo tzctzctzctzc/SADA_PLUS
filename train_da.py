@@ -573,6 +573,10 @@ def create_argparser():
         help='teacher path for static-full Stage 2',
     )
     parser.add_argument(
+        '--stage2-boundary-residual-calibration', default=None,
+        help='source-only frozen-teacher boundary residual calibration artifact',
+    )
+    parser.add_argument(
         '--stage2-loss-weighting',
         choices=[
             'anchor_equal', 'proposal_equal',
@@ -729,6 +733,9 @@ if __name__ == '__main__':
         ),
         'stability_keep_ratio': args.stage2_stability_keep_ratio,
         'static_teacher': args.stage2_static_teacher,
+        'boundary_residual_calibration': (
+            args.stage2_boundary_residual_calibration
+        ),
         'alqa_head_seeds': [
             int(value.strip())
             for value in args.alqa_head_seeds.split(',')
@@ -750,25 +757,33 @@ if __name__ == '__main__':
                 if args.stage2 == 'static'
                 else (
                     'sada_static_full_path_offset_mse_v1'
-                    if args.stage2 == 'static-full'
+                    if (
+                        args.stage2 == 'static-full'
+                        and args.stage2_boundary_residual_calibration is None
+                    )
                     else (
-                        (
-                            'sada_static_full_path_{}_{}_stability_'
-                            'top_fraction_offset_mse_multiview_v4'.format(
-                                args.stage2_static_teacher,
-                                args.stage2_stability_perturbation,
-                            )
-                            if args.stage2_stability_keep_ratio < 1.0
-                            else (
+                        'sada_static_full_path_source_residual_corrected_'
+                        'offset_mse_v1'
+                        if args.stage2 == 'static-full'
+                        else (
+                            (
                                 'sada_static_full_path_{}_{}_stability_'
-                                'weighted_offset_mse_v2'.format(
+                                'top_fraction_offset_mse_multiview_v4'.format(
                                     args.stage2_static_teacher,
                                     args.stage2_stability_perturbation,
                                 )
+                                if args.stage2_stability_keep_ratio < 1.0
+                                else (
+                                    'sada_static_full_path_{}_{}_stability_'
+                                    'weighted_offset_mse_v2'.format(
+                                        args.stage2_static_teacher,
+                                        args.stage2_stability_perturbation,
+                                    )
+                                )
                             )
+                            if args.stage2 == 'static-full-stability'
+                            else 'confidence_fixed_routing_loss_weighting_v1'
                         )
-                        if args.stage2 == 'static-full-stability'
-                        else 'confidence_fixed_routing_loss_weighting_v1'
                     )
                 )
             )
@@ -845,6 +860,13 @@ if __name__ == '__main__':
     ):
         raise ValueError(
             'EMA Stage 2 teacher requires static-full-stability Stage 2'
+        )
+    if (
+        args.stage2_boundary_residual_calibration is not None
+        and args.stage2 != 'static-full'
+    ):
+        raise ValueError(
+            'Boundary residual correction requires static-full Stage 2'
         )
     if (
         args.stage2 != 'static-full-stability'

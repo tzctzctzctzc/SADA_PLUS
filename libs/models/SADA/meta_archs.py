@@ -371,6 +371,34 @@ class SADA(nn.Module):
         self.stage2_static_teacher = stage2_cfg.get(
             'static_teacher', 'frozen'
         )
+        self.stage2_boundary_residual_calibration = stage2_cfg.get(
+            'boundary_residual_calibration'
+        )
+        self.stage2_boundary_residual_enabled = (
+            self.stage2_boundary_residual_calibration is not None
+        )
+        if self.stage2_boundary_residual_enabled:
+            artifact = torch.load(
+                self.stage2_boundary_residual_calibration,
+                map_location='cpu',
+            )
+            calibration = artifact['calibration']
+            self.stage2_boundary_residual_gamma = float(artifact['gamma'])
+            self.register_buffer(
+                'stage2_boundary_residual_mean',
+                calibration['mean'].float(),
+                persistent=False,
+            )
+            self.register_buffer(
+                'stage2_boundary_residual_std',
+                calibration['std'].float().clamp_min(1e-6),
+                persistent=False,
+            )
+            self.register_buffer(
+                'stage2_boundary_residual_weight',
+                calibration['weight'].float(),
+                persistent=False,
+            )
         self.stage2_alqa_head_seeds = stage2_cfg.get(
             'alqa_head_seeds', [123, 456, 789]
         )
@@ -424,6 +452,13 @@ class SADA(nn.Module):
         ):
             raise ValueError(
                 'EMA Stage 2 teacher requires static-full routing'
+            )
+        if (
+            self.stage2_boundary_residual_enabled
+            and self.stage2_routing != 'static_full_dense'
+        ):
+            raise ValueError(
+                'Boundary residual correction requires static-full routing'
             )
         self.stage2_uses_external_teacher = (
             self.stage2_routing
@@ -952,6 +987,31 @@ class SADA(nn.Module):
                 stage2_teacher.reg_head_target,
             )
         return self.backbone_pl, self.neck_pl, self.reg_head_pl
+
+    @torch.no_grad()
+    def _stage2_correct_teacher_offsets(self, regression_head, fpn_features, fpn_masks, offsets):
+        """Apply a frozen source-only signed residual correction to teacher offsets."""
+        if not self.stage2_boundary_residual_enabled:
+            return offsets
+        hidden, _ = regression_hidden_and_offsets(
+            regression_head, fpn_features, fpn_masks
+        )
+        weight = self.stage2_boundary_residual_weight
+        corrected = []
+        for level, (features, level_offsets) in enumerate(zip(hidden, offsets)):
+            normalized = (
+                features - self.stage2_boundary_residual_mean[None, :, None]
+            ) / self.stage2_boundary_residual_std[None, :, None]
+            residual = F.conv1d(
+                normalized,
+                weight[:-1].transpose(0, 1).unsqueeze(-1),
+                weight[-1],
+            )
+            corrected.append(torch.clamp_min(
+                level_offsets + self.stage2_boundary_residual_gamma * residual,
+                0.0,
+            ))
+        return tuple(corrected)
 
     @torch.no_grad()
     def _stage2_perturbed_inputs(
@@ -1685,6 +1745,13 @@ class SADA(nn.Module):
                 out_offsets_tgt_pl, out_actionness_tgt_pl = stage2_regression_teacher(
                     pseudo_features, pseudo_masks
                 )
+                if self.stage2_boundary_residual_enabled:
+                    out_offsets_tgt_pl = self._stage2_correct_teacher_offsets(
+                        stage2_regression_teacher,
+                        pseudo_features,
+                        pseudo_masks,
+                        out_offsets_tgt_pl,
+                    )
                 out_offsets_tgt_pl_perturbed = None
                 if fpn_feats_tgt_pl_perturbed is not None:
                     out_offsets_tgt_pl_perturbed = []
