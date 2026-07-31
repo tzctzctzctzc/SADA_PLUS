@@ -1,0 +1,112 @@
+{
+  "audit": "locked_temporal_evidence_target_feasibility",
+  "checkpoint_epoch": 10,
+  "locked_calibration": {
+    "version": 1,
+    "parameters": {
+      "search_radius_ratio": 0.1,
+      "window_ratio": 0.1,
+      "feature_weight": 1.0,
+      "semantic_weight": 1.0,
+      "distance_weight": 0.1,
+      "margin_threshold": 0.0,
+      "max_shift_ratio": 0.1
+    },
+    "levels": [
+      0,
+      1,
+      2
+    ],
+    "config": "/home1/gyy/vlms/SADA_STAGE2_20260727/results/official_sada_fixedval_s1_seed123/260730_183436_359/config.json",
+    "checkpoint": "/home1/gyy/vlms/SADA_STAGE2_20260727/results/official_sada_fixedval_s1_seed123/260730_183436_359/saved_ckpt/best_ckpt/checkpoint-epoch10.pt",
+    "checkpoint_epoch": 10,
+    "selection": {
+      "screening_metric": "source_val_mean_delta_iou",
+      "protection": "iou70 non-decrease and high-quality mean delta >= -0.002",
+      "final_metric": "source_val_fixed_proposal_average_map",
+      "map_finalists": 10
+    }
+  },
+  "target_val_videos": 50,
+  "proposal": {
+    "proposals": 1263,
+    "mean_iou": {
+      "baseline": 0.5298073735513583,
+      "refined": 0.5283685449204059,
+      "delta": -0.0014388286309524698
+    },
+    "win_rate": 0.2992874109263658,
+    "loss_rate": 0.334916864608076,
+    "tie_rate": 0.3657957244655582,
+    "iou50_rate": {
+      "baseline": 0.6342042755344418,
+      "refined": 0.6286619160728424
+    },
+    "iou70_rate": {
+      "baseline": 0.3586698337292161,
+      "refined": 0.3602533650039588
+    },
+    "high_quality_iou70": {
+      "n": 453,
+      "mean_delta_iou": -0.002982765238806112,
+      "loss_rate": 0.41501103752759383
+    },
+    "class_correct_rate": 0.8020585906571654,
+    "normalized_left_error": {
+      "baseline": 30.216056558486454,
+      "refined": 30.219800877195325,
+      "delta": 0.00374431870887404
+    },
+    "normalized_right_error": {
+      "baseline": 30.284769478195194,
+      "refined": 30.281956771268238,
+      "delta": -0.0028127069269539705
+    },
+    "left_applied_rate": 0.49564528899445764,
+    "right_applied_rate": 0.5613618368962787
+  },
+  "detection": {
+    "baseline": {
+      "tiou_thresholds": [
+        0.1,
+        0.2,
+        0.30000000000000004,
+        0.4,
+        0.5
+      ],
+      "map_by_tiou": [
+        0.2273984242879538,
+        0.21910071595911065,
+        0.205294514185309,
+        0.18448875910431417,
+        0.1565670204679694
+      ],
+      "average_map": 0.1985698868009314
+    },
+    "refined": {
+      "tiou_thresholds": [
+        0.1,
+        0.2,
+        0.30000000000000004,
+        0.4,
+        0.5
+      ],
+      "map_by_tiou": [
+        0.22677021736270198,
+        0.21950573118528252,
+        0.206831549372891,
+        0.18511027237725472,
+        0.1544706843401622
+      ],
+      "average_map": 0.1985376909276585
+    },
+    "delta_average_map": -3.219587327291107e-05
+  },
+  "protocol": {
+    "proposal_set": "fixed post-hard-class-agnostic-NMS proposals",
+    "classification_labels_scores": "unchanged",
+    "second_nms": "none",
+    "actionness": "max sigmoid of trained dense classification logits",
+    "target_gt_usage": "metrics only after locked refinement"
+  }
+}

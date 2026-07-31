@@ -1,0 +1,112 @@
+{
+  "audit": "locked_temporal_evidence_target_feasibility",
+  "checkpoint_epoch": 15,
+  "locked_calibration": {
+    "version": 1,
+    "parameters": {
+      "search_radius_ratio": 0.1,
+      "window_ratio": 0.1,
+      "feature_weight": 1.0,
+      "semantic_weight": 1.0,
+      "distance_weight": 0.25,
+      "margin_threshold": 0.25,
+      "max_shift_ratio": 0.1
+    },
+    "levels": [
+      0,
+      1,
+      2
+    ],
+    "config": "/home1/gyy/vlms/SADA_STAGE2_20260727/results/official_sada_fixedval_s4_seed123/260730_183337_140/config.json",
+    "checkpoint": "/home1/gyy/vlms/SADA_STAGE2_20260727/results/official_sada_fixedval_s4_seed123/260730_183337_140/saved_ckpt/best_ckpt/checkpoint-epoch15.pt",
+    "checkpoint_epoch": 15,
+    "selection": {
+      "screening_metric": "source_val_mean_delta_iou",
+      "protection": "iou70 non-decrease and high-quality mean delta >= -0.002",
+      "final_metric": "source_val_fixed_proposal_average_map",
+      "map_finalists": 10
+    }
+  },
+  "target_val_videos": 22,
+  "proposal": {
+    "proposals": 1313,
+    "mean_iou": {
+      "baseline": 0.604376312026432,
+      "refined": 0.6043977991206839,
+      "delta": 2.1487094251962445e-05
+    },
+    "win_rate": 0.31073876618431073,
+    "loss_rate": 0.2916984006092917,
+    "tie_rate": 0.39756283320639757,
+    "iou50_rate": {
+      "baseline": 0.7357197258187357,
+      "refined": 0.7334348819497334
+    },
+    "iou70_rate": {
+      "baseline": 0.40594059405940597,
+      "refined": 0.4044173648134044
+    },
+    "high_quality_iou70": {
+      "n": 533,
+      "mean_delta_iou": -0.0035284158212829935,
+      "loss_rate": 0.3527204502814259
+    },
+    "class_correct_rate": 0.9116527037319117,
+    "normalized_left_error": {
+      "baseline": 13.897809976346464,
+      "refined": 13.897692552564862,
+      "delta": -0.00011742378160183045
+    },
+    "normalized_right_error": {
+      "baseline": 13.907792216396691,
+      "refined": 13.907654547273776,
+      "delta": -0.00013766912291557254
+    },
+    "left_applied_rate": 0.3907083015993907,
+    "right_applied_rate": 0.4166031987814166
+  },
+  "detection": {
+    "baseline": {
+      "tiou_thresholds": [
+        0.1,
+        0.2,
+        0.30000000000000004,
+        0.4,
+        0.5
+      ],
+      "map_by_tiou": [
+        0.2997158865241624,
+        0.29060988253016606,
+        0.2740457786008613,
+        0.2472409055486188,
+        0.21054979352310993
+      ],
+      "average_map": 0.2644324493453837
+    },
+    "refined": {
+      "tiou_thresholds": [
+        0.1,
+        0.2,
+        0.30000000000000004,
+        0.4,
+        0.5
+      ],
+      "map_by_tiou": [
+        0.2989132528749853,
+        0.2902304068829185,
+        0.27533722370369473,
+        0.2487181960001617,
+        0.20888367518129006
+      ],
+      "average_map": 0.2644165509286101
+    },
+    "delta_average_map": -1.5898416773574287e-05
+  },
+  "protocol": {
+    "proposal_set": "fixed post-hard-class-agnostic-NMS proposals",
+    "classification_labels_scores": "unchanged",
+    "second_nms": "none",
+    "actionness": "max sigmoid of trained dense classification logits",
+    "target_gt_usage": "metrics only after locked refinement"
+  }
+}
