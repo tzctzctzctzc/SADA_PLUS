@@ -4,6 +4,11 @@ from torch import nn
 from torch.nn import functional as F
 
 from .blocks import MaskedConv1D, Scale, LayerNorm
+from .aux_boundary_head import AuxBoundaryHead
+from .boundary_target_utils import (
+    boundary_focal_loss,
+    build_boundary_heatmaps,
+)
 from .losses_aux import ctr_diou_loss_1d, sigmoid_focal_loss, ctr_giou_loss_1d
 from .models import register_meta_arch, make_backbone, make_neck, make_generator
 from .stage1_utils import (
@@ -313,6 +318,17 @@ class SADA(nn.Module):
                    for level in self.oracle_target_regression_levels)
         ):
             raise ValueError('Oracle target regression levels are invalid')
+        begtr_cfg = cfg.get('begtr', {})
+        self.begtr_mode = begtr_cfg.get('mode', 'off')
+        if self.begtr_mode not in ('off', 'source'):
+            raise ValueError('unknown BEGTR mode: {}'.format(self.begtr_mode))
+        self.begtr_enabled = self.begtr_mode != 'off'
+        self.begtr_boundary_weight = float(
+            begtr_cfg.get('boundary_weight', 0.1)
+        )
+        self.begtr_sigma = float(begtr_cfg.get('sigma', 1.0))
+        if self.begtr_boundary_weight < 0 or self.begtr_sigma <= 0:
+            raise ValueError('invalid BEGTR source boundary configuration')
         stage1_cfg = cfg.get('stage1', {})
         self.stage1_enabled = stage1_cfg.get('enabled', False)
         self.stage1_perturbation = stage1_cfg.get('perturbation', 'shift')
@@ -546,6 +562,20 @@ class SADA(nn.Module):
                     with_ln=head_with_ln,
                     num_bins=0
             )
+
+        if self.begtr_enabled:
+            if use_trident_head:
+                raise ValueError('BEGTR requires use_trident_head=False')
+            self.aux_boundary_head = AuxBoundaryHead(
+                fpn_dim,
+                head_dim,
+                kernel_size=head_kernel_size,
+                num_layers=2,
+                with_ln=head_with_ln,
+                prior_prob=self.train_cls_prior_prob,
+            )
+        else:
+            self.aux_boundary_head = None
 
         self.cls_head_target = self.cls_head
         self.reg_head_target = self.reg_head
@@ -1084,6 +1114,12 @@ class SADA(nn.Module):
 
         # Generate the logits using the pseudo-label network (frozen in the case of static, or changing in the case of dynamic)
         out_cls_logits_tgt_pl, _ = self.cls_head_pl(fpn_feats_tgt_pl, fpn_masks_tgt_pl)
+
+        aux_start_src, aux_end_src = None, None
+        if self.aux_boundary_head is not None:
+            aux_start_src, aux_end_src = self.aux_boundary_head(
+                fpn_feats_src, fpn_masks_src
+            )
         
         if self.use_trident_head:
             out_lb_logits_src = self.start_head(fpn_feats_src, fpn_masks_src)
@@ -1140,11 +1176,26 @@ class SADA(nn.Module):
             assert video_list[0]['labels'] is not None, "GT action labels does not exist"
             gt_segments = [x['segments'].to(self.device) for x in video_list]
             gt_labels = [x['labels'].to(self.device) for x in video_list]
+            if self.begtr_mode == 'source' and domain == 'src':
+                for index in range(bs, len(video_list)):
+                    gt_segments[index] = gt_segments[index].new_empty((0, 2))
+                    gt_labels[index] = gt_labels[index].new_empty(
+                        (0,), dtype=torch.long
+                    )
 
             # compute the gt labels for cls & reg
             # list of prediction targets
             gt_cls_labels, gt_offsets = self.label_points(
                 points, gt_segments, gt_labels)
+            aux_boundary_targets = None
+            if self.aux_boundary_head is not None and domain == 'src':
+                aux_boundary_targets = build_boundary_heatmaps(
+                    points,
+                    fpn_masks_src,
+                    gt_segments[:bs],
+                    self.reg_range,
+                    sigma=self.begtr_sigma,
+                )
             
             
             # For debugging ...
@@ -1194,6 +1245,8 @@ class SADA(nn.Module):
                 domain=domain,
                 curr_epoch=curr_epoch,
                 stage1_routes=stage1_routes,
+                aux_boundary_outputs=(aux_start_src, aux_end_src),
+                aux_boundary_targets=aux_boundary_targets,
             )
             
             # Return the GTs of the target domain as well, to be used to compute the anchors
@@ -1435,7 +1488,9 @@ class SADA(nn.Module):
             mode, 
             domain, 
             curr_epoch,
-            stage1_routes=None,):
+            stage1_routes=None,
+            aux_boundary_outputs=None,
+            aux_boundary_targets=None,):
         bs = int(fpn_masks[0].shape[0] / 2)
         
         # gt_cls_labels is a list of 2B elements, each of shape FT x C
@@ -1613,6 +1668,25 @@ class SADA(nn.Module):
 
         downstream_loss = cls_loss + reg_loss * loss_reg_weight 
 
+        aux_boundary_loss = 0 * decoded_offsets.sum()
+        if (
+            self.aux_boundary_head is not None
+            and domain == 'src'
+            and aux_boundary_outputs is not None
+            and aux_boundary_targets is not None
+        ):
+            aux_boundary_loss = boundary_focal_loss(
+                aux_boundary_outputs[0],
+                aux_boundary_outputs[1],
+                aux_boundary_targets[0],
+                aux_boundary_targets[1],
+                fpn_masks_src,
+            )
+            downstream_loss = (
+                downstream_loss
+                + self.begtr_boundary_weight * aux_boundary_loss
+            )
+
         target_reg_loss = 0 * decoded_offsets.sum()
         target_reg_positive = 0 * decoded_offsets.sum()
         if self.oracle_target_regression_mode != 'off':
@@ -1655,6 +1729,7 @@ class SADA(nn.Module):
         
         losses =  {'cls_loss': cls_loss,
                    'reg_loss': reg_loss,
+                   'aux_boundary_loss': aux_boundary_loss,
                    'oracle_target_reg_loss': target_reg_loss,
                    'oracle_target_reg_positive': target_reg_positive,
                    'downstream_loss': downstream_loss}

@@ -238,7 +238,12 @@ class BaseTrainerDA:
                 self.valid_metrics_src.reset()
                 self.valid_metrics_tgt.reset()
                 
-                metric_tgt = self._valid_epoch(epoch, self.train_loader_tgt2, domain='tgt')  # Evaluate the performance on the aligned target domain dataset
+                source_only_begtr = (
+                    self.cfg.get('begtr', {}).get('mode', 'off') == 'source'
+                )
+                metric_tgt = None
+                if not source_only_begtr:
+                    metric_tgt = self._valid_epoch(epoch, self.train_loader_tgt2, domain='tgt')  # Evaluate the performance on the aligned target domain dataset
                 metric_src = self._valid_epoch(epoch, self.val_loader_src, domain='src') # Evaluate on the test set of the source domain
 
                 if metric_src < self.best_metric:
@@ -341,6 +346,9 @@ class BaseTrainerDA:
 
             # Evaluate the model (for debugging purposes)
             if (self.test_freq != -1 and epoch % self.test_freq == 0):
+                source_only_begtr = (
+                    self.cfg.get('begtr', {}).get('mode', 'off') == 'source'
+                )
                 # Evaluate on the train split of the source domain (Used during supervision of training)
                 source_metrics_train = self._test_epoch(epoch, self.train_loader_src2, 'train', domain='src')  
                 source_metrics_train = {'t_src_'+k : v for k, v in list(source_metrics_train.items())}
@@ -351,15 +359,16 @@ class BaseTrainerDA:
                 source_metrics_val = {'v_src_'+k : v for k, v in list(source_metrics_val.items())}
                 wandb.log(source_metrics_val, step=epoch)
                 
-                # Evaluate on the train split of the target domain (Aligned during training)
-                target_metrics_train = self._test_epoch(epoch, self.train_loader_tgt2, 'train', domain='tgt')
-                target_metrics_train = {'t_tgt_'+k : v for k, v in list(target_metrics_train.items())}
-                wandb.log(target_metrics_train, step=epoch)
-                
-                # Evaluate on the test split of the target domain (Not seen during training)
-                target_metrics_val = self._test_epoch(epoch, self.val_loader_tgt, 'test', domain='tgt')
-                target_metrics_val = {'v_tgt_'+k : v for k, v in list(target_metrics_val.items())}
-                wandb.log(target_metrics_val, step=epoch)
+                if not source_only_begtr:
+                    # Evaluate on the train split of the target domain (Aligned during training)
+                    target_metrics_train = self._test_epoch(epoch, self.train_loader_tgt2, 'train', domain='tgt')
+                    target_metrics_train = {'t_tgt_'+k : v for k, v in list(target_metrics_train.items())}
+                    wandb.log(target_metrics_train, step=epoch)
+
+                    # Evaluate on the test split of the target domain (Not seen during training)
+                    target_metrics_val = self._test_epoch(epoch, self.val_loader_tgt, 'test', domain='tgt')
+                    target_metrics_val = {'v_tgt_'+k : v for k, v in list(target_metrics_val.items())}
+                    wandb.log(target_metrics_val, step=epoch)
 
         # Save the last model
         self.save_ckpt(mode='latest', epoch=epoch)

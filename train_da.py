@@ -46,6 +46,24 @@ ARGS_TYPES = dict(
 ) 
 
 
+def load_model_state_with_optional_begtr(model, state_dict):
+    """Load an older SADA checkpoint while initializing only the new BEGTR head."""
+    incompatible = model.load_state_dict(state_dict, strict=False)
+    missing = set(incompatible.missing_keys)
+    unexpected = set(incompatible.unexpected_keys)
+    allowed_missing = {
+        name for name in model.state_dict()
+        if name.startswith('aux_boundary_head.')
+    }
+    if unexpected or not missing.issubset(allowed_missing):
+        raise RuntimeError(
+            'checkpoint/model mismatch; missing={}, unexpected={}'.format(
+                sorted(missing), sorted(unexpected)
+            )
+        )
+    return bool(missing)
+
+
 # This is needed for wandb Sweeps to work. Problem is that otherwise you can't sweep over single parameters inside nested dicts (it overrides the whole dict)
 def sync_configs(from_cfg, to_cfg):
     # move all configs that are common to both configs into to_cfg (moves overriden parameter from sweep config to the config that is actually used)
@@ -246,7 +264,9 @@ def main(cfg, resume, project_name='sada', debug=False):
                 current_alpha=model.stage1_alpha,
                 calibration_epoch=max(1, model.warmup_adv),
             )
-            model.load_state_dict(checkpoint['state_dict'])
+            fresh_begtr = load_model_state_with_optional_begtr(
+                model, checkpoint['state_dict']
+            )
             if stage1 is not None:
                 legacy_rng = stage1.get('rng_state')
                 train_rng_state = stage1.get('train_rng_state', legacy_rng)
@@ -266,12 +286,27 @@ def main(cfg, resume, project_name='sada', debug=False):
                 model.stage1_calibrated = stage1['calibrated']
             
             if use_ema:
-                model_ema.module.load_state_dict(checkpoint['ema_state_dict'])
+                fresh_begtr_ema = load_model_state_with_optional_begtr(
+                    model_ema.module, checkpoint['ema_state_dict']
+                )
+                if fresh_begtr != fresh_begtr_ema:
+                    raise RuntimeError('student and EMA BEGTR checkpoint states differ')
+                if fresh_begtr:
+                    model_ema.module.aux_boundary_head.load_state_dict(
+                        model.aux_boundary_head.state_dict()
+                    )
             
             # also load the optimizer / scheduler if necessary
-            optimizer_gen_source.load_state_dict(checkpoint['optimizer_gen_source'])
-            optimizer_gen_source_alignment.load_state_dict(checkpoint['optimizer_gen_source_alignment'])
-            optimizer_disc.load_state_dict(checkpoint['optimizer_disc'])
+            if not fresh_begtr:
+                optimizer_gen_source.load_state_dict(checkpoint['optimizer_gen_source'])
+                optimizer_gen_source_alignment.load_state_dict(checkpoint['optimizer_gen_source_alignment'])
+                optimizer_disc.load_state_dict(checkpoint['optimizer_disc'])
+            else:
+                logger.info(
+                    'Initialized BEGTR auxiliary head and rebuilt optimizers; '
+                    'base model and EMA weights were restored from epoch %d.',
+                    checkpoint['epoch'],
+                )
             completed_steps = checkpoint['epoch'] * num_iters_epoch
             for scheduler, optimizer in (
                     (scheduler_gen_source, optimizer_gen_source),
@@ -478,6 +513,18 @@ def create_argparser():
         '--stop-after-epoch', type=int, default=None,
         help='stop after this epoch without changing the scheduler horizon',
     )
+    parser.add_argument(
+        '--begtr', choices=['off', 'source'], default='off',
+        help='train the source-supervised auxiliary start/end boundary head',
+    )
+    parser.add_argument(
+        '--begtr-boundary-weight', type=float, default=0.1,
+        help='weight of the source auxiliary boundary focal loss',
+    )
+    parser.add_argument(
+        '--begtr-sigma', type=float, default=1.0,
+        help='Gaussian boundary heatmap sigma measured in FPN cells',
+    )
 
     add_dict_to_argparser(parser, ARGS_TYPES)
 
@@ -545,6 +592,11 @@ if __name__ == '__main__':
         'stop_after_epoch': args.stop_after_epoch,
         'no_conditional_update': args.diagnostic_no_ca,
         'alignment_levels': diagnostic_levels,
+    }
+    config_dict['begtr'] = {
+        'mode': args.begtr,
+        'boundary_weight': args.begtr_boundary_weight,
+        'sigma': args.begtr_sigma,
     }
 
     update_config_with_arguments(config_dict, args, ARGS_TYPES, ARGS_CONFIGPATH)
