@@ -178,9 +178,12 @@ def coarse_proposals(model, batch, fpn_masks, logits, offsets, points, levels):
     return outputs
 
 
-def collect_records(model, dataset, device, batch_size, levels):
+def collect_records(
+        model, dataset, device, batch_size, levels,
+        include_gt_peak_metrics=False):
     records = []
     map_statistics = []
+    start_peak_errors, end_peak_errors, peak_gains = [], [], []
     with torch.no_grad():
         for batch_start in range(0, len(dataset), batch_size):
             raw_batch = [
@@ -211,6 +214,35 @@ def collect_records(model, dataset, device, batch_size, levels):
                         map_statistics.append((
                             float(valid_values.mean()), float(valid_values.std(unbiased=False))
                         ))
+                    if include_gt_peak_metrics:
+                        low, high = map(float, model.reg_range[level])
+                        stride = float(points[level][0, 3])
+                        for segment in video["segments"]:
+                            duration = float(segment[1] - segment[0])
+                            scale = duration / 2.0
+                            if duration <= 0 or scale < low or scale > high:
+                                continue
+                            radius = max(0.25 * duration, 2.0 * stride)
+                            for boundary, probabilities, output in (
+                                (float(segment[0]), per_level[level]["start"], start_peak_errors),
+                                (float(segment[1]), per_level[level]["end"], end_peak_errors),
+                            ):
+                                local = torch.where(
+                                    (per_level[level]["points"] >= boundary - radius)
+                                    & (per_level[level]["points"] <= boundary + radius)
+                                )[0]
+                                if not local.numel():
+                                    continue
+                                peak_index = local[probabilities[local].argmax()]
+                                nearest_index = (
+                                    per_level[level]["points"] - boundary
+                                ).abs().argmin()
+                                output.append(abs(
+                                    float(per_level[level]["points"][peak_index]) - boundary
+                                ) / duration)
+                                peak_gains.append(float(
+                                    probabilities[peak_index] - probabilities[nearest_index]
+                                ))
                 metadata = raw_video["metadata"]
                 for segment, score, label, level in zip(
                         proposal["segments"], proposal["scores"],
@@ -234,6 +266,19 @@ def collect_records(model, dataset, device, batch_size, levels):
     return records, {
         "map_mean": float(np.mean(means)) if means else None,
         "mean_temporal_std": float(np.mean(stds)) if stds else None,
+        "source_gt_peak": {
+            "start_count": len(start_peak_errors),
+            "end_count": len(end_peak_errors),
+            "start_normalized_error": (
+                float(np.mean(start_peak_errors)) if start_peak_errors else None
+            ),
+            "end_normalized_error": (
+                float(np.mean(end_peak_errors)) if end_peak_errors else None
+            ),
+            "mean_peak_gain_over_nearest_gt_cell": (
+                float(np.mean(peak_gains)) if peak_gains else None
+            ),
+        } if include_gt_peak_metrics else None,
     }
 
 
@@ -378,7 +423,8 @@ def source_select(args):
     )
     batch_size = args.batch_size or int(cfg.get("loader", {}).get("batch_size", 1))
     records, map_statistics = collect_records(
-        model, source_val, args.device, batch_size, levels
+        model, source_val, args.device, batch_size, levels,
+        include_gt_peak_metrics=True,
     )
     baseline_segments = [record["segment"] for record in records]
     baseline_detection = detection_metrics(
@@ -454,7 +500,8 @@ def target_eval(args):
     )
     batch_size = args.batch_size or int(cfg.get("loader", {}).get("batch_size", 1))
     records, map_statistics = collect_records(
-        model, target_val, args.device, batch_size, artifact["levels"]
+        model, target_val, args.device, batch_size, artifact["levels"],
+        include_gt_peak_metrics=False,
     )
     baseline = [record["segment"] for record in records]
     refined, details = refine_records(records, artifact["parameters"])
