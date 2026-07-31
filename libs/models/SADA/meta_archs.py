@@ -414,6 +414,12 @@ class SADA(nn.Module):
         self.stage2_student_mirror_weighting = bool(
             stage2_cfg.get('student_mirror_weighting', False)
         )
+        self.stage2_student_shift_weighting = bool(
+            stage2_cfg.get('student_shift_weighting', False)
+        )
+        self.stage2_student_shift_steps = int(
+            stage2_cfg.get('student_shift_steps', 1)
+        )
         if self.stage2_semantic_boundary_weighting:
             if self.stage2_semantic_boundary_calibration is None:
                 raise ValueError('Semantic boundary calibration is required')
@@ -469,7 +475,7 @@ class SADA(nn.Module):
         if self.stage2_routing not in (
                 'confidence', 'alqa_same_budget',
                 'static_dense', 'static_full_dense', 'output_moment',
-                'student_consistency', 'student_mirror'):
+                'student_consistency', 'student_mirror', 'student_shift'):
             raise ValueError('unknown Stage 2 routing mode')
         if self.stage2_static_teacher not in ('frozen', 'ema'):
             raise ValueError('unknown static Stage 2 teacher mode')
@@ -524,11 +530,19 @@ class SADA(nn.Module):
             and self.stage2_routing != 'student_mirror'
         ):
             raise ValueError('Student mirror requires student-mirror routing')
+        if (
+            self.stage2_student_shift_weighting
+            and (
+                self.stage2_routing != 'student_shift'
+                or self.stage2_student_shift_steps < 1
+            )
+        ):
+            raise ValueError('Student shift requires a positive shift routing')
         self.stage2_uses_external_teacher = (
             self.stage2_routing
             not in (
                 'static_dense', 'static_full_dense', 'output_moment',
-                'student_consistency', 'student_mirror'
+                'student_consistency', 'student_mirror', 'student_shift'
             )
         )
         if self.stage2_loss_weighting not in (
@@ -1171,6 +1185,34 @@ class SADA(nn.Module):
             remapped.append(torch.stack(samples, dim=0))
         return remapped
 
+    def _stage2_shift_fpn_features(self, features, masks, delta):
+        """Translate valid FPN features without wrapping crop boundaries."""
+        shifted_features, shifted_masks = [], []
+        for level_features, level_masks in zip(features, masks):
+            shifted, shifted_mask = shift_features(
+                level_features, level_masks, delta
+            )
+            shifted_features.append(shifted)
+            shifted_masks.append(shifted_mask)
+        return shifted_features, shifted_masks
+
+    def _stage2_unshift_offsets(self, offsets, masks, delta):
+        """Return shifted-head predictions to original anchor coordinates."""
+        remapped_offsets, remapped_masks = [], []
+        for level_offsets, level_masks in zip(offsets, masks):
+            output = torch.zeros_like(level_offsets)
+            output_mask = torch.zeros_like(level_masks, dtype=torch.bool)
+            if delta > 0:
+                output[..., :-delta] = level_offsets[..., delta:]
+                output_mask[..., :-delta] = level_masks[..., delta:]
+            else:
+                amount = -delta
+                output[..., amount:] = level_offsets[..., :-amount]
+                output_mask[..., amount:] = level_masks[..., :-amount]
+            remapped_offsets.append(output)
+            remapped_masks.append(output_mask)
+        return remapped_offsets, remapped_masks
+
     @torch.no_grad()
     def _stage1_shift_routing(self, video_list_tgt, points, rng=None):
         """Deterministic two-view routing for the feature-shift experiment."""
@@ -1757,7 +1799,8 @@ class SADA(nn.Module):
                             perturbed_fpn_feats
                         )
         elif self.stage2_routing in (
-                'output_moment', 'student_consistency', 'student_mirror'):
+                'output_moment', 'student_consistency', 'student_mirror',
+                'student_shift'):
             fpn_feats_tgt_pl, fpn_masks_tgt_pl = fpn_feats_tgt, fpn_masks_tgt
             fpn_feats_tgt_pl_perturbed = None
         else:
@@ -1814,7 +1857,7 @@ class SADA(nn.Module):
         # Generate the logits using the pseudo-label network (frozen in the case of static, or changing in the case of dynamic)
         if self.stage2_routing in (
                 'static_full_dense', 'output_moment', 'student_consistency',
-                'student_mirror'):
+                'student_mirror', 'student_shift'):
             out_cls_logits_tgt_pl = [
                 logits.detach() for logits in out_cls_logits_tgt
             ]
@@ -1845,6 +1888,8 @@ class SADA(nn.Module):
         out_offsets_tgt, out_actionness_tgt= self.reg_head_target(fpn_feats_tgt, fpn_masks_tgt)
         student_consistency_offsets = None
         student_mirror_offsets = None
+        student_shift_offsets = None
+        student_shift_masks = None
         if (
             self.stage2_enabled
             and self.stage2_student_consistency_weighting
@@ -1886,6 +1931,24 @@ class SADA(nn.Module):
             )
             student_mirror_offsets = self._stage2_unmirror_offsets(
                 mirrored_offsets, fpn_masks_tgt
+            )
+        if (
+            self.stage2_enabled
+            and self.stage2_student_shift_weighting
+            and mode == 'train'
+            and curr_epoch >= self.stage2_start_epoch
+        ):
+            shifted_features, shifted_masks = self._stage2_shift_fpn_features(
+                fpn_feats_tgt, fpn_masks_tgt, self.stage2_student_shift_steps,
+            )
+            shifted_offsets, _ = self.reg_head_target(
+                shifted_features, shifted_masks
+            )
+            student_shift_offsets, student_shift_masks = (
+                self._stage2_unshift_offsets(
+                    shifted_offsets, shifted_masks,
+                    self.stage2_student_shift_steps,
+                )
             )
         
         out_offsets = [torch.cat((out_offsets_src[i], out_offsets_tgt[i]), dim=0) for i in range(len(out_offsets_src))]
@@ -1941,7 +2004,8 @@ class SADA(nn.Module):
                         )
                         out_offsets_tgt_pl_perturbed.append(perturbed_offsets)
         elif self.stage2_routing in (
-                'output_moment', 'student_consistency', 'student_mirror'):
+                'output_moment', 'student_consistency', 'student_mirror',
+                'student_shift'):
             out_offsets_tgt_pl = [offset.detach() for offset in out_offsets_tgt]
             out_actionness_tgt_pl = [
                 actionness.detach() for actionness in out_actionness_tgt
@@ -1973,6 +2037,14 @@ class SADA(nn.Module):
             student_mirror_offsets = [
                 offsets.permute(0, 2, 1)
                 for offsets in student_mirror_offsets
+            ]
+        if student_shift_offsets is not None:
+            student_shift_offsets = [
+                offsets.permute(0, 2, 1)
+                for offsets in student_shift_offsets
+            ]
+            student_shift_masks = [
+                masks.squeeze(1) for masks in student_shift_masks
             ]
         if out_offsets_tgt_pl_perturbed is not None:
             out_offsets_tgt_pl_perturbed = [
@@ -2011,6 +2083,8 @@ class SADA(nn.Module):
             stage2_dense_semantic_scores_active = None
             stage2_student_consistency_offsets_active = None
             stage2_student_mirror_offsets_active = None
+            stage2_student_shift_offsets_active = None
+            stage2_student_shift_masks_active = None
             stage2_proposal_count = 0
             stage2_pre_nms_budget = 0
             stage2_rescued_pre_nms = 0
@@ -2093,6 +2167,14 @@ class SADA(nn.Module):
                 and curr_epoch >= self.stage2_start_epoch
             ):
                 stage2_student_mirror_offsets_active = student_mirror_offsets
+            elif (
+                self.stage2_enabled
+                and self.stage2_routing == 'student_shift'
+                and mode == 'train'
+                and curr_epoch >= self.stage2_start_epoch
+            ):
+                stage2_student_shift_offsets_active = student_shift_offsets
+                stage2_student_shift_masks_active = student_shift_masks
             
             
             # For debugging ...
@@ -2160,6 +2242,10 @@ class SADA(nn.Module):
                 stage2_student_mirror_offsets=(
                     stage2_student_mirror_offsets_active
                 ),
+                stage2_student_shift_offsets=(
+                    stage2_student_shift_offsets_active
+                ),
+                stage2_student_shift_masks=stage2_student_shift_masks_active,
             )
             losses.update({
                 'stage2_pre_nms_budget': torch.tensor(
@@ -2441,7 +2527,9 @@ class SADA(nn.Module):
             stage2_dense_perturbed_offsets=None,
             stage2_dense_semantic_scores=None,
             stage2_student_consistency_offsets=None,
-            stage2_student_mirror_offsets=None,):
+            stage2_student_mirror_offsets=None,
+            stage2_student_shift_offsets=None,
+            stage2_student_shift_masks=None,):
         bs = int(fpn_masks[0].shape[0] / 2)
         
         # gt_cls_labels is a list of 2B elements, each of shape FT x C
@@ -2720,6 +2808,7 @@ class SADA(nn.Module):
         stage2_semantic_mean = 0 * decoded_offsets.sum()
         stage2_semantic_keep_fraction = 0 * decoded_offsets.sum()
         stage2_output_moment_classes = 0 * decoded_offsets.sum()
+        stage2_shift_valid_fraction = 0 * decoded_offsets.sum()
         stage2_level_positive = [
             0 * decoded_offsets.sum() for _ in range(self.n_levels)
         ]
@@ -2955,13 +3044,22 @@ class SADA(nn.Module):
                     self.stage2_student_mirror_weighting
                     and stage2_student_mirror_offsets is not None
                 )
+                or (
+                    self.stage2_student_shift_weighting
+                    and stage2_student_shift_offsets is not None
+                    and stage2_student_shift_masks is not None
+                )
             )
         ):
             stage2_predictions = torch.cat(
                 (
                     stage2_student_consistency_offsets
                     if self.stage2_student_consistency_weighting
-                    else stage2_student_mirror_offsets
+                    else (
+                        stage2_student_mirror_offsets
+                        if self.stage2_student_mirror_weighting
+                        else stage2_student_shift_offsets
+                    )
                 ),
                 dim=1,
             )
@@ -2976,11 +3074,26 @@ class SADA(nn.Module):
             ], dim=1)
             stage2_scores = torch.cat(out_cls_logits_tgt, dim=1).sigmoid(
             ).amax(dim=-1)
+            paired_mask = (
+                torch.cat(stage2_student_shift_masks, dim=1)
+                if self.stage2_student_shift_weighting
+                else torch.ones_like(valid_mask_tgt, dtype=torch.bool)
+            )
             stage2_reg_mask = (
                 valid_mask_tgt
                 & stage2_level_mask
+                & paired_mask
                 & (stage2_scores >= self.stage2_alpha)
             )
+            if self.stage2_student_shift_weighting:
+                eligible = (
+                    valid_mask_tgt
+                    & stage2_level_mask
+                    & (stage2_scores >= self.stage2_alpha)
+                )
+                stage2_shift_valid_fraction = (
+                    stage2_reg_mask.sum().float() / eligible.sum().clamp_min(1)
+                )
             stage2_reg_positive = stage2_reg_mask.sum().float()
             offset = 0
             for level, level_mask in enumerate(fpn_masks_tgt):
@@ -3081,6 +3194,7 @@ class SADA(nn.Module):
                 or self.stage2_output_moment_weighting
                 or self.stage2_student_consistency_weighting
                 or self.stage2_student_mirror_weighting
+                or self.stage2_student_shift_weighting
             )
         ):
             stage2_reg_ratio = (
@@ -3123,6 +3237,7 @@ class SADA(nn.Module):
                    'stage2_output_moment_classes': (
                        stage2_output_moment_classes
                    ),
+                   'stage2_shift_valid_fraction': stage2_shift_valid_fraction,
                    'downstream_loss': downstream_loss}
         for level, count in enumerate(stage2_level_positive):
             losses['stage2_pseudo_l{}_positive'.format(level)] = count
