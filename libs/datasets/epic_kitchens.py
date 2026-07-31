@@ -243,6 +243,9 @@ class EpicKitchensDataset(Dataset):
         else:
             data_dict['metadata']['original_feat_len'] = feats.shape[1]
             data_dict['metadata']['crop_start'] = 0
+            data_dict['boundary_valid'] = torch.ones(
+                segments.shape[0], 2, dtype=torch.bool
+            )
 
         if self.stage1_context:
             data_dict['full_feats'] = full_feats

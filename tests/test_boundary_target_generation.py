@@ -31,13 +31,35 @@ class BoundaryTargetGenerationTest(unittest.TestCase):
             torch.ones(1, 1, 12, dtype=torch.bool),
             torch.ones(1, 1, 6, dtype=torch.bool),
         ]
-        starts, ends = build_boundary_heatmaps(
+        starts, ends, start_masks, end_masks = build_boundary_heatmaps(
             points, masks, [torch.tensor([[2.0, 8.0]])],
             [[0, 4], [4, 8]], sigma=1.0,
         )
         self.assertEqual(int(starts[0][0].argmax()), 2)
         self.assertEqual(int(ends[0][0].argmax()), 8)
         self.assertEqual(float(starts[1].sum()), 0.0)
+        self.assertTrue(start_masks[0].all())
+        self.assertTrue(end_masks[0].all())
+
+    def test_truncated_side_is_not_a_positive_and_crop_edge_is_ignored(self):
+        points = [
+            torch.tensor([[float(i), 0.0, 8.0, 1.0] for i in range(10)])
+        ]
+        masks = [torch.ones(1, 1, 10, dtype=torch.bool)]
+        starts, ends, start_masks, end_masks = build_boundary_heatmaps(
+            points,
+            masks,
+            [torch.tensor([[0.0, 5.0]])],
+            [[0, 8]],
+            gt_boundary_valid=[torch.tensor([[False, True]])],
+            crop_edges=[torch.tensor([True, False])],
+            edge_ignore_cells=3,
+        )
+        self.assertEqual(float(starts[0].sum()), 0.0)
+        self.assertEqual(int(ends[0][0].argmax()), 5)
+        self.assertFalse(start_masks[0][0, :3].any())
+        self.assertFalse(end_masks[0][0, :3].any())
+        self.assertTrue(start_masks[0][0, 3:].all())
 
     def test_boundary_loss_has_gradient(self):
         start = [torch.zeros(1, 5, requires_grad=True)]
@@ -45,7 +67,9 @@ class BoundaryTargetGenerationTest(unittest.TestCase):
         target_start = [torch.tensor([[0.0, 1.0, 0.0, 0.0, 0.0]])]
         target_end = [torch.tensor([[0.0, 0.0, 0.0, 1.0, 0.0]])]
         masks = [torch.ones(1, 5, dtype=torch.bool)]
-        loss = boundary_focal_loss(start, end, target_start, target_end, masks)
+        loss = boundary_focal_loss(
+            start, end, target_start, target_end, masks, masks
+        )
         loss.backward()
         self.assertGreater(float(loss), 0.0)
         self.assertIsNotNone(start[0].grad)

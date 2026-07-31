@@ -258,6 +258,8 @@ def collect_records(
                         "points": per_level[level]["points"],
                         "start": per_level[level]["start"],
                         "end": per_level[level]["end"],
+                        "stride": float(points[level][0, 3]),
+                        "regression_range": list(map(float, model.reg_range[level])),
                         "gt_segments": video["segments"].detach().cpu(),
                         "gt_labels": video["labels"].detach().cpu(),
                     })
@@ -298,7 +300,11 @@ def proposal_summary(records, refined, details):
     baseline_iou, refined_iou = [], []
     left_before, left_after, right_before, right_after = [], [], [], []
     class_correct = []
-    for record, new_segment in zip(records, refined):
+    accepted = []
+    for record, new_segment, detail in zip(records, refined, details):
+        accepted.append(
+            bool(detail["left"]["accepted"] or detail["right"]["accepted"])
+        )
         gt = record["gt_segments"]
         if not gt.numel():
             baseline_iou.append(0.0)
@@ -308,10 +314,11 @@ def proposal_summary(records, refined, details):
         overlap = pairwise_iou(record["segment"].unsqueeze(0), gt)[0]
         match = int(overlap.argmax())
         target = gt[match]
-        baseline_iou.append(float(overlap[match]))
+        matched_iou = float(overlap[match])
+        baseline_iou.append(matched_iou)
         refined_iou.append(float(aligned_segment_iou(new_segment, target)))
         duration = float(target[1] - target[0])
-        if duration > 0:
+        if matched_iou > 0 and duration > 0:
             left_before.append(abs(float(record["segment"][0] - target[0])) / duration)
             left_after.append(abs(float(new_segment[0] - target[0])) / duration)
             right_before.append(abs(float(record["segment"][1] - target[1])) / duration)
@@ -322,6 +329,8 @@ def proposal_summary(records, refined, details):
     current = np.asarray(refined_iou)
     delta = current - baseline
     high_quality = baseline >= 0.7
+    accepted = np.asarray(accepted, dtype=bool)
+    accepted_delta = delta[accepted]
 
     def mean(values):
         return float(np.mean(values)) if len(values) else None
@@ -333,6 +342,17 @@ def proposal_summary(records, refined, details):
         "win_rate": mean(delta > 1e-4),
         "loss_rate": mean(delta < -1e-4),
         "tie_rate": mean(np.abs(delta) <= 1e-4),
+        "accepted": {
+            "proposal_rate": mean(accepted),
+            "side_rate": mean([
+                side[boundary]["accepted"]
+                for side in details for boundary in ("left", "right")
+            ]),
+            "n": int(accepted.sum()),
+            "mean_delta_iou": mean(accepted_delta),
+            "win_rate": mean(accepted_delta > 1e-4),
+            "loss_rate": mean(accepted_delta < -1e-4),
+        },
         "iou50_rate": {"baseline": mean(baseline >= 0.5),
                        "refined": mean(current >= 0.5)},
         "iou70_rate": {"baseline": mean(baseline >= 0.7),
@@ -358,6 +378,46 @@ def proposal_summary(records, refined, details):
             item["right"]["accepted"] for item in details
         ]),
     }
+
+
+def perfect_map_records(records):
+    """Replace learned maps with source-GT Gaussian maps on the same grids."""
+    output = []
+    for record in records:
+        points = record["points"]
+        start = torch.zeros_like(points)
+        end = torch.zeros_like(points)
+        low, high = record["regression_range"]
+        for segment in record["gt_segments"]:
+            duration = float(segment[1] - segment[0])
+            scale = duration / 2.0
+            if duration <= 0 or scale < low or scale > high:
+                continue
+            start = torch.maximum(start, torch.exp(
+                -0.5 * ((points - segment[0]) / record["stride"]) ** 2
+            ))
+            end = torch.maximum(end, torch.exp(
+                -0.5 * ((points - segment[1]) / record["stride"]) ** 2
+            ))
+        output.append({**record, "start": start, "end": end})
+    return output
+
+
+def passes_source_gate(summary, min_coverage):
+    accepted = summary["accepted"]
+    if accepted["n"] == 0 or accepted["mean_delta_iou"] is None:
+        return False
+    high_quality_delta = summary["high_quality_iou70"]["mean_delta_iou"]
+    if high_quality_delta is None:
+        return False
+    return (
+        accepted["side_rate"] >= min_coverage
+        and accepted["mean_delta_iou"] > 0
+        and accepted["win_rate"] > accepted["loss_rate"]
+        and summary["iou70_rate"]["refined"]
+        >= summary["iou70_rate"]["baseline"] - 1e-12
+        and high_quality_delta >= -0.002
+    )
 
 
 def prediction_dict(records, segments):
@@ -474,11 +534,7 @@ def source_select(args):
     for parameters in parameter_grid(args):
         refined, details = refine_records(records, parameters)
         summary = proposal_summary(records, refined, details)
-        protected = (
-            summary["iou70_rate"]["refined"]
-            >= summary["iou70_rate"]["baseline"] - 1e-12
-            and summary["high_quality_iou70"]["mean_delta_iou"] >= -0.002
-        )
+        protected = passes_source_gate(summary, args.min_source_coverage)
         screened.append({
             "parameters": parameters,
             "proposal": summary,
@@ -494,26 +550,32 @@ def source_select(args):
         finalist["detection"]["delta_average_map"] = (
             finalist["detection"]["average_map"] - baseline_detection["average_map"]
         )
-    selected = max(finalists, key=lambda item: (
+    best_diagnostic = max(finalists, key=lambda item: (
         item["detection"]["average_map"],
         item["proposal"]["mean_iou"]["delta"],
     ))
-    artifact = {
-        "version": 1,
-        "parameters": selected["parameters"],
-        "levels": levels,
-        "config": args.config,
-        "checkpoint": args.checkpoint,
-        "checkpoint_epoch": checkpoint.get("epoch"),
-        "model_kind": args.model_kind,
-        "selection": {
-            "source_only": True,
-            "protection": "iou70 non-decrease and high-quality mean delta >= -0.002",
-            "screening_metric": "source_val_mean_delta_iou",
-            "final_metric": "source_val_fixed_proposal_average_map",
-        },
-    }
-    torch.save(artifact, args.calibration_output)
+    selected = best_diagnostic if eligible else None
+    if selected is not None:
+        artifact = {
+            "version": 2,
+            "parameters": selected["parameters"],
+            "levels": levels,
+            "config": args.config,
+            "checkpoint": args.checkpoint,
+            "checkpoint_epoch": checkpoint.get("epoch"),
+            "model_kind": args.model_kind,
+            "selection": {
+                "source_only": True,
+                "protection": (
+                    "accepted-side coverage >= {:.3f}, accepted mean delta > 0, "
+                    "accepted wins > losses, iou70 non-decrease, and high-quality "
+                    "mean delta >= -0.002"
+                ).format(args.min_source_coverage),
+                "screening_metric": "source_val_mean_delta_iou",
+                "final_metric": "source_val_fixed_proposal_average_map",
+            },
+        }
+        torch.save(artifact, args.calibration_output)
     return {
         "audit": "source_selected_aux_boundary_transfer",
         "checkpoint_epoch": checkpoint.get("epoch"),
@@ -525,9 +587,78 @@ def source_select(args):
         "baseline_detection": baseline_detection,
         "official_source_detection": official_source_detection,
         "finalists": finalists,
+        "source_gate_passed": selected is not None,
         "selected": selected,
-        "calibration_output": args.calibration_output,
+        "best_diagnostic": best_diagnostic,
+        "calibration_output": args.calibration_output if selected else None,
         "target_gt_usage": "none",
+    }
+
+
+def perfect_map_oracle(args):
+    levels = parse_numbers(args.levels, int)
+    cfg, checkpoint, model = load_model(
+        args.config, args.checkpoint, args.device, args.model_kind
+    )
+    source_val = make_dataset(
+        cfg["dataset_name"], False, cfg["src_val_split"], **cfg["dataset"]
+    )
+    batch_size = args.batch_size or int(cfg.get("loader", {}).get("batch_size", 1))
+    learned_records, _ = collect_records(
+        model, source_val, args.device, batch_size, levels,
+        include_gt_peak_metrics=False,
+    )
+    records = perfect_map_records(learned_records)
+    baseline_segments = [record["segment"] for record in records]
+    baseline_detection = detection_metrics(
+        cfg, source_val, records, baseline_segments
+    )
+    screened = []
+    for parameters in parameter_grid(args):
+        refined, details = refine_records(records, parameters)
+        summary = proposal_summary(records, refined, details)
+        screened.append({
+            "parameters": parameters,
+            "proposal": summary,
+            "passes_source_gate": passes_source_gate(
+                summary, args.min_source_coverage
+            ),
+        })
+    eligible = [item for item in screened if item["passes_source_gate"]]
+    ranked = eligible if eligible else screened
+    ranked.sort(
+        key=lambda item: item["proposal"]["mean_iou"]["delta"], reverse=True
+    )
+    finalists = ranked[:args.map_finalists]
+    for finalist in finalists:
+        refined, _ = refine_records(records, finalist["parameters"])
+        finalist["detection"] = detection_metrics(
+            cfg, source_val, records, refined
+        )
+        finalist["detection"]["delta_average_map"] = (
+            finalist["detection"]["average_map"]
+            - baseline_detection["average_map"]
+        )
+    selected = max(finalists, key=lambda item: (
+        item["detection"]["average_map"],
+        item["proposal"]["mean_iou"]["delta"],
+    ))
+    return {
+        "audit": "perfect_boundary_map_source_oracle",
+        "checkpoint_epoch": checkpoint.get("epoch"),
+        "source_val_videos": len(source_val),
+        "source_val_proposals": len(records),
+        "candidate_count": len(screened),
+        "passing_candidate_count": len(eligible),
+        "baseline_detection": baseline_detection,
+        "finalists": finalists,
+        "selected": selected,
+        "protocol": {
+            "proposal_set": "unchanged fixed source proposals",
+            "boundary_map": "source GT Gaussian on the proposal FPN level",
+            "search_and_gate": "identical to learned-map audit",
+            "target_gt_usage": "none",
+        },
     }
 
 
@@ -574,7 +705,11 @@ def target_eval(args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=("source_select", "target_eval"), required=True)
+    parser.add_argument(
+        "--mode",
+        choices=("source_select", "target_eval", "perfect_map_oracle"),
+        required=True,
+    )
     parser.add_argument("--config", required=True)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--output", required=True)
@@ -593,13 +728,19 @@ def main():
     parser.add_argument("--min-duration-ratio", type=float, default=0.5)
     parser.add_argument("--max-duration-ratio", type=float, default=1.5)
     parser.add_argument("--map-finalists", type=int, default=10)
+    parser.add_argument("--min-source-coverage", type=float, default=0.05)
     args = parser.parse_args()
     if args.mode == "source_select" and not args.calibration_output:
         parser.error("--calibration-output is required for source_select")
     if args.mode == "target_eval" and not args.calibration:
         parser.error("--calibration is required for target_eval")
     seed_everything(args.seed)
-    result = source_select(args) if args.mode == "source_select" else target_eval(args)
+    if args.mode == "source_select":
+        result = source_select(args)
+    elif args.mode == "target_eval":
+        result = target_eval(args)
+    else:
+        result = perfect_map_oracle(args)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2), encoding="utf-8")

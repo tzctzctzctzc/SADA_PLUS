@@ -8,60 +8,104 @@ def _plain_mask(mask):
 
 @torch.no_grad()
 def build_boundary_heatmaps(
-        points, masks, gt_segments, regression_ranges, sigma=1.0):
+        points, masks, gt_segments, regression_ranges, sigma=1.0,
+        gt_boundary_valid=None, crop_edges=None, edge_ignore_cells=0):
     """Build scale-aware Gaussian start/end targets on each FPN grid."""
     if sigma <= 0:
         raise ValueError("sigma must be positive")
     if not (len(points) == len(masks) == len(regression_ranges)):
         raise ValueError("points, masks and regression ranges must align")
-    starts, ends = [], []
+    if edge_ignore_cells < 0:
+        raise ValueError("edge_ignore_cells must be non-negative")
+    if gt_boundary_valid is None:
+        gt_boundary_valid = [
+            torch.ones(
+                segments.shape[0], 2, dtype=torch.bool,
+                device=segments.device,
+            )
+            for segments in gt_segments
+        ]
+    if crop_edges is None:
+        crop_edges = [
+            torch.zeros(2, dtype=torch.bool, device=segments.device)
+            for segments in gt_segments
+        ]
+    if not (
+        len(gt_segments) == len(gt_boundary_valid) == len(crop_edges)
+    ):
+        raise ValueError("segments, side validity and crop edges must align")
+    starts, ends, start_masks, end_masks = [], [], [], []
     for level, (level_points, level_mask, level_range) in enumerate(zip(
             points, masks, regression_ranges)):
         valid = _plain_mask(level_mask).bool()
+        start_valid = valid.clone()
+        end_valid = valid.clone()
         start_target = level_points.new_zeros(valid.shape)
         end_target = level_points.new_zeros(valid.shape)
         centers = level_points[:, 0]
         stride = float(level_points[0, 3])
         low, high = map(float, level_range)
-        for batch_index, segments in enumerate(gt_segments):
+        for batch_index, (segments, side_valid, sample_crop_edges) in enumerate(
+                zip(gt_segments, gt_boundary_valid, crop_edges)):
             if segments.numel() == 0:
                 continue
+            side_valid = side_valid.to(device=segments.device, dtype=torch.bool)
+            if side_valid.shape != segments.shape:
+                raise ValueError("boundary validity must have shape [N, 2]")
+            if edge_ignore_cells:
+                valid_indices = torch.where(valid[batch_index])[0]
+                ignored = min(edge_ignore_cells, int(valid_indices.numel()))
+                if ignored and bool(sample_crop_edges[0]):
+                    start_valid[batch_index, valid_indices[:ignored]] = False
+                    end_valid[batch_index, valid_indices[:ignored]] = False
+                if ignored and bool(sample_crop_edges[1]):
+                    start_valid[batch_index, valid_indices[-ignored:]] = False
+                    end_valid[batch_index, valid_indices[-ignored:]] = False
             durations = segments[:, 1] - segments[:, 0]
             scale = durations / 2.0
             eligible = (scale >= low) & (scale <= high) & (durations > 0)
-            for segment in segments[eligible]:
-                start_gaussian = torch.exp(
-                    -0.5 * ((centers - segment[0]) / (sigma * stride)) ** 2
-                )
-                end_gaussian = torch.exp(
-                    -0.5 * ((centers - segment[1]) / (sigma * stride)) ** 2
-                )
-                start_target[batch_index] = torch.maximum(
-                    start_target[batch_index], start_gaussian
-                )
-                end_target[batch_index] = torch.maximum(
-                    end_target[batch_index], end_gaussian
-                )
+            for segment, valid_sides in zip(segments[eligible], side_valid[eligible]):
+                if bool(valid_sides[0]):
+                    start_gaussian = torch.exp(
+                        -0.5 * ((centers - segment[0]) / (sigma * stride)) ** 2
+                    )
+                    start_target[batch_index] = torch.maximum(
+                        start_target[batch_index], start_gaussian
+                    )
+                if bool(valid_sides[1]):
+                    end_gaussian = torch.exp(
+                        -0.5 * ((centers - segment[1]) / (sigma * stride)) ** 2
+                    )
+                    end_target[batch_index] = torch.maximum(
+                        end_target[batch_index], end_gaussian
+                    )
         starts.append(start_target * valid.to(start_target.dtype))
         ends.append(end_target * valid.to(end_target.dtype))
-    return starts, ends
+        start_masks.append(start_valid)
+        end_masks.append(end_valid)
+    return starts, ends, start_masks, end_masks
 
 
 def boundary_focal_loss(
-        start_logits, end_logits, start_targets, end_targets, masks,
+        start_logits, end_logits, start_targets, end_targets,
+        start_masks, end_masks,
         alpha=0.25, gamma=2.0):
     """Focal loss normalized by Gaussian boundary mass."""
     if not (
         len(start_logits) == len(end_logits) == len(start_targets)
-        == len(end_targets) == len(masks)
+        == len(end_targets) == len(start_masks) == len(end_masks)
     ):
         raise ValueError("boundary predictions, targets and masks must align")
     numerator = start_logits[0].sum() * 0.0
     normalizer = numerator.detach()
-    for start, end, start_target, end_target, mask in zip(
-            start_logits, end_logits, start_targets, end_targets, masks):
-        valid = _plain_mask(mask).bool()
-        for logits, target in ((start, start_target), (end, end_target)):
+    for start, end, start_target, end_target, start_mask, end_mask in zip(
+            start_logits, end_logits, start_targets, end_targets,
+            start_masks, end_masks):
+        for logits, target, mask in (
+            (start, start_target, start_mask),
+            (end, end_target, end_mask),
+        ):
+            valid = _plain_mask(mask).bool()
             logits = logits.float()
             target = target.float()
             probability = logits.sigmoid()

@@ -8,6 +8,7 @@ from .aux_boundary_head import AuxBoundaryHead
 from .boundary_target_utils import (
     boundary_focal_loss,
     build_boundary_heatmaps,
+    build_same_selection_supervision,
 )
 from .losses_aux import ctr_diou_loss_1d, sigmoid_focal_loss, ctr_giou_loss_1d
 from .models import register_meta_arch, make_backbone, make_neck, make_generator
@@ -296,7 +297,9 @@ class SADA(nn.Module):
         self.oracle_target_regression_mode = cfg.get('diagnostic', {}).get(
             'oracle_target_regression', 'off'
         )
-        if self.oracle_target_regression_mode not in ('off', 'selected', 'full'):
+        if self.oracle_target_regression_mode not in (
+            'off', 'selected', 'full', 'clean_pseudo', 'same_selection'
+        ):
             raise ValueError(
                 'unknown Oracle target regression mode: {}'.format(
                     self.oracle_target_regression_mode
@@ -327,7 +330,14 @@ class SADA(nn.Module):
             begtr_cfg.get('boundary_weight', 0.1)
         )
         self.begtr_sigma = float(begtr_cfg.get('sigma', 1.0))
-        if self.begtr_boundary_weight < 0 or self.begtr_sigma <= 0:
+        self.begtr_edge_ignore_cells = int(
+            begtr_cfg.get('edge_ignore_cells', 3)
+        )
+        if (
+            self.begtr_boundary_weight < 0
+            or self.begtr_sigma <= 0
+            or self.begtr_edge_ignore_cells < 0
+        ):
             raise ValueError('invalid BEGTR source boundary configuration')
         stage1_cfg = cfg.get('stage1', {})
         self.stage1_enabled = stage1_cfg.get('enabled', False)
@@ -1189,12 +1199,36 @@ class SADA(nn.Module):
                 points, gt_segments, gt_labels)
             aux_boundary_targets = None
             if self.aux_boundary_head is not None and domain == 'src':
+                boundary_valid = [
+                    x.get(
+                        'boundary_valid',
+                        torch.ones(
+                            x['segments'].shape[0], 2,
+                            dtype=torch.bool, device=self.device,
+                        ),
+                    ).to(self.device)
+                    for x in video_list_src
+                ]
+                crop_edges = [
+                    torch.tensor((
+                        int(x['metadata'].get('crop_start', 0)) > 0,
+                        int(x['metadata'].get('crop_start', 0))
+                        + int(x['feats'].shape[-1])
+                        < int(x['metadata'].get(
+                            'original_feat_len', x['feats'].shape[-1]
+                        )),
+                    ), dtype=torch.bool, device=self.device)
+                    for x in video_list_src
+                ]
                 aux_boundary_targets = build_boundary_heatmaps(
                     points,
                     fpn_masks_src,
                     gt_segments[:bs],
                     self.reg_range,
                     sigma=self.begtr_sigma,
+                    gt_boundary_valid=boundary_valid,
+                    crop_edges=crop_edges,
+                    edge_ignore_cells=self.begtr_edge_ignore_cells,
                 )
             
             
@@ -1247,6 +1281,8 @@ class SADA(nn.Module):
                 stage1_routes=stage1_routes,
                 aux_boundary_outputs=(aux_start_src, aux_end_src),
                 aux_boundary_targets=aux_boundary_targets,
+                target_pseudo_logits=out_cls_logits_tgt_pl,
+                target_pseudo_offsets=out_offsets_tgt_pl,
             )
             
             # Return the GTs of the target domain as well, to be used to compute the anchors
@@ -1490,7 +1526,9 @@ class SADA(nn.Module):
             curr_epoch,
             stage1_routes=None,
             aux_boundary_outputs=None,
-            aux_boundary_targets=None,):
+            aux_boundary_targets=None,
+            target_pseudo_logits=None,
+            target_pseudo_offsets=None,):
         bs = int(fpn_masks[0].shape[0] / 2)
         
         # gt_cls_labels is a list of 2B elements, each of shape FT x C
@@ -1680,7 +1718,8 @@ class SADA(nn.Module):
                 aux_boundary_outputs[1],
                 aux_boundary_targets[0],
                 aux_boundary_targets[1],
-                fpn_masks_src,
+                aux_boundary_targets[2],
+                aux_boundary_targets[3],
             )
             downstream_loss = (
                 downstream_loss
@@ -1694,9 +1733,6 @@ class SADA(nn.Module):
                 out_offsets_tgt, None, None, mode=mode
             )
             target_offsets = torch.stack(gt_offsets_tgt)
-            target_scores = torch.cat(out_cls_logits_tgt, dim=1).sigmoid().max(
-                dim=-1
-            ).values
             target_level_mask = torch.cat([
                 torch.full_like(
                     fpn_masks_tgt[level],
@@ -1705,14 +1741,46 @@ class SADA(nn.Module):
                 )
                 for level in range(self.n_levels)
             ], dim=1)
-            target_reg_mask = build_oracle_target_regression_mask(
-                target_scores,
-                gt_cls_tgt_full,
-                valid_mask_tgt,
-                target_level_mask,
-                self.cfg['model'].get('pl_threshold', 0.7),
-                self.oracle_target_regression_mode,
-            )
+            if self.oracle_target_regression_mode in (
+                'clean_pseudo', 'same_selection'
+            ):
+                if target_pseudo_logits is None or target_pseudo_offsets is None:
+                    raise RuntimeError(
+                        'same-selection Oracle requires pseudo-label outputs'
+                    )
+                pseudo_probabilities = torch.cat(
+                    target_pseudo_logits, dim=1
+                ).sigmoid()
+                pseudo_scores, pseudo_classes = pseudo_probabilities.max(dim=-1)
+                pseudo_labels = F.one_hot(
+                    pseudo_classes, num_classes=pseudo_probabilities.shape[-1]
+                ).to(pseudo_probabilities.dtype)
+                pseudo_labels = pseudo_labels * (
+                    pseudo_scores >= self.cfg['model'].get('pl_threshold', 0.7)
+                ).unsqueeze(-1)
+                target_reg_mask, target_offsets = (
+                    build_same_selection_supervision(
+                        pseudo_labels,
+                        gt_cls_tgt_full,
+                        torch.cat(target_pseudo_offsets, dim=1).detach(),
+                        target_offsets,
+                        valid_mask_tgt,
+                        target_level_mask,
+                        self.oracle_target_regression_mode,
+                    )
+                )
+            else:
+                target_scores = torch.cat(
+                    out_cls_logits_tgt, dim=1
+                ).sigmoid().max(dim=-1).values
+                target_reg_mask = build_oracle_target_regression_mask(
+                    target_scores,
+                    gt_cls_tgt_full,
+                    valid_mask_tgt,
+                    target_level_mask,
+                    self.cfg['model'].get('pl_threshold', 0.7),
+                    self.oracle_target_regression_mode,
+                )
             target_reg_positive = target_reg_mask.sum().float()
             if target_reg_mask.any():
                 target_reg_loss = ctr_diou_loss_1d(

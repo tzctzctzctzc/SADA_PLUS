@@ -49,6 +49,10 @@ def truncate_feats(
     data_dict['metadata']['original_feat_len'] = feat_len
     data_dict['metadata']['crop_start'] = 0
     num_segs = data_dict['segments'].shape[0]
+    if 'boundary_valid' not in data_dict:
+        data_dict['boundary_valid'] = torch.ones(
+            num_segs, 2, dtype=torch.bool
+        )
 
     # seq_len < max_seq_len
     if feat_len <= max_seq_len:
@@ -107,11 +111,20 @@ def truncate_feats(
     feats = data_dict['feats'][:, st:ed].clone()
     data_dict['feats'] = feats
     # segments: N x 2 in feature grids
+    original_segments = data_dict['segments']
+    crop_boundary_valid = torch.stack((
+        original_segments[:, 0] >= st,
+        original_segments[:, 1] <= ed,
+    ), dim=1)
     data_dict['segments'] = torch.stack((left[seg_idx], right[seg_idx]), dim=1)
     # shift the time stamps due to truncation
     data_dict['segments'] = data_dict['segments'] - st
     # labels: N
     data_dict['labels'] = data_dict['labels'][seg_idx].clone()
+    data_dict['boundary_valid'] = (
+        data_dict['boundary_valid'][seg_idx].clone()
+        & crop_boundary_valid[seg_idx]
+    )
 
 
     # Update the video length
