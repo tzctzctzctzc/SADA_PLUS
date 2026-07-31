@@ -64,6 +64,17 @@ def load_model_state_with_optional_begtr(model, state_dict):
     return bool(missing)
 
 
+def restore_optimizer_group_lrs(optimizer, checkpoint_state):
+    """Restore schedule position without loading incompatible parameter ids."""
+    saved_groups = checkpoint_state['param_groups']
+    if len(optimizer.param_groups) != len(saved_groups):
+        raise RuntimeError('optimizer parameter-group count changed')
+    for current, saved in zip(optimizer.param_groups, saved_groups):
+        current['lr'] = float(saved['lr'])
+        if 'initial_lr' in saved:
+            current['initial_lr'] = float(saved['initial_lr'])
+
+
 # This is needed for wandb Sweeps to work. Problem is that otherwise you can't sweep over single parameters inside nested dicts (it overrides the whole dict)
 def sync_configs(from_cfg, to_cfg):
     # move all configs that are common to both configs into to_cfg (moves overriden parameter from sweep config to the config that is actually used)
@@ -306,6 +317,18 @@ def main(cfg, resume, project_name='sada', debug=False):
                     'Initialized BEGTR auxiliary head and rebuilt optimizers; '
                     'base model and EMA weights were restored from epoch %d.',
                     checkpoint['epoch'],
+                )
+                restore_optimizer_group_lrs(
+                    optimizer_gen_source,
+                    checkpoint['optimizer_gen_source'],
+                )
+                restore_optimizer_group_lrs(
+                    optimizer_gen_source_alignment,
+                    checkpoint['optimizer_gen_source_alignment'],
+                )
+                restore_optimizer_group_lrs(
+                    optimizer_disc,
+                    checkpoint['optimizer_disc'],
                 )
             completed_steps = checkpoint['epoch'] * num_iters_epoch
             for scheduler, optimizer in (
