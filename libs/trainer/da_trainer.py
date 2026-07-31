@@ -21,6 +21,7 @@ from libs.models.SADA.stage2_alqa import (
     calibrate_quality_heads,
     collect_source_quality_sequences,
 )
+from .gradient_surgery import project_conflicting_gradients
 
 def move_to_device(video_list, device):
     for i, video in enumerate(video_list):
@@ -449,6 +450,9 @@ class Trainer(BaseTrainerDA):
             
             
             final_loss = torch.tensor(0.0, requires_grad=True).to(self.model.device)
+            downstream_weight = self.cfg['model']['loss_weights'][
+                'weight_downstream'
+            ]
             if curr_epoch < warmup_adv:
                 # Apply the source only training 
                 final_loss += losses['downstream_loss'] 
@@ -471,8 +475,6 @@ class Trainer(BaseTrainerDA):
                 if 'None' in adv_method:
                     pass
                 
-                downstream_weight = self.cfg['model']['loss_weights']['weight_downstream']
-
                 if iter_idx % 1 == 0:
                     final_loss += downstream_weight * losses['downstream_loss']    # Downweight this loss to avoid overfitting?
 
@@ -484,8 +486,61 @@ class Trainer(BaseTrainerDA):
             self.optimizer_gen_source.zero_grad(set_to_none=True)
             self.optimizer_gen_source_alignment.zero_grad(set_to_none=True)
             self.optimizer_disc.zero_grad(set_to_none=True)
-            
-            final_loss.backward()
+
+            pcgrad_cosine = torch.zeros((), device=self.model.device)
+            pcgrad_conflict = torch.zeros((), device=self.model.device)
+            pcgrad_coefficient = torch.zeros((), device=self.model.device)
+            pcgrad_active = (
+                self.model.stage2_gradient_surgery
+                and curr_epoch >= max(warmup_adv, self.model.stage2_start_epoch)
+                and losses['stage2_loss_term'].requires_grad
+                and losses['stage2_loss_term'].detach().abs().item() > 0
+            )
+            if pcgrad_active:
+                pcgrad_params = []
+                seen_parameters = set()
+                for group in self.optimizer_gen_source_alignment.param_groups:
+                    for parameter in group['params']:
+                        if id(parameter) not in seen_parameters:
+                            pcgrad_params.append(parameter)
+                            seen_parameters.add(id(parameter))
+                reference_loss = (
+                    downstream_weight * losses['source_downstream_loss']
+                )
+                auxiliary_loss = downstream_weight * losses['stage2_loss_term']
+                reference_gradients = torch.autograd.grad(
+                    reference_loss,
+                    pcgrad_params,
+                    retain_graph=True,
+                    allow_unused=True,
+                )
+                auxiliary_gradients = torch.autograd.grad(
+                    auxiliary_loss,
+                    pcgrad_params,
+                    retain_graph=True,
+                    allow_unused=True,
+                )
+                (
+                    projected_gradients,
+                    pcgrad_cosine,
+                    pcgrad_conflict,
+                    pcgrad_coefficient,
+                ) = project_conflicting_gradients(
+                    reference_gradients, auxiliary_gradients
+                )
+                (final_loss - auxiliary_loss).backward()
+                for parameter, gradient in zip(pcgrad_params, projected_gradients):
+                    if gradient is None:
+                        continue
+                    if parameter.grad is None:
+                        parameter.grad = gradient.clone()
+                    else:
+                        parameter.grad.add_(gradient)
+            else:
+                final_loss.backward()
+            losses['stage2_pcgrad_cosine'] = pcgrad_cosine
+            losses['stage2_pcgrad_conflict'] = pcgrad_conflict
+            losses['stage2_pcgrad_projection_coefficient'] = pcgrad_coefficient
 
             reg_grad_square = torch.zeros(
                 (), device=self.model.device

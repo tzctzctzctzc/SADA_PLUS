@@ -426,6 +426,9 @@ class SADA(nn.Module):
         self.stage2_source_robust_drop_probability = float(
             stage2_cfg.get('source_robust_drop_probability', 0.1)
         )
+        self.stage2_gradient_surgery = bool(
+            stage2_cfg.get('gradient_surgery', False)
+        )
         if self.stage2_semantic_boundary_weighting:
             if self.stage2_semantic_boundary_calibration is None:
                 raise ValueError('Semantic boundary calibration is required')
@@ -553,6 +556,11 @@ class SADA(nn.Module):
             )
         ):
             raise ValueError('Source robust routing requires valid dropout')
+        if (
+            self.stage2_gradient_surgery
+            and self.stage2_routing != 'static_full_dense'
+        ):
+            raise ValueError('Gradient surgery requires static-full routing')
         self.stage2_uses_external_teacher = (
             self.stage2_routing
             not in (
@@ -2779,7 +2787,8 @@ class SADA(nn.Module):
         else:
             loss_reg_weight = cls_loss.detach() / max(reg_loss.item(), 0.01)
 
-        downstream_loss = cls_loss + reg_loss * loss_reg_weight 
+        downstream_loss = cls_loss + reg_loss * loss_reg_weight
+        source_downstream_loss = downstream_loss
 
         target_reg_loss = 0 * decoded_offsets.sum()
         target_reg_positive = 0 * decoded_offsets.sum()
@@ -2851,6 +2860,7 @@ class SADA(nn.Module):
             )
 
         stage2_reg_loss = 0 * decoded_offsets.sum()
+        stage2_loss_term = 0 * decoded_offsets.sum()
         stage2_reg_positive = 0 * decoded_offsets.sum()
         stage2_reg_ratio = 0 * decoded_offsets.sum()
         stage2_active_batch = 0 * decoded_offsets.sum()
@@ -3305,16 +3315,18 @@ class SADA(nn.Module):
             stage2_reg_ratio = (
                 stage2_reg_loss.detach() / reg_loss.detach().clamp_min(1e-8)
             )
-            downstream_loss = (
-                downstream_loss
-                + self.stage2_weight * loss_reg_weight * stage2_reg_loss
+            stage2_loss_term = (
+                self.stage2_weight * loss_reg_weight * stage2_reg_loss
             )
+            downstream_loss = downstream_loss + stage2_loss_term
         
         losses =  {'cls_loss': cls_loss,
                    'reg_loss': reg_loss,
                    'oracle_target_reg_loss': target_reg_loss,
                    'oracle_target_reg_positive': target_reg_positive,
+                   'source_downstream_loss': source_downstream_loss,
                    'stage2_pseudo_reg_loss': stage2_reg_loss,
+                   'stage2_loss_term': stage2_loss_term,
                    'stage2_pseudo_reg_positive': stage2_reg_positive,
                    'stage2_pseudo_active_batch': stage2_active_batch,
                    'stage2_pseudo_to_source_reg_ratio': stage2_reg_ratio,

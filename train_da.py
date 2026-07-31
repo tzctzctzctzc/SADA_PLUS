@@ -523,7 +523,7 @@ def create_argparser():
             'off', 'pseudo', 'alqa', 'static', 'static-full',
             'static-full-stability', 'static-full-semantic', 'output-moment',
             'student-consistency', 'student-mirror', 'student-shift',
-            'source-robust',
+            'source-robust', 'static-full-pcgrad',
         ],
         default='off',
         help='target pseudo-boundary regression after warm-up',
@@ -723,7 +723,7 @@ if __name__ == '__main__':
                     'static_full_dense'
                     if args.stage2 in (
                         'static-full', 'static-full-stability',
-                        'static-full-semantic',
+                        'static-full-semantic', 'static-full-pcgrad',
                     )
                     else (
                         'output_moment'
@@ -788,6 +788,7 @@ if __name__ == '__main__':
         'source_robust_drop_probability': (
             args.stage2_source_robust_drop_probability
         ),
+        'gradient_surgery': args.stage2 == 'static-full-pcgrad',
         'alqa_head_seeds': [
             int(value.strip())
             for value in args.alqa_head_seeds.split(',')
@@ -829,6 +830,8 @@ if __name__ == '__main__':
                                     else (
                                         'sada_source_channel_dropout_gt_diou_v1'
                                         if args.stage2 == 'source-robust'
+                                        else 'sada_static_full_pcgrad_offset_mse_v1'
+                                        if args.stage2 == 'static-full-pcgrad'
                                         else 'sada_static_full_path_offset_mse_v1'
                                     )
                                 )
@@ -870,7 +873,7 @@ if __name__ == '__main__':
                 'static', 'static-full', 'static-full-stability',
                 'static-full-semantic', 'output-moment',
                 'student-consistency', 'student-mirror', 'student-shift',
-                'source-robust'
+                'source-robust', 'static-full-pcgrad'
             )
             else 'source_gt_calibrated_then_frozen'
         ),
@@ -886,7 +889,7 @@ if __name__ == '__main__':
                 'static', 'static-full', 'static-full-stability',
                 'static-full-semantic', 'output-moment',
                 'student-consistency', 'student-mirror', 'student-shift',
-                'source-robust'
+                'source-robust', 'static-full-pcgrad'
             )
             else 'per_video_per_fpn_original_alpha_count'
         ),
@@ -895,7 +898,8 @@ if __name__ == '__main__':
             if args.stage2 in (
                 'static', 'static-full', 'static-full-stability',
                 'static-full-semantic', 'output-moment',
-                'student-consistency', 'student-shift', 'source-robust'
+                'student-consistency', 'student-shift', 'source-robust',
+                'static-full-pcgrad'
             )
             else 'hard_class_agnostic_ranked_by_classification_confidence'
         ),
@@ -905,7 +909,8 @@ if __name__ == '__main__':
                 else 'frozen_warmup'
             )
             if args.stage2 in (
-                'static-full', 'static-full-stability', 'static-full-semantic'
+                'static-full', 'static-full-stability', 'static-full-semantic',
+                'static-full-pcgrad'
             )
             else 'none'
         ),
@@ -922,7 +927,8 @@ if __name__ == '__main__':
             if args.stage2 == 'source-robust'
             else 'offset_mse'
             if args.stage2 in (
-                'static-full', 'static-full-stability', 'static-full-semantic'
+                'static-full', 'static-full-stability', 'static-full-semantic',
+                'static-full-pcgrad'
             )
             else 'diou'
         ),
@@ -934,7 +940,8 @@ if __name__ == '__main__':
         args.stage2 in (
             'static', 'static-full', 'static-full-stability',
             'static-full-semantic', 'output-moment', 'student-consistency',
-            'student-mirror', 'student-shift', 'source-robust'
+            'student-mirror', 'student-shift', 'source-robust',
+            'static-full-pcgrad'
         )
         and args.stage2_loss_weighting != 'anchor_equal'
     ):
