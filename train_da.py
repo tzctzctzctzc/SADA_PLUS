@@ -485,8 +485,27 @@ def main(cfg, resume, project_name='sada', debug=False):
             'Evaluating resumed checkpoint on target test only (epoch=%d)...',
             evaluated_epoch,
         )
-        trainer._test_epoch(
-            evaluated_epoch, val_loader_tgt, mode='test', domain='tgt'
+        ema_metrics = trainer._test_epoch(
+            evaluated_epoch,
+            val_loader_tgt,
+            mode='test',
+            domain='tgt',
+            evaluation_role='ema' if trainer.ema_active else 'student',
+        )
+        student_metrics = ema_metrics
+        if trainer.ema_active:
+            student_metrics = trainer._test_epoch(
+                evaluated_epoch,
+                val_loader_tgt,
+                mode='test',
+                domain='tgt',
+                evaluation_model=trainer.model,
+                evaluation_role='student',
+            )
+        logger.info(
+            'Target-only Average mAP: ema=%.4f student=%.4f',
+            ema_metrics['map_final'],
+            student_metrics['map_final'],
         )
         logger.info('Target-only evaluation finished!')
         print("All done!")

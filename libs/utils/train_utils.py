@@ -13,6 +13,19 @@ import wandb
 from .postprocessing import postprocess_results
 
 
+def _state_tensor_key(tensor):
+    """Identify repeated state-dict entries that share one tensor."""
+    if tensor.numel() == 0:
+        return None
+    return (
+        tensor.device,
+        tensor.dtype,
+        tensor.data_ptr(),
+        tensor.storage_offset(),
+        tuple(tensor.shape),
+    )
+
+
 ################################################################################
 def fix_random_seed(seed, include_cuda=True):
     rng_generator = torch.manual_seed(seed)
@@ -98,7 +111,13 @@ class ModelEma(torch.nn.Module):
 
     def _update(self, model, update_fn):
         with torch.no_grad():
+            seen = set()
             for ema_v, model_v in zip(self.module.state_dict().values(), model.state_dict().values()):
+                key = _state_tensor_key(ema_v)
+                if key is not None and key in seen:
+                    continue
+                if key is not None:
+                    seen.add(key)
                 if self.device is not None:
                     model_v = model_v.to(device=self.device)
                 ema_v.copy_(update_fn(ema_v, model_v))
@@ -123,7 +142,13 @@ class ModelEma2(torch.nn.Module):
 
     def _update(self, model, update_fn):
         with torch.no_grad():
+            seen = set()
             for ema_v, model_v in zip(self.module.state_dict().values(), model.state_dict().values()):
+                key = _state_tensor_key(ema_v)
+                if key is not None and key in seen:
+                    continue
+                if key is not None:
+                    seen.add(key)
                 if self.device is not None:
                     model_v = model_v.to(device=self.device)
                 ema_v.copy_(update_fn(ema_v, model_v))
