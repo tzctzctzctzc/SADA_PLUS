@@ -429,6 +429,9 @@ class SADA(nn.Module):
         self.stage2_gradient_surgery = bool(
             stage2_cfg.get('gradient_surgery', False)
         )
+        self.stage2_gradient_surgery_scope = stage2_cfg.get(
+            'gradient_surgery_scope', 'all'
+        )
         if self.stage2_semantic_boundary_weighting:
             if self.stage2_semantic_boundary_calibration is None:
                 raise ValueError('Semantic boundary calibration is required')
@@ -558,7 +561,10 @@ class SADA(nn.Module):
             raise ValueError('Source robust routing requires valid dropout')
         if (
             self.stage2_gradient_surgery
-            and self.stage2_routing != 'static_full_dense'
+            and (
+                self.stage2_routing != 'static_full_dense'
+                or self.stage2_gradient_surgery_scope not in ('all', 'reg_head')
+            )
         ):
             raise ValueError('Gradient surgery requires static-full routing')
         self.stage2_uses_external_teacher = (

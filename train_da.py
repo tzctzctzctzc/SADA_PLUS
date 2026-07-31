@@ -579,6 +579,10 @@ def create_argparser():
         help='whole-channel source-FPN dropout for source-robust Stage 2',
     )
     parser.add_argument(
+        '--stage2-pcgrad-scope', choices=('all', 'reg_head'), default='all',
+        help='parameters that receive projected pseudo-boundary gradients',
+    )
+    parser.add_argument(
         '--stage2-static-teacher', choices=('frozen', 'ema'), default='frozen',
         help='teacher path for static-full Stage 2',
     )
@@ -789,6 +793,7 @@ if __name__ == '__main__':
             args.stage2_source_robust_drop_probability
         ),
         'gradient_surgery': args.stage2 == 'static-full-pcgrad',
+        'gradient_surgery_scope': args.stage2_pcgrad_scope,
         'alqa_head_seeds': [
             int(value.strip())
             for value in args.alqa_head_seeds.split(',')
@@ -1008,6 +1013,11 @@ if __name__ == '__main__':
         and not 0 < args.stage2_source_robust_drop_probability < 1
     ):
         raise ValueError('Source robust dropout probability must be in (0, 1)')
+    if (
+        args.stage2 != 'static-full-pcgrad'
+        and args.stage2_pcgrad_scope != 'all'
+    ):
+        raise ValueError('PCGrad scope requires static-full-pcgrad Stage 2')
     if (
         (
             args.stage2 == 'alqa'

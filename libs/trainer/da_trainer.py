@@ -497,13 +497,19 @@ class Trainer(BaseTrainerDA):
                 and losses['stage2_loss_term'].detach().abs().item() > 0
             )
             if pcgrad_active:
-                pcgrad_params = []
-                seen_parameters = set()
-                for group in self.optimizer_gen_source_alignment.param_groups:
-                    for parameter in group['params']:
-                        if id(parameter) not in seen_parameters:
-                            pcgrad_params.append(parameter)
-                            seen_parameters.add(id(parameter))
+                if self.model.stage2_gradient_surgery_scope == 'reg_head':
+                    pcgrad_params = [
+                        parameter for parameter in self.model.reg_head_target.parameters()
+                        if parameter.requires_grad
+                    ]
+                else:
+                    pcgrad_params = []
+                    seen_parameters = set()
+                    for group in self.optimizer_gen_source_alignment.param_groups:
+                        for parameter in group['params']:
+                            if id(parameter) not in seen_parameters:
+                                pcgrad_params.append(parameter)
+                                seen_parameters.add(id(parameter))
                 reference_loss = (
                     downstream_weight * losses['source_downstream_loss']
                 )
