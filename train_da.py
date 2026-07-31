@@ -476,6 +476,21 @@ def main(cfg, resume, project_name='sada', debug=False):
                         scheduler_gen_source_alignment=scheduler_gen_source_alignment,
                         scheduler_disc=scheduler_disc)
     trainer.start_epoch = args.start_epoch
+
+    if args.evaluate_target_only:
+        if not resume:
+            raise ValueError('--evaluate-target-only requires --resume')
+        evaluated_epoch = args.start_epoch - 1
+        logger.info(
+            'Evaluating resumed checkpoint on target test only (epoch=%d)...',
+            evaluated_epoch,
+        )
+        trainer._test_epoch(
+            evaluated_epoch, val_loader_tgt, mode='test', domain='tgt'
+        )
+        logger.info('Target-only evaluation finished!')
+        print("All done!")
+        return
     
     # ----------------------------------------------- TRAINING -----------------------------------------------
     logger.info(f"Starting training (epochs={cfg['opt']['epochs']}, early_stop={es})...")
@@ -509,6 +524,10 @@ def create_argparser():
                         help='gpu')
     parser.add_argument('-d', '--debug', action='store_true',
                         help='debug flag')
+    parser.add_argument(
+        '--evaluate-target-only', action='store_true',
+        help='restore a checkpoint, evaluate target test mAP, and exit without training',
+    )
     parser.add_argument(
         '--stage1', choices=['off', 'shift', 'context'], default='off',
         help='enable Stage 1 target routing perturbation',
