@@ -1,0 +1,19 @@
+{
+  "audit": "source_train_crop_boundary_validity",
+  "videos": 124,
+  "repeats": 10,
+  "sample_count": 1240,
+  "retained_segments": 69463,
+  "crop_sample_rate": 0.9540322580645161,
+  "left_crop_sample_rate": 0.8556451612903225,
+  "right_crop_sample_rate": 0.8612903225806452,
+  "boundary_patterns": {
+    "both_valid": 68845,
+    "start_truncated": 376,
+    "end_truncated": 242,
+    "both_truncated": 0
+  },
+  "invalid_start_rate": 0.005412953658782373,
+  "invalid_end_rate": 0.0034838691101737617,
+  "any_invalid_rate": 0.008896822768956135
+}

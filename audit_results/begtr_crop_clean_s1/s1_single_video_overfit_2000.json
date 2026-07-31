@@ -1,0 +1,47 @@
+{
+  "audit": "single_uncropped_source_video_overfit",
+  "checkpoint_epoch": 10,
+  "video_id": "P03_02",
+  "segments": 115,
+  "steps": 2000,
+  "learning_rate": 0.001,
+  "warmup_steps": 25,
+  "loss": {
+    "before": 0.7560034990310669,
+    "best": 0.04871072992682457,
+    "after": 0.048710741102695465
+  },
+  "peak": {
+    "before": {
+      "start_count": 150,
+      "end_count": 150,
+      "start_normalized_error": 0.5237530307428659,
+      "end_normalized_error": 0.4730643750421397
+    },
+    "after": {
+      "start_count": 150,
+      "end_count": 150,
+      "start_normalized_error": 0.22788366311217922,
+      "end_normalized_error": 0.18080410743060668
+    }
+  },
+  "trainable_parameters": 1577986,
+  "base_parameters_with_gradients": 0,
+  "history": [
+    {
+      "step": 1,
+      "loss": 0.7560034990310669,
+      "lr": 4e-05
+    },
+    {
+      "step": 25,
+      "loss": 0.19983573257923126,
+      "lr": 0.001
+    },
+    {
+      "step": 2000,
+      "loss": 0.15717457234859467,
+      "lr": 0.001
+    }
+  ]
+}

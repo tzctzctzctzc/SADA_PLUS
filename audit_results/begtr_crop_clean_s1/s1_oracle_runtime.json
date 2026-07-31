@@ -1,0 +1,28 @@
+{
+  "audit": "real_runtime_same_selection_oracle_equivalence",
+  "checkpoint_epoch": 10,
+  "source_video": "P03_02",
+  "target_video": "P01_03",
+  "selected_anchors": 28,
+  "masks_exactly_equal": true,
+  "common_loss_max_abs_differences": {
+    "aux_boundary_loss": 0.0,
+    "cls_loss": 0.0,
+    "reg_loss": 0.0
+  },
+  "selected_target_mean_abs_difference": 0.48179149627685547,
+  "oracle_regression_loss": {
+    "clean_pseudo": 8.40772447331805e-17,
+    "same_selection": 0.2883027493953705
+  },
+  "backward": {
+    "clean_pseudo": {
+      "parameters_with_gradients": 176,
+      "finite": true
+    },
+    "same_selection": {
+      "parameters_with_gradients": 176,
+      "finite": true
+    }
+  }
+}
