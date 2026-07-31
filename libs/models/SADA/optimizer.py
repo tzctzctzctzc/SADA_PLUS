@@ -122,7 +122,7 @@ def make_scheduler(
         warmup_steps = warmup_epochs * num_iters_per_epoch
 
         # get eta min
-        eta_min = optimizer_config["eta_min"]
+        eta_min = float(optimizer_config["eta_min"])
 
         # with linear warmup: call our custom schedulers
         if optimizer_config["schedule_type"] == "cosine":
@@ -153,7 +153,7 @@ def make_scheduler(
         max_steps = max_epochs * num_iters_per_epoch
 
         # get eta min
-        eta_min = optimizer_config["eta_min"]
+        eta_min = float(optimizer_config["eta_min"])
 
         # without warmup: call default schedulers
         if optimizer_config["schedule_type"] == "cosine":
