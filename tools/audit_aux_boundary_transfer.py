@@ -391,6 +391,43 @@ def detection_metrics(cfg, dataset, records, segments):
     }
 
 
+def official_detection_metrics(cfg, dataset, model, device):
+    """Evaluate the unchanged SADA inference path on one source checkpoint."""
+    results = {
+        key: [] for key in ("video-id", "t-start", "t-end", "label", "score")
+    }
+    with torch.no_grad():
+        for index in range(len(dataset)):
+            batch = [move_video(dataset[index], device)]
+            source_output, _ = model(
+                video_list_src=batch, video_list_tgt=batch, mode="test"
+            )
+            output = source_output[0]
+            count = output["segments"].shape[0]
+            if not count:
+                continue
+            results["video-id"].extend([output["video_id"]] * count)
+            results["t-start"].append(output["segments"][:, 0])
+            results["t-end"].append(output["segments"][:, 1])
+            results["label"].append(output["labels"])
+            results["score"].append(output["scores"])
+    for key in ("t-start", "t-end", "label", "score"):
+        results[key] = torch.cat(results[key]).numpy()
+    results["video-id"] = np.asarray(results["video-id"])
+    evaluator = ANETdetection(
+        dataset.json_file,
+        dataset.split,
+        tiou_thresholds=dataset.get_attributes()["tiou_thresholds"],
+        action_subsampling=cfg["dataset"].get("action_subsampling", "all"),
+    )
+    evaluated = evaluator.evaluate(results, verbose=False)
+    return {
+        "tiou_thresholds": evaluator.tiou_thresholds.tolist(),
+        "map_by_tiou": evaluated[0].tolist(),
+        "average_map": float(evaluated[1]),
+    }
+
+
 def parameter_grid(args):
     keys = (
         "search_radius_ratio", "absolute_threshold", "gain_threshold",
@@ -429,6 +466,9 @@ def source_select(args):
     baseline_segments = [record["segment"] for record in records]
     baseline_detection = detection_metrics(
         cfg, source_val, records, baseline_segments
+    )
+    official_source_detection = official_detection_metrics(
+        cfg, source_val, model, args.device
     )
     screened = []
     for parameters in parameter_grid(args):
@@ -483,6 +523,7 @@ def source_select(args):
         "candidate_count": len(screened),
         "protected_candidate_count": len(eligible),
         "baseline_detection": baseline_detection,
+        "official_source_detection": official_source_detection,
         "finalists": finalists,
         "selected": selected,
         "calibration_output": args.calibration_output,
