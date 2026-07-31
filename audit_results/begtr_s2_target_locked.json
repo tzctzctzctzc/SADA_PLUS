@@ -1,0 +1,118 @@
+{
+  "audit": "locked_aux_boundary_target_feasibility",
+  "checkpoint_epoch": 15,
+  "locked_calibration": {
+    "version": 1,
+    "parameters": {
+      "search_radius_ratio": 0.2,
+      "absolute_threshold": 0.2,
+      "gain_threshold": 0.05,
+      "margin_threshold": 0.0,
+      "max_shift_ratio": 0.2,
+      "min_duration_ratio": 0.5,
+      "max_duration_ratio": 1.5
+    },
+    "levels": [
+      0,
+      1,
+      2
+    ],
+    "config": "model_results/begtr_s2_w010_seed123/260731_184410_797/config.json",
+    "checkpoint": "model_results/begtr_s2_w010_seed123/260731_184410_797/saved_ckpt/latest_ckpt/checkpoint-epoch15.pt",
+    "checkpoint_epoch": 15,
+    "model_kind": "ema",
+    "selection": {
+      "source_only": true,
+      "protection": "iou70 non-decrease and high-quality mean delta >= -0.002",
+      "screening_metric": "source_val_mean_delta_iou",
+      "final_metric": "source_val_fixed_proposal_average_map"
+    }
+  },
+  "target_val_videos": 54,
+  "boundary_map_statistics": {
+    "map_mean": 0.06632048398670223,
+    "mean_temporal_std": 0.03292932755164342,
+    "source_gt_peak": null
+  },
+  "proposal": {
+    "proposals": 4427,
+    "mean_iou": {
+      "baseline": 0.4288418952241853,
+      "refined": 0.42892280525353493,
+      "delta": 8.09100293496513e-05
+    },
+    "win_rate": 0.0018070928393946238,
+    "loss_rate": 0.0009035464196973119,
+    "tie_rate": 0.997289360740908,
+    "iou50_rate": {
+      "baseline": 0.4824937881183646,
+      "refined": 0.4824937881183646
+    },
+    "iou70_rate": {
+      "baseline": 0.252767110910323,
+      "refined": 0.252767110910323
+    },
+    "high_quality_iou70": {
+      "n": 1119,
+      "mean_delta_iou": 8.426152562541126e-05,
+      "loss_rate": 0.0017873100983020554
+    },
+    "class_correct_rate": 0.6311271741585724,
+    "normalized_left_error": {
+      "baseline": 64.81114861965045,
+      "refined": 64.81137793851764,
+      "delta": 0.0002293188671901458
+    },
+    "normalized_right_error": {
+      "baseline": 64.94199447061358,
+      "refined": 64.94217383311046,
+      "delta": 0.0001793624968834893
+    },
+    "left_accepted_rate": 0.00045177320984865596,
+    "right_accepted_rate": 0.002484752654167608
+  },
+  "detection": {
+    "baseline": {
+      "tiou_thresholds": [
+        0.1,
+        0.2,
+        0.30000000000000004,
+        0.4,
+        0.5
+      ],
+      "map_by_tiou": [
+        0.3815951325785164,
+        0.36445677077354344,
+        0.3387856173046096,
+        0.29328610090703783,
+        0.24042973761931696
+      ],
+      "average_map": 0.32371067183660485
+    },
+    "refined": {
+      "tiou_thresholds": [
+        0.1,
+        0.2,
+        0.30000000000000004,
+        0.4,
+        0.5
+      ],
+      "map_by_tiou": [
+        0.3815951325785164,
+        0.36445677077354344,
+        0.3387856173046096,
+        0.29246526656063293,
+        0.24042973761931696
+      ],
+      "average_map": 0.32354650496732384
+    },
+    "delta_average_map": -0.00016416686928100166
+  },
+  "protocol": {
+    "proposal_set": "fixed post-hard-class-agnostic-NMS proposals",
+    "classification_labels_scores": "unchanged",
+    "boundary_map": "same FPN level as each retained proposal",
+    "second_nms": "none",
+    "target_gt_usage": "metrics only after locked refinement"
+  }
+}

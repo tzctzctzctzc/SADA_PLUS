@@ -1,0 +1,794 @@
+{
+  "audit": "source_selected_aux_boundary_transfer",
+  "checkpoint_epoch": 15,
+  "source_val_videos": 33,
+  "source_val_proposals": 1881,
+  "boundary_map_statistics": {
+    "map_mean": 0.06832430897412275,
+    "mean_temporal_std": 0.03655773764382107,
+    "source_gt_peak": {
+      "start_count": 2330,
+      "end_count": 2330,
+      "start_normalized_error": 0.31380919426266696,
+      "end_normalized_error": 0.3009808579524876,
+      "mean_peak_gain_over_nearest_gt_cell": 0.0181385472169058
+    }
+  },
+  "candidate_count": 576,
+  "protected_candidate_count": 570,
+  "baseline_detection": {
+    "tiou_thresholds": [
+      0.1,
+      0.2,
+      0.30000000000000004,
+      0.4,
+      0.5
+    ],
+    "map_by_tiou": [
+      0.49196903303128037,
+      0.47735232379802406,
+      0.4463105618337099,
+      0.40562336096190876,
+      0.32824648998140765
+    ],
+    "average_map": 0.42990035392126613
+  },
+  "official_source_detection": {
+    "tiou_thresholds": [
+      0.1,
+      0.2,
+      0.30000000000000004,
+      0.4,
+      0.5
+    ],
+    "map_by_tiou": [
+      0.6336855553164893,
+      0.6196576174440753,
+      0.5813719610321186,
+      0.527505542499223,
+      0.43005282657153066
+    ],
+    "average_map": 0.5584547005726874
+  },
+  "finalists": [
+    {
+      "parameters": {
+        "search_radius_ratio": 0.2,
+        "absolute_threshold": 0.2,
+        "gain_threshold": 0.05,
+        "margin_threshold": 0.0,
+        "max_shift_ratio": 0.2,
+        "min_duration_ratio": 0.5,
+        "max_duration_ratio": 1.5
+      },
+      "proposal": {
+        "proposals": 1881,
+        "mean_iou": {
+          "baseline": 0.4481341033347856,
+          "refined": 0.4482655109081849,
+          "delta": 0.00013140757339929788
+        },
+        "win_rate": 0.002126528442317916,
+        "loss_rate": 0.001594896331738437,
+        "tie_rate": 0.9962785752259437,
+        "iou50_rate": {
+          "baseline": 0.5050505050505051,
+          "refined": 0.5055821371610846
+        },
+        "iou70_rate": {
+          "baseline": 0.27804359383306754,
+          "refined": 0.27910685805422647
+        },
+        "high_quality_iou70": {
+          "n": 523,
+          "mean_delta_iou": 5.766743683678242e-05,
+          "loss_rate": 0.0
+        },
+        "class_correct_rate": 0.6469962785752259,
+        "normalized_left_error": {
+          "baseline": 36.89964800742435,
+          "refined": 36.89956019346902,
+          "delta": -8.781395532244972e-05
+        },
+        "normalized_right_error": {
+          "baseline": 37.057117927211486,
+          "refined": 37.05722540959897,
+          "delta": 0.00010748238747557906
+        },
+        "left_accepted_rate": 0.001063264221158958,
+        "right_accepted_rate": 0.002658160552897395
+      },
+      "passes_high_quality_protection": true,
+      "detection": {
+        "tiou_thresholds": [
+          0.1,
+          0.2,
+          0.30000000000000004,
+          0.4,
+          0.5
+        ],
+        "map_by_tiou": [
+          0.49196903303128037,
+          0.47735232379802406,
+          0.4463105618337099,
+          0.40562336096190876,
+          0.32849966949909104
+        ],
+        "average_map": 0.42995098982480284,
+        "delta_average_map": 5.063590353671099e-05
+      }
+    },
+    {
+      "parameters": {
+        "search_radius_ratio": 0.2,
+        "absolute_threshold": 0.2,
+        "gain_threshold": 0.05,
+        "margin_threshold": 0.05,
+        "max_shift_ratio": 0.2,
+        "min_duration_ratio": 0.5,
+        "max_duration_ratio": 1.5
+      },
+      "proposal": {
+        "proposals": 1881,
+        "mean_iou": {
+          "baseline": 0.4481341033347856,
+          "refined": 0.4482655109081849,
+          "delta": 0.00013140757339929788
+        },
+        "win_rate": 0.002126528442317916,
+        "loss_rate": 0.001594896331738437,
+        "tie_rate": 0.9962785752259437,
+        "iou50_rate": {
+          "baseline": 0.5050505050505051,
+          "refined": 0.5055821371610846
+        },
+        "iou70_rate": {
+          "baseline": 0.27804359383306754,
+          "refined": 0.27910685805422647
+        },
+        "high_quality_iou70": {
+          "n": 523,
+          "mean_delta_iou": 5.766743683678242e-05,
+          "loss_rate": 0.0
+        },
+        "class_correct_rate": 0.6469962785752259,
+        "normalized_left_error": {
+          "baseline": 36.89964800742435,
+          "refined": 36.89956019346902,
+          "delta": -8.781395532244972e-05
+        },
+        "normalized_right_error": {
+          "baseline": 37.057117927211486,
+          "refined": 37.05722540959897,
+          "delta": 0.00010748238747557906
+        },
+        "left_accepted_rate": 0.001063264221158958,
+        "right_accepted_rate": 0.002658160552897395
+      },
+      "passes_high_quality_protection": true,
+      "detection": {
+        "tiou_thresholds": [
+          0.1,
+          0.2,
+          0.30000000000000004,
+          0.4,
+          0.5
+        ],
+        "map_by_tiou": [
+          0.49196903303128037,
+          0.47735232379802406,
+          0.4463105618337099,
+          0.40562336096190876,
+          0.32849966949909104
+        ],
+        "average_map": 0.42995098982480284,
+        "delta_average_map": 5.063590353671099e-05
+      }
+    },
+    {
+      "parameters": {
+        "search_radius_ratio": 0.2,
+        "absolute_threshold": 0.2,
+        "gain_threshold": 0.0,
+        "margin_threshold": 0.05,
+        "max_shift_ratio": 0.2,
+        "min_duration_ratio": 0.5,
+        "max_duration_ratio": 1.5
+      },
+      "proposal": {
+        "proposals": 1881,
+        "mean_iou": {
+          "baseline": 0.4481341033347856,
+          "refined": 0.44825047470967383,
+          "delta": 0.00011637137488821983
+        },
+        "win_rate": 0.004784688995215311,
+        "loss_rate": 0.003189792663476874,
+        "tie_rate": 0.9920255183413078,
+        "iou50_rate": {
+          "baseline": 0.5050505050505051,
+          "refined": 0.5050505050505051
+        },
+        "iou70_rate": {
+          "baseline": 0.27804359383306754,
+          "refined": 0.27910685805422647
+        },
+        "high_quality_iou70": {
+          "n": 523,
+          "mean_delta_iou": 0.0001027661573362624,
+          "loss_rate": 0.0038240917782026767
+        },
+        "class_correct_rate": 0.6469962785752259,
+        "normalized_left_error": {
+          "baseline": 36.89964800742435,
+          "refined": 36.89956019346902,
+          "delta": -8.781395532244972e-05
+        },
+        "normalized_right_error": {
+          "baseline": 37.057117927211486,
+          "refined": 37.057069142656914,
+          "delta": -4.878455457545427e-05
+        },
+        "left_accepted_rate": 0.001063264221158958,
+        "right_accepted_rate": 0.006911217437533227
+      },
+      "passes_high_quality_protection": true,
+      "detection": {
+        "tiou_thresholds": [
+          0.1,
+          0.2,
+          0.30000000000000004,
+          0.4,
+          0.5
+        ],
+        "map_by_tiou": [
+          0.49156215516435475,
+          0.47735232379802406,
+          0.4469632360504283,
+          0.40562336096190876,
+          0.3278031030557583
+        ],
+        "average_map": 0.42986083580609485,
+        "delta_average_map": -3.951811517127757e-05
+      }
+    },
+    {
+      "parameters": {
+        "search_radius_ratio": 0.2,
+        "absolute_threshold": 0.2,
+        "gain_threshold": 0.0,
+        "margin_threshold": 0.1,
+        "max_shift_ratio": 0.2,
+        "min_duration_ratio": 0.5,
+        "max_duration_ratio": 1.5
+      },
+      "proposal": {
+        "proposals": 1881,
+        "mean_iou": {
+          "baseline": 0.4481341033347856,
+          "refined": 0.4481501373961708,
+          "delta": 1.6034061385240406e-05
+        },
+        "win_rate": 0.000531632110579479,
+        "loss_rate": 0.0,
+        "tie_rate": 0.9994683678894205,
+        "iou50_rate": {
+          "baseline": 0.5050505050505051,
+          "refined": 0.5050505050505051
+        },
+        "iou70_rate": {
+          "baseline": 0.27804359383306754,
+          "refined": 0.27804359383306754
+        },
+        "high_quality_iou70": {
+          "n": 523,
+          "mean_delta_iou": 5.766743683678242e-05,
+          "loss_rate": 0.0
+        },
+        "class_correct_rate": 0.6469962785752259,
+        "normalized_left_error": {
+          "baseline": 36.89964800742435,
+          "refined": 36.89961865885634,
+          "delta": -2.9348568010476068e-05
+        },
+        "normalized_right_error": {
+          "baseline": 37.057117927211486,
+          "refined": 37.057117927211486,
+          "delta": 0.0
+        },
+        "left_accepted_rate": 0.000531632110579479,
+        "right_accepted_rate": 0.0
+      },
+      "passes_high_quality_protection": true,
+      "detection": {
+        "tiou_thresholds": [
+          0.1,
+          0.2,
+          0.30000000000000004,
+          0.4,
+          0.5
+        ],
+        "map_by_tiou": [
+          0.49196903303128037,
+          0.47735232379802406,
+          0.4463105618337099,
+          0.40562336096190876,
+          0.32824648998140765
+        ],
+        "average_map": 0.42990035392126613,
+        "delta_average_map": 0.0
+      }
+    },
+    {
+      "parameters": {
+        "search_radius_ratio": 0.2,
+        "absolute_threshold": 0.2,
+        "gain_threshold": 0.05,
+        "margin_threshold": 0.1,
+        "max_shift_ratio": 0.2,
+        "min_duration_ratio": 0.5,
+        "max_duration_ratio": 1.5
+      },
+      "proposal": {
+        "proposals": 1881,
+        "mean_iou": {
+          "baseline": 0.4481341033347856,
+          "refined": 0.4481501373961708,
+          "delta": 1.6034061385240406e-05
+        },
+        "win_rate": 0.000531632110579479,
+        "loss_rate": 0.0,
+        "tie_rate": 0.9994683678894205,
+        "iou50_rate": {
+          "baseline": 0.5050505050505051,
+          "refined": 0.5050505050505051
+        },
+        "iou70_rate": {
+          "baseline": 0.27804359383306754,
+          "refined": 0.27804359383306754
+        },
+        "high_quality_iou70": {
+          "n": 523,
+          "mean_delta_iou": 5.766743683678242e-05,
+          "loss_rate": 0.0
+        },
+        "class_correct_rate": 0.6469962785752259,
+        "normalized_left_error": {
+          "baseline": 36.89964800742435,
+          "refined": 36.89961865885634,
+          "delta": -2.9348568010476068e-05
+        },
+        "normalized_right_error": {
+          "baseline": 37.057117927211486,
+          "refined": 37.057117927211486,
+          "delta": 0.0
+        },
+        "left_accepted_rate": 0.000531632110579479,
+        "right_accepted_rate": 0.0
+      },
+      "passes_high_quality_protection": true,
+      "detection": {
+        "tiou_thresholds": [
+          0.1,
+          0.2,
+          0.30000000000000004,
+          0.4,
+          0.5
+        ],
+        "map_by_tiou": [
+          0.49196903303128037,
+          0.47735232379802406,
+          0.4463105618337099,
+          0.40562336096190876,
+          0.32824648998140765
+        ],
+        "average_map": 0.42990035392126613,
+        "delta_average_map": 0.0
+      }
+    },
+    {
+      "parameters": {
+        "search_radius_ratio": 0.2,
+        "absolute_threshold": 0.2,
+        "gain_threshold": 0.1,
+        "margin_threshold": 0.0,
+        "max_shift_ratio": 0.2,
+        "min_duration_ratio": 0.5,
+        "max_duration_ratio": 1.5
+      },
+      "proposal": {
+        "proposals": 1881,
+        "mean_iou": {
+          "baseline": 0.4481341033347856,
+          "refined": 0.4481501373961708,
+          "delta": 1.6034061385240406e-05
+        },
+        "win_rate": 0.000531632110579479,
+        "loss_rate": 0.0,
+        "tie_rate": 0.9994683678894205,
+        "iou50_rate": {
+          "baseline": 0.5050505050505051,
+          "refined": 0.5050505050505051
+        },
+        "iou70_rate": {
+          "baseline": 0.27804359383306754,
+          "refined": 0.27804359383306754
+        },
+        "high_quality_iou70": {
+          "n": 523,
+          "mean_delta_iou": 5.766743683678242e-05,
+          "loss_rate": 0.0
+        },
+        "class_correct_rate": 0.6469962785752259,
+        "normalized_left_error": {
+          "baseline": 36.89964800742435,
+          "refined": 36.89961865885634,
+          "delta": -2.9348568010476068e-05
+        },
+        "normalized_right_error": {
+          "baseline": 37.057117927211486,
+          "refined": 37.057117927211486,
+          "delta": 0.0
+        },
+        "left_accepted_rate": 0.000531632110579479,
+        "right_accepted_rate": 0.0
+      },
+      "passes_high_quality_protection": true,
+      "detection": {
+        "tiou_thresholds": [
+          0.1,
+          0.2,
+          0.30000000000000004,
+          0.4,
+          0.5
+        ],
+        "map_by_tiou": [
+          0.49196903303128037,
+          0.47735232379802406,
+          0.4463105618337099,
+          0.40562336096190876,
+          0.32824648998140765
+        ],
+        "average_map": 0.42990035392126613,
+        "delta_average_map": 0.0
+      }
+    },
+    {
+      "parameters": {
+        "search_radius_ratio": 0.2,
+        "absolute_threshold": 0.2,
+        "gain_threshold": 0.1,
+        "margin_threshold": 0.05,
+        "max_shift_ratio": 0.2,
+        "min_duration_ratio": 0.5,
+        "max_duration_ratio": 1.5
+      },
+      "proposal": {
+        "proposals": 1881,
+        "mean_iou": {
+          "baseline": 0.4481341033347856,
+          "refined": 0.4481501373961708,
+          "delta": 1.6034061385240406e-05
+        },
+        "win_rate": 0.000531632110579479,
+        "loss_rate": 0.0,
+        "tie_rate": 0.9994683678894205,
+        "iou50_rate": {
+          "baseline": 0.5050505050505051,
+          "refined": 0.5050505050505051
+        },
+        "iou70_rate": {
+          "baseline": 0.27804359383306754,
+          "refined": 0.27804359383306754
+        },
+        "high_quality_iou70": {
+          "n": 523,
+          "mean_delta_iou": 5.766743683678242e-05,
+          "loss_rate": 0.0
+        },
+        "class_correct_rate": 0.6469962785752259,
+        "normalized_left_error": {
+          "baseline": 36.89964800742435,
+          "refined": 36.89961865885634,
+          "delta": -2.9348568010476068e-05
+        },
+        "normalized_right_error": {
+          "baseline": 37.057117927211486,
+          "refined": 37.057117927211486,
+          "delta": 0.0
+        },
+        "left_accepted_rate": 0.000531632110579479,
+        "right_accepted_rate": 0.0
+      },
+      "passes_high_quality_protection": true,
+      "detection": {
+        "tiou_thresholds": [
+          0.1,
+          0.2,
+          0.30000000000000004,
+          0.4,
+          0.5
+        ],
+        "map_by_tiou": [
+          0.49196903303128037,
+          0.47735232379802406,
+          0.4463105618337099,
+          0.40562336096190876,
+          0.32824648998140765
+        ],
+        "average_map": 0.42990035392126613,
+        "delta_average_map": 0.0
+      }
+    },
+    {
+      "parameters": {
+        "search_radius_ratio": 0.2,
+        "absolute_threshold": 0.2,
+        "gain_threshold": 0.1,
+        "margin_threshold": 0.1,
+        "max_shift_ratio": 0.2,
+        "min_duration_ratio": 0.5,
+        "max_duration_ratio": 1.5
+      },
+      "proposal": {
+        "proposals": 1881,
+        "mean_iou": {
+          "baseline": 0.4481341033347856,
+          "refined": 0.4481501373961708,
+          "delta": 1.6034061385240406e-05
+        },
+        "win_rate": 0.000531632110579479,
+        "loss_rate": 0.0,
+        "tie_rate": 0.9994683678894205,
+        "iou50_rate": {
+          "baseline": 0.5050505050505051,
+          "refined": 0.5050505050505051
+        },
+        "iou70_rate": {
+          "baseline": 0.27804359383306754,
+          "refined": 0.27804359383306754
+        },
+        "high_quality_iou70": {
+          "n": 523,
+          "mean_delta_iou": 5.766743683678242e-05,
+          "loss_rate": 0.0
+        },
+        "class_correct_rate": 0.6469962785752259,
+        "normalized_left_error": {
+          "baseline": 36.89964800742435,
+          "refined": 36.89961865885634,
+          "delta": -2.9348568010476068e-05
+        },
+        "normalized_right_error": {
+          "baseline": 37.057117927211486,
+          "refined": 37.057117927211486,
+          "delta": 0.0
+        },
+        "left_accepted_rate": 0.000531632110579479,
+        "right_accepted_rate": 0.0
+      },
+      "passes_high_quality_protection": true,
+      "detection": {
+        "tiou_thresholds": [
+          0.1,
+          0.2,
+          0.30000000000000004,
+          0.4,
+          0.5
+        ],
+        "map_by_tiou": [
+          0.49196903303128037,
+          0.47735232379802406,
+          0.4463105618337099,
+          0.40562336096190876,
+          0.32824648998140765
+        ],
+        "average_map": 0.42990035392126613,
+        "delta_average_map": 0.0
+      }
+    },
+    {
+      "parameters": {
+        "search_radius_ratio": 0.2,
+        "absolute_threshold": 0.2,
+        "gain_threshold": 0.0,
+        "margin_threshold": 0.05,
+        "max_shift_ratio": 0.05,
+        "min_duration_ratio": 0.5,
+        "max_duration_ratio": 1.5
+      },
+      "proposal": {
+        "proposals": 1881,
+        "mean_iou": {
+          "baseline": 0.4481341033347856,
+          "refined": 0.44814790927251463,
+          "delta": 1.3805937729003516e-05
+        },
+        "win_rate": 0.000531632110579479,
+        "loss_rate": 0.0,
+        "tie_rate": 0.9994683678894205,
+        "iou50_rate": {
+          "baseline": 0.5050505050505051,
+          "refined": 0.5050505050505051
+        },
+        "iou70_rate": {
+          "baseline": 0.27804359383306754,
+          "refined": 0.27804359383306754
+        },
+        "high_quality_iou70": {
+          "n": 523,
+          "mean_delta_iou": 4.965386016874878e-05,
+          "loss_rate": 0.0
+        },
+        "class_correct_rate": 0.6469962785752259,
+        "normalized_left_error": {
+          "baseline": 36.89964800742435,
+          "refined": 36.89964800742435,
+          "delta": 0.0
+        },
+        "normalized_right_error": {
+          "baseline": 37.057117927211486,
+          "refined": 37.05709128282017,
+          "delta": -2.66443913223871e-05
+        },
+        "left_accepted_rate": 0.0,
+        "right_accepted_rate": 0.000531632110579479
+      },
+      "passes_high_quality_protection": true,
+      "detection": {
+        "tiou_thresholds": [
+          0.1,
+          0.2,
+          0.30000000000000004,
+          0.4,
+          0.5
+        ],
+        "map_by_tiou": [
+          0.49196903303128037,
+          0.47735232379802406,
+          0.4463105618337099,
+          0.40562336096190876,
+          0.32824648998140765
+        ],
+        "average_map": 0.42990035392126613,
+        "delta_average_map": 0.0
+      }
+    },
+    {
+      "parameters": {
+        "search_radius_ratio": 0.2,
+        "absolute_threshold": 0.1,
+        "gain_threshold": 0.0,
+        "margin_threshold": 0.1,
+        "max_shift_ratio": 0.2,
+        "min_duration_ratio": 0.5,
+        "max_duration_ratio": 1.5
+      },
+      "proposal": {
+        "proposals": 1881,
+        "mean_iou": {
+          "baseline": 0.4481341033347856,
+          "refined": 0.4481409161361771,
+          "delta": 6.812801391504217e-06
+        },
+        "win_rate": 0.000531632110579479,
+        "loss_rate": 0.000531632110579479,
+        "tie_rate": 0.998936735778841,
+        "iou50_rate": {
+          "baseline": 0.5050505050505051,
+          "refined": 0.5050505050505051
+        },
+        "iou70_rate": {
+          "baseline": 0.27804359383306754,
+          "refined": 0.27804359383306754
+        },
+        "high_quality_iou70": {
+          "n": 523,
+          "mean_delta_iou": 5.766743683678242e-05,
+          "loss_rate": 0.0
+        },
+        "class_correct_rate": 0.6469962785752259,
+        "normalized_left_error": {
+          "baseline": 36.89964800742435,
+          "refined": 36.89961791473636,
+          "delta": -3.009268798605591e-05
+        },
+        "normalized_right_error": {
+          "baseline": 37.057117927211486,
+          "refined": 37.057117927211486,
+          "delta": 0.0
+        },
+        "left_accepted_rate": 0.001063264221158958,
+        "right_accepted_rate": 0.0
+      },
+      "passes_high_quality_protection": true,
+      "detection": {
+        "tiou_thresholds": [
+          0.1,
+          0.2,
+          0.30000000000000004,
+          0.4,
+          0.5
+        ],
+        "map_by_tiou": [
+          0.49196903303128037,
+          0.47735232379802406,
+          0.4463105618337099,
+          0.40562336096190876,
+          0.32824648998140765
+        ],
+        "average_map": 0.42990035392126613,
+        "delta_average_map": 0.0
+      }
+    }
+  ],
+  "selected": {
+    "parameters": {
+      "search_radius_ratio": 0.2,
+      "absolute_threshold": 0.2,
+      "gain_threshold": 0.05,
+      "margin_threshold": 0.0,
+      "max_shift_ratio": 0.2,
+      "min_duration_ratio": 0.5,
+      "max_duration_ratio": 1.5
+    },
+    "proposal": {
+      "proposals": 1881,
+      "mean_iou": {
+        "baseline": 0.4481341033347856,
+        "refined": 0.4482655109081849,
+        "delta": 0.00013140757339929788
+      },
+      "win_rate": 0.002126528442317916,
+      "loss_rate": 0.001594896331738437,
+      "tie_rate": 0.9962785752259437,
+      "iou50_rate": {
+        "baseline": 0.5050505050505051,
+        "refined": 0.5055821371610846
+      },
+      "iou70_rate": {
+        "baseline": 0.27804359383306754,
+        "refined": 0.27910685805422647
+      },
+      "high_quality_iou70": {
+        "n": 523,
+        "mean_delta_iou": 5.766743683678242e-05,
+        "loss_rate": 0.0
+      },
+      "class_correct_rate": 0.6469962785752259,
+      "normalized_left_error": {
+        "baseline": 36.89964800742435,
+        "refined": 36.89956019346902,
+        "delta": -8.781395532244972e-05
+      },
+      "normalized_right_error": {
+        "baseline": 37.057117927211486,
+        "refined": 37.05722540959897,
+        "delta": 0.00010748238747557906
+      },
+      "left_accepted_rate": 0.001063264221158958,
+      "right_accepted_rate": 0.002658160552897395
+    },
+    "passes_high_quality_protection": true,
+    "detection": {
+      "tiou_thresholds": [
+        0.1,
+        0.2,
+        0.30000000000000004,
+        0.4,
+        0.5
+      ],
+      "map_by_tiou": [
+        0.49196903303128037,
+        0.47735232379802406,
+        0.4463105618337099,
+        0.40562336096190876,
+        0.32849966949909104
+      ],
+      "average_map": 0.42995098982480284,
+      "delta_average_map": 5.063590353671099e-05
+    }
+  },
+  "calibration_output": "audit_results/begtr_s2_w010_seed123_latest_calibration.pt",
+  "target_gt_usage": "none"
+}
