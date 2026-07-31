@@ -420,6 +420,12 @@ class SADA(nn.Module):
         self.stage2_student_shift_steps = int(
             stage2_cfg.get('student_shift_steps', 1)
         )
+        self.stage2_source_robust_weighting = bool(
+            stage2_cfg.get('source_robust_weighting', False)
+        )
+        self.stage2_source_robust_drop_probability = float(
+            stage2_cfg.get('source_robust_drop_probability', 0.1)
+        )
         if self.stage2_semantic_boundary_weighting:
             if self.stage2_semantic_boundary_calibration is None:
                 raise ValueError('Semantic boundary calibration is required')
@@ -475,7 +481,8 @@ class SADA(nn.Module):
         if self.stage2_routing not in (
                 'confidence', 'alqa_same_budget',
                 'static_dense', 'static_full_dense', 'output_moment',
-                'student_consistency', 'student_mirror', 'student_shift'):
+                'student_consistency', 'student_mirror', 'student_shift',
+                'source_robust'):
             raise ValueError('unknown Stage 2 routing mode')
         if self.stage2_static_teacher not in ('frozen', 'ema'):
             raise ValueError('unknown static Stage 2 teacher mode')
@@ -538,11 +545,20 @@ class SADA(nn.Module):
             )
         ):
             raise ValueError('Student shift requires a positive shift routing')
+        if (
+            self.stage2_source_robust_weighting
+            and (
+                self.stage2_routing != 'source_robust'
+                or not 0 < self.stage2_source_robust_drop_probability < 1
+            )
+        ):
+            raise ValueError('Source robust routing requires valid dropout')
         self.stage2_uses_external_teacher = (
             self.stage2_routing
             not in (
                 'static_dense', 'static_full_dense', 'output_moment',
-                'student_consistency', 'student_mirror', 'student_shift'
+                'student_consistency', 'student_mirror', 'student_shift',
+                'source_robust'
             )
         )
         if self.stage2_loss_weighting not in (
@@ -1800,7 +1816,7 @@ class SADA(nn.Module):
                         )
         elif self.stage2_routing in (
                 'output_moment', 'student_consistency', 'student_mirror',
-                'student_shift'):
+                'student_shift', 'source_robust'):
             fpn_feats_tgt_pl, fpn_masks_tgt_pl = fpn_feats_tgt, fpn_masks_tgt
             fpn_feats_tgt_pl_perturbed = None
         else:
@@ -1857,7 +1873,7 @@ class SADA(nn.Module):
         # Generate the logits using the pseudo-label network (frozen in the case of static, or changing in the case of dynamic)
         if self.stage2_routing in (
                 'static_full_dense', 'output_moment', 'student_consistency',
-                'student_mirror', 'student_shift'):
+                'student_mirror', 'student_shift', 'source_robust'):
             out_cls_logits_tgt_pl = [
                 logits.detach() for logits in out_cls_logits_tgt
             ]
@@ -1890,6 +1906,7 @@ class SADA(nn.Module):
         student_mirror_offsets = None
         student_shift_offsets = None
         student_shift_masks = None
+        source_robust_offsets = None
         if (
             self.stage2_enabled
             and self.stage2_student_consistency_weighting
@@ -1950,6 +1967,33 @@ class SADA(nn.Module):
                     self.stage2_student_shift_steps,
                 )
             )
+        if (
+            self.stage2_enabled
+            and self.stage2_source_robust_weighting
+            and mode == 'train'
+            and curr_epoch >= self.stage2_start_epoch
+        ):
+            source_keys = []
+            for index, item in enumerate(video_list_src):
+                metadata = item.get('metadata', {})
+                source_keys.append('{}:{}'.format(
+                    metadata.get('video_id', index),
+                    metadata.get('crop_start', 0),
+                ))
+            perturbed_source_fpn = [
+                deterministic_channel_dropout_perturbation(
+                    features,
+                    masks,
+                    source_keys,
+                    self.stage2_source_robust_drop_probability,
+                    self.stage2_stability_seed,
+                    curr_epoch,
+                )
+                for features, masks in zip(fpn_feats_src, fpn_masks_src)
+            ]
+            source_robust_offsets, _ = self.reg_head_target(
+                perturbed_source_fpn, fpn_masks_src
+            )
         
         out_offsets = [torch.cat((out_offsets_src[i], out_offsets_tgt[i]), dim=0) for i in range(len(out_offsets_src))]
         out_actionness = [torch.cat((out_actionness_src[i], out_actionness_tgt[i]), dim=0) for i in range(len(out_offsets_src))]
@@ -2005,7 +2049,7 @@ class SADA(nn.Module):
                         out_offsets_tgt_pl_perturbed.append(perturbed_offsets)
         elif self.stage2_routing in (
                 'output_moment', 'student_consistency', 'student_mirror',
-                'student_shift'):
+                'student_shift', 'source_robust'):
             out_offsets_tgt_pl = [offset.detach() for offset in out_offsets_tgt]
             out_actionness_tgt_pl = [
                 actionness.detach() for actionness in out_actionness_tgt
@@ -2046,6 +2090,11 @@ class SADA(nn.Module):
             student_shift_masks = [
                 masks.squeeze(1) for masks in student_shift_masks
             ]
+        if source_robust_offsets is not None:
+            source_robust_offsets = [
+                offsets.permute(0, 2, 1)
+                for offsets in source_robust_offsets
+            ]
         if out_offsets_tgt_pl_perturbed is not None:
             out_offsets_tgt_pl_perturbed = [
                 [x.permute(0, 2, 1) for x in offsets]
@@ -2085,6 +2134,7 @@ class SADA(nn.Module):
             stage2_student_mirror_offsets_active = None
             stage2_student_shift_offsets_active = None
             stage2_student_shift_masks_active = None
+            stage2_source_robust_offsets_active = None
             stage2_proposal_count = 0
             stage2_pre_nms_budget = 0
             stage2_rescued_pre_nms = 0
@@ -2175,6 +2225,13 @@ class SADA(nn.Module):
             ):
                 stage2_student_shift_offsets_active = student_shift_offsets
                 stage2_student_shift_masks_active = student_shift_masks
+            elif (
+                self.stage2_enabled
+                and self.stage2_routing == 'source_robust'
+                and mode == 'train'
+                and curr_epoch >= self.stage2_start_epoch
+            ):
+                stage2_source_robust_offsets_active = source_robust_offsets
             
             
             # For debugging ...
@@ -2246,6 +2303,9 @@ class SADA(nn.Module):
                     stage2_student_shift_offsets_active
                 ),
                 stage2_student_shift_masks=stage2_student_shift_masks_active,
+                stage2_source_robust_offsets=(
+                    stage2_source_robust_offsets_active
+                ),
             )
             losses.update({
                 'stage2_pre_nms_budget': torch.tensor(
@@ -2529,7 +2589,8 @@ class SADA(nn.Module):
             stage2_student_consistency_offsets=None,
             stage2_student_mirror_offsets=None,
             stage2_student_shift_offsets=None,
-            stage2_student_shift_masks=None,):
+            stage2_student_shift_masks=None,
+            stage2_source_robust_offsets=None,):
         bs = int(fpn_masks[0].shape[0] / 2)
         
         # gt_cls_labels is a list of 2B elements, each of shape FT x C
@@ -2809,6 +2870,7 @@ class SADA(nn.Module):
         stage2_semantic_keep_fraction = 0 * decoded_offsets.sum()
         stage2_output_moment_classes = 0 * decoded_offsets.sum()
         stage2_shift_valid_fraction = 0 * decoded_offsets.sum()
+        stage2_source_robust_positive = 0 * decoded_offsets.sum()
         stage2_level_positive = [
             0 * decoded_offsets.sum() for _ in range(self.n_levels)
         ]
@@ -2958,6 +3020,48 @@ class SADA(nn.Module):
                         stage2_targets[stage2_reg_mask],
                         reduction='sum',
                     ) / stage2_reg_positive
+                stage2_offset_l1 = (
+                    stage2_predictions[stage2_reg_mask]
+                    - stage2_targets[stage2_reg_mask]
+                ).abs().mean()
+            else:
+                stage2_reg_loss = 0 * stage2_predictions.sum()
+        elif (
+            self.stage2_enabled
+            and self.stage2_source_robust_weighting
+            and stage2_source_robust_offsets is not None
+        ):
+            stage2_predictions = torch.cat(stage2_source_robust_offsets, dim=1)
+            stage2_targets = torch.stack(gt_offsets_src).detach()
+            stage2_level_mask = torch.cat([
+                torch.full_like(
+                    fpn_masks_src[level],
+                    level in self.stage2_levels,
+                    dtype=torch.bool,
+                )
+                for level in range(self.n_levels)
+            ], dim=1)
+            stage2_reg_mask = (
+                valid_mask_src
+                & stage2_level_mask
+                & (gt_cls_src_full.sum(dim=-1) > 0)
+            )
+            stage2_reg_positive = stage2_reg_mask.sum().float()
+            stage2_source_robust_positive = stage2_reg_positive
+            stage2_active_batch = torch.ones_like(stage2_reg_positive)
+            offset = 0
+            for level, level_mask in enumerate(fpn_masks_src):
+                next_offset = offset + level_mask.shape[1]
+                stage2_level_positive[level] = stage2_reg_mask[
+                    :, offset:next_offset
+                ].sum().float()
+                offset = next_offset
+            if stage2_reg_mask.any():
+                stage2_reg_loss = ctr_diou_loss_1d(
+                    stage2_predictions[stage2_reg_mask],
+                    stage2_targets[stage2_reg_mask],
+                    reduction='sum',
+                ) / stage2_reg_positive
                 stage2_offset_l1 = (
                     stage2_predictions[stage2_reg_mask]
                     - stage2_targets[stage2_reg_mask]
@@ -3195,6 +3299,7 @@ class SADA(nn.Module):
                 or self.stage2_student_consistency_weighting
                 or self.stage2_student_mirror_weighting
                 or self.stage2_student_shift_weighting
+                or self.stage2_source_robust_weighting
             )
         ):
             stage2_reg_ratio = (
@@ -3221,6 +3326,9 @@ class SADA(nn.Module):
                    'stage2_weight_ess': stage2_weight_ess,
                    'stage2_weight_mean': stage2_weight_mean,
                    'stage2_pseudo_offset_l1': stage2_offset_l1,
+                   'stage2_source_robust_positive': (
+                       stage2_source_robust_positive
+                   ),
                    'stage2_stability_weight_sum': stage2_stability_weight_sum,
                    'stage2_stability_mean': stage2_stability_mean,
                    'stage2_stability_low_fraction': stage2_stability_low,
