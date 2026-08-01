@@ -29,6 +29,12 @@ build_oracle_target_regression_mask = (
     stage1_utils.build_oracle_target_regression_mask
 )
 context_view_on_cpu = stage1_utils.context_view_on_cpu
+deterministic_channel_dropout_perturbation = (
+    stage1_utils.deterministic_channel_dropout_perturbation
+)
+deterministic_gaussian_perturbation = (
+    stage1_utils.deterministic_gaussian_perturbation
+)
 interpolate_probabilities = stage1_utils.interpolate_probabilities
 shift_features = stage1_utils.shift_features
 weighted_quantile = stage1_utils.weighted_quantile
@@ -138,6 +144,49 @@ class Stage1UtilsTest(unittest.TestCase):
         self.assertEqual(
             shifted_mask.tolist(), [[False, False, True, True, True]]
         )
+
+    def test_gaussian_noise_is_reproducible_and_batch_independent(self):
+        inputs = torch.arange(24).float().view(2, 3, 4)
+        masks = torch.ones(2, 1, 4, dtype=torch.bool)
+        first = deterministic_gaussian_perturbation(
+            inputs, masks, ["a", "b"], 0.05, 17
+        )
+        repeated = deterministic_gaussian_perturbation(
+            inputs, masks, ["a", "b"], 0.05, 17
+        )
+        swapped = deterministic_gaussian_perturbation(
+            inputs.flip(0), masks.flip(0), ["b", "a"], 0.05, 17
+        )
+        self.assertTrue(torch.equal(first, repeated))
+        self.assertTrue(torch.equal(first, swapped.flip(0)))
+
+    def test_feature_noise_preserves_padding(self):
+        inputs = torch.arange(12).float().view(1, 3, 4)
+        masks = torch.tensor([[[True, True, False, False]]])
+        gaussian = deterministic_gaussian_perturbation(
+            inputs, masks, ["sample"], 0.05, 17
+        )
+        dropout = deterministic_channel_dropout_perturbation(
+            inputs, masks, ["sample"], 0.2, 17
+        )
+        self.assertTrue(torch.equal(gaussian[..., 2:], inputs[..., 2:]))
+        self.assertTrue(torch.equal(dropout[..., 2:], inputs[..., 2:]))
+
+    def test_channel_dropout_is_reproducible_and_batch_independent(self):
+        inputs = torch.ones(2, 32, 4)
+        masks = torch.ones(2, 1, 4, dtype=torch.bool)
+        first = deterministic_channel_dropout_perturbation(
+            inputs, masks, ["a", "b"], 0.2, 23
+        )
+        repeated = deterministic_channel_dropout_perturbation(
+            inputs, masks, ["a", "b"], 0.2, 23
+        )
+        swapped = deterministic_channel_dropout_perturbation(
+            inputs.flip(0), masks.flip(0), ["b", "a"], 0.2, 23
+        )
+        self.assertTrue(torch.equal(first, repeated))
+        self.assertTrue(torch.equal(first, swapped.flip(0)))
+        self.assertTrue(torch.all(first == first[..., :1]))
 
     def test_context_valid_and_invalid_views_share_cpu_device(self):
         full = torch.arange(12).float().view(1, 12)

@@ -1,3 +1,5 @@
+import hashlib
+
 import torch
 import torch.nn.functional as F
 
@@ -177,6 +179,77 @@ def shift_features(features, valid_mask, delta):
         shifted.copy_(features)
         shifted_mask.copy_(valid_mask)
     return shifted, shifted_mask
+
+
+def _sample_seed(base_seed, sample_key, perturbation):
+    token = "{}|{}|{}".format(base_seed, sample_key, perturbation)
+    return int.from_bytes(
+        hashlib.sha256(token.encode("utf-8")).digest()[:8], "little"
+    ) % (2 ** 31)
+
+
+def deterministic_gaussian_perturbation(
+    inputs, masks, sample_keys, noise_std, base_seed
+):
+    """Add reproducible Gaussian noise independently to valid samples."""
+    if inputs.ndim != 3 or masks.shape != (
+        inputs.shape[0], 1, inputs.shape[2]
+    ):
+        raise ValueError("inputs and masks must be [B,C,T] and [B,1,T]")
+    if len(sample_keys) != inputs.shape[0] or noise_std <= 0:
+        raise ValueError("sample keys must align and noise std must be positive")
+
+    perturbed = inputs.clone()
+    for index, sample_key in enumerate(sample_keys):
+        generator = torch.Generator(device=inputs.device)
+        generator.manual_seed(
+            _sample_seed(base_seed, sample_key, "gaussian")
+        )
+        noise = torch.randn(
+            inputs[index].shape,
+            dtype=inputs.dtype,
+            device=inputs.device,
+            generator=generator,
+        )
+        valid = masks[index].to(inputs.dtype)
+        perturbed[index] = inputs[index] + noise_std * noise * valid
+    return perturbed
+
+
+def deterministic_channel_dropout_perturbation(
+    inputs, masks, sample_keys, drop_probability, base_seed
+):
+    """Drop reproducible whole channels while preserving padded positions."""
+    if inputs.ndim != 3 or masks.shape != (
+        inputs.shape[0], 1, inputs.shape[2]
+    ):
+        raise ValueError("inputs and masks must be [B,C,T] and [B,1,T]")
+    if (
+        len(sample_keys) != inputs.shape[0]
+        or not 0.0 < drop_probability < 1.0
+    ):
+        raise ValueError("sample keys must align and dropout must be in (0,1)")
+
+    perturbed = inputs.clone()
+    keep_scale = 1.0 / (1.0 - drop_probability)
+    for index, sample_key in enumerate(sample_keys):
+        generator = torch.Generator(device=inputs.device)
+        generator.manual_seed(
+            _sample_seed(base_seed, sample_key, "channel_dropout")
+        )
+        keep = torch.rand(
+            (inputs.shape[1], 1),
+            dtype=inputs.dtype,
+            device=inputs.device,
+            generator=generator,
+        ) >= drop_probability
+        channel_mask = keep.to(inputs.dtype) * keep_scale
+        valid = masks[index].to(inputs.dtype)
+        perturbed[index] = (
+            inputs[index] * channel_mask * valid
+            + inputs[index] * (1.0 - valid)
+        )
+    return perturbed
 
 
 def context_view_on_cpu(original, full, start, length):
