@@ -257,10 +257,18 @@ class Trainer(BaseTrainerDA):
     
     def _phantom_train_epoch(self):
         # to make the data_loader behave in a reproducible way when training is resumed. It simulates an epoch-worth of data_loader iteration.
+        supervised_mode = self.cfg.get('diagnostic', {}).get(
+            'supervised_upper_bound', 'off'
+        )
         iter_src = itertools.cycle(iter(self.train_loader_src))
         iter_tgt = itertools.cycle(iter(self.train_loader_tgt))
-        for _ in range(max(len(self.train_loader_src), len(self.train_loader_tgt))):
-            next(iter_src)
+        if supervised_mode == 'target_only':
+            num_iters = len(self.train_loader_tgt)
+        else:
+            num_iters = max(len(self.train_loader_src), len(self.train_loader_tgt))
+        for _ in range(num_iters):
+            if supervised_mode != 'target_only':
+                next(iter_src)
             next(iter_tgt)
 
     def _train_epoch(self, curr_epoch, ad_lambda=1, cls_static_anchors = None, mean_class_conf=None): 
@@ -284,61 +292,104 @@ class Trainer(BaseTrainerDA):
         iter_src = itertools.cycle(iter_src)
         iter_tgt = itertools.cycle(iter_tgt)
         
-        # Compute the number of iterations as the maximum of both train_loader_src and train_loader_tgt
-        num_iters = max(len(self.train_loader_src), len(self.train_loader_tgt))
+        supervised_mode = self.cfg.get('diagnostic', {}).get(
+            'supervised_upper_bound', 'off'
+        )
+        if supervised_mode == 'target_only':
+            num_iters = len(self.train_loader_tgt)
+        else:
+            num_iters = max(len(self.train_loader_src), len(self.train_loader_tgt))
         
         counter = 0
         for iter_idx in tqdm(range(num_iters)):
-            # Get the video data of each of the datasets and move to device
-            video_list_src = next(iter_src)
-            video_list_src = move_to_device(video_list_src, self.model.device)
-            
-            video_list_tgt = next(iter_tgt)
-            video_list_tgt = move_to_device(video_list_tgt, self.model.device)
-            
-            # forward / backward the model
-            losses, _, _, _, _, _, _ = self.model(video_list_src = video_list_src,
-                                video_list_tgt = video_list_tgt,
-                                mode='train',
-                                curr_epoch=curr_epoch,
-                                cls_static_anchors=cls_static_anchors,
-                                mean_class_conf=mean_class_conf) 
-
-            # Update the final loss with the adversarial loss
-            
-            # Add it to the final loss only if non-zero and if we are passed the warmup phase
-            warmup_adv = self.cfg['train_cfg'].get('warmup_adv', 0)
-            adv_method = self.cfg['model']['adv_method']
-            adv_disc = self.cfg['model'].get('use_adv_discriminator', True)
-            
-            
-            final_loss = torch.tensor(0.0, requires_grad=True).to(self.model.device)
-            if curr_epoch < warmup_adv:
-                # Apply the source only training 
-                final_loss += losses['downstream_loss'] 
+            if supervised_mode == 'target_only':
+                video_list_tgt = next(iter_tgt)
+                video_list_tgt = move_to_device(video_list_tgt, self.model.device)
+                losses, _, _, _, _, _, _ = self.model(
+                    video_list_src=video_list_tgt,
+                    video_list_tgt=video_list_tgt,
+                    mode='train',
+                    domain='tgt',
+                    curr_epoch=curr_epoch,
+                    cls_static_anchors=cls_static_anchors,
+                    mean_class_conf=mean_class_conf,
+                )
+                final_loss = losses['downstream_loss']
+                losses['tgt_gt_downstream_loss'] = losses['downstream_loss']
+            elif supervised_mode == 'source_target':
+                video_list_src = next(iter_src)
+                video_list_src = move_to_device(video_list_src, self.model.device)
+                video_list_tgt = next(iter_tgt)
+                video_list_tgt = move_to_device(video_list_tgt, self.model.device)
+                losses_src, _, _, _, _, _, _ = self.model(
+                    video_list_src=video_list_src,
+                    video_list_tgt=video_list_tgt,
+                    mode='train',
+                    domain='src',
+                    curr_epoch=curr_epoch,
+                    cls_static_anchors=cls_static_anchors,
+                    mean_class_conf=mean_class_conf,
+                )
+                losses_tgt, _, _, _, _, _, _ = self.model(
+                    video_list_src=video_list_src,
+                    video_list_tgt=video_list_tgt,
+                    mode='train',
+                    domain='tgt',
+                    curr_epoch=curr_epoch,
+                    cls_static_anchors=cls_static_anchors,
+                    mean_class_conf=mean_class_conf,
+                )
+                final_loss = 0.5 * (
+                    losses_src['downstream_loss'] + losses_tgt['downstream_loss']
+                )
+                losses = {
+                    'downstream_loss': final_loss,
+                    'src_gt_downstream_loss': losses_src['downstream_loss'],
+                    'tgt_gt_downstream_loss': losses_tgt['downstream_loss'],
+                }
             else:
-                # This means that we have left the pretraining phase and we are now in the adversarial training phase
-                #print("not using warmup")
-                weight_adv = self.cfg['model']['loss_weights']['weight_adv']
-                
-                # Compute the weight semantic 
-                weight_semantic = self.cfg['model']['loss_weights']['weight_semantic'] 
-                if 'reverse' in adv_method: 
-                    if adv_disc: 
-                        final_loss += weight_adv * losses['loss_adv_rev']  
-                if 'conditional_rev' in adv_method: 
-                    no_conditional_update = self.cfg.get(
-                        'diagnostic', {}
-                    ).get('no_conditional_update', False)
-                    if adv_disc and not no_conditional_update:
-                        final_loss += weight_adv * losses['loss_conditional_adv_rev']  
-                if 'None' in adv_method:
-                    pass
-                
-                downstream_weight = self.cfg['model']['loss_weights']['weight_downstream']
+                # Get the video data of each of the datasets and move to device
+                video_list_src = next(iter_src)
+                video_list_src = move_to_device(video_list_src, self.model.device)
 
-                if iter_idx % 1 == 0:
-                    final_loss += downstream_weight * losses['downstream_loss']    # Downweight this loss to avoid overfitting?
+                video_list_tgt = next(iter_tgt)
+                video_list_tgt = move_to_device(video_list_tgt, self.model.device)
+
+                # forward / backward the model
+                losses, _, _, _, _, _, _ = self.model(video_list_src = video_list_src,
+                                    video_list_tgt = video_list_tgt,
+                                    mode='train',
+                                    curr_epoch=curr_epoch,
+                                    cls_static_anchors=cls_static_anchors,
+                                    mean_class_conf=mean_class_conf)
+
+                # Add adversarial loss only after warmup.
+                warmup_adv = self.cfg['train_cfg'].get('warmup_adv', 0)
+                adv_method = self.cfg['model']['adv_method']
+                adv_disc = self.cfg['model'].get('use_adv_discriminator', True)
+
+                final_loss = torch.tensor(0.0, requires_grad=True).to(self.model.device)
+                if curr_epoch < warmup_adv:
+                    # Apply the source only training
+                    final_loss += losses['downstream_loss']
+                else:
+                    weight_adv = self.cfg['model']['loss_weights']['weight_adv']
+                    if 'reverse' in adv_method:
+                        if adv_disc:
+                            final_loss += weight_adv * losses['loss_adv_rev']
+                    if 'conditional_rev' in adv_method:
+                        no_conditional_update = self.cfg.get(
+                            'diagnostic', {}
+                        ).get('no_conditional_update', False)
+                        if adv_disc and not no_conditional_update:
+                            final_loss += weight_adv * losses['loss_conditional_adv_rev']
+                    if 'None' in adv_method:
+                        pass
+
+                    downstream_weight = self.cfg['model']['loss_weights']['weight_downstream']
+
+                    if iter_idx % 1 == 0:
+                        final_loss += downstream_weight * losses['downstream_loss']
 
 
             # For debugging purposes
@@ -368,7 +419,9 @@ class Trainer(BaseTrainerDA):
                     self.model.parameters(),
                     self.cfg['train_cfg']['clip_grad_l2norm'])
             
-            if curr_epoch < warmup_adv:
+            if supervised_mode != 'off':
+                self.optimizer_gen_source.step()
+            elif curr_epoch < warmup_adv:
                 self.optimizer_gen_source.step()
                 
             else:
@@ -400,9 +453,12 @@ class Trainer(BaseTrainerDA):
             # OPTIONAL: Update the learning rate
             if self.lr_scheduler_gen_source is not None:
                 self.lr_scheduler_gen_source.step()  # once per epoch
-            if self.lr_scheduler_gen_source_alignment is not None:
+            if (
+                supervised_mode == 'off'
+                and self.lr_scheduler_gen_source_alignment is not None
+            ):
                 self.lr_scheduler_gen_source_alignment.step()  # once per epoch
-            if self.lr_scheduler_disc is not None:
+            if supervised_mode == 'off' and self.lr_scheduler_disc is not None:
                 self.lr_scheduler_disc.step()  # once per epoch
            
                 

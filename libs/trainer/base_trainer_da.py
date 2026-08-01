@@ -177,6 +177,14 @@ class BaseTrainerDA:
         not_improved_count = 0
         
         print("Starting the training...")
+        supervised_mode = self.cfg.get('diagnostic', {}).get(
+            'supervised_upper_bound', 'off'
+        )
+        if supervised_mode != 'off':
+            self.logger.info(
+                "Diagnostic supervised upper-bound mode=%s; best checkpoint uses target validation loss.",
+                supervised_mode,
+            )
         stop_after_epoch = self.cfg.get('diagnostic', {}).get(
             'stop_after_epoch'
         )
@@ -199,11 +207,19 @@ class BaseTrainerDA:
             print("Epoch: " + str(epoch) + " / " + str(self.epochs))
             
             
-            if epoch <= self.cfg['train_cfg'].get('warmup_adv', 0) and not self.cfg['model'].get('weight_sharing', True):
+            if (
+                supervised_mode == 'off'
+                and epoch <= self.cfg['train_cfg'].get('warmup_adv', 0)
+                and not self.cfg['model'].get('weight_sharing', True)
+            ):
                 # Initialize the target domain's generator using the source one right after finishing each of the epochs of the pretraining phase (it does not make much of a difference)
                 self.model.backbone_target.load_state_dict(self.model.backbone_source.state_dict())
                 self.model.neck_target.load_state_dict(self.model.neck_source.state_dict())
-            if epoch <= self.cfg['train_cfg'].get('warmup_adv', 0) and self.cfg['model'].get('student_teacher_network', False):
+            if (
+                supervised_mode == 'off'
+                and epoch <= self.cfg['train_cfg'].get('warmup_adv', 0)
+                and self.cfg['model'].get('student_teacher_network', False)
+            ):
                 # Initialize the target domain's generator using the source one right after finishing each of the epochs of the pretraining phase (it does not make much of a difference)
                 self.model.cls_head_target.load_state_dict(self.model.cls_head.state_dict())
                 self.model.reg_head_target.load_state_dict(self.model.reg_head.state_dict())
@@ -238,13 +254,19 @@ class BaseTrainerDA:
                 self.valid_metrics_src.reset()
                 self.valid_metrics_tgt.reset()
                 
-                metric_tgt = self._valid_epoch(epoch, self.train_loader_tgt2, domain='tgt')  # Evaluate the performance on the aligned target domain dataset
-                metric_src = self._valid_epoch(epoch, self.val_loader_src, domain='src') # Evaluate on the test set of the source domain
+                if supervised_mode == 'off':
+                    metric_tgt = self._valid_epoch(epoch, self.train_loader_tgt2, domain='tgt')  # Evaluate the performance on the aligned target domain dataset
+                    metric_src = self._valid_epoch(epoch, self.val_loader_src, domain='src') # Evaluate on the test set of the source domain
+                    monitor_metric = metric_src
+                else:
+                    metric_tgt = self._valid_epoch(epoch, self.val_loader_tgt, domain='tgt')
+                    metric_src = self._valid_epoch(epoch, self.val_loader_src, domain='src')
+                    monitor_metric = metric_tgt
 
-                if metric_src < self.best_metric:
+                if monitor_metric < self.best_metric:
                     print("Updating the best early stopping metric")
                     print("Previous best metric: " + str(self.best_metric))
-                    self.best_metric = metric_src
+                    self.best_metric = monitor_metric
                     print("New best metric: " + str(self.best_metric))
                     self.save_ckpt(mode='best', epoch=epoch)
                     not_improved_count = 0

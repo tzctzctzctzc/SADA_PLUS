@@ -190,7 +190,11 @@ def main(cfg, resume, project_name='sada', debug=False):
     for module in model.disc_dom_conditional_adv:
         disc_params += list(module.parameters())
     
-    num_iters_epoch = max(len(train_loader_src), len(train_loader_tgt))
+    supervised_mode = cfg.get('diagnostic', {}).get('supervised_upper_bound', 'off')
+    if supervised_mode == 'target_only':
+        num_iters_epoch = len(train_loader_tgt)
+    else:
+        num_iters_epoch = max(len(train_loader_src), len(train_loader_tgt))
     
     optimizer_gen_source = make_optimizer(model, cfg['opt'], cfg['opt']['learning_rate'], exclude_params = ['disc_dom_adv', 'disc_dom_conditional_adv', 'learnable_embeddings'])
     scheduler_gen_source = make_scheduler(optimizer_gen_source, cfg['opt'], num_iters_epoch)
@@ -475,6 +479,12 @@ def create_argparser():
         help='comma-separated FPN levels used only for diagnostic runs',
     )
     parser.add_argument(
+        '--supervised-upper-bound',
+        choices=['off', 'target_only', 'source_target'],
+        default='off',
+        help='diagnostic training with target GT; not a UDA method',
+    )
+    parser.add_argument(
         '--stop-after-epoch', type=int, default=None,
         help='stop after this epoch without changing the scheduler horizon',
     )
@@ -508,6 +518,17 @@ if __name__ == '__main__':
         )
     ):
         raise ValueError('Stage 1 and Oracle diagnostics cannot both be enabled')
+    if (
+        args.supervised_upper_bound != 'off'
+        and (
+            args.stage1 != 'off'
+            or args.oracle_routing != 'off'
+            or args.oracle_target_regression != 'off'
+        )
+    ):
+        raise ValueError(
+            'Supervised upper-bound diagnostics must run without Stage 1 or Oracle diagnostics'
+        )
     diagnostic_levels = None
     if args.diagnostic_alignment_levels is not None:
         diagnostic_levels = [
@@ -545,6 +566,7 @@ if __name__ == '__main__':
         'stop_after_epoch': args.stop_after_epoch,
         'no_conditional_update': args.diagnostic_no_ca,
         'alignment_levels': diagnostic_levels,
+        'supervised_upper_bound': args.supervised_upper_bound,
     }
 
     update_config_with_arguments(config_dict, args, ARGS_TYPES, ARGS_CONFIGPATH)
