@@ -200,13 +200,13 @@ def main():
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--seed", type=int, default=20260802)
-    parser.add_argument("--scales", type=float, nargs=2, default=(0.75, 1.25))
+    parser.add_argument("--scales", type=float, nargs=2, default=(0.75, 0.90))
     parser.add_argument("--levels", type=int, nargs="+", default=(0, 1, 2))
     parser.add_argument("--device", default="cuda:0")
     args = parser.parse_args()
     scales = tuple(args.scales)
-    if not scales[0] < 1.0 < scales[1]:
-        raise ValueError("--scales must contain one value below and above 1")
+    if not 0.0 < scales[0] < scales[1] < 1.0:
+        raise ValueError("--scales must contain two ordered values below 1")
 
     random.seed(args.seed)
     torch.manual_seed(args.seed)
