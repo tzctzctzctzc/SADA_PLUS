@@ -206,7 +206,11 @@ class Trainer(BaseTrainerDA):
         metadata['calibration_epoch'] = epoch
         save_calibration_artifact(artifact, thresholds, manifest, metadata)
         self.logger.info("Stage 1 thresholds: %s", thresholds)
-        self._stage1_dry_run()
+        calibration_epoch = max(
+            1, self.cfg['train_cfg'].get('warmup_adv', 0)
+        )
+        if epoch == calibration_epoch:
+            self._stage1_dry_run()
         self.model.train(was_training)
 
     @torch.no_grad()

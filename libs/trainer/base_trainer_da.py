@@ -10,7 +10,10 @@ import csv
 import json
 
 from libs.evaluation.metrics import MetricTracker
-from libs.models.SADA.stage1_utils import validate_stage1_resume
+from libs.models.SADA.stage1_utils import (
+    stage1_calibration_due,
+    validate_stage1_resume,
+)
 
 class BaseTrainerDA:
     """
@@ -219,10 +222,14 @@ class BaseTrainerDA:
                 1, self.cfg['train_cfg'].get('warmup_adv', 0)
             )
             if (
-                epoch == calibration_epoch
-                and self.cfg.get('stage1', {}).get('enabled', False)
-                and hasattr(self, '_calibrate_stage1')
-                and not self.model.stage1_calibrated
+                hasattr(self, '_calibrate_stage1')
+                and stage1_calibration_due(
+                    epoch,
+                    calibration_epoch,
+                    self.cfg.get('stage1', {}).get('enabled', False),
+                    self.model.stage1_perturbation,
+                    self.model.stage1_calibrated,
+                )
             ):
                 self._calibrate_stage1(epoch)
             

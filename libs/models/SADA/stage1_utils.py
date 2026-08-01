@@ -4,6 +4,17 @@ import torch
 import torch.nn.functional as F
 
 
+def stage1_calibration_due(
+    epoch, calibration_epoch, enabled, perturbation, calibrated
+):
+    """Return whether Stage 1 thresholds must be refreshed this epoch."""
+    if not enabled or epoch < calibration_epoch:
+        return False
+    if perturbation == "gaussian_mse":
+        return True
+    return epoch == calibration_epoch and not calibrated
+
+
 def build_oracle_routing(probabilities, gt_labels, alpha, mode):
     """Build diagnostic target routes without changing the default SADA path."""
     if mode not in ("o1", "o2", "o3"):

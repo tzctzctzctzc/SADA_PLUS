@@ -41,6 +41,7 @@ interpolate_probabilities = stage1_utils.interpolate_probabilities
 shift_features = stage1_utils.shift_features
 weighted_quantile = stage1_utils.weighted_quantile
 source_action_eligible = stage1_utils.source_action_eligible
+stage1_calibration_due = stage1_utils.stage1_calibration_due
 validate_stage1_resume = stage1_utils.validate_stage1_resume
 
 DATA_UTILS_PATH = Path(__file__).parents[1] / "libs/datasets/data_utils.py"
@@ -84,6 +85,16 @@ class Stage1UtilsTest(unittest.TestCase):
                 current_alpha=0.6,
                 calibration_epoch=5,
             )
+
+    def test_gaussian_mse_recalibrates_every_epoch_after_warmup(self):
+        self.assertFalse(stage1_calibration_due(4, 5, True, "gaussian_mse", False))
+        self.assertTrue(stage1_calibration_due(5, 5, True, "gaussian_mse", False))
+        self.assertTrue(stage1_calibration_due(6, 5, True, "gaussian_mse", True))
+
+    def test_other_stage1_modes_keep_one_time_calibration(self):
+        self.assertTrue(stage1_calibration_due(5, 5, True, "shift", False))
+        self.assertFalse(stage1_calibration_due(6, 5, True, "shift", True))
+        self.assertFalse(stage1_calibration_due(5, 5, False, "gaussian_mse", False))
 
     def test_stage1_resume_rejects_perturbation_mismatch(self):
         with self.assertRaisesRegex(ValueError, "perturbation mismatch"):
