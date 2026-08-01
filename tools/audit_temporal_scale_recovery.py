@@ -228,7 +228,8 @@ def main():
         args.device
     )
     checkpoint = torch.load(args.checkpoint, map_location=args.device)
-    model.load_state_dict(checkpoint["state_dict"])
+    state_dict = checkpoint.get("state_dict", checkpoint)
+    model.load_state_dict(state_dict)
     model.eval()
     if any(level < 0 or level >= model.n_levels for level in args.levels):
         raise ValueError("--levels contains an unavailable FPN level")
