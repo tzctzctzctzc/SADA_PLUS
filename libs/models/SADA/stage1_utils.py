@@ -188,6 +188,53 @@ def context_view_on_cpu(original, full, start, length):
     return context.detach().cpu()
 
 
+def temporal_scale_view_on_cpu(full, start, length, scale):
+    """Build a fixed-length temporal-scale view from full video features.
+
+    The sampled source span is centered on the original crop and resized back
+    to ``length``. ``None`` means that the requested scale does not fit in the
+    full video and must not enter a matched-view audit.
+    """
+    if scale <= 0:
+        raise ValueError("temporal scale must be positive")
+    if length <= 0:
+        raise ValueError("temporal view length must be positive")
+    if start < 0 or start + length > full.shape[-1]:
+        raise ValueError("original crop is outside the full feature sequence")
+
+    span = max(1, int(round(length * scale)))
+    if span > full.shape[-1]:
+        return None
+
+    center = start + 0.5 * (length - 1)
+    scaled_start = int(round(center - 0.5 * (span - 1)))
+    scaled_start = min(max(scaled_start, 0), full.shape[-1] - span)
+    sampled = full[:, scaled_start:scaled_start + span].unsqueeze(0)
+    if span != length:
+        sampled = F.interpolate(
+            sampled, size=length, mode="linear", align_corners=False
+        )
+    return {
+        "feats": sampled.squeeze(0).detach().cpu(),
+        "start": scaled_start,
+        "span": span,
+        "length": length,
+        "scale": float(scale),
+    }
+
+
+def map_original_points_to_scale_view(
+    points, original_start, scaled_start, scaled_span, output_length
+):
+    """Map original-crop coordinates into an align_corners=False scale view."""
+    absolute = original_start + points
+    return (
+        (absolute - scaled_start + 0.5)
+        * (float(output_length) / float(scaled_span))
+        - 0.5
+    )
+
+
 def interpolate_probabilities(probabilities, strict_mask, points, query):
     """
     Interpolate BxTxC probabilities on a shared 1-D point grid.

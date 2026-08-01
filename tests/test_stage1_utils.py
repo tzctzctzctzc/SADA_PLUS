@@ -30,7 +30,11 @@ build_oracle_target_regression_mask = (
 )
 context_view_on_cpu = stage1_utils.context_view_on_cpu
 interpolate_probabilities = stage1_utils.interpolate_probabilities
+map_original_points_to_scale_view = (
+    stage1_utils.map_original_points_to_scale_view
+)
 shift_features = stage1_utils.shift_features
+temporal_scale_view_on_cpu = stage1_utils.temporal_scale_view_on_cpu
 weighted_quantile = stage1_utils.weighted_quantile
 source_action_eligible = stage1_utils.source_action_eligible
 validate_stage1_resume = stage1_utils.validate_stage1_resume
@@ -158,6 +162,37 @@ class Stage1UtilsTest(unittest.TestCase):
         self.assertEqual(valid_view.tolist(), [[3, 4, 5, 6, 7, 8]])
         self.assertEqual(invalid_view.tolist(), [[2, 3, 4, 5, 6, 7]])
         self.assertTrue(torch.equal(fallback_view, original))
+
+    def test_temporal_scale_view_keeps_requested_span_and_output_length(self):
+        full = torch.arange(12).float().view(1, 12)
+        narrow = temporal_scale_view_on_cpu(
+            full, start=2, length=6, scale=0.5
+        )
+        wide = temporal_scale_view_on_cpu(
+            full, start=2, length=6, scale=1.5
+        )
+
+        self.assertEqual((narrow["start"], narrow["span"]), (4, 3))
+        self.assertEqual((wide["start"], wide["span"]), (0, 9))
+        self.assertEqual(narrow["feats"].shape, (1, 6))
+        self.assertEqual(wide["feats"].shape, (1, 6))
+        self.assertEqual(narrow["feats"].device.type, "cpu")
+        self.assertIsNone(
+            temporal_scale_view_on_cpu(full, start=2, length=6, scale=3.0)
+        )
+
+    def test_temporal_scale_coordinate_mapping_matches_resize_geometry(self):
+        points = torch.tensor([0.0, 1.0, 3.0, 5.0])
+        identity = map_original_points_to_scale_view(
+            points, 2, 2, 6, 6
+        )
+        wide = map_original_points_to_scale_view(
+            points, 2, 0, 9, 6
+        )
+
+        self.assertTrue(torch.allclose(identity, points))
+        expected = (points + 2.5) * (6.0 / 9.0) - 0.5
+        self.assertTrue(torch.allclose(wide, expected))
 
     def test_interpolation_uses_two_valid_endpoints(self):
         points = torch.tensor([[0.0, 0, 0, 1], [4.0, 0, 0, 4], [8.0, 0, 0, 4]])
