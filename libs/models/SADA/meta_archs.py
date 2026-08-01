@@ -873,7 +873,6 @@ class SADA(nn.Module):
             module.eval()
         try:
             inputs, masks = self.preprocessing(video_list, mode='validation')
-            strict = self._stage1_strict_masks(masks)
             sample_keys = [
                 '{}:{}'.format(
                     video['metadata']['video_id'],
@@ -906,7 +905,6 @@ class SADA(nn.Module):
             return {
                 'fpn': fpn,
                 'fpn_masks': fpn_masks,
-                'strict': strict,
                 'logits': logits,
                 'representations': representations,
                 'perturbed': perturbed,
@@ -939,7 +937,6 @@ class SADA(nn.Module):
                         output[3][level].permute(0, 2, 1)
                         for output in signals['perturbed']
                     ],
-                    signals['strict'][level].squeeze(1),
                     da_valid,
                     self.stage1_alpha,
                     calibrated['confidence_edges'],
@@ -961,7 +958,6 @@ class SADA(nn.Module):
                     'pseudo_class': pseudo_class,
                     'perturbed_class': pseudo_class,
                     'valid': da_valid,
-                    'feature_valid': da_valid,
                     'action_std': zeros,
                     'background_std': zeros,
                     'representation_mse': zeros,
@@ -1113,7 +1109,7 @@ class SADA(nn.Module):
                     'level': torch.full(
                         shape, level, dtype=torch.long, device=score.device
                     ).flatten(),
-                    'valid': signals['strict'][level].squeeze(1).flatten(),
+                    'valid': signals['fpn_masks'][level].squeeze(1).flatten(),
                     'score': score.flatten(),
                     'consistent': consistent.flatten(),
                     'representation_mse': representation_mse.flatten(),

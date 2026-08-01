@@ -265,7 +265,6 @@ def build_gaussian_mse_routing(
     perturbed_probabilities,
     original_representation,
     perturbed_representations,
-    feature_valid,
     da_valid,
     alpha,
     confidence_edges,
@@ -303,7 +302,6 @@ def build_gaussian_mse_routing(
     action_candidate = da_valid & (score >= alpha)
     reliable_action = (
         action_candidate
-        & feature_valid
         & class_consistent
         & (representation_mse <= anchor_threshold)
     )
@@ -314,13 +312,12 @@ def build_gaussian_mse_routing(
         "stable_background": stable_background,
         "ignore": ignore,
         "action_candidate": action_candidate,
-        "class_consistent": action_candidate & feature_valid & class_consistent,
+        "class_consistent": action_candidate & class_consistent,
         "background_candidate": stable_background,
         "all_view_low": stable_background,
         "pseudo_class": pseudo_class,
         "perturbed_class": perturbed_classes[0],
         "valid": da_valid,
-        "feature_valid": feature_valid,
         "action_std": representation_mse,
         "background_std": torch.zeros_like(representation_mse),
         "representation_mse": representation_mse,

@@ -204,7 +204,6 @@ class Stage1UtilsTest(unittest.TestCase):
             perturbed_probabilities,
             original_representation,
             perturbed_representations,
-            feature_valid=torch.ones(1, 4, dtype=torch.bool),
             da_valid=torch.ones(1, 4, dtype=torch.bool),
             alpha=0.5,
             confidence_edges=[0.65, 0.75, 0.85],
