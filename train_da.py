@@ -442,12 +442,16 @@ def create_argparser():
     parser.add_argument('-d', '--debug', action='store_true',
                         help='debug flag')
     parser.add_argument(
-        '--stage1', choices=['off', 'shift', 'context'], default='off',
+        '--stage1', choices=['off', 'shift', 'context', 'gaussian_mse'], default='off',
         help='enable Stage 1 target routing perturbation',
     )
     parser.add_argument(
         '--stage1-seed', type=int, default=100003,
         help='independent perturbation RNG seed',
+    )
+    parser.add_argument(
+        '--stage1-mse-quantile', type=float, default=0.80,
+        help='source-correct action MSE quantile for Gaussian Stage 1',
     )
     parser.add_argument(
         '--oracle-routing', choices=['off', 'o1', 'o2', 'o3'], default='off',
@@ -495,11 +499,21 @@ if __name__ == '__main__':
         'perturbation': args.stage1 if args.stage1 != 'off' else 'shift',
         'seed': args.stage1_seed,
         'calibration_seed': args.stage1_seed + 1,
-        'quantile': 0.90,
+        'quantile': (
+            args.stage1_mse_quantile
+            if args.stage1 == 'gaussian_mse'
+            else 0.90
+        ),
         'epsilon_bg': 0.01,
         'context_rho': 64.0 / 2304.0,
         'context_rho_max': 2.0 * 64.0 / 2304.0,
+        'gaussian_std': 0.05,
+        'perturbation_seeds': [20260730, 20260731, 20260732, 20260733],
+        'levels': [0, 1, 2],
+        'num_confidence_bins': 4,
     }
+    if not 0.0 < args.stage1_mse_quantile <= 1.0:
+        raise ValueError('--stage1-mse-quantile must be in (0, 1]')
     if (
         args.stage1 != 'off'
         and (

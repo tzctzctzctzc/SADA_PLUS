@@ -4,7 +4,7 @@ from pathlib import Path
 
 import torch
 
-from .stage1_utils import weighted_quantile
+from .stage1_utils import confidence_bin_index, weighted_quantile
 
 
 def layer_balanced_weights(levels):
@@ -99,6 +99,69 @@ def calibrate_thresholds(records, quantile=0.90, epsilon_bg=0.01):
         "action_leakage": action_leakage,
         "background_retention": background_retention,
         "eligible_action": int(action.sum()),
+    }
+
+
+def calibrate_gaussian_mse_thresholds(
+    records, alpha, levels=(0, 1, 2), quantile=0.80, num_bins=4
+):
+    """Calibrate per-level, confidence-conditioned MSE thresholds."""
+    if not records:
+        raise ValueError("empty Gaussian MSE source calibration records")
+    if not 0.0 < quantile <= 1.0 or num_bins < 1:
+        raise ValueError("invalid Gaussian MSE calibration settings")
+    data = {
+        key: torch.cat([item[key].cpu() for item in records])
+        for key in records[0]
+    }
+    calibrated = {}
+    for level in levels:
+        level_mask = data["level"] == level
+        candidate = (
+            level_mask
+            & data["valid"].bool()
+            & data["consistent"].bool()
+            & (data["score"] >= alpha)
+        )
+        if not candidate.any():
+            raise ValueError(
+                "empty Gaussian MSE candidate set at FPN level {}".format(level)
+            )
+        candidate_scores = data["score"][candidate].float()
+        quantiles = torch.arange(1, num_bins, dtype=torch.float32) / num_bins
+        edges = (
+            torch.quantile(candidate_scores, quantiles).tolist()
+            if num_bins > 1
+            else []
+        )
+        bins = confidence_bin_index(data["score"], edges)
+        thresholds, bin_counts = [], []
+        for bin_id in range(num_bins):
+            correct = candidate & data["correct"].bool() & (bins == bin_id)
+            if not correct.any():
+                raise ValueError(
+                    "empty correct source action set at FPN level {}, bin {}".format(
+                        level, bin_id
+                    )
+                )
+            thresholds.append(float(torch.quantile(
+                data["representation_mse"][correct].float(), quantile
+            )))
+            bin_counts.append({
+                "candidate": int((candidate & (bins == bin_id)).sum()),
+                "correct": int(correct.sum()),
+            })
+        calibrated[str(level)] = {
+            "confidence_edges": [float(edge) for edge in edges],
+            "mse_thresholds": thresholds,
+            "bin_counts": bin_counts,
+        }
+    return {
+        "method": "confidence_then_gaussian_mse",
+        "alpha": float(alpha),
+        "quantile": float(quantile),
+        "num_confidence_bins": int(num_bins),
+        "levels": calibrated,
     }
 
 

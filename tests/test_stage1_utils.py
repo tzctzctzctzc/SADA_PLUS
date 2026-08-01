@@ -24,6 +24,8 @@ CALIBRATION_SPEC = importlib.util.spec_from_file_location(
 stage1_calibration = importlib.util.module_from_spec(CALIBRATION_SPEC)
 CALIBRATION_SPEC.loader.exec_module(stage1_calibration)
 build_routing_masks = stage1_utils.build_routing_masks
+build_gaussian_mse_routing = stage1_utils.build_gaussian_mse_routing
+confidence_bin_index = stage1_utils.confidence_bin_index
 build_oracle_routing = stage1_utils.build_oracle_routing
 build_oracle_target_regression_mask = (
     stage1_utils.build_oracle_target_regression_mask
@@ -171,6 +173,52 @@ class Stage1UtilsTest(unittest.TestCase):
         )
         self.assertTrue(torch.equal(gaussian[..., 2:], inputs[..., 2:]))
         self.assertTrue(torch.equal(dropout[..., 2:], inputs[..., 2:]))
+
+    def test_confidence_bins_are_left_closed(self):
+        bins = confidence_bin_index(
+            torch.tensor([0.50, 0.60, 0.70, 0.80]),
+            [0.60, 0.70],
+        )
+        self.assertEqual(bins.tolist(), [0, 1, 2, 2])
+
+    def test_gaussian_mse_only_filters_high_confidence_actions(self):
+        original_prob = torch.tensor([[[
+            0.80, 0.10
+        ], [
+            0.70, 0.20
+        ], [
+            0.40, 0.20
+        ], [
+            0.90, 0.10
+        ]]])
+        perturbed_probabilities = [original_prob.clone() for _ in range(4)]
+        for probability in perturbed_probabilities:
+            probability[0, 1] = torch.tensor([0.20, 0.75])
+        original_representation = torch.zeros(1, 4, 2)
+        perturbed_representations = [
+            torch.tensor([[[0.1, 0.1], [0.1, 0.1], [0.0, 0.0], [0.5, 0.5]]])
+            for _ in range(4)
+        ]
+        route = build_gaussian_mse_routing(
+            original_prob,
+            perturbed_probabilities,
+            original_representation,
+            perturbed_representations,
+            feature_valid=torch.ones(1, 4, dtype=torch.bool),
+            da_valid=torch.ones(1, 4, dtype=torch.bool),
+            alpha=0.5,
+            confidence_edges=[0.65, 0.75, 0.85],
+            mse_thresholds=[0.05, 0.05, 0.05, 0.05],
+        )
+        self.assertEqual(
+            route["reliable_action"].tolist(), [[True, False, False, False]]
+        )
+        self.assertEqual(
+            route["stable_background"].tolist(), [[False, False, True, False]]
+        )
+        self.assertEqual(
+            route["ignore"].tolist(), [[False, True, False, True]]
+        )
 
     def test_channel_dropout_is_reproducible_and_batch_independent(self):
         inputs = torch.ones(2, 32, 4)
@@ -329,6 +377,27 @@ class Stage1UtilsTest(unittest.TestCase):
         self.assertAlmostEqual(output["beta"], 0.02, places=6)
         self.assertAlmostEqual(output["tau_act"], 0.04, places=6)
         self.assertAlmostEqual(output["tau_bg"], 0.02, places=6)
+
+    def test_gaussian_mse_calibration_is_level_and_confidence_conditioned(self):
+        records = [{
+            "level": torch.zeros(4, dtype=torch.long),
+            "valid": torch.ones(4, dtype=torch.bool),
+            "score": torch.tensor([0.60, 0.70, 0.80, 0.90]),
+            "consistent": torch.ones(4, dtype=torch.bool),
+            "representation_mse": torch.tensor([0.10, 0.20, 0.30, 0.40]),
+            "correct": torch.ones(4, dtype=torch.bool),
+        }]
+        output = stage1_calibration.calibrate_gaussian_mse_thresholds(
+            records,
+            alpha=0.5,
+            levels=(0,),
+            quantile=0.5,
+            num_bins=2,
+        )
+        level = output["levels"]["0"]
+        self.assertAlmostEqual(level["confidence_edges"][0], 0.75)
+        self.assertAlmostEqual(level["mse_thresholds"][0], 0.15)
+        self.assertAlmostEqual(level["mse_thresholds"][1], 0.35)
 
     def test_negative_shift_has_no_wraparound(self):
         features = torch.arange(5).float().view(1, 5)

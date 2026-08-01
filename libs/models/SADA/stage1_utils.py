@@ -252,6 +252,84 @@ def deterministic_channel_dropout_perturbation(
     return perturbed
 
 
+def confidence_bin_index(scores, inner_edges):
+    """Assign scores to left-closed confidence bins."""
+    edges = torch.as_tensor(
+        inner_edges, dtype=scores.dtype, device=scores.device
+    )
+    return torch.bucketize(scores.contiguous(), edges, right=True)
+
+
+def build_gaussian_mse_routing(
+    original_prob,
+    perturbed_probabilities,
+    original_representation,
+    perturbed_representations,
+    feature_valid,
+    da_valid,
+    alpha,
+    confidence_edges,
+    mse_thresholds,
+):
+    """Filter high-confidence action routes while preserving SADA background."""
+    if len(perturbed_probabilities) != len(perturbed_representations):
+        raise ValueError("probability and representation views must align")
+    if not perturbed_probabilities:
+        raise ValueError("at least one perturbed view is required")
+
+    score, pseudo_class = original_prob.max(dim=-1)
+    perturbed_classes = torch.stack([
+        probability.max(dim=-1).indices
+        for probability in perturbed_probabilities
+    ])
+    class_consistent = (
+        perturbed_classes == pseudo_class.unsqueeze(0)
+    ).all(dim=0)
+    representation_mse = torch.stack([
+        (original_representation - representation).square().mean(dim=-1)
+        for representation in perturbed_representations
+    ]).mean(dim=0)
+
+    bin_index = confidence_bin_index(score, confidence_edges)
+    thresholds = torch.as_tensor(
+        mse_thresholds,
+        dtype=representation_mse.dtype,
+        device=representation_mse.device,
+    )
+    if thresholds.numel() != len(confidence_edges) + 1:
+        raise ValueError("MSE thresholds must define every confidence bin")
+    anchor_threshold = thresholds[bin_index]
+
+    action_candidate = da_valid & (score >= alpha)
+    reliable_action = (
+        action_candidate
+        & feature_valid
+        & class_consistent
+        & (representation_mse <= anchor_threshold)
+    )
+    stable_background = da_valid & (score < alpha)
+    ignore = da_valid & ~(reliable_action | stable_background)
+    return {
+        "reliable_action": reliable_action,
+        "stable_background": stable_background,
+        "ignore": ignore,
+        "action_candidate": action_candidate,
+        "class_consistent": action_candidate & feature_valid & class_consistent,
+        "background_candidate": stable_background,
+        "all_view_low": stable_background,
+        "pseudo_class": pseudo_class,
+        "perturbed_class": perturbed_classes[0],
+        "valid": da_valid,
+        "feature_valid": feature_valid,
+        "action_std": representation_mse,
+        "background_std": torch.zeros_like(representation_mse),
+        "representation_mse": representation_mse,
+        "confidence_bin": bin_index,
+        "mse_threshold": anchor_threshold,
+        "score_original": score,
+    }
+
+
 def context_view_on_cpu(original, full, start, length):
     """Build one Context view on CPU before batch padding/concatenation."""
     if full is not None:

@@ -409,6 +409,9 @@ class BaseTrainerDA:
                 'beta': self.model.stage1_beta,
                 'tau_act': self.model.stage1_tau_act,
                 'tau_bg': self.model.stage1_tau_bg,
+                'gaussian_mse_calibration': (
+                    self.model.stage1_gaussian_calibration
+                ),
                 'calibrated': self.model.stage1_calibrated,
             }
         return state
@@ -447,9 +450,14 @@ class BaseTrainerDA:
                 self.model.stage1_dryrun_rng.set_state(
                     stage1['dryrun_rng_state'].cpu()
                 )
-            self.model.stage1_beta = stage1['beta']
-            self.model.stage1_tau_act = stage1['tau_act']
-            self.model.stage1_tau_bg = stage1['tau_bg']
+            if self.model.stage1_perturbation == 'gaussian_mse':
+                self.model.stage1_gaussian_calibration = stage1.get(
+                    'gaussian_mse_calibration'
+                )
+            else:
+                self.model.stage1_beta = stage1['beta']
+                self.model.stage1_tau_act = stage1['tau_act']
+                self.model.stage1_tau_bg = stage1['tau_bg']
             self.model.stage1_calibrated = stage1['calibrated']
 
         self.start_epoch = checkpoint['epoch'] + 1

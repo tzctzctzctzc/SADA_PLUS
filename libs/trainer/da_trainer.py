@@ -11,6 +11,7 @@ from .base_trainer_da import BaseTrainerDA
 from libs.datasets import truncate_feats
 from libs.utils.train_utils import AverageMeter
 from libs.models.SADA.stage1_calibration import (
+    calibrate_gaussian_mse_thresholds,
     calibrate_thresholds,
     load_calibration_artifact,
     model_state_sha256,
@@ -79,9 +80,12 @@ class Trainer(BaseTrainerDA):
             calibrated = load_calibration_artifact(
                 artifact, self._stage1_artifact_metadata(include_model=True)
             )
-            self.model.stage1_beta = calibrated['beta']
-            self.model.stage1_tau_act = calibrated['tau_act']
-            self.model.stage1_tau_bg = calibrated['tau_bg']
+            if self.model.stage1_perturbation == 'gaussian_mse':
+                self.model.stage1_gaussian_calibration = calibrated
+            else:
+                self.model.stage1_beta = calibrated['beta']
+                self.model.stage1_tau_act = calibrated['tau_act']
+                self.model.stage1_tau_bg = calibrated['tau_bg']
             self.model.stage1_calibrated = True
 
     def _stage1_artifact_metadata(self, include_model=False):
@@ -119,6 +123,17 @@ class Trainer(BaseTrainerDA):
             ).hexdigest(),
             'git_commit': git_commit,
         }
+        if self.model.stage1_perturbation == 'gaussian_mse':
+            metadata.update({
+                'gaussian_std': self.model.stage1_gaussian_std,
+                'perturbation_seeds': list(
+                    self.model.stage1_perturbation_seeds
+                ),
+                'levels': list(self.model.stage1_levels),
+                'num_confidence_bins': stage1_cfg.get(
+                    'num_confidence_bins', 4
+                ),
+            })
         if include_model:
             metadata['model_state_sha256'] = model_state_sha256(self.model)
         return metadata
@@ -163,14 +178,25 @@ class Trainer(BaseTrainerDA):
             perturbations = self.model._stage1_last_perturbation
             for item, perturbation in zip(manifest[-len(prepared):], perturbations):
                 item.update(perturbation)
-        thresholds = calibrate_thresholds(
-            records,
-            quantile=self.cfg.get('stage1', {}).get('quantile', 0.90),
-            epsilon_bg=self.cfg.get('stage1', {}).get('epsilon_bg', 0.01),
-        )
-        self.model.stage1_beta = thresholds['beta']
-        self.model.stage1_tau_act = thresholds['tau_act']
-        self.model.stage1_tau_bg = thresholds['tau_bg']
+        stage1_cfg = self.cfg.get('stage1', {})
+        if self.model.stage1_perturbation == 'gaussian_mse':
+            thresholds = calibrate_gaussian_mse_thresholds(
+                records,
+                alpha=self.model.stage1_alpha,
+                levels=self.model.stage1_levels,
+                quantile=stage1_cfg.get('quantile', 0.80),
+                num_bins=stage1_cfg.get('num_confidence_bins', 4),
+            )
+            self.model.stage1_gaussian_calibration = thresholds
+        else:
+            thresholds = calibrate_thresholds(
+                records,
+                quantile=stage1_cfg.get('quantile', 0.90),
+                epsilon_bg=stage1_cfg.get('epsilon_bg', 0.01),
+            )
+            self.model.stage1_beta = thresholds['beta']
+            self.model.stage1_tau_act = thresholds['tau_act']
+            self.model.stage1_tau_bg = thresholds['tau_bg']
         self.model.stage1_calibrated = True
         artifact = self.cfg.get('stage1', {}).get(
             'calibration_artifact',

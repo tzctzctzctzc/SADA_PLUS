@@ -7,10 +7,12 @@ from .blocks import MaskedConv1D, Scale, LayerNorm
 from .losses_aux import ctr_diou_loss_1d, sigmoid_focal_loss, ctr_giou_loss_1d
 from .models import register_meta_arch, make_backbone, make_neck, make_generator
 from .stage1_utils import (
+    build_gaussian_mse_routing,
     build_oracle_target_regression_mask,
     build_oracle_routing,
     build_routing_masks,
     context_view_on_cpu,
+    deterministic_gaussian_perturbation,
     erode_mask,
     interpolate_probabilities,
     shift_features,
@@ -331,12 +333,41 @@ class SADA(nn.Module):
         self.stage1_beta = stage1_cfg.get('beta', None)
         self.stage1_tau_act = stage1_cfg.get('tau_act', None)
         self.stage1_tau_bg = stage1_cfg.get('tau_bg', None)
-        self.stage1_calibrated = all(
-            value is not None
-            for value in (self.stage1_beta, self.stage1_tau_act, self.stage1_tau_bg)
+        self.stage1_gaussian_std = float(stage1_cfg.get('gaussian_std', 0.05))
+        self.stage1_perturbation_seeds = tuple(
+            int(seed) for seed in stage1_cfg.get(
+                'perturbation_seeds', (20260730, 20260731, 20260732, 20260733)
+            )
         )
+        self.stage1_levels = tuple(
+            int(level) for level in stage1_cfg.get('levels', (0, 1, 2))
+        )
+        self.stage1_gaussian_calibration = stage1_cfg.get(
+            'gaussian_mse_calibration'
+        )
+        if self.stage1_perturbation == 'gaussian_mse':
+            self.stage1_calibrated = self.stage1_gaussian_calibration is not None
+        else:
+            self.stage1_calibrated = all(
+                value is not None
+                for value in (
+                    self.stage1_beta, self.stage1_tau_act, self.stage1_tau_bg
+                )
+            )
         if self.stage1_enabled:
-            assert self.stage1_perturbation in ('shift', 'context')
+            assert self.stage1_perturbation in ('shift', 'context', 'gaussian_mse')
+            if self.stage1_perturbation == 'gaussian_mse':
+                if self.stage1_gaussian_std <= 0:
+                    raise ValueError('Stage 1 Gaussian std must be positive')
+                if len(self.stage1_perturbation_seeds) != 4:
+                    raise ValueError('Stage 1 Gaussian MSE requires exactly four views')
+                if (
+                    not self.stage1_levels
+                    or len(set(self.stage1_levels)) != len(self.stage1_levels)
+                    or any(level < 0 or level >= self.n_levels
+                           for level in self.stage1_levels)
+                ):
+                    raise ValueError('Stage 1 Gaussian MSE levels are invalid')
             if (
                 self.oracle_routing_mode != 'off'
                 or self.oracle_target_regression_mode != 'off'
@@ -828,6 +859,118 @@ class SADA(nn.Module):
         return strict_outputs
 
     @torch.no_grad()
+    def _stage1_gaussian_signals(self, video_list, domain):
+        """Compute original and four fixed Gaussian views in evaluation mode."""
+        if domain == 'source':
+            modules = (self.backbone_source, self.neck_source, self.cls_head)
+        elif domain == 'target':
+            modules = (self.backbone_target, self.neck_target, self.cls_head_target)
+        else:
+            raise ValueError('Stage 1 Gaussian domain must be source or target')
+
+        training_states = [module.training for module in modules]
+        for module in modules:
+            module.eval()
+        try:
+            inputs, masks = self.preprocessing(video_list, mode='validation')
+            strict = self._stage1_strict_masks(masks)
+            sample_keys = [
+                '{}:{}'.format(
+                    video['metadata']['video_id'],
+                    video['metadata'].get('crop_start', 0),
+                )
+                for video in video_list
+            ]
+
+            def forward_view(view):
+                features, feature_masks, _ = modules[0](view, masks)
+                fpn, fpn_masks = modules[1](features, feature_masks)
+                logits, representations = modules[2](fpn, fpn_masks)
+                return fpn, fpn_masks, logits, representations
+
+            fpn, fpn_masks, logits, representations = forward_view(inputs)
+            perturbed = []
+            for seed in self.stage1_perturbation_seeds:
+                view = deterministic_gaussian_perturbation(
+                    inputs,
+                    masks,
+                    sample_keys,
+                    self.stage1_gaussian_std,
+                    seed,
+                )
+                perturbed.append(forward_view(view))
+            self._stage1_last_perturbation = [{
+                'gaussian_std': self.stage1_gaussian_std,
+                'perturbation_seeds': list(self.stage1_perturbation_seeds),
+            } for _ in video_list]
+            return {
+                'fpn': fpn,
+                'fpn_masks': fpn_masks,
+                'strict': strict,
+                'logits': logits,
+                'representations': representations,
+                'perturbed': perturbed,
+            }
+        finally:
+            for module, was_training in zip(modules, training_states):
+                module.train(was_training)
+
+    @torch.no_grad()
+    def _stage1_gaussian_routing(self, video_list, return_signals=False):
+        """Apply locked source-calibrated MSE thresholds to target anchors."""
+        if not self.stage1_calibrated:
+            raise RuntimeError('Stage 1 Gaussian MSE thresholds are not calibrated')
+        signals = self._stage1_gaussian_signals(video_list, domain='target')
+        routes = []
+        for level in range(self.n_levels):
+            probability = signals['logits'][level].permute(0, 2, 1).sigmoid()
+            representation = signals['representations'][level].permute(0, 2, 1)
+            da_valid = signals['fpn_masks'][level].squeeze(1).bool()
+            if level in self.stage1_levels:
+                calibrated = self.stage1_gaussian_calibration['levels'][str(level)]
+                route = build_gaussian_mse_routing(
+                    probability,
+                    [
+                        output[2][level].permute(0, 2, 1).sigmoid()
+                        for output in signals['perturbed']
+                    ],
+                    representation,
+                    [
+                        output[3][level].permute(0, 2, 1)
+                        for output in signals['perturbed']
+                    ],
+                    signals['strict'][level].squeeze(1),
+                    da_valid,
+                    self.stage1_alpha,
+                    calibrated['confidence_edges'],
+                    calibrated['mse_thresholds'],
+                )
+            else:
+                score, pseudo_class = probability.max(dim=-1)
+                action = da_valid & (score >= self.stage1_alpha)
+                background = da_valid & ~action
+                zeros = torch.zeros_like(score)
+                route = {
+                    'reliable_action': action,
+                    'stable_background': background,
+                    'ignore': da_valid & ~(action | background),
+                    'action_candidate': action,
+                    'class_consistent': action,
+                    'background_candidate': background,
+                    'all_view_low': background,
+                    'pseudo_class': pseudo_class,
+                    'perturbed_class': pseudo_class,
+                    'valid': da_valid,
+                    'feature_valid': da_valid,
+                    'action_std': zeros,
+                    'background_std': zeros,
+                    'representation_mse': zeros,
+                    'score_original': score,
+                }
+            routes.append(route)
+        return (routes, signals) if return_signals else routes
+
+    @torch.no_grad()
     def _stage1_context_routing(self, video_list_tgt, points, rng=None):
         """Deterministic routing for baseline-crop-preserving context views."""
         if not self.stage1_calibrated:
@@ -928,6 +1071,56 @@ class SADA(nn.Module):
     @torch.no_grad()
     def collect_stage1_calibration_records(self, video_list):
         """Return detached source-validation anchor records for calibration."""
+        if self.stage1_perturbation == 'gaussian_mse':
+            signals = self._stage1_gaussian_signals(video_list, domain='source')
+            points = self.point_generator(signals['fpn'])
+            gt_segments = [item['segments'].to(self.device) for item in video_list]
+            gt_labels = [item['labels'].to(self.device) for item in video_list]
+            gt_cls, _ = self.label_points(points, gt_segments, gt_labels)
+            gt_cls = torch.stack(gt_cls)
+
+            records, start = [], 0
+            for level, point_grid in enumerate(points):
+                length = point_grid.shape[0]
+                labels = gt_cls[:, start:start + length]
+                start += length
+                if level not in self.stage1_levels:
+                    continue
+                probability = signals['logits'][level].permute(0, 2, 1).sigmoid()
+                representation = signals['representations'][level].permute(0, 2, 1)
+                score, pseudo_class = probability.max(dim=-1)
+                perturbed_classes = torch.stack([
+                    output[2][level].permute(0, 2, 1).sigmoid().max(
+                        dim=-1
+                    ).indices
+                    for output in signals['perturbed']
+                ])
+                consistent = (
+                    perturbed_classes == pseudo_class.unsqueeze(0)
+                ).all(dim=0)
+                representation_mse = torch.stack([
+                    (
+                        representation
+                        - output[3][level].permute(0, 2, 1)
+                    ).square().mean(dim=-1)
+                    for output in signals['perturbed']
+                ]).mean(dim=0)
+                correct = labels.gather(
+                    -1, pseudo_class.unsqueeze(-1)
+                ).squeeze(-1) > 0
+                shape = score.shape
+                records.append({
+                    'level': torch.full(
+                        shape, level, dtype=torch.long, device=score.device
+                    ).flatten(),
+                    'valid': signals['strict'][level].squeeze(1).flatten(),
+                    'score': score.flatten(),
+                    'consistent': consistent.flatten(),
+                    'representation_mse': representation_mse.flatten(),
+                    'correct': correct.flatten(),
+                })
+            return records
+
         inputs, masks = self.preprocessing(video_list, mode='validation')
         feats, backbone_masks, _ = self.backbone_target(inputs, masks)
         fpn_feats, _ = self.neck_target(feats, backbone_masks)
@@ -993,6 +1186,8 @@ class SADA(nn.Module):
     @torch.no_grad()
     def stage1_route_only(self, video_list):
         """Route target videos without reading segments or labels."""
+        if self.stage1_perturbation == 'gaussian_mse':
+            return self._stage1_gaussian_routing(video_list)
         inputs, masks = self.preprocessing(video_list, mode='validation')
         feats, backbone_masks, _ = self.backbone_target(inputs, masks)
         fpn_feats, _ = self.neck_target(feats, backbone_masks)
@@ -1064,7 +1259,9 @@ class SADA(nn.Module):
             and self.stage1_calibrated
             and mode == 'train'
         ):
-            if self.stage1_perturbation == 'shift':
+            if self.stage1_perturbation == 'gaussian_mse':
+                stage1_routes = self._stage1_gaussian_routing(video_list_tgt)
+            elif self.stage1_perturbation == 'shift':
                 stage1_routes = self._stage1_shift_routing(video_list_tgt, points)
             else:
                 stage1_routes = self._stage1_context_routing(video_list_tgt, points)
