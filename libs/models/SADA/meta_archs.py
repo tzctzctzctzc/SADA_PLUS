@@ -15,6 +15,7 @@ from .stage1_utils import (
     interpolate_probabilities,
     shift_features,
     source_action_eligible,
+    target_routing_gt_counts,
 )
 from libs.utils import batched_nms
 import einops
@@ -281,6 +282,9 @@ class SADA(nn.Module):
         self.warmup_adv = cfg['train_cfg'].get('warmup_adv', 0)
         self.oracle_routing_mode = cfg.get('diagnostic', {}).get(
             'oracle_routing', 'off'
+        )
+        self.audit_target_routing_gt = cfg.get('diagnostic', {}).get(
+            'audit_target_routing_gt', False
         )
         if self.oracle_routing_mode not in ('off', 'o1', 'o2', 'o3'):
             raise ValueError(
@@ -1812,6 +1816,15 @@ class SADA(nn.Module):
                             if route_l['valid'].any()
                             else route_l['background_std'].sum() * 0
                         )
+
+                    if self.audit_target_routing_gt and l in semantic_alignment_levels:
+                        routing_counts = target_routing_gt_counts(
+                            out_cls_logits_tgt2,
+                            gts_per_level_tgt[l][valid_mask_l_tgt],
+                            static_threshold,
+                        )
+                        for name, value in routing_counts.items():
+                            losses['routing_gt_l{}_{}'.format(l, name)] = value
             
                     # 2) Compute the pseudo-labels of the source domain
                     # c* = argmax_c \hat{p}_c

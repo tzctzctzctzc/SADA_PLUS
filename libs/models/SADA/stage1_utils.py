@@ -2,6 +2,32 @@ import torch
 import torch.nn.functional as F
 
 
+@torch.no_grad()
+def target_routing_gt_counts(probabilities, gt_labels, alpha):
+    """Count how the current target routing treats GT action anchors."""
+    if probabilities.shape != gt_labels.shape:
+        raise ValueError("probabilities and GT labels must have the same shape")
+
+    score, pseudo_class = probabilities.max(dim=-1)
+    selected = score >= alpha
+    gt_action = gt_labels.sum(dim=-1) > 0
+    class_correct = gt_labels.gather(
+        -1, pseudo_class.unsqueeze(-1)
+    ).squeeze(-1) > 0
+
+    return {
+        "valid": torch.tensor(
+            selected.numel(), device=probabilities.device, dtype=torch.float32
+        ),
+        "selected": selected.sum().float(),
+        "gt_action": gt_action.sum().float(),
+        "selected_gt_action": (selected & gt_action).sum().float(),
+        "selected_correct_action": (selected & class_correct).sum().float(),
+        "ignored_gt_action": ((~selected) & gt_action).sum().float(),
+        "selected_gt_background": (selected & (~gt_action)).sum().float(),
+    }
+
+
 def build_oracle_routing(probabilities, gt_labels, alpha, mode):
     """Build diagnostic target routes without changing the default SADA path."""
     if mode not in ("o1", "o2", "o3"):

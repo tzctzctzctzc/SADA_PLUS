@@ -33,6 +33,7 @@ interpolate_probabilities = stage1_utils.interpolate_probabilities
 shift_features = stage1_utils.shift_features
 weighted_quantile = stage1_utils.weighted_quantile
 source_action_eligible = stage1_utils.source_action_eligible
+target_routing_gt_counts = stage1_utils.target_routing_gt_counts
 validate_stage1_resume = stage1_utils.validate_stage1_resume
 
 DATA_UTILS_PATH = Path(__file__).parents[1] / "libs/datasets/data_utils.py"
@@ -239,6 +240,30 @@ class Stage1UtilsTest(unittest.TestCase):
         self.assertEqual(o3["background"].tolist(), [False, False, True, True])
         self.assertFalse(o3["ignore"].any())
         self.assertTrue(torch.equal(o3["action_labels"], gt_labels))
+
+    def test_target_routing_gt_counts_track_coverage_and_precision(self):
+        probabilities = torch.tensor([
+            [0.80, 0.10],
+            [0.20, 0.30],
+            [0.05, 0.90],
+            [0.10, 0.20],
+        ])
+        gt_labels = torch.tensor([
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [0.0, 0.0],
+            [0.0, 0.0],
+        ])
+        counts = target_routing_gt_counts(probabilities, gt_labels, 0.6)
+        self.assertEqual({key: value.item() for key, value in counts.items()}, {
+            "valid": 4.0,
+            "selected": 2.0,
+            "gt_action": 2.0,
+            "selected_gt_action": 1.0,
+            "selected_correct_action": 1.0,
+            "ignored_gt_action": 1.0,
+            "selected_gt_background": 1.0,
+        })
 
     def test_oracle_target_regression_masks_keep_routing_out_of_scope(self):
         score = torch.tensor([[0.8, 0.4, 0.9, 0.7]])

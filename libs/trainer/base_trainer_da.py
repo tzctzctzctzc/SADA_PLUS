@@ -300,6 +300,53 @@ class BaseTrainerDA:
                     anchor_valid / anchor_total
                 )
             log_data.update(stage1_summary)
+            routing_summary = getattr(self, 'routing_gt_epoch_summary', {})
+            if routing_summary:
+                count_names = (
+                    'valid', 'selected', 'gt_action', 'selected_gt_action',
+                    'selected_correct_action', 'ignored_gt_action',
+                    'selected_gt_background',
+                )
+                totals = {name: 0.0 for name in count_names}
+                for level in range(getattr(self.model, 'n_levels', 0)):
+                    prefix = 't_routing_gt_l{}_'.format(level)
+                    for name in count_names:
+                        totals[name] += routing_summary.get(
+                            prefix + name + '_total', 0.0
+                        )
+                routing_summary.update({
+                    't_routing_gt_{}_total'.format(name): value
+                    for name, value in totals.items()
+                })
+
+                def ratio(numerator, denominator):
+                    return numerator / denominator if denominator > 0 else 0.0
+
+                routing_summary.update({
+                    't_routing_gt_action_selection_rate': ratio(
+                        totals['selected'], totals['valid']
+                    ),
+                    't_routing_gt_foreground_coverage': ratio(
+                        totals['selected_gt_action'], totals['gt_action']
+                    ),
+                    't_routing_gt_correct_action_coverage': ratio(
+                        totals['selected_correct_action'], totals['gt_action']
+                    ),
+                    't_routing_gt_foreground_precision': ratio(
+                        totals['selected_gt_action'], totals['selected']
+                    ),
+                    't_routing_gt_correct_action_precision': ratio(
+                        totals['selected_correct_action'], totals['selected']
+                    ),
+                    't_routing_gt_class_accuracy_on_foreground': ratio(
+                        totals['selected_correct_action'],
+                        totals['selected_gt_action'],
+                    ),
+                    't_routing_gt_action_leakage': ratio(
+                        totals['ignored_gt_action'], totals['gt_action']
+                    ),
+                })
+                log_data.update(routing_summary)
             
             # Upload to wandb
             if wandb.run is not None:
@@ -326,6 +373,16 @@ class BaseTrainerDA:
                         for key, value in stage1_values.items():
                             if key != 'epoch':
                                 self.stage1_writer.add_scalar(key, value, epoch)
+            if self.cfg.get('diagnostic', {}).get('audit_target_routing_gt', False):
+                routing_log = os.path.join(
+                    self.cfg.save_dir, 'target_routing_gt_epoch_metrics.jsonl'
+                )
+                routing_values = {
+                    key: value for key, value in log_data.items()
+                    if key == 'epoch' or 'routing_gt_' in key
+                }
+                with open(routing_log, 'a', encoding='utf-8') as handle:
+                    handle.write(json.dumps(routing_values) + '\n')
             
             # print logged informations to the screen
             t = time.time() - t0

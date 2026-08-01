@@ -471,6 +471,14 @@ def create_argparser():
         help='compute conditional alignment diagnostics but exclude it from updates',
     )
     parser.add_argument(
+        '--stage1-action-only-ca', action='store_true',
+        help='disable background conditional DA while preserving its denominator',
+    )
+    parser.add_argument(
+        '--audit-target-routing-gt', action='store_true',
+        help='log target-GT routing counts without using them for optimization',
+    )
+    parser.add_argument(
         '--diagnostic-alignment-levels', default=None,
         help='comma-separated FPN levels used only for diagnostic runs',
     )
@@ -508,6 +516,16 @@ if __name__ == '__main__':
         )
     ):
         raise ValueError('Stage 1 and Oracle diagnostics cannot both be enabled')
+    if args.stage1_action_only_ca and (
+        args.stage1 != 'off'
+        or args.oracle_routing != 'off'
+        or args.oracle_target_regression != 'off'
+        or args.diagnostic_no_ca
+    ):
+        raise ValueError(
+            'action-only conditional alignment must run without Stage 1, '
+            'Oracle, or no-CA diagnostics'
+        )
     diagnostic_levels = None
     if args.diagnostic_alignment_levels is not None:
         diagnostic_levels = [
@@ -537,6 +555,12 @@ if __name__ == '__main__':
         raise ValueError(
             'Oracle target regression levels must be unique values from 0 to 5'
         )
+    original_background_weight = config_dict['model'].get(
+        'weight_no_class_adv', 1.0
+    )
+    if args.stage1_action_only_ca:
+        # Keep align_bkg enabled so the action-class normalization is unchanged.
+        config_dict['model']['weight_no_class_adv'] = 0.0
     config_dict['diagnostic'] = {
         'oracle_routing': args.oracle_routing,
         'oracle_target_regression': args.oracle_target_regression,
@@ -545,6 +569,9 @@ if __name__ == '__main__':
         'stop_after_epoch': args.stop_after_epoch,
         'no_conditional_update': args.diagnostic_no_ca,
         'alignment_levels': diagnostic_levels,
+        'action_only_ca': args.stage1_action_only_ca,
+        'original_background_weight': original_background_weight,
+        'audit_target_routing_gt': args.audit_target_routing_gt,
     }
 
     update_config_with_arguments(config_dict, args, ARGS_TYPES, ARGS_CONFIGPATH)

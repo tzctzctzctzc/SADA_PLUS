@@ -275,6 +275,7 @@ class Trainer(BaseTrainerDA):
         # switch to train mode
         self.model.train()
         self.stage1_epoch_summary = {}
+        self.routing_gt_epoch_summary = {}
         
         # Create iterator for the source and target data loaders
         iter_src = iter(self.train_loader_src)
@@ -394,6 +395,12 @@ class Trainer(BaseTrainerDA):
                     key = 't_' + raw_loss_name + '_total'
                     self.stage1_epoch_summary[key] = (
                         self.stage1_epoch_summary.get(key, 0.0) + loss_tr.item()
+                    )
+                if raw_loss_name.startswith('routing_gt_'):
+                    key = 't_' + raw_loss_name + '_total'
+                    self.routing_gt_epoch_summary[key] = (
+                        self.routing_gt_epoch_summary.get(key, 0.0)
+                        + loss_tr.item()
                     )
             
             
