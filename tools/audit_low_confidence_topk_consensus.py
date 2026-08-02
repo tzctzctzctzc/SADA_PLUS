@@ -241,6 +241,7 @@ def main():
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--levels", type=int, nargs="+", default=[0, 1, 2])
+    parser.add_argument("--max-videos", type=int, default=None)
     args = parser.parse_args()
 
     from libs.datasets import make_dataset
@@ -266,6 +267,7 @@ def main():
         open(cfg["dataset"]["json_file"], encoding="utf-8")
     )["database"]
     batch_size = args.batch_size or int(cfg.get("loader", {}).get("batch_size", 1))
+    video_count = min(len(dataset), args.max_videos or len(dataset))
     alpha = float(cfg["model"].get("pl_threshold", 0.7))
     device = args.device
 
@@ -276,11 +278,11 @@ def main():
     level_records = []
 
     with torch.inference_mode():
-        for batch_start in range(0, len(dataset), batch_size):
+        for batch_start in range(0, video_count, batch_size):
             raw_videos = [
                 dataset[index]
                 for index in range(
-                    batch_start, min(batch_start + batch_size, len(dataset))
+                    batch_start, min(batch_start + batch_size, video_count)
                 )
             ]
             videos = [move_video(video, device) for video in raw_videos]
@@ -501,7 +503,7 @@ def main():
     result = {
         "audit": "low_confidence_gt_action_topk_and_model_consensus",
         "seed": args.seed,
-        "videos": len(dataset),
+        "videos": video_count,
         "levels": args.levels,
         "alpha": alpha,
         "base_view": args.base_view,
