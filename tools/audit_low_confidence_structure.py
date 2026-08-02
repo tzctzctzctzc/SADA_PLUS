@@ -406,6 +406,7 @@ def main():
 
     result = {
         "audit": "low_confidence_tal_foreground_structure",
+        "config": args.config,
         "seed": args.seed,
         "videos": video_count,
         "levels": args.levels,
