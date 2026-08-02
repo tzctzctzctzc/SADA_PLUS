@@ -192,13 +192,37 @@ def load_models(cfg, view_specs, device):
             if state_key not in checkpoint:
                 raise KeyError("{} has no {}".format(checkpoint_path, state_key))
             model = make_meta_arch(cfg["model_name"], cfg, device=device).to(device)
-            model.load_state_dict(checkpoint[state_key])
+            checkpoint_state = checkpoint[state_key]
+            model_state = model.state_dict()
+            compatible_state = {
+                key: value
+                for key, value in checkpoint_state.items()
+                if key in model_state and model_state[key].shape == value.shape
+            }
+            required_prefixes = (
+                "backbone_target.",
+                "neck_target.",
+                "cls_head_target.",
+            )
+            for prefix in required_prefixes:
+                required_keys = [
+                    key for key in checkpoint_state if key.startswith(prefix)
+                ]
+                if not required_keys or any(
+                    key not in compatible_state for key in required_keys
+                ):
+                    raise RuntimeError(
+                        "incompatible checkpoint weights for {}".format(prefix)
+                    )
+            model.load_state_dict(compatible_state, strict=False)
             model.eval()
             models[name] = model
             metadata[name] = {
                 "checkpoint": checkpoint_path,
                 "checkpoint_epoch": checkpoint.get("epoch"),
                 "state_key": state_key,
+                "loaded_tensor_count": len(compatible_state),
+                "skipped_incompatible_tensor_count": len(checkpoint_state) - len(compatible_state),
             }
         del checkpoint
     return models, metadata
