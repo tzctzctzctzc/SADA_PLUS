@@ -404,6 +404,7 @@ def main():
             for level in args.levels
         },
         "by_base_max_score_gap": {},
+        "low_cohort_composition_by_gap": {},
     }
     gap = alpha - base_score
     gap_bins = [
@@ -415,6 +416,32 @@ def main():
     for name, gap_mask in gap_bins:
         analysis_a["by_base_max_score_gap"][name] = rank_summary(
             base_probability, gt_labels, low_action & gap_mask, alpha
+        )
+        action_mask = low_action & gap_mask
+        background_mask = low_background & gap_mask
+        correct_count = int((action_mask & base_correct).sum().item())
+        selected_count = int((action_mask | background_mask).sum().item())
+        analysis_a["low_cohort_composition_by_gap"][name] = {
+            "gt_action": int(action_mask.sum().item()),
+            "gt_background": int(background_mask.sum().item()),
+            "correct_action": correct_count,
+            "correct_routing_precision": ratio(correct_count, selected_count),
+        }
+
+    threshold_sweep = {}
+    thresholds = sorted({
+        max(0.05, alpha - delta)
+        for delta in (0.0, 0.02, 0.05, 0.10, 0.20, 0.30, 0.40)
+    }, reverse=True)
+    for threshold in thresholds:
+        selected = base_low & (base_score >= threshold)
+        threshold_sweep["{:.2f}".format(threshold)] = rule_summary(
+            selected,
+            base_correct,
+            low_action,
+            low_background,
+            baseline_correct,
+            all_gt_action_count,
         )
 
     view_results = {}
@@ -550,6 +577,7 @@ def main():
             "base_gt_action_background_leakage": ratio(int(low_action.sum().item()), all_gt_action_count),
         },
         "analysis_a_base_topk": analysis_a,
+        "base_lowered_threshold_sweep": threshold_sweep,
         "oracle_topk_ceiling": {
             "warning": "Uses GT to choose a class inside top-k; not deployable.",
             "top_1_correct_da_utilization": ratio(
