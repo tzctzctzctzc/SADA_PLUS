@@ -39,19 +39,53 @@ function prepareFrames(video, center, outputDir) {
   });
 }
 
-function prompt() {
+function loadOntology(csvPath) {
+  if (!csvPath) return null;
+  const rows = fs.readFileSync(csvPath, 'utf8').split(/\r?\n/).slice(1).filter(Boolean);
+  return rows.map(line => {
+    const match = line.match(/^(\d+),([^,]+),/);
+    if (!match) throw new Error(`cannot parse ontology row: ${line.slice(0, 80)}`);
+    return { id: Number(match[1]), verb: match[2] };
+  }).sort((a, b) => a.id - b.id);
+}
+
+function normalizeVerb(value) {
+  return String(value || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+}
+
+function prompt(ontology, promptMode) {
+  const target = ontology
+    ? ontology.filter(item => item.id < 10).map(item => item.verb)
+    : ['take', 'put', 'wash', 'open', 'close', 'insert', 'turn on', 'cut', 'turn off', 'pour'];
+  const contrastiveKeys = new Set([
+    'mix', 'move', 'remove', 'throw', 'dry', 'shake', 'scoop', 'adjust',
+    'squeeze', 'lift', 'pull', 'press', 'fill', 'scrape', 'wrap', 'set',
+    'add', 'hold', 'wear', 'transition',
+  ]);
+  const nonTarget = ontology
+    ? ontology.filter(item => item.id >= 10 && (
+      promptMode === 'full_ontology' || contrastiveKeys.has(item.verb)
+    )).map(item => item.verb)
+    : [];
+  const taxonomyRule = ontology ? `
+The dataset uses a strict verb taxonomy. First identify the single best verb at the center moment.
+Target verb labels: ${target.join(', ')}.
+${promptMode === 'full_ontology' ? 'All non-target verb labels' : 'Easily confused non-target verb labels'} that MUST be treated as background even when they are meaningful actions: ${nonTarget.join(', ')}.
+Near-neighbor labels are intentionally distinct. Do not map a non-target verb to a broad target synonym merely because both involve hand-object interaction.` : `
+Target verb labels: ${target.join(', ')}.`;
   return `You are a temporal action localization verifier.
 You are given five chronologically ordered frames sampled from a short egocentric kitchen video clip. Frame 3 is the current temporal anchor; frames 1-2 are before it and frames 4-5 are after it.
 
-Decide whether the CENTER MOMENT (frame 3), not merely another part of the clip, lies inside one of these target actions:
-take, put, wash, open, close, insert, turn on, cut, turn off, pour.
+Decide whether the CENTER MOMENT (frame 3), not merely another part of the clip, lies inside one of the target verb labels.${taxonomyRule}
 
 Do not count camera motion, visible hands without meaningful interaction, idle/preparation states, or a target action appearing only before or after the center moment.
 
-Return JSON only, with exactly one key named "label":
-{"label":"A"} = center moment is inside a target action
-{"label":"B"} = center moment is background
-{"label":"U"} = genuinely uncertain`;
+Return JSON only with label, best verb, and target_probability from 0 to 100.
+target_probability means the probability that the CENTER MOMENT belongs to one of the exact target verb labels, not merely the probability that some action is happening.
+Examples:
+{"label":"A","verb":"target verb","target_probability":90}
+{"label":"B","verb":"best non-target verb or background","target_probability":10}
+{"label":"U","verb":"uncertain","target_probability":50}`;
 }
 
 function outputText(response) {
@@ -59,8 +93,8 @@ function outputText(response) {
     .filter(item => item.type === 'output_text').map(item => item.text).join('').trim();
 }
 
-async function requestOne(baseUrl, apiKey, model, frames, wireApi) {
-  const content = [{ type: 'input_text', text: prompt() }];
+async function requestOne(baseUrl, apiKey, model, frames, wireApi, ontology, promptMode) {
+  const content = [{ type: 'input_text', text: prompt(ontology, promptMode) }];
   for (const file of frames) {
     const image = fs.readFileSync(file).toString('base64');
     content.push({ type: 'input_image', image_url: `data:image/jpeg;base64,${image}` });
@@ -109,6 +143,14 @@ async function main() {
   if (!['responses', 'chat'].includes(wireApi)) throw new Error('--wire-api must be responses or chat');
   const keyEnv = args['api-key-env'] || 'CCH_API_KEY';
   const apiKey = process.env[keyEnv];
+  const ontology = loadOntology(args['ontology-csv']);
+  const promptMode = args['prompt-mode'] || (ontology ? 'full_ontology' : 'target_only');
+  if (!['target_only', 'contrastive', 'contrastive_score', 'full_ontology'].includes(promptMode)) {
+    throw new Error('--prompt-mode must be target_only, contrastive, contrastive_score, or full_ontology');
+  }
+  if (promptMode !== 'target_only' && !ontology) {
+    throw new Error('--ontology-csv is required for taxonomy-aware prompt modes');
+  }
   if (!apiKey) throw new Error(`environment variable ${keyEnv} is empty`);
   const limit = Number(args.limit || Infinity);
   const rows = readJsonl(args.manifest);
@@ -125,17 +167,41 @@ async function main() {
     try {
       const video = findVideo(args['video-root'], row.video_id);
       const frames = prepareFrames(video, row.center_sec, path.join(args['cache-dir'], row.candidate_id));
-      const response = await requestOne(baseUrl, apiKey, model, frames, wireApi);
+      const response = await requestOne(
+        baseUrl, apiKey, model, frames, wireApi, ontology, promptMode,
+      );
       let label = null;
-      try { label = JSON.parse(response.text).label; } catch {}
+      let reportedVerb = null;
+      let targetProbability = null;
+      try {
+        const parsed = JSON.parse(response.text);
+        label = parsed.label;
+        reportedVerb = parsed.verb || null;
+        targetProbability = Number.isFinite(Number(parsed.target_probability))
+          ? Number(parsed.target_probability) : null;
+      } catch {}
       const match = String(label || '').match(/^([ABU])$/i);
+      let prediction = match ? match[1].toUpperCase() : 'U';
+      if (ontology && reportedVerb) {
+        const targetVerbs = new Set(
+          ontology.filter(item => item.id < 10).map(item => normalizeVerb(item.verb)),
+        );
+        prediction = normalizeVerb(reportedVerb) === 'uncertain'
+          ? 'U'
+          : (targetVerbs.has(normalizeVerb(reportedVerb)) ? 'A' : 'B');
+      }
       result.status = 'ok';
-      result.prediction = match ? match[1].toUpperCase() : 'U';
+      result.prediction = prediction;
+      result.model_reported_label = match ? match[1].toUpperCase() : null;
       result.parse_error = !match;
       result.response_text = response.text;
+      result.reported_verb = reportedVerb;
+      result.target_probability = targetProbability;
       result.usage = response.usage;
       result.model = model;
       result.wire_api = wireApi;
+      result.prompt_mode = promptMode;
+      result.gate_rule = ontology ? 'deterministic_from_reported_verb' : 'model_label';
     } catch (error) {
       result.error = String(error.message || error);
     }

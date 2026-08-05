@@ -2,6 +2,7 @@
 
 import argparse
 import collections
+import csv
 import json
 from pathlib import Path
 
@@ -16,6 +17,19 @@ def read_jsonl(path):
 
 def safe_ratio(numerator, denominator):
     return numerator / denominator if denominator else None
+
+
+def normalize_verb(value):
+    return str(value or "").strip().lower().replace(" ", "-").replace("_", "-")
+
+
+def target_verbs_from_csv(path):
+    with open(path, encoding="utf-8") as stream:
+        return {
+            normalize_verb(row["key"])
+            for row in csv.DictReader(stream)
+            if int(row["id"]) < 10
+        }
 
 
 def summarize(rows):
@@ -77,6 +91,10 @@ def main():
         "--metadata",
         help="Exporter sidecar; defaults to <manifest>.meta.json when present.",
     )
+    parser.add_argument(
+        "--ontology-csv",
+        help="Derive A/B deterministically from reported_verb and the first ten IDs.",
+    )
     args = parser.parse_args()
 
     manifest = {row["candidate_id"]: row for row in read_jsonl(args.manifest)}
@@ -85,11 +103,22 @@ def main():
         for row in read_jsonl(args.predictions)
         if row.get("status") == "ok"
     }
+    cached_gate_rules = {
+        row.get("gate_rule") for row in predictions.values() if row.get("gate_rule")
+    }
+    target_verbs = target_verbs_from_csv(args.ontology_csv) if args.ontology_csv else None
     rows = []
     for candidate_id, prediction in predictions.items():
         if candidate_id not in manifest:
             continue
-        rows.append({**manifest[candidate_id], **prediction})
+        row = {**manifest[candidate_id], **prediction}
+        if target_verbs is not None and row.get("reported_verb"):
+            row["model_reported_prediction"] = row["prediction"]
+            verb = normalize_verb(row["reported_verb"])
+            row["prediction"] = "U" if verb == "uncertain" else (
+                "A" if verb in target_verbs else "B"
+            )
+        rows.append(row)
 
     by_level = {}
     for level in sorted({row["fpn_level"] for row in rows if "fpn_level" in row}):
@@ -137,6 +166,15 @@ def main():
     result = {
         "audit": "offline_vlm_actionness",
         "target_gt_use": "post-API scoring only; never included in prompt",
+        "gate_rule": (
+            "deterministic_from_reported_verb"
+            if target_verbs is not None
+            else (
+                next(iter(cached_gate_rules))
+                if len(cached_gate_rules) == 1
+                else "cached_model_label"
+            )
+        ),
         "completed_candidates": len(rows),
         "missing_candidates": len(manifest) - len(rows),
         "global": global_metrics,
