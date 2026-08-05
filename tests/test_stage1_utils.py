@@ -238,6 +238,15 @@ class Stage1UtilsTest(unittest.TestCase):
         self.assertEqual(o3["action"].tolist(), [True, True, False, False])
         self.assertEqual(o3["background"].tolist(), [False, False, True, True])
         self.assertFalse(o3["ignore"].any())
+        self.assertEqual(o3["action_labels"][0].tolist(), [0.0, 1.0, 1.0])
+        self.assertEqual(o3["action_labels"][1].tolist(), [0.0, 0.0, 1.0])
+
+        o4 = build_oracle_routing(probabilities, gt_labels, 0.6, "o4")
+        self.assertEqual(o4["action"].tolist(), [True, True, False, False])
+        self.assertEqual(o4["background"].tolist(), [False, False, True, True])
+        self.assertFalse(o4["ignore"].any())
+        self.assertEqual(o4["action_labels"][0].tolist(), [1.0, 0.0, 0.0])
+        self.assertEqual(o4["action_labels"][1].tolist(), [0.0, 1.0, 0.0])
         self.assertTrue(torch.equal(o3["action_labels"], gt_labels))
 
     def test_oracle_target_regression_masks_keep_routing_out_of_scope(self):

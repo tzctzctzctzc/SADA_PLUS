@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 def build_oracle_routing(probabilities, gt_labels, alpha, mode):
     """Build diagnostic target routes without changing the default SADA path."""
-    if mode not in ("o1", "o2", "o3"):
+    if mode not in ("o1", "o2", "o3", "o4"):
         raise ValueError("unknown oracle routing mode: {}".format(mode))
     if probabilities.shape != gt_labels.shape:
         raise ValueError("probabilities and GT labels must have the same shape")
@@ -27,10 +27,17 @@ def build_oracle_routing(probabilities, gt_labels, alpha, mode):
         action_labels[action] = pseudo_labels[action]
         true_action = action & gt_foreground
         action_labels[true_action] = gt_labels[true_action]
-    else:
+    elif mode == "o3":
         action = gt_foreground
         background = ~gt_foreground
         action_labels[action] = gt_labels[action]
+    else:
+        # Perfect action/background routing while preserving the model's
+        # predicted action class. This isolates the upper bound of an
+        # actionness-only target pseudo-label refiner.
+        action = gt_foreground
+        background = ~gt_foreground
+        action_labels[action] = pseudo_labels[action]
 
     ignore = ~(action | background)
     return {

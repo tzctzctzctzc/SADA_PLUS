@@ -282,7 +282,7 @@ class SADA(nn.Module):
         self.oracle_routing_mode = cfg.get('diagnostic', {}).get(
             'oracle_routing', 'off'
         )
-        if self.oracle_routing_mode not in ('off', 'o1', 'o2', 'o3'):
+        if self.oracle_routing_mode not in ('off', 'o1', 'o2', 'o3', 'o4'):
             raise ValueError(
                 'unknown oracle routing mode: {}'.format(
                     self.oracle_routing_mode

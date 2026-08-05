@@ -450,7 +450,7 @@ def create_argparser():
         help='independent perturbation RNG seed',
     )
     parser.add_argument(
-        '--oracle-routing', choices=['off', 'o1', 'o2', 'o3'], default='off',
+        '--oracle-routing', choices=['off', 'o1', 'o2', 'o3', 'o4'], default='off',
         help='diagnostic target routing; uses target GT and is not a UDA method',
     )
     parser.add_argument(
