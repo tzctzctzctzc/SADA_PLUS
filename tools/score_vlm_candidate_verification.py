@@ -88,6 +88,9 @@ def summarize_real(rows, metadata=None, include_by_class=True):
 
     metrics = {
         "n": len(rows),
+        "confirmed_count": len(confirmed),
+        "correct_candidate_count": len(correct),
+        "candidate_pool_correct_action_rate": ratio(len(correct), len(rows)),
         "candidate_correct_confirm_recall": ratio(
             len(correct_confirmed), len(correct)
         ),
@@ -113,6 +116,13 @@ def summarize_real(rows, metadata=None, include_by_class=True):
             collections.Counter(row["prediction"] for row in rows)
         ),
     }
+    confirmed_precision = metrics["confirmed_correct_action_precision"]
+    pool_precision = metrics["candidate_pool_correct_action_rate"]
+    metrics["confirmed_precision_gain_vs_candidate_pool"] = (
+        confirmed_precision - pool_precision
+        if confirmed_precision is not None and pool_precision is not None
+        else None
+    )
 
     if include_by_class:
         by_class = {}
@@ -137,6 +147,18 @@ def summarize_real(rows, metadata=None, include_by_class=True):
             original_correct + len(correct_confirmed), denominator
         )
     return metrics
+
+
+def use_center_segment_semantics(rows):
+    """Map semantic center-in-segment GT onto the common real-audit fields."""
+    return [
+        {
+            **row,
+            "gt_is_foreground": row["center_in_target_action"],
+            "sada_top1_is_correct": row["sada_top1_matches_center_gt"],
+        }
+        for row in rows
+    ]
 
 
 def main():
@@ -190,6 +212,14 @@ def main():
         "metrics": summarize(rows) if is_probe else summarize_real(rows, metadata),
         "candidate_export_metadata": metadata,
     }
+    if not is_probe and rows and all(
+        "center_in_target_action" in row
+        and "sada_top1_matches_center_gt" in row
+        for row in rows
+    ):
+        result["center_segment_metrics"] = summarize_real(
+            use_center_segment_semantics(rows), metadata=None
+        )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2), encoding="utf-8")

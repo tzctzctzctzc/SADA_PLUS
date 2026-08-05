@@ -1,6 +1,10 @@
 import unittest
 
-from tools.score_vlm_candidate_verification import summarize, summarize_real
+from tools.score_vlm_candidate_verification import (
+    summarize,
+    summarize_real,
+    use_center_segment_semantics,
+)
 
 
 class VlmCandidateVerificationTest(unittest.TestCase):
@@ -58,11 +62,31 @@ class VlmCandidateVerificationTest(unittest.TestCase):
         )
         self.assertEqual(result["candidate_correct_confirm_recall"], 0.5)
         self.assertEqual(result["confirmed_correct_action_precision"], 0.5)
+        self.assertEqual(result["candidate_pool_correct_action_rate"], 0.5)
+        self.assertEqual(
+            result["confirmed_precision_gain_vs_candidate_pool"], 0.0
+        )
         self.assertEqual(result["wrong_action_class_false_confirm_rate"], 1.0)
         self.assertEqual(result["background_false_confirm_rate"], 0.0)
         self.assertEqual(result["background_routing_recall"], 1.0)
         self.assertEqual(result["correct_action_routing_coverage_before_vlm"], 0.2)
         self.assertEqual(result["correct_action_routing_coverage_after_vlm"], 0.3)
+
+    def test_center_segment_semantics_are_kept_separate(self):
+        rows = [
+            {
+                "prediction": "CONFIRM_TARGET",
+                "gt_is_foreground": False,
+                "sada_top1_is_correct": False,
+                "center_in_target_action": True,
+                "sada_top1_matches_center_gt": True,
+                "sada_top1_class": 2,
+            }
+        ]
+        remapped = use_center_segment_semantics(rows)
+        self.assertTrue(remapped[0]["gt_is_foreground"])
+        self.assertTrue(remapped[0]["sada_top1_is_correct"])
+        self.assertFalse(rows[0]["gt_is_foreground"])
 
 
 if __name__ == "__main__":

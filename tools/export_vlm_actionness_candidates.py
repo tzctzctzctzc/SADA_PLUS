@@ -66,7 +66,11 @@ def main():
     from libs.datasets import make_dataset
     from libs.models.SADA import make_meta_arch
     from libs.utils.utils import _update_config, read_yaml
-    from tools.audit_original_sada_pseudolabels import crop_targets, move_video
+    from tools.audit_original_sada_pseudolabels import (
+        crop_targets,
+        kept_label,
+        move_video,
+    )
 
     cfg = read_yaml(args.config)
     cfg["stage1"] = {"enabled": False, "perturbation": "shift"}
@@ -176,6 +180,18 @@ def main():
                     gt_action = bool(gt_vector.sum() > 0)
                     predicted_class = int(pseudo_class[index])
                     correct_class = bool(gt_action and gt_vector[predicted_class] > 0)
+                    center_gt_class_ids = sorted(
+                        {
+                            int(action["label_id"])
+                            for action in annotations[video_id]["annotations"]
+                            if kept_label(
+                                int(action["label_id"]),
+                                cfg["dataset"].get("action_subsampling", "all"),
+                            )
+                            and float(action["segment"][0]) <= center_sec
+                            <= float(action["segment"][1])
+                        }
+                    )
                     rows.append(
                         {
                             "candidate_id": "{}-l{}-{:06d}".format(
@@ -195,6 +211,11 @@ def main():
                             .flatten()
                             .cpu()
                             .tolist(),
+                            "center_gt_class_ids": center_gt_class_ids,
+                            "center_in_target_action": bool(center_gt_class_ids),
+                            "sada_top1_matches_center_gt": (
+                                predicted_class in center_gt_class_ids
+                            ),
                         }
                     )
 
@@ -204,6 +225,7 @@ def main():
         for row in rows:
             stream.write(json.dumps(row, ensure_ascii=False) + "\n")
     foreground = sum(row["gt_is_foreground"] for row in rows)
+    center_foreground = sum(row["center_in_target_action"] for row in rows)
     metadata = {
         "selection_uses_target_gt": False,
         "target_gt_use": "attached after candidate selection for offline scoring only",
@@ -218,6 +240,7 @@ def main():
         "min_gap_sec": args.min_gap_sec,
         "manifest_candidates": len(rows),
         "candidate_gt_foreground_anchors": foreground,
+        "candidate_center_in_target_action": center_foreground,
         **totals,
     }
     metadata_path = Path(str(output) + ".meta.json")
