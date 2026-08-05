@@ -48,12 +48,25 @@ def main():
     parser.add_argument("--per-group", type=int, default=10)
     parser.add_argument("--seed", type=int, default=20260805)
     parser.add_argument("--idle-margin-sec", type=float, default=1.0)
+    parser.add_argument(
+        "--candidate-label-id",
+        type=int,
+        help="Build a candidate-specific verifier probe instead of the ten-class probe.",
+    )
     args = parser.parse_args()
 
     rng = random.Random(args.seed)
     database = json.loads(Path(args.annotations).read_text(encoding="utf-8"))["database"]
     available = video_ids_in(args.video_root)
-    groups = {"target_action": [], "other_action": [], "idle_background": []}
+    if args.candidate_label_id is None:
+        groups = {"target_action": [], "other_action": [], "idle_background": []}
+    else:
+        groups = {
+            "candidate_action": [],
+            "other_target_action": [],
+            "other_action": [],
+            "idle_background": [],
+        }
 
     for video_id in sorted(available):
         video = database.get(video_id)
@@ -62,22 +75,45 @@ def main():
         annotations = video.get("annotations", [])
         for index, action in enumerate(annotations):
             label = int(action["label_id"])
-            group = "target_action" if label < 10 else "other_action"
             center = midpoint(action["segment"])
-            if group == "other_action" and any(
-                int(other["label_id"]) < 10
-                and float(other["segment"][0]) <= center <= float(other["segment"][1])
-                for other in annotations
-            ):
+            if args.candidate_label_id is None:
+                group = "target_action" if label < 10 else "other_action"
+                overlaps_excluded_label = group == "other_action" and any(
+                    int(other["label_id"]) < 10
+                    and float(other["segment"][0]) <= center <= float(other["segment"][1])
+                    for other in annotations
+                )
+            else:
+                if label == args.candidate_label_id:
+                    group = "candidate_action"
+                elif label < 10:
+                    group = "other_target_action"
+                else:
+                    group = "other_action"
+                excluded_ids = (
+                    {args.candidate_label_id}
+                    if group == "other_target_action"
+                    else set(range(10)) if group == "other_action" else set()
+                )
+                overlaps_excluded_label = any(
+                    int(other["label_id"]) in excluded_ids
+                    and float(other["segment"][0]) <= center <= float(other["segment"][1])
+                    for other in annotations
+                )
+            if overlaps_excluded_label:
                 continue
             groups[group].append(
                 {
                     "candidate_id": "probe-{}-{}-{:05d}".format(group, video_id, index),
                     "video_id": video_id,
                     "center_sec": center,
-                    "gt_is_foreground": group == "target_action",
+                    "gt_is_foreground": group
+                    in {"target_action", "candidate_action", "other_target_action"},
+                    "gt_matches_candidate": group == "candidate_action",
                     "probe_group": group,
+                    "gt_label_id": label,
                     "target_label_id": label if label < 10 else None,
+                    "candidate_label_id": args.candidate_label_id,
                 }
             )
 
@@ -125,6 +161,7 @@ def main():
                 "valid_uda_result": False,
                 "selection_uses_target_gt": True,
                 "groups": {name: args.per_group for name in groups},
+                "candidate_label_id": args.candidate_label_id,
                 "seed": args.seed,
             },
             indent=2,

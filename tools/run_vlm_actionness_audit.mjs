@@ -54,6 +54,86 @@ function normalizeVerb(value) {
 }
 
 function prompt(ontology, promptMode) {
+  if (promptMode === 'take_verify') {
+    return `You are verifying one candidate pseudo-label for temporal action localization
+in an egocentric kitchen video.
+
+You are given five chronologically ordered frames sampled around a temporal
+anchor. Frame 3 corresponds to the anchor. Frames 1-2 provide preceding
+context, and Frames 4-5 provide following context.
+
+Your task is not to identify the exact instant when an action starts or ends.
+Determine whether the temporal neighborhood of Frame 3 belongs to the action
+segment represented by the SADA candidate.
+
+SADA candidate action: "take"
+
+Candidate definition:
+"Take" means that the person deliberately acquires possession or stable
+control of an object, typically by grasping, retrieving, or picking it up.
+
+Typical temporal evidence may include approaching, reaching for, contacting,
+grasping, or retrieving the object before or near the anchor; acquiring or
+consolidating control around the anchor; and holding or carrying the object
+after or near the anchor. None of these cues is sufficient by itself. They
+should form temporally consistent evidence that the central neighborhood
+belongs to an acquisition event.
+
+The complete transition from not possessing the object to possessing it does
+not need to be fully visible within the five frames. Frame 3 may lie near the
+beginning, middle, or end of the annotated "take" segment. However, the
+available evidence should indicate that the central temporal neighborhood is
+part of a possession-acquisition event, rather than merely showing an object
+that was already being held and moved for an unrelated purpose.
+
+Choose exactly one label:
+
+CONFIRM_TARGET: The temporal neighborhood of Frame 3 is clearly part of the
+possession-acquisition event described by "take".
+
+OTHER_ACTIVITY: A meaningful interaction clearly occurs around Frame 3, but
+the overall event is better described by another action rather than "take".
+
+TRUE_BACKGROUND: No deliberate object interaction occurs around Frame 3.
+Camera motion, walking, waiting, visible hands, object visibility, observation,
+and idle preparation alone count as background.
+
+UNCERTAIN: The frames suggest that an interaction may be occurring, but
+occlusion, sparse temporal evidence, ambiguous object state, or insufficient
+context makes it impossible to determine reliably whether the central
+neighborhood belongs to "take", another activity, or background.
+
+Important:
+- Evaluate whether Frame 3 lies inside the candidate action event, not whether
+  the exact action transition happens precisely at Frame 3.
+- Use Frames 1-2 and Frames 4-5 as temporal context, but do not confirm an
+  action that occurs only in the outer context frames and does not extend into
+  the temporal neighborhood of Frame 3.
+- Do not confirm merely because hands or relevant objects are visible.
+- If the object remains under stable control throughout the sequence and
+  there is no evidence that the central neighborhood belongs to an acquisition
+  event, do not confirm "take".
+- Brief contact without evidence of acquiring stable control is not sufficient.
+- Actions such as lift, pull, remove, or adjust should not automatically be
+  treated as "take". Confirm only when they are part of gaining possession or
+  stable control and the overall event is best described as "take".
+- If a meaningful interaction is clearly visible but it does not match "take",
+  choose OTHER_ACTIVITY.
+- If a meaningful interaction may be occurring but its identity or temporal
+  relation to Frame 3 is unclear, choose UNCERTAIN rather than TRUE_BACKGROUND.
+
+Decision order:
+1. Choose CONFIRM_TARGET when the central neighborhood is clearly part of the
+   candidate "take" event.
+2. Otherwise choose OTHER_ACTIVITY when another meaningful interaction is
+   clearly identifiable.
+3. Choose TRUE_BACKGROUND only when no meaningful interaction occurs around
+   the anchor.
+4. Choose UNCERTAIN for all remaining ambiguous cases.
+
+Return exactly one JSON object with no explanation, markdown, or additional
+text, for example: {"label":"CONFIRM_TARGET"}`;
+  }
   const target = ontology
     ? ontology.filter(item => item.id < 10).map(item => item.verb)
     : ['take', 'put', 'wash', 'open', 'close', 'insert', 'turn on', 'cut', 'turn off', 'pour'];
@@ -145,10 +225,10 @@ async function main() {
   const apiKey = process.env[keyEnv];
   const ontology = loadOntology(args['ontology-csv']);
   const promptMode = args['prompt-mode'] || (ontology ? 'full_ontology' : 'target_only');
-  if (!['target_only', 'contrastive', 'contrastive_score', 'full_ontology'].includes(promptMode)) {
-    throw new Error('--prompt-mode must be target_only, contrastive, contrastive_score, or full_ontology');
+  if (!['target_only', 'contrastive', 'contrastive_score', 'full_ontology', 'take_verify'].includes(promptMode)) {
+    throw new Error('--prompt-mode must be target_only, contrastive, contrastive_score, full_ontology, or take_verify');
   }
-  if (promptMode !== 'target_only' && !ontology) {
+  if (!['target_only', 'take_verify'].includes(promptMode) && !ontology) {
     throw new Error('--ontology-csv is required for taxonomy-aware prompt modes');
   }
   if (!apiKey) throw new Error(`environment variable ${keyEnv} is empty`);
@@ -180,9 +260,15 @@ async function main() {
         targetProbability = Number.isFinite(Number(parsed.target_probability))
           ? Number(parsed.target_probability) : null;
       } catch {}
-      const match = String(label || '').match(/^([ABU])$/i);
-      let prediction = match ? match[1].toUpperCase() : 'U';
-      if (ontology && reportedVerb) {
+      const verifierLabels = new Set([
+        'CONFIRM_TARGET', 'OTHER_ACTIVITY', 'TRUE_BACKGROUND', 'UNCERTAIN',
+      ]);
+      const normalizedLabel = String(label || '').trim().toUpperCase();
+      const match = normalizedLabel.match(/^([ABU])$/i);
+      let prediction = promptMode === 'take_verify'
+        ? (verifierLabels.has(normalizedLabel) ? normalizedLabel : 'UNCERTAIN')
+        : (match ? match[1].toUpperCase() : 'U');
+      if (promptMode !== 'take_verify' && ontology && reportedVerb) {
         const targetVerbs = new Set(
           ontology.filter(item => item.id < 10).map(item => normalizeVerb(item.verb)),
         );
@@ -192,8 +278,12 @@ async function main() {
       }
       result.status = 'ok';
       result.prediction = prediction;
-      result.model_reported_label = match ? match[1].toUpperCase() : null;
-      result.parse_error = !match;
+      result.model_reported_label = promptMode === 'take_verify'
+        ? (verifierLabels.has(normalizedLabel) ? normalizedLabel : null)
+        : (match ? match[1].toUpperCase() : null);
+      result.parse_error = promptMode === 'take_verify'
+        ? !verifierLabels.has(normalizedLabel)
+        : !match;
       result.response_text = response.text;
       result.reported_verb = reportedVerb;
       result.target_probability = targetProbability;
@@ -201,7 +291,9 @@ async function main() {
       result.model = model;
       result.wire_api = wireApi;
       result.prompt_mode = promptMode;
-      result.gate_rule = ontology ? 'deterministic_from_reported_verb' : 'model_label';
+      result.gate_rule = promptMode === 'take_verify'
+        ? 'candidate_semantic_verifier'
+        : (ontology ? 'deterministic_from_reported_verb' : 'model_label');
     } catch (error) {
       result.error = String(error.message || error);
     }
