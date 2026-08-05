@@ -168,6 +168,273 @@ const CANDIDATE_SPECS = new Map([
   }],
 ]);
 
+// Parallel descriptions used only by the listwise experiment. Keeping this
+// separate preserves the exact prompts used by the earlier independent audit.
+const LISTWISE_SPECS = new Map([
+  [0, {
+    name: 'take',
+    definition: 'acquires possession or stable control of an object, typically by grasping, retrieving, or picking it up',
+    evidence: 'The person approaches, reaches for, contacts, grasps, or retrieves the object; control is acquired or consolidated around the central neighborhood; and the object may subsequently be held or carried. The complete acquisition transition does not need to be fully visible.',
+    negatives: 'Do not confirm merely because the object is already held, carried, lifted, pulled, adjusted, or moved. Brief contact without evidence that the central neighborhood belongs to an acquisition event is not sufficient.',
+    distinction: '"Take" is primarily defined by gaining possession or stable control. Unlike "move", control does not simply continue; unlike "remove", extraction from a container, attachment, or constrained location is not the defining event.',
+  }],
+  [1, {
+    name: 'put',
+    definition: 'places an object at a destination and relinquishes stable control of it',
+    evidence: 'The person holds or carries the object before or near the anchor, moves it toward a destination, and places or releases it so that the object becomes supported by or remains at the destination.',
+    negatives: 'Do not confirm if the object remains held, is only moved or adjusted, merely contacts a surface, or passes near a destination without a placement-and-release event.',
+    distinction: '"Put" requires relinquishing control and establishing a new resting or supported state. Unlike "move", continued possession without release is insufficient.',
+  }],
+  [2, {
+    name: 'wash',
+    definition: 'cleans an object or the hands using water, rubbing, rinsing, or another cleaning medium',
+    evidence: 'The central neighborhood shows a sustained cleaning process, such as rinsing under water, rubbing, applying a cleaning medium, or removing residue from the hands or an object.',
+    negatives: 'Being near a sink, holding an object under an inactive tap, filling, pouring, squeezing a sponge, wiping once, or merely moving a wet object is not sufficient.',
+    distinction: '"Wash" describes the broader cleaning event, often involving water or rinsing. If repeated forceful rubbing is clearly the defining interaction, "scrub" is more specific.',
+  }],
+  [3, {
+    name: 'open',
+    definition: 'changes a door, lid, drawer, container, or closure from a closed state to an open or accessible state',
+    evidence: 'The person manipulates a closure and the opening, separation, or accessibility increases before, around, or after the central neighborhood.',
+    negatives: 'Do not confirm for reaching into something already open, holding an already removed lid, generic pulling, touching a closure without a state change, or moving an open part without increasing accessibility.',
+    distinction: '"Open" is defined by a closed-to-open state change. A pulling motion is only the means; if no opening or accessibility change occurs, "pull" is more accurate.',
+  }],
+  [4, {
+    name: 'close',
+    definition: 'changes a door, lid, drawer, container, or closure from an open state to a closed or secured state',
+    evidence: 'The person moves, presses, aligns, or secures a closure and the opening or accessibility decreases before, around, or after the anchor.',
+    negatives: 'Do not confirm for touching or adjusting something already closed, placing an object nearby, moving a door or lid without evidence of closure, or handling a separate covering material.',
+    distinction: '"Close" requires an open-to-closed state change of a rigid or defined closure. Using flexible material to cover or enclose an object is better described as "wrap".',
+  }],
+  [5, {
+    name: 'insert',
+    definition: 'moves an object from outside into the interior of a container, slot, opening, or enclosing object',
+    evidence: 'The object approaches an opening, crosses its boundary, and becomes at least partly contained inside it around the central neighborhood.',
+    negatives: 'Putting an object on a surface, holding it near an opening, briefly dipping it, placing it beside a container, or removing it from an interior is not insert.',
+    distinction: '"Insert" is defined by crossing an outside-to-inside containment boundary. "Put" may place an object at a destination without entering an enclosing space.',
+  }],
+  [6, {
+    name: 'turn-on',
+    definition: 'operates a control so that a device, appliance, light, flame, or flow changes from inactive to active',
+    evidence: 'The person presses, rotates, toggles, or otherwise operates a control, with visual evidence that the device, output, flame, light, or flow activates.',
+    negatives: 'Do not confirm for touching or adjusting a control without activation, using a device that was already active, or activation occurring only outside the central neighborhood.',
+    distinction: '"Turn-on" requires an inactive-to-active state change. A control manipulation without activation is better described as "adjust".',
+  }],
+  [7, {
+    name: 'cut',
+    definition: 'uses a blade or cutting tool to slice, divide, or sever material',
+    evidence: 'The central neighborhood shows purposeful blade contact and cutting motion, with evidence that the material is sliced, divided, or structurally separated.',
+    negatives: 'Holding a knife, positioning food, pressing without separation, peeling, scraping across a surface, or moving an already cut piece is not sufficient.',
+    distinction: '"Cut" requires slicing or severing material. "Scrape" uses edge-to-surface dragging without cutting through the material.',
+  }],
+  [8, {
+    name: 'turn-off',
+    definition: 'operates a control so that a device, appliance, light, flame, or flow changes from active to inactive',
+    evidence: 'The person presses, rotates, toggles, or otherwise operates a control, with visual evidence that the device, output, flame, light, or flow deactivates.',
+    negatives: 'Do not confirm for touching or adjusting a control without deactivation, interacting with a device already inactive, or deactivation occurring only outside the central neighborhood.',
+    distinction: '"Turn-off" requires an active-to-inactive state change. A setting change without deactivation is better described as "adjust".',
+  }],
+  [9, {
+    name: 'pour',
+    definition: 'tilts or controls a source container so that its contents flow into or onto a destination',
+    evidence: 'The source container is oriented for transfer and liquid, granules, or other contents visibly flow or are clearly transferred around the anchor.',
+    negatives: 'Moving or tilting a container without content transfer, filling directly from a tap, stirring, handling containers near each other, or merely changing the destination amount without evidence of source-controlled flow is insufficient.',
+    distinction: '"Pour" is defined from the source-transfer perspective. Unlike "empty", the source need not become substantially depleted; unlike "fill", the destination state is not the sole defining event.',
+  }],
+  [11, {
+    name: 'move',
+    definition: 'changes the location or position of an object while stable possession or support may continue',
+    evidence: 'The object is deliberately translated or repositioned around the central neighborhood without a defining acquisition, release, containment, or state change event.',
+    negatives: 'Do not confirm merely for acquiring possession, releasing an object at a destination, opening, closing, inserting, or removing when relocation is only a consequence of another defining action.',
+    distinction: '"Move" is primarily relocation. Unlike "take", possession need not be newly acquired; unlike "put", possession need not be relinquished.',
+  }],
+  [12, {
+    name: 'remove',
+    definition: 'extracts an object from an inside, attached, inserted, covering, or constrained state into an outside or detached state',
+    evidence: 'The object crosses from inside to outside, attached to detached, inserted to withdrawn, or constrained to released around the central neighborhood.',
+    negatives: 'Generic picking up from an unconstrained resting position, continued holding, simple relocation, or movement without evidence of extraction or detachment is not sufficient.',
+    distinction: '"Remove" is defined by extraction or detachment from a prior containing or constrained state. "Take" is defined by gaining possession even when no such state transition exists.',
+  }],
+  [17, {
+    name: 'adjust',
+    definition: 'changes the position, setting, orientation, fit, or configuration of an object or control without a defining activation, deactivation, opening, or closing event',
+    evidence: 'The central neighborhood shows a deliberate fine modification to position, orientation, alignment, fit, or setting.',
+    negatives: 'Do not confirm when the defining event is clearly turning a device on or off, opening, closing, inserting, removing, taking, or moving an object to a new destination.',
+    distinction: '"Adjust" changes degree, alignment, configuration, or setting while preserving the broader state. It does not require the binary state transition of turn-on, turn-off, open, or close.',
+  }],
+  [20, {
+    name: 'empty',
+    definition: 'discharges contents from a container so that the source becomes substantially less full or nearly empty',
+    evidence: 'Contents visibly leave the source through tipping, dumping, draining, shaking, or another discharge process, with evidence of substantial depletion.',
+    negatives: 'Pouring a small controlled amount while retaining substantial contents, tilting without visible discharge, filling a destination, or handling an empty container is not sufficient.',
+    distinction: '"Empty" is defined by substantial depletion of the source. "Pour" describes controlled transfer and does not require the source to become nearly empty.',
+  }],
+  [25, {
+    name: 'scrape',
+    definition: 'drags a tool or object edge across a surface to detach, collect, clean, spread, or move material',
+    evidence: 'The central neighborhood shows sustained edge-to-surface contact with a dragging or scraping motion along the surface.',
+    negatives: 'Cutting through material, merely holding a blade, wiping softly, pressing without dragging, or moving already detached pieces is not sufficient.',
+    distinction: '"Scrape" is defined by dragging an edge across a surface. "Cut" is defined by slicing or severing through material.',
+  }],
+  [26, {
+    name: 'fill',
+    definition: 'adds material or contents into a destination container so that its amount, occupancy, or fullness increases',
+    evidence: 'Material enters a destination container and produces a visible or strongly supported increase in its contents around the central neighborhood.',
+    negatives: 'Inserting one solid object, handling an already full container, tilting without transfer, or transferring material without evidence that a destination is being filled is not sufficient.',
+    distinction: '"Fill" is defined by increasing the destination contents. "Pour" is defined by source-controlled flow, and "insert" is defined by one object crossing into an enclosing space.',
+  }],
+  [29, {
+    name: 'scrub',
+    definition: 'cleans a surface or object through repeated forceful rubbing with a hand, pad, brush, sponge, or cleaning tool',
+    evidence: 'Repeated back-and-forth or circular rubbing contact for cleaning is visible around the central neighborhood.',
+    negatives: 'Rinsing under water without repeated rubbing, squeezing a sponge, wiping once, merely being near a sink, or handling a cleaning tool without sustained rubbing is not sufficient.',
+    distinction: '"Scrub" is the specific repeated forceful rubbing action. "Wash" is the broader cleaning event and may instead be dominated by rinsing or water-based cleaning.',
+  }],
+  [31, {
+    name: 'pull',
+    definition: 'applies force to draw an object or movable part toward the person or along its constrained path',
+    evidence: 'The object or part translates in the pulling direction while contact and pulling force are maintained around the central neighborhood.',
+    negatives: 'Touching a handle without translation, lifting vertically, acquiring possession, or opening something without visible pulling evidence is not sufficient.',
+    distinction: '"Pull" is defined by the direction and maintained drawing force. If the defining result is a closed-to-open state change, "open" is more accurate.',
+  }],
+  [36, {
+    name: 'wrap',
+    definition: 'covers, encloses, seals, or secures an object using flexible material or a flexible closure',
+    evidence: 'Flexible covering material or a seal is deliberately placed around or over the object and becomes folded, enclosed, sealed, or secured.',
+    negatives: 'Closing a rigid door or lid, placing material nearby, covering only momentarily, or holding an already wrapped object is not sufficient.',
+    distinction: '"Wrap" requires flexible material enclosing or securing an object. "Close" uses a defined rigid closure or movable part to reduce accessibility.',
+  }],
+]);
+
+function listwiseCandidateBlock(letter, option) {
+  const spec = LISTWISE_SPECS.get(Number(option?.class_id));
+  if (!spec) throw new Error(`unsupported listwise candidate: ${option?.class_id}`);
+  return `Candidate ${letter}
+
+Action name:
+"${spec.name}"
+
+Candidate definition:
+"${spec.name}" means that the person deliberately ${spec.definition}.
+
+Expected temporal evidence:
+${spec.evidence}
+
+Important negative evidence:
+${spec.negatives}
+
+Key distinction:
+${spec.distinction}`;
+}
+
+function listwisePrompt(optionMapping) {
+  if (!optionMapping || !['A', 'B', 'C'].every(key => optionMapping[key])) {
+    throw new Error('listwise option_mapping must contain A, B, and C');
+  }
+  const candidateText = ['A', 'B', 'C']
+    .map(letter => listwiseCandidateBlock(letter, optionMapping[letter]))
+    .join('\n\n\n');
+  return `You are comparing candidate pseudo-labels for temporal action localization
+in an egocentric kitchen video.
+
+You are given five chronologically ordered frames sampled around a temporal
+anchor. Frame 3 corresponds to the temporal anchor. Frames 1-2 provide
+preceding context, and Frames 4-5 provide following context.
+
+Your task is not to identify the exact instant when an action starts or ends.
+Determine which single option, if any, best and most specifically describes
+the temporal neighborhood of Frame 3. Do not assume that Frame 3 belongs to
+an action merely because candidate actions are provided.
+
+The candidate actions are presented in an arbitrary order. Their order does
+not indicate confidence, priority, likelihood, or whether they were proposed
+by another model. Evaluate all candidates using exactly the same standard.
+
+${candidateText}
+
+
+Temporal localization principles:
+
+- Evaluate the temporal neighborhood of Frame 3, not merely whether an action
+  appears somewhere in the five frames.
+- The complete state transition of an action does not need to be fully visible
+  within the five frames. Frame 3 may lie near the beginning, middle, or end
+  of the corresponding action segment.
+- However, the frames must contain temporally consistent evidence that the
+  central neighborhood belongs to the selected action event.
+- Evidence appearing only in the outer context frames must not determine the
+  answer if that event does not extend into the neighborhood of Frame 3.
+- The evidence should concern the same object, control, device, material, or
+  interaction and should form one continuous event around Frame 3.
+- Do not combine unrelated evidence from different objects or separate moments.
+- Visible hands, tools, controls, relevant objects, or general motion are not
+  sufficient by themselves.
+
+Before deciding, internally perform the following comparison:
+
+1. Frames 1-2: Determine the preceding object state, hand-object relationship,
+   possession state, location, closure state, device state, or content state.
+2. Frame 3 and its immediate neighborhood: Determine the interaction and event
+   phase occurring at the anchor.
+3. Frames 4-5: Determine whether the same interaction continues, completes,
+   changes into another event, or produces a relevant new state.
+4. Compare Candidates A, B, and C directly: Determine which candidate explains
+   the complete before-anchor-after evidence most accurately and specifically.
+5. Check counter-evidence: Reject a candidate if confirming it requires
+   assuming an unobserved state transition, ignoring contradictory frames,
+   combining unrelated events, or relying only on broad semantic similarity.
+
+Do not output this internal analysis.
+
+Choose exactly one label:
+
+A: The temporal neighborhood of Frame 3 is best and most specifically
+explained by Candidate A, with better support than Candidates B and C.
+
+B: The temporal neighborhood of Frame 3 is best and most specifically
+explained by Candidate B, with better support than Candidates A and C.
+
+C: The temporal neighborhood of Frame 3 is best and most specifically
+explained by Candidate C, with better support than Candidates A and B.
+
+OTHER_ACTIVITY: A meaningful interaction clearly occurs around Frame 3, but
+none of Candidates A, B, or C accurately describes the central event.
+
+TRUE_BACKGROUND: No deliberate or meaningful object interaction occurs around
+Frame 3. Camera motion, walking, waiting, observation, visible hands, object
+visibility, and idle preparation alone count as background.
+
+UNCERTAIN: The visual or temporal evidence is insufficient to distinguish the
+options reliably, or two or more candidates remain similarly plausible.
+
+Important decision rules:
+
+- Choose a candidate only when it is the single best explanation of the
+  central temporal neighborhood.
+- Semantic compatibility is not sufficient. A candidate must explain the
+  event more accurately and specifically than the other candidates.
+- Do not choose a candidate merely because one or two frames can be made
+  consistent with its definition.
+- Shared objects, hand motions, tools, or intermediate states do not prove that
+  two semantically related actions are equivalent.
+- Prefer the action whose defining state change or interaction is directly
+  supported by the temporal evidence.
+- If Candidates A, B, and C describe related actions, distinguish them using
+  their Key distinction fields.
+- If two or more candidates remain similarly plausible after comparison,
+  choose UNCERTAIN rather than selecting one arbitrarily.
+- Choose OTHER_ACTIVITY only when a meaningful interaction is clearly visible
+  but all three candidates are contradicted or less accurate.
+- Choose TRUE_BACKGROUND only when meaningful interaction is absent.
+- The use of A, B, or C does not indicate any preferred ordering.
+
+Return exactly one JSON object with no explanation, markdown, or additional
+text. The value of "label" must be exactly one of: "A", "B", "C",
+"OTHER_ACTIVITY", "TRUE_BACKGROUND", "UNCERTAIN".
+
+{"label":"A"}`;
+}
+
 function genericCandidatePrompt(candidateLabelId) {
   const spec = CANDIDATE_SPECS.get(Number(candidateLabelId));
   if (!spec) throw new Error(`unsupported candidate label id: ${candidateLabelId}`);
@@ -229,7 +496,10 @@ Return exactly one JSON object with no explanation, markdown, or additional
 text, for example: {"label":"CONFIRM_TARGET"}`;
 }
 
-function prompt(ontology, promptMode, candidateLabelId) {
+function prompt(ontology, promptMode, candidateLabelId, optionMapping) {
+  if (promptMode === 'candidate_listwise') {
+    return listwisePrompt(optionMapping);
+  }
   if (promptMode === 'candidate_verify' && Number(candidateLabelId) !== 0) {
     return genericCandidatePrompt(candidateLabelId);
   }
@@ -352,8 +622,11 @@ function outputText(response) {
     .filter(item => item.type === 'output_text').map(item => item.text).join('').trim();
 }
 
-async function requestOne(baseUrl, apiKey, model, frames, wireApi, ontology, promptMode, candidateLabelId) {
-  const content = [{ type: 'input_text', text: prompt(ontology, promptMode, candidateLabelId) }];
+async function requestOne(baseUrl, apiKey, model, frames, wireApi, ontology, promptMode, candidateLabelId, optionMapping) {
+  const content = [{
+    type: 'input_text',
+    text: prompt(ontology, promptMode, candidateLabelId, optionMapping),
+  }];
   for (const file of frames) {
     const image = fs.readFileSync(file).toString('base64');
     content.push({ type: 'input_image', image_url: `data:image/jpeg;base64,${image}` });
@@ -404,10 +677,10 @@ async function main() {
   const apiKey = process.env[keyEnv];
   const ontology = loadOntology(args['ontology-csv']);
   const promptMode = args['prompt-mode'] || (ontology ? 'full_ontology' : 'target_only');
-  if (!['target_only', 'contrastive', 'contrastive_score', 'full_ontology', 'take_verify', 'candidate_verify'].includes(promptMode)) {
-    throw new Error('--prompt-mode must be target_only, contrastive, contrastive_score, full_ontology, take_verify, or candidate_verify');
+  if (!['target_only', 'contrastive', 'contrastive_score', 'full_ontology', 'take_verify', 'candidate_verify', 'candidate_listwise'].includes(promptMode)) {
+    throw new Error('--prompt-mode is not supported');
   }
-  if (!['target_only', 'take_verify', 'candidate_verify'].includes(promptMode) && !ontology) {
+  if (!['target_only', 'take_verify', 'candidate_verify', 'candidate_listwise'].includes(promptMode) && !ontology) {
     throw new Error('--ontology-csv is required for taxonomy-aware prompt modes');
   }
   if (!apiKey) throw new Error(`environment variable ${keyEnv} is empty`);
@@ -434,8 +707,12 @@ async function main() {
       if (promptMode === 'candidate_verify' && candidateLabelId == null) {
         throw new Error(`candidate class missing for ${row.candidate_id}`);
       }
+      if (promptMode === 'candidate_listwise' && !row.option_mapping) {
+        throw new Error(`option_mapping missing for ${row.candidate_id}`);
+      }
       const response = await requestOne(
-        baseUrl, apiKey, model, frames, wireApi, ontology, promptMode, candidateLabelId,
+        baseUrl, apiKey, model, frames, wireApi, ontology, promptMode,
+        candidateLabelId, row.option_mapping,
       );
       let label = null;
       let reportedVerb = null;
@@ -450,13 +727,19 @@ async function main() {
       const verifierLabels = new Set([
         'CONFIRM_TARGET', 'OTHER_ACTIVITY', 'TRUE_BACKGROUND', 'UNCERTAIN',
       ]);
+      const listwiseLabels = new Set([
+        'A', 'B', 'C', 'OTHER_ACTIVITY', 'TRUE_BACKGROUND', 'UNCERTAIN',
+      ]);
       const normalizedLabel = String(label || '').trim().toUpperCase();
       const match = normalizedLabel.match(/^([ABU])$/i);
       const verifierMode = ['take_verify', 'candidate_verify'].includes(promptMode);
-      let prediction = verifierMode
-        ? (verifierLabels.has(normalizedLabel) ? normalizedLabel : 'UNCERTAIN')
-        : (match ? match[1].toUpperCase() : 'U');
-      if (!verifierMode && ontology && reportedVerb) {
+      const listwiseMode = promptMode === 'candidate_listwise';
+      let prediction = listwiseMode
+        ? (listwiseLabels.has(normalizedLabel) ? normalizedLabel : 'UNCERTAIN')
+        : (verifierMode
+          ? (verifierLabels.has(normalizedLabel) ? normalizedLabel : 'UNCERTAIN')
+          : (match ? match[1].toUpperCase() : 'U'));
+      if (!verifierMode && !listwiseMode && ontology && reportedVerb) {
         const targetVerbs = new Set(
           ontology.filter(item => item.id < 10).map(item => normalizeVerb(item.verb)),
         );
@@ -466,12 +749,14 @@ async function main() {
       }
       result.status = 'ok';
       result.prediction = prediction;
-      result.model_reported_label = verifierMode
-        ? (verifierLabels.has(normalizedLabel) ? normalizedLabel : null)
-        : (match ? match[1].toUpperCase() : null);
-      result.parse_error = verifierMode
-        ? !verifierLabels.has(normalizedLabel)
-        : !match;
+      result.model_reported_label = listwiseMode
+        ? (listwiseLabels.has(normalizedLabel) ? normalizedLabel : null)
+        : (verifierMode
+          ? (verifierLabels.has(normalizedLabel) ? normalizedLabel : null)
+          : (match ? match[1].toUpperCase() : null));
+      result.parse_error = listwiseMode
+        ? !listwiseLabels.has(normalizedLabel)
+        : (verifierMode ? !verifierLabels.has(normalizedLabel) : !match);
       result.response_text = response.text;
       result.reported_verb = reportedVerb;
       result.target_probability = targetProbability;
@@ -481,13 +766,16 @@ async function main() {
       result.prompt_mode = promptMode;
       result.anchor_id = row.anchor_id ?? row.candidate_id;
       result.candidate_role = row.candidate_role ?? null;
+      result.option_mapping = listwiseMode ? row.option_mapping : null;
       result.candidate_label_id = verifierMode ? Number(candidateLabelId ?? 0) : null;
       result.candidate_name = verifierMode
         ? CANDIDATE_SPECS.get(Number(candidateLabelId ?? 0))?.name || null
         : null;
-      result.gate_rule = verifierMode
-        ? 'candidate_semantic_verifier'
-        : (ontology ? 'deterministic_from_reported_verb' : 'model_label');
+      result.gate_rule = listwiseMode
+        ? 'listwise_candidate_competition'
+        : (verifierMode
+          ? 'candidate_semantic_verifier'
+          : (ontology ? 'deterministic_from_reported_verb' : 'model_label'));
     } catch (error) {
       result.error = String(error.message || error);
     }
