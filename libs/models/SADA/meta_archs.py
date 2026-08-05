@@ -16,6 +16,7 @@ from .stage1_utils import (
     shift_features,
     source_action_eligible,
 )
+from .vlm_routing import build_vlm_routing, load_vlm_routing_cache
 from libs.utils import batched_nms
 import einops
 import copy
@@ -342,8 +343,6 @@ class SADA(nn.Module):
                 or self.oracle_target_regression_mode != 'off'
             ):
                 raise ValueError('Stage 1 and Oracle diagnostics cannot both be enabled')
-        
-        
         assert len(self.fpn_strides) == len(self.reg_range)
         self.scale_factor = scale_factor
         self.iou_weight_power = iou_weight_power
@@ -356,6 +355,23 @@ class SADA(nn.Module):
         if self.cfg['dataset'].get('action_subsampling', None) == '10_majority_classes':
             self.num_classes = 10
             self.num_class_orig = 10
+
+        vlm_cfg = cfg.get('vlm_routing', {})
+        self.vlm_routing_enabled = vlm_cfg.get('enabled', False)
+        self.vlm_routing_cache = {}
+        self.vlm_routing_entry_count = 0
+        if self.vlm_routing_enabled:
+            if self.stage1_enabled or self.oracle_routing_mode != 'off':
+                raise ValueError(
+                    'VLM routing cannot be combined with Stage 1 stability or Oracle routing'
+                )
+            cache_path = vlm_cfg.get('cache_path')
+            if not cache_path:
+                raise ValueError('VLM routing requires a cache path')
+            (
+                self.vlm_routing_cache,
+                self.vlm_routing_entry_count,
+            ) = load_vlm_routing_cache(cache_path, self.num_classes)
         
         
         # check the feature pyramid and local attention window size
@@ -1068,6 +1084,18 @@ class SADA(nn.Module):
                 stage1_routes = self._stage1_shift_routing(video_list_tgt, points)
             else:
                 stage1_routes = self._stage1_context_routing(video_list_tgt, points)
+        vlm_routes = None
+        if (
+            self.vlm_routing_enabled
+            and curr_epoch >= self.warmup_adv
+            and mode == 'train'
+        ):
+            vlm_routes = build_vlm_routing(
+                self.vlm_routing_cache,
+                video_list_tgt,
+                points,
+                [mask.squeeze(1) for mask in fpn_masks_tgt],
+            )
 
         # ------------------------------------------------------------
         # Apply the classification and regression head for the source and target domains, separately
@@ -1194,6 +1222,7 @@ class SADA(nn.Module):
                 domain=domain,
                 curr_epoch=curr_epoch,
                 stage1_routes=stage1_routes,
+                vlm_routes=vlm_routes,
             )
             
             # Return the GTs of the target domain as well, to be used to compute the anchors
@@ -1435,7 +1464,8 @@ class SADA(nn.Module):
             mode, 
             domain, 
             curr_epoch,
-            stage1_routes=None,):
+            stage1_routes=None,
+            vlm_routes=None,):
         bs = int(fpn_masks[0].shape[0] / 2)
         
         # gt_cls_labels is a list of 2B elements, each of shape FT x C
@@ -1773,7 +1803,34 @@ class SADA(nn.Module):
                     elif stage1_routes is None:
                         selected_anchors_mask = max_cls_prob_tgt >= threshold[max_cls_idx_tgt]
                         pseudo_gt_cls_target[selected_anchors_mask] = F.one_hot(max_cls_idx_tgt[selected_anchors_mask], num_classes=self.num_classes).float()
-                        stage1_background_mask = None
+                        if vlm_routes is None:
+                            stage1_background_mask = None
+                        else:
+                            route_l = vlm_routes[l]
+                            route_valid = fpn_masks_tgt[l]
+                            matched = route_l['matched'][route_valid]
+                            vlm_action = route_l['action'][route_valid]
+                            vlm_background = route_l['background'][route_valid]
+                            vlm_ignore = route_l['ignore'][route_valid]
+                            vlm_classes = route_l['pseudo_class'][route_valid]
+
+                            pseudo_gt_cls_target[matched] = 0
+                            pseudo_gt_cls_target[vlm_action] = F.one_hot(
+                                vlm_classes[vlm_action],
+                                num_classes=self.num_classes,
+                            ).float()
+                            stage1_background_mask = torch.all(
+                                pseudo_gt_cls_target == 0, dim=-1
+                            )
+                            stage1_background_mask[vlm_ignore] = False
+                            stage1_background_mask[vlm_background] = True
+                            metric_prefix = 'vlm_l{}_'.format(l)
+                            losses[metric_prefix + 'matched'] = matched.sum().float()
+                            losses[metric_prefix + 'action'] = vlm_action.sum().float()
+                            losses[metric_prefix + 'background'] = (
+                                vlm_background.sum().float()
+                            )
+                            losses[metric_prefix + 'ignore'] = vlm_ignore.sum().float()
                     else:
                         route_l = stage1_routes[l]
                         route_valid = fpn_masks_tgt[l]

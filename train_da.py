@@ -450,6 +450,10 @@ def create_argparser():
         help='independent perturbation RNG seed',
     )
     parser.add_argument(
+        '--vlm-routing-cache', default=None,
+        help='GT-free offline VLM routing cache for conservative Stage 1 refinement',
+    )
+    parser.add_argument(
         '--oracle-routing', choices=['off', 'o1', 'o2', 'o3', 'o4'], default='off',
         help='diagnostic target routing; uses target GT and is not a UDA method',
     )
@@ -500,6 +504,12 @@ if __name__ == '__main__':
         'context_rho': 64.0 / 2304.0,
         'context_rho_max': 2.0 * 64.0 / 2304.0,
     }
+    config_dict['vlm_routing'] = {
+        'enabled': args.vlm_routing_cache is not None,
+        'cache_path': args.vlm_routing_cache,
+    }
+    if args.vlm_routing_cache is not None and args.stage1 != 'off':
+        raise ValueError('VLM routing and Stage 1 stability cannot both be enabled')
     if (
         args.stage1 != 'off'
         and (
