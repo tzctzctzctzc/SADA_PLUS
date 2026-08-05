@@ -53,8 +53,133 @@ function normalizeVerb(value) {
   return String(value || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
 }
 
-function prompt(ontology, promptMode) {
-  if (promptMode === 'take_verify') {
+const CANDIDATE_SPECS = new Map([
+  [0, {
+    name: 'take',
+    definition: 'acquires possession or stable control of an object by grasping, retrieving, or picking it up',
+  }],
+  [1, {
+    name: 'put',
+    definition: 'places an object at a destination and relinquishes stable control of it',
+    evidence: 'The person holds or carries the object before or near the anchor, moves it to a destination, and places or releases it so that it remains there.',
+    negatives: 'Do not confirm if the object remains held, is only moved or adjusted, or merely contacts a surface without a clear placement-and-release event.',
+  }],
+  [2, {
+    name: 'wash',
+    definition: 'deliberately cleans an object or the hands using water, rubbing, or another cleaning medium',
+    evidence: 'The central neighborhood shows sustained cleaning interaction, such as rinsing under water, rubbing, scrubbing, or applying and removing a cleaning medium.',
+    negatives: 'Being near a sink, holding an object under an inactive tap, filling, pouring, wiping once, or merely moving a wet object is not sufficient.',
+  }],
+  [3, {
+    name: 'open',
+    definition: 'changes a door, lid, drawer, container, or closure from a closed state to an open or accessible state',
+    evidence: 'The person manipulates a closure and the opening or accessibility increases before, around, or after the anchor.',
+    negatives: 'Do not confirm for reaching into something already open, holding an already removed lid, unrelated pulling, or touching a closure without an opening state change.',
+  }],
+  [4, {
+    name: 'close',
+    definition: 'changes a door, lid, drawer, container, or closure from an open state to a closed or secured state',
+    evidence: 'The person moves or secures a closure and the opening or accessibility decreases before, around, or after the anchor.',
+    negatives: 'Do not confirm for touching or adjusting something already closed, putting an object nearby, or moving a door or lid without evidence that it becomes closed.',
+  }],
+  [5, {
+    name: 'insert',
+    definition: 'moves an object from outside into the interior of a container, slot, opening, or enclosing object',
+    evidence: 'The object approaches an opening, crosses its boundary, and becomes at least partly contained inside it around the central neighborhood.',
+    negatives: 'Putting an object on a surface, holding it near an opening, briefly dipping it, or removing it from a container is not insert.',
+  }],
+  [6, {
+    name: 'turn-on',
+    definition: 'operates a control so that a device, appliance, light, flame, or flow changes from inactive to active',
+    evidence: 'The person presses, rotates, toggles, or otherwise operates a control and there is visual evidence that the device or output activates.',
+    negatives: 'Do not confirm for touching or adjusting a control without activation, using a device that was already on, or an activation occurring only outside the central neighborhood.',
+  }],
+  [7, {
+    name: 'cut',
+    definition: 'uses a blade or cutting tool to slice, divide, or sever material',
+    evidence: 'The central neighborhood shows purposeful blade contact and cutting motion that slices or separates the material.',
+    negatives: 'Holding a knife, positioning food, scraping, peeling, pressing, or moving an already cut piece is not sufficient.',
+  }],
+  [8, {
+    name: 'turn-off',
+    definition: 'operates a control so that a device, appliance, light, flame, or flow changes from active to inactive',
+    evidence: 'The person presses, rotates, toggles, or otherwise operates a control and there is visual evidence that the device or output deactivates.',
+    negatives: 'Do not confirm for touching or adjusting a control without deactivation, interacting with a device already off, or a deactivation occurring only outside the central neighborhood.',
+  }],
+  [9, {
+    name: 'pour',
+    definition: 'tilts or controls a source container so that its contents flow into or onto a destination',
+    evidence: 'The source is oriented for transfer and visible liquid, granules, or other contents flow or are clearly transferred around the central neighborhood.',
+    negatives: 'Moving or tilting a container without evidence of content transfer, filling from a tap, stirring, or merely holding containers near each other is not sufficient.',
+  }],
+]);
+
+function genericCandidatePrompt(candidateLabelId) {
+  const spec = CANDIDATE_SPECS.get(Number(candidateLabelId));
+  if (!spec) throw new Error(`unsupported candidate label id: ${candidateLabelId}`);
+  return `You are verifying one candidate pseudo-label for temporal action localization
+in an egocentric kitchen video.
+
+You are given five chronologically ordered frames sampled around a temporal
+anchor. Frame 3 corresponds to the anchor. Frames 1-2 provide preceding
+context, and Frames 4-5 provide following context.
+
+Your task is not to identify the exact instant when an action starts or ends.
+Determine whether the temporal neighborhood of Frame 3 belongs to the action
+segment represented by the SADA candidate.
+
+SADA candidate action: "${spec.name}"
+
+Candidate definition:
+"${spec.name}" means that the person deliberately ${spec.definition}.
+
+Expected temporal evidence:
+${spec.evidence}
+No single cue is sufficient by itself. The frames should provide temporally
+consistent evidence that the central neighborhood belongs to this event. The
+complete state transition does not need to be fully visible within five frames.
+
+Important negative evidence:
+${spec.negatives}
+Do not confirm merely because hands, tools, controls, or relevant objects are
+visible. Do not confirm an action that occurs only in the outer context frames
+and does not extend into the temporal neighborhood of Frame 3.
+
+Choose exactly one label:
+
+CONFIRM_TARGET: The temporal neighborhood of Frame 3 is clearly part of the
+candidate "${spec.name}" event.
+
+OTHER_ACTIVITY: A meaningful interaction clearly occurs around Frame 3, but
+the overall event is better described by another action rather than
+"${spec.name}".
+
+TRUE_BACKGROUND: No deliberate object interaction or target action occurs
+around Frame 3. Camera motion, walking, waiting, visible hands, object
+visibility, observation, and idle preparation alone count as background.
+
+UNCERTAIN: The frames suggest that an interaction may be occurring, but
+occlusion, sparse temporal evidence, ambiguous state, or insufficient context
+makes it impossible to determine the correct case reliably.
+
+Decision order:
+1. Choose CONFIRM_TARGET only when the central neighborhood is clearly part of
+   the candidate event.
+2. Otherwise choose OTHER_ACTIVITY when another meaningful interaction is
+   clearly identifiable.
+3. Choose TRUE_BACKGROUND only when no meaningful interaction occurs around
+   the anchor.
+4. Choose UNCERTAIN for all remaining ambiguous cases.
+
+Return exactly one JSON object with no explanation, markdown, or additional
+text, for example: {"label":"CONFIRM_TARGET"}`;
+}
+
+function prompt(ontology, promptMode, candidateLabelId) {
+  if (promptMode === 'candidate_verify' && Number(candidateLabelId) !== 0) {
+    return genericCandidatePrompt(candidateLabelId);
+  }
+  if (promptMode === 'take_verify' || promptMode === 'candidate_verify') {
     return `You are verifying one candidate pseudo-label for temporal action localization
 in an egocentric kitchen video.
 
@@ -173,8 +298,8 @@ function outputText(response) {
     .filter(item => item.type === 'output_text').map(item => item.text).join('').trim();
 }
 
-async function requestOne(baseUrl, apiKey, model, frames, wireApi, ontology, promptMode) {
-  const content = [{ type: 'input_text', text: prompt(ontology, promptMode) }];
+async function requestOne(baseUrl, apiKey, model, frames, wireApi, ontology, promptMode, candidateLabelId) {
+  const content = [{ type: 'input_text', text: prompt(ontology, promptMode, candidateLabelId) }];
   for (const file of frames) {
     const image = fs.readFileSync(file).toString('base64');
     content.push({ type: 'input_image', image_url: `data:image/jpeg;base64,${image}` });
@@ -225,10 +350,10 @@ async function main() {
   const apiKey = process.env[keyEnv];
   const ontology = loadOntology(args['ontology-csv']);
   const promptMode = args['prompt-mode'] || (ontology ? 'full_ontology' : 'target_only');
-  if (!['target_only', 'contrastive', 'contrastive_score', 'full_ontology', 'take_verify'].includes(promptMode)) {
-    throw new Error('--prompt-mode must be target_only, contrastive, contrastive_score, full_ontology, or take_verify');
+  if (!['target_only', 'contrastive', 'contrastive_score', 'full_ontology', 'take_verify', 'candidate_verify'].includes(promptMode)) {
+    throw new Error('--prompt-mode must be target_only, contrastive, contrastive_score, full_ontology, take_verify, or candidate_verify');
   }
-  if (!['target_only', 'take_verify'].includes(promptMode) && !ontology) {
+  if (!['target_only', 'take_verify', 'candidate_verify'].includes(promptMode) && !ontology) {
     throw new Error('--ontology-csv is required for taxonomy-aware prompt modes');
   }
   if (!apiKey) throw new Error(`environment variable ${keyEnv} is empty`);
@@ -247,8 +372,12 @@ async function main() {
     try {
       const video = findVideo(args['video-root'], row.video_id);
       const frames = prepareFrames(video, row.center_sec, path.join(args['cache-dir'], row.candidate_id));
+      const candidateLabelId = row.sada_top1_class ?? row.candidate_label_id;
+      if (promptMode === 'candidate_verify' && candidateLabelId == null) {
+        throw new Error(`candidate class missing for ${row.candidate_id}`);
+      }
       const response = await requestOne(
-        baseUrl, apiKey, model, frames, wireApi, ontology, promptMode,
+        baseUrl, apiKey, model, frames, wireApi, ontology, promptMode, candidateLabelId,
       );
       let label = null;
       let reportedVerb = null;
@@ -265,10 +394,11 @@ async function main() {
       ]);
       const normalizedLabel = String(label || '').trim().toUpperCase();
       const match = normalizedLabel.match(/^([ABU])$/i);
-      let prediction = promptMode === 'take_verify'
+      const verifierMode = ['take_verify', 'candidate_verify'].includes(promptMode);
+      let prediction = verifierMode
         ? (verifierLabels.has(normalizedLabel) ? normalizedLabel : 'UNCERTAIN')
         : (match ? match[1].toUpperCase() : 'U');
-      if (promptMode !== 'take_verify' && ontology && reportedVerb) {
+      if (!verifierMode && ontology && reportedVerb) {
         const targetVerbs = new Set(
           ontology.filter(item => item.id < 10).map(item => normalizeVerb(item.verb)),
         );
@@ -278,10 +408,10 @@ async function main() {
       }
       result.status = 'ok';
       result.prediction = prediction;
-      result.model_reported_label = promptMode === 'take_verify'
+      result.model_reported_label = verifierMode
         ? (verifierLabels.has(normalizedLabel) ? normalizedLabel : null)
         : (match ? match[1].toUpperCase() : null);
-      result.parse_error = promptMode === 'take_verify'
+      result.parse_error = verifierMode
         ? !verifierLabels.has(normalizedLabel)
         : !match;
       result.response_text = response.text;
@@ -291,7 +421,11 @@ async function main() {
       result.model = model;
       result.wire_api = wireApi;
       result.prompt_mode = promptMode;
-      result.gate_rule = promptMode === 'take_verify'
+      result.candidate_label_id = verifierMode ? Number(candidateLabelId ?? 0) : null;
+      result.candidate_name = verifierMode
+        ? CANDIDATE_SPECS.get(Number(candidateLabelId ?? 0))?.name || null
+        : null;
+      result.gate_rule = verifierMode
         ? 'candidate_semantic_verifier'
         : (ontology ? 'deterministic_from_reported_verb' : 'model_label');
     } catch (error) {

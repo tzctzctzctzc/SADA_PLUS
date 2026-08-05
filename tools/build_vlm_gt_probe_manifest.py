@@ -49,6 +49,11 @@ def main():
     parser.add_argument("--seed", type=int, default=20260805)
     parser.add_argument("--idle-margin-sec", type=float, default=1.0)
     parser.add_argument(
+        "--subset",
+        action="append",
+        help="Keep only exact annotation subsets; may be repeated.",
+    )
+    parser.add_argument(
         "--candidate-label-id",
         type=int,
         help="Build a candidate-specific verifier probe instead of the ten-class probe.",
@@ -71,6 +76,8 @@ def main():
     for video_id in sorted(available):
         video = database.get(video_id)
         if not video:
+            continue
+        if args.subset and video.get("subset") not in args.subset:
             continue
         annotations = video.get("annotations", [])
         for index, action in enumerate(annotations):
@@ -104,7 +111,14 @@ def main():
                 continue
             groups[group].append(
                 {
-                    "candidate_id": "probe-{}-{}-{:05d}".format(group, video_id, index),
+                    "candidate_id": "probe-{}{}-{}-{:05d}".format(
+                        "c{}-".format(args.candidate_label_id)
+                        if args.candidate_label_id is not None
+                        else "",
+                        group,
+                        video_id,
+                        index,
+                    ),
                     "video_id": video_id,
                     "center_sec": center,
                     "gt_is_foreground": group
@@ -130,14 +144,21 @@ def main():
             if is_idle:
                 groups["idle_background"].append(
                     {
-                        "candidate_id": "probe-idle_background-{}-{:05d}".format(
-                            video_id, trial
+                        "candidate_id": "probe-{}idle_background-{}-{:05d}".format(
+                            "c{}-".format(args.candidate_label_id)
+                            if args.candidate_label_id is not None
+                            else "",
+                            video_id,
+                            trial,
                         ),
                         "video_id": video_id,
                         "center_sec": center,
                         "gt_is_foreground": False,
+                        "gt_matches_candidate": False,
                         "probe_group": "idle_background",
+                        "gt_label_id": None,
                         "target_label_id": None,
+                        "candidate_label_id": args.candidate_label_id,
                     }
                 )
 
@@ -162,6 +183,7 @@ def main():
                 "selection_uses_target_gt": True,
                 "groups": {name: args.per_group for name in groups},
                 "candidate_label_id": args.candidate_label_id,
+                "subsets": args.subset,
                 "seed": args.seed,
             },
             indent=2,
