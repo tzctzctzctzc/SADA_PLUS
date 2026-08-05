@@ -1,4 +1,5 @@
 import json
+import math
 from collections import defaultdict
 from pathlib import Path
 
@@ -61,7 +62,9 @@ def build_vlm_routing(cache, video_list, points, target_masks):
             for entry in cache.get((video_id, level), []):
                 absolute_point = entry["anchor_index"] * stride
                 local_position = (absolute_point - crop_start) / float(stride)
-                local_index = int(round(local_position))
+                # Python's round-to-even can collapse consecutive anchors when
+                # crop_start is exactly half an FPN stride from the full grid.
+                local_index = int(math.floor(local_position + 0.5))
                 if local_index < 0 or local_index >= length:
                     continue
                 projected_point = crop_start + float(

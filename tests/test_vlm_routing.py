@@ -78,3 +78,34 @@ def test_cache_rejects_action_outside_ontology(tmp_path):
         assert "invalid VLM action class" in str(error)
     else:
         raise AssertionError("invalid class must be rejected")
+
+
+def test_half_stride_projection_keeps_adjacent_anchors_distinct(tmp_path):
+    cache_path = tmp_path / "cache.json"
+    cache_path.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "video_id": "video",
+                        "fpn_level": 0,
+                        "anchor_index": index,
+                        "decision": "ignore",
+                    }
+                    for index in (5, 6)
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    cache, _ = load_vlm_routing_cache(cache_path, num_classes=10)
+    points = [
+        torch.tensor(
+            [[0.0, 0.0, 0.0, 4.0], [4.0, 0.0, 0.0, 4.0], [8.0, 0.0, 0.0, 4.0]]
+        )
+    ]
+    masks = [torch.tensor([[True, True, True]])]
+    video_list = [{"metadata": {"video_id": "video", "crop_start": 18}}]
+
+    routes = build_vlm_routing(cache, video_list, points, masks)
+    assert routes[0]["matched"].tolist() == [[False, True, True]]
