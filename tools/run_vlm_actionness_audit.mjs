@@ -112,6 +112,60 @@ const CANDIDATE_SPECS = new Map([
     evidence: 'The source is oriented for transfer and visible liquid, granules, or other contents flow or are clearly transferred around the central neighborhood.',
     negatives: 'Moving or tilting a container without evidence of content transfer, filling from a tap, stirring, or merely holding containers near each other is not sufficient.',
   }],
+  [11, {
+    name: 'move',
+    definition: 'changes the location or position of an object without requiring a new possession or release event',
+    evidence: 'The object is deliberately translated or repositioned around the central neighborhood. Stable possession may continue throughout.',
+    negatives: 'Do not confirm merely for acquiring, releasing, opening, or closing an object when no distinct relocation event is visible.',
+  }],
+  [12, {
+    name: 'remove',
+    definition: 'takes an object out of, off, or away from a container, attachment, or prior location',
+    evidence: 'The object crosses from an inside, attached, or resting state to an outside, detached, or removed state.',
+    negatives: 'Generic picking up without evidence of removal from something, continued holding, or unrelated movement is not sufficient.',
+  }],
+  [17, {
+    name: 'adjust',
+    definition: 'changes the position, setting, or configuration of an object or control without requiring activation or deactivation',
+    evidence: 'The central neighborhood shows a deliberate fine change to position, orientation, fit, or setting.',
+    negatives: 'Do not confirm when the defining event is clearly turning a device on or off, opening, closing, inserting, or removing.',
+  }],
+  [20, {
+    name: 'empty',
+    definition: 'removes or discharges contents from a container so that it becomes substantially less full',
+    evidence: 'Contents visibly leave the source container by tipping, dumping, draining, or another discharge action.',
+    negatives: 'Pouring a small controlled amount while retaining contents, filling a destination, or tilting without visible discharge is not sufficient.',
+  }],
+  [25, {
+    name: 'scrape',
+    definition: 'drags a tool or object edge across a surface to detach, collect, clean, or move material',
+    evidence: 'The central neighborhood shows sustained edge-to-surface contact with a dragging or scraping motion.',
+    negatives: 'Cutting through material, merely holding a blade, wiping softly, or moving already detached pieces is not sufficient.',
+  }],
+  [26, {
+    name: 'fill',
+    definition: 'adds material or contents into a container so that its amount or occupancy increases',
+    evidence: 'Material enters a destination container and visibly increases its contents around the central neighborhood.',
+    negatives: 'Inserting one solid object, pouring without a clear destination increase, or handling an already full container is not sufficient.',
+  }],
+  [29, {
+    name: 'scrub',
+    definition: 'cleans a surface or object by repeated forceful rubbing with a hand, pad, brush, or cleaning tool',
+    evidence: 'Repeated back-and-forth rubbing contact for cleaning is visible around the central neighborhood.',
+    negatives: 'Rinsing under water, squeezing a sponge, wiping once, or merely being near a sink is not sufficient.',
+  }],
+  [31, {
+    name: 'pull',
+    definition: 'applies force to draw an object or movable part toward the person or along its constrained path',
+    evidence: 'The object or part translates in the pulling direction while contact and pulling force are maintained.',
+    negatives: 'Opening without visible pulling, lifting vertically, taking possession, or touching a handle without translation is not sufficient.',
+  }],
+  [36, {
+    name: 'wrap',
+    definition: 'covers, encloses, seals, or secures an object with material or a flexible closure',
+    evidence: 'Covering material or a seal is deliberately placed around or over the object and becomes secured.',
+    negatives: 'Closing a rigid door or lid, merely placing material nearby, or holding an already wrapped object is not sufficient.',
+  }],
 ]);
 
 function genericCandidatePrompt(candidateLabelId) {
@@ -371,8 +425,12 @@ async function main() {
     const result = { candidate_id: row.candidate_id, status: 'error' };
     try {
       const video = findVideo(args['video-root'], row.video_id);
-      const frames = prepareFrames(video, row.center_sec, path.join(args['cache-dir'], row.candidate_id));
-      const candidateLabelId = row.sada_top1_class ?? row.candidate_label_id;
+      const frames = prepareFrames(
+        video,
+        row.center_sec,
+        path.join(args['cache-dir'], row.frame_cache_id ?? row.candidate_id),
+      );
+      const candidateLabelId = row.candidate_label_id ?? row.sada_top1_class;
       if (promptMode === 'candidate_verify' && candidateLabelId == null) {
         throw new Error(`candidate class missing for ${row.candidate_id}`);
       }
@@ -421,6 +479,8 @@ async function main() {
       result.model = model;
       result.wire_api = wireApi;
       result.prompt_mode = promptMode;
+      result.anchor_id = row.anchor_id ?? row.candidate_id;
+      result.candidate_role = row.candidate_role ?? null;
       result.candidate_label_id = verifierMode ? Number(candidateLabelId ?? 0) : null;
       result.candidate_name = verifierMode
         ? CANDIDATE_SPECS.get(Number(candidateLabelId ?? 0))?.name || null

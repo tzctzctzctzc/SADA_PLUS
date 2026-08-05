@@ -59,6 +59,10 @@ def main():
     parser.add_argument("--top-k-per-video-level", type=int, default=5)
     parser.add_argument("--min-gap-sec", type=float, default=0.75)
     parser.add_argument("--levels", type=int, nargs="+", default=(0, 1, 2))
+    parser.add_argument(
+        "--reuse-manifest",
+        help="Reuse these exact candidate anchors and only refresh their logits/GT.",
+    )
     args = parser.parse_args()
 
     import torch
@@ -80,6 +84,27 @@ def main():
         cfg["dataset"]["feat_folder"] = args.feature_dir
     _update_config(cfg)
 
+    reuse_rows = None
+    reuse_by_key = {}
+    if args.reuse_manifest:
+        reuse_rows = [
+            json.loads(line)
+            for line in Path(args.reuse_manifest)
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if line.strip()
+        ]
+        reuse_by_key = {
+            (
+                row["video_id"],
+                int(row["fpn_level"]),
+                int(row["anchor_index"]),
+            ): row
+            for row in reuse_rows
+        }
+        if len(reuse_by_key) != len(reuse_rows):
+            raise ValueError("--reuse-manifest contains duplicate anchor keys")
+
     split = args.subset
     if split is None:
         split = cfg["tgt_train_split"] if args.split == "train" else cfg["tgt_val_split"]
@@ -88,7 +113,10 @@ def main():
     dataset = make_dataset(cfg["dataset_name"], False, split, **cfg["dataset"])
     available_videos = video_ids_in(args.video_root)
     dataset.data_list = tuple(
-        item for item in dataset.data_list if item["id"] in available_videos
+        item
+        for item in dataset.data_list
+        if item["id"] in available_videos
+        and (reuse_rows is None or item["id"] in {row["video_id"] for row in reuse_rows})
     )
     if not dataset.data_list:
         raise RuntimeError("No dataset videos have a matching MP4 in --video-root")
@@ -148,7 +176,9 @@ def main():
                     continue
 
                 probabilities = level_logits[0].transpose(0, 1).sigmoid()
-                scores, pseudo_class = probabilities.max(dim=-1)
+                top_scores, top_classes = probabilities.topk(k=2, dim=-1)
+                scores = top_scores[:, 0]
+                pseudo_class = top_classes[:, 0]
                 valid = level_mask[0, 0].bool()
                 gt_action = labels.sum(dim=-1) > 0
                 correct = labels.gather(
@@ -165,21 +195,43 @@ def main():
                 centers = (
                     (point_grid[:, 0] + crop_start) * feat_stride + frame_offset
                 ) / fps
-                chosen = choose_indices(
-                    scores,
-                    centers,
-                    valid,
-                    args.beta,
-                    alpha,
-                    args.top_k_per_video_level,
-                    args.min_gap_sec,
-                )
+                if reuse_rows is None:
+                    chosen = choose_indices(
+                        scores,
+                        centers,
+                        valid,
+                        args.beta,
+                        alpha,
+                        args.top_k_per_video_level,
+                        args.min_gap_sec,
+                    )
+                else:
+                    chosen = sorted(
+                        index
+                        for candidate_video, candidate_level, index in reuse_by_key
+                        if candidate_video == video_id and candidate_level == level
+                    )
                 for index in chosen:
+                    if index >= probabilities.shape[0] or not bool(valid[index]):
+                        raise ValueError(
+                            "reused anchor is invalid: {} level {} index {}".format(
+                                video_id, level, index
+                            )
+                        )
                     center_sec = min(max(float(centers[index]), 0.0), duration)
                     gt_vector = labels[index]
                     gt_action = bool(gt_vector.sum() > 0)
                     predicted_class = int(pseudo_class[index])
+                    second_class = int(top_classes[index, 1])
                     correct_class = bool(gt_action and gt_vector[predicted_class] > 0)
+                    center_all_gt_class_ids = sorted(
+                        {
+                            int(action["label_id"])
+                            for action in annotations[video_id]["annotations"]
+                            if float(action["segment"][0]) <= center_sec
+                            <= float(action["segment"][1])
+                        }
+                    )
                     center_gt_class_ids = sorted(
                         {
                             int(action["label_id"])
@@ -192,10 +244,21 @@ def main():
                             <= float(action["segment"][1])
                         }
                     )
+                    reused = reuse_by_key.get((video_id, level, int(index)), {})
+                    if reused and int(reused["sada_top1_class"]) != predicted_class:
+                        raise ValueError(
+                            "reused top-1 changed for {}: {} -> {}".format(
+                                reused["candidate_id"],
+                                reused["sada_top1_class"],
+                                predicted_class,
+                            )
+                        )
                     rows.append(
                         {
-                            "candidate_id": "{}-l{}-{:06d}".format(
-                                video_id, level, int(index)
+                            **reused,
+                            "candidate_id": reused.get(
+                                "candidate_id",
+                                "{}-l{}-{:06d}".format(video_id, level, int(index)),
                             ),
                             "video_id": video_id,
                             "center_sec": center_sec,
@@ -203,6 +266,8 @@ def main():
                             "anchor_index": int(index),
                             "sada_score": float(scores[index]),
                             "sada_top1_class": predicted_class,
+                            "sada_top2_score": float(top_scores[index, 1]),
+                            "sada_top2_class": second_class,
                             "alpha": alpha,
                             "beta": args.beta,
                             "gt_is_foreground": gt_action,
@@ -212,6 +277,7 @@ def main():
                             .cpu()
                             .tolist(),
                             "center_gt_class_ids": center_gt_class_ids,
+                            "center_all_gt_class_ids": center_all_gt_class_ids,
                             "center_in_target_action": bool(center_gt_class_ids),
                             "sada_top1_matches_center_gt": (
                                 predicted_class in center_gt_class_ids
@@ -239,6 +305,12 @@ def main():
         "top_k_per_video_level": args.top_k_per_video_level,
         "min_gap_sec": args.min_gap_sec,
         "manifest_candidates": len(rows),
+        "candidate_selection": (
+            "reused exact manifest anchors"
+            if reuse_rows is not None
+            else "frozen SADA low-confidence top-k"
+        ),
+        "reuse_manifest": args.reuse_manifest,
         "candidate_gt_foreground_anchors": foreground,
         "candidate_center_in_target_action": center_foreground,
         **totals,
