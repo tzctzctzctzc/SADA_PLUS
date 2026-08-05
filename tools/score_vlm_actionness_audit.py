@@ -32,13 +32,14 @@ def summarize(rows):
     correct_action = sum(
         row["prediction"] == "A"
         and row["gt_is_foreground"]
-        and row["sada_top1_is_correct"]
+        and row.get("sada_top1_is_correct", False)
         for row in rows
     )
     oracle_correct = sum(
-        row["gt_is_foreground"] and row["sada_top1_is_correct"] for row in rows
+        row["gt_is_foreground"] and row.get("sada_top1_is_correct", False)
+        for row in rows
     )
-    return {
+    result = {
         "n": total,
         "gt_foreground_n": foreground,
         "gt_background_n": background,
@@ -49,14 +50,22 @@ def summarize(rows):
         "uncertain_rate": safe_ratio(
             sum(row["prediction"] == "U" for row in rows), total
         ),
-        "correct_action_routing_coverage": safe_ratio(correct_action, foreground),
-        "class_accuracy_given_recovered_foreground": safe_ratio(
-            correct_action, true_positive
-        ),
-        "oracle_actionness_correct_action_coverage": safe_ratio(
-            oracle_correct, foreground
-        ),
     }
+    if any("sada_top1_is_correct" in row for row in rows):
+        result.update(
+            {
+                "correct_action_routing_coverage": safe_ratio(
+                    correct_action, foreground
+                ),
+                "class_accuracy_given_recovered_foreground": safe_ratio(
+                    correct_action, true_positive
+                ),
+                "oracle_actionness_correct_action_coverage": safe_ratio(
+                    oracle_correct, foreground
+                ),
+            }
+        )
+    return result
 
 
 def main():
@@ -83,9 +92,14 @@ def main():
         rows.append({**manifest[candidate_id], **prediction})
 
     by_level = {}
-    for level in sorted({row["fpn_level"] for row in rows}):
+    for level in sorted({row["fpn_level"] for row in rows if "fpn_level" in row}):
         by_level[str(level)] = summarize(
             [row for row in rows if row["fpn_level"] == level]
+        )
+    by_probe_group = {}
+    for group in sorted({row["probe_group"] for row in rows if "probe_group" in row}):
+        by_probe_group[group] = summarize(
+            [row for row in rows if row["probe_group"] == group]
         )
     metadata_path = Path(args.metadata or (args.manifest + ".meta.json"))
     metadata = (
@@ -127,6 +141,7 @@ def main():
         "missing_candidates": len(manifest) - len(rows),
         "global": global_metrics,
         "by_fpn_level": by_level,
+        "by_probe_group": by_probe_group,
         "candidate_export_metadata": metadata,
     }
     output = Path(args.output)

@@ -48,10 +48,10 @@ take, put, wash, open, close, insert, turn on, cut, turn off, pour.
 
 Do not count camera motion, visible hands without meaningful interaction, idle/preparation states, or a target action appearing only before or after the center moment.
 
-Output exactly one letter:
-A = center moment is inside a target action
-B = center moment is background
-U = genuinely uncertain`;
+Return JSON only, with exactly one key named "label":
+{"label":"A"} = center moment is inside a target action
+{"label":"B"} = center moment is background
+{"label":"U"} = genuinely uncertain`;
 }
 
 function outputText(response) {
@@ -59,22 +59,43 @@ function outputText(response) {
     .filter(item => item.type === 'output_text').map(item => item.text).join('').trim();
 }
 
-async function requestOne(baseUrl, apiKey, model, frames) {
+async function requestOne(baseUrl, apiKey, model, frames, wireApi) {
   const content = [{ type: 'input_text', text: prompt() }];
   for (const file of frames) {
     const image = fs.readFileSync(file).toString('base64');
     content.push({ type: 'input_image', image_url: `data:image/jpeg;base64,${image}` });
   }
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/responses`, {
+  let endpoint = 'responses';
+  let body = { model, input: [{ role: 'user', content }], max_output_tokens: 32 };
+  if (wireApi === 'chat') {
+    endpoint = 'chat/completions';
+    body = {
+      model,
+      messages: [{
+        role: 'user',
+        content: content.map(item => item.type === 'input_text'
+          ? { type: 'text', text: item.text }
+          : { type: 'image_url', image_url: { url: item.image_url } }),
+      }],
+      max_tokens: 32,
+      temperature: 0,
+      enable_thinking: false,
+      response_format: { type: 'json_object' },
+    };
+  }
+  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/${endpoint}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, input: [{ role: 'user', content }], max_output_tokens: 32 }),
+    body: JSON.stringify(body),
   });
-  const body = await response.text();
+  const responseBody = await response.text();
   let parsed;
-  try { parsed = JSON.parse(body); } catch { parsed = { raw: body }; }
+  try { parsed = JSON.parse(responseBody); } catch { parsed = { raw: responseBody }; }
   if (!response.ok) throw new Error(`HTTP ${response.status}: ${JSON.stringify(parsed).slice(0, 400)}`);
-  return { text: outputText(parsed), usage: parsed.usage || null };
+  const text = wireApi === 'chat'
+    ? String(parsed.choices?.[0]?.message?.content || '').trim()
+    : outputText(parsed);
+  return { text, usage: parsed.usage || null };
 }
 
 async function main() {
@@ -84,6 +105,8 @@ async function main() {
   }
   const baseUrl = args['base-url'] || process.env.VLM_BASE_URL || 'https://api.asxs.top/v1';
   const model = args.model || process.env.VLM_MODEL || 'gpt-5.4';
+  const wireApi = args['wire-api'] || process.env.VLM_WIRE_API || 'responses';
+  if (!['responses', 'chat'].includes(wireApi)) throw new Error('--wire-api must be responses or chat');
   const keyEnv = args['api-key-env'] || 'CCH_API_KEY';
   const apiKey = process.env[keyEnv];
   if (!apiKey) throw new Error(`environment variable ${keyEnv} is empty`);
@@ -102,14 +125,17 @@ async function main() {
     try {
       const video = findVideo(args['video-root'], row.video_id);
       const frames = prepareFrames(video, row.center_sec, path.join(args['cache-dir'], row.candidate_id));
-      const response = await requestOne(baseUrl, apiKey, model, frames);
-      const match = response.text.match(/^\s*([ABU])(?:\b|\s|$)/i);
+      const response = await requestOne(baseUrl, apiKey, model, frames, wireApi);
+      let label = null;
+      try { label = JSON.parse(response.text).label; } catch {}
+      const match = String(label || '').match(/^([ABU])$/i);
       result.status = 'ok';
       result.prediction = match ? match[1].toUpperCase() : 'U';
       result.parse_error = !match;
       result.response_text = response.text;
       result.usage = response.usage;
       result.model = model;
+      result.wire_api = wireApi;
     } catch (error) {
       result.error = String(error.message || error);
     }
