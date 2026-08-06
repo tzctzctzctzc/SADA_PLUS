@@ -7,7 +7,7 @@ import torch
 
 
 VALID_DECISIONS = {"action", "background", "ignore"}
-ROUTING_SCHEMA_VERSION = "candidate-blind-exact-anchor-routing-v1"
+ROUTING_SCHEMA_VERSION = "candidate-blind-exact-anchor-routing-v2"
 
 
 def load_vlm_routing_cache(path, num_classes):

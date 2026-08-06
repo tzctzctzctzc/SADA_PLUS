@@ -3,6 +3,7 @@ import http from 'node:http';
 import test from 'node:test';
 
 import {
+  FRAME_OFFSETS_SEC,
   HttpStatusError,
   PROMPT_SHA256,
   ROUTING_SCHEMA_VERSION,
@@ -20,6 +21,20 @@ import {
 } from '../tools/run_vlm_actionness_audit.mjs';
 
 function manifestRow() {
+  const structure = {
+    teacher_regression_left: 1.0,
+    teacher_regression_right: 1.5,
+    point_stride: 2.0,
+    point_regression_range_min: 2.0,
+    point_regression_range_max: 8.0,
+    teacher_predicted_max_distance: 3.0,
+    teacher_predicted_center_distance: 0.25,
+    center_sample_radius: 1.5,
+    teacher_range_eligible: true,
+    teacher_center_eligible: true,
+    teacher_duration_eligible: true,
+    teacher_structural_eligible: true,
+  };
   return {
     candidate_id: 'exact',
     video_id: 'video',
@@ -29,12 +44,14 @@ function manifestRow() {
     absolute_center_time: 12.5,
     center_sec: 12.5,
     teacher_top1_class: 3,
+    ...structure,
     member_anchors: [{
       fpn_level: 2,
       anchor_index: 7,
       global_anchor_index: 123,
       absolute_center_time: 12.5,
       teacher_top1_class: 3,
+      ...structure,
     }],
   };
 }
@@ -43,17 +60,22 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-test('routing schema is locked to candidate-blind exact-anchor v1', () => {
+test('routing schema is locked to state-transition exact-anchor v2', () => {
   assert.equal(
     ROUTING_SCHEMA_VERSION,
-    'candidate-blind-exact-anchor-routing-v1',
+    'candidate-blind-exact-anchor-routing-v2',
+  );
+  assert.deepEqual(
+    FRAME_OFFSETS_SEC,
+    [-0.8, -0.6, -0.4, -0.2, 0, 0.2, 0.4, 0.6, 0.8],
   );
 });
 
 test('valid target foreground is the only action rescue', () => {
   const parsed = parseGateResponse(JSON.stringify({
-    center_interaction: 'YES',
-    target_signature: 'YES',
+    before_state: 'SUPPORTS_TARGET_EVENT',
+    center_change: 'TARGET_DEFINING_CHANGE',
+    after_state: 'SUPPORTS_TARGET_EVENT',
     label: 'TARGET_FOREGROUND',
   }));
   assert.equal(parsed.action_rescue, true);
@@ -64,14 +86,15 @@ test('valid target foreground is the only action rescue', () => {
 
 test('valid non-confirm responses remain normalized ignores', () => {
   const cases = [
-    ['YES', 'NO', 'OTHER_ACTIVITY'],
-    ['NO', 'NO', 'TRUE_BACKGROUND'],
-    ['UNCERTAIN', 'UNCERTAIN', 'UNCERTAIN'],
+    ['CONTRADICTS_TARGET_EVENT', 'OTHER_CHANGE', 'CONTRADICTS_TARGET_EVENT', 'OTHER_ACTIVITY'],
+    ['CONTRADICTS_TARGET_EVENT', 'NO_MEANINGFUL_CHANGE', 'CONTRADICTS_TARGET_EVENT', 'TRUE_BACKGROUND'],
+    ['UNCERTAIN', 'UNCERTAIN', 'UNCERTAIN', 'UNCERTAIN'],
   ];
-  for (const [center, signature, label] of cases) {
+  for (const [before, center, after, label] of cases) {
     const parsed = parseGateResponse(JSON.stringify({
-      center_interaction: center,
-      target_signature: signature,
+      before_state: before,
+      center_change: center,
+      after_state: after,
       label,
     }));
     assert.equal(parsed.action_rescue, false);
@@ -84,8 +107,9 @@ test('malformed and inconsistent responses are protocol failures', () => {
   assert.equal(parseGateResponse('not-json').parse_error, true);
   assert.equal(parseGateResponse('null').protocol_error, true);
   const inconsistent = parseGateResponse(JSON.stringify({
-    center_interaction: 'YES',
-    target_signature: 'NO',
+    before_state: 'SUPPORTS_TARGET_EVENT',
+    center_change: 'OTHER_CHANGE',
+    after_state: 'SUPPORTS_TARGET_EVENT',
     label: 'TARGET_FOREGROUND',
   }));
   assert.equal(inconsistent.consistency_error, true);
@@ -109,6 +133,13 @@ test('manifest enforces absolute time and one exact member', () => {
   assert.throws(
     () => validateManifestRows([broadcast]),
     /exactly one member anchor/,
+  );
+
+  const badStructure = clone(row);
+  badStructure.teacher_predicted_max_distance = 99;
+  assert.throws(
+    () => validateManifestRows([badStructure]),
+    /structure fields disagree/,
   );
 });
 
@@ -206,6 +237,7 @@ test('completion summary distinguishes resumed, API, and local work', () => {
     api_attempted: 1,
     api_success: 1,
     local_uncertain: 1,
+    local_structural_ignore: 0,
     completed_total: 3,
     action: 1,
     ignore: 2,

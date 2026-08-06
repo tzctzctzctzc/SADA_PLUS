@@ -11,19 +11,21 @@ import { fileURLToPath } from 'node:url';
  *
  * This runner intentionally has one task only:
  *   1. Read one exact low-confidence SADA anchor from the manifest.
- *   2. Extract five frames centered on that exact anchor.
+ *   2. Extract nine dense frames centered on that exact anchor.
  *   3. Hide SADA's top-1 class from the VLM.
- *   4. Ask whether Frame 3 belongs to the fixed ten-class target foreground set.
- *   5. Rescue the anchor only when all returned gate fields consistently say YES.
+ *   4. Ask whether a target-defining state change passes through Frame 5.
+ *   5. Rescue only when visual state evidence and teacher structure both pass.
  *
  * The VLM never changes the class. A rescued anchor keeps the frozen teacher's
  * top-1 class. Valid non-confirmed responses are routed to IGNORE. Malformed or
  * internally inconsistent responses are protocol errors and stop the run.
  */
 
-const FRAME_OFFSETS_SEC = Object.freeze([-1.0, -0.5, 0.0, 0.5, 1.0]);
-const PROMPT_VERSION = 'candidate-blind-target-foreground-gate-v1';
-const ROUTING_SCHEMA_VERSION = 'candidate-blind-exact-anchor-routing-v1';
+const FRAME_OFFSETS_SEC = Object.freeze([
+  -0.8, -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8,
+]);
+const PROMPT_VERSION = 'candidate-blind-state-transition-gate-v2';
+const ROUTING_SCHEMA_VERSION = 'candidate-blind-exact-anchor-routing-v2';
 
 const ALLOWED_ARGS = new Set([
   'manifest',
@@ -42,8 +44,17 @@ const ALLOWED_ARGS = new Set([
   'limit',
 ]);
 
-const INTERACTION_VALUES = new Set(['YES', 'NO', 'UNCERTAIN']);
-const SIGNATURE_VALUES = new Set(['YES', 'NO', 'UNCERTAIN']);
+const STATE_VALUES = new Set([
+  'SUPPORTS_TARGET_EVENT',
+  'CONTRADICTS_TARGET_EVENT',
+  'UNCERTAIN',
+]);
+const CHANGE_VALUES = new Set([
+  'TARGET_DEFINING_CHANGE',
+  'OTHER_CHANGE',
+  'NO_MEANINGFUL_CHANGE',
+  'UNCERTAIN',
+]);
 const LABEL_VALUES = new Set([
   'TARGET_FOREGROUND',
   'OTHER_ACTIVITY',
@@ -310,7 +321,7 @@ function prepareFrames(video, centerSec, outputDir) {
   );
 
   const temporalContextValid = (
-    uniqueTimestamps >= 4
+    uniqueTimestamps >= 7
     && hasPreContext
     && hasPostContext
   );
@@ -329,14 +340,15 @@ function foregroundGatePrompt() {
   return `You are auditing one exact temporal anchor for temporal action localization
 in an egocentric kitchen video.
 
-You are given five chronologically ordered frames. Frame 3 is the exact
-anchor being audited. Frames 1-2 are preceding context and Frames 4-5 are
-following context.
+You are given nine chronologically ordered frames sampled every 0.2 seconds.
+Frame 5 is the exact anchor being audited. Frames 1-4 are preceding context
+and Frames 6-9 are following context.
 
-Determine whether the exact temporal neighborhood of Frame 3 contains direct
-visual evidence that it belongs to one of the ten target action events below.
+Determine whether one continuous target action event passes through Frame 5.
+Use the dense sequence to compare the relevant object state before, during,
+and after the anchor. Do not classify the whole clip from general activity.
 
-No candidate action label is provided. Do not assume that Frame 3 is an action
+No candidate action label is provided. Do not assume that Frame 5 is an action
 anchor merely because it was selected for review.
 
 Target action event signatures:
@@ -390,23 +402,20 @@ a container or constrained location, adjusting a position or setting without
 a target state transition, emptying, scraping, filling, scrubbing, pulling,
 or wrapping.
 
-Before deciding, internally inspect:
+Before deciding, internally inspect three stages:
 
-1. Frames 1-2:
-   Identify the preceding hand-object relationship and any relevant possession,
-   location, containment, closure, device, or content state.
+1. BEFORE STATE — Frames 1-4:
+   Identify the preceding possession, location, containment, closure, device,
+   cleaning, cutting, or content state for the same hand and object.
 
-2. Frame 3 and its immediate neighborhood:
-   Decide whether a deliberate interaction actually extends through the exact
-   anchor, rather than occurring only in the outer context.
+2. CENTER CHANGE — Frames 4-6, especially Frame 5:
+   Identify the visible change or continuing target-defining manipulation that
+   passes through the exact anchor. An event only in Frames 1-3 or 7-9 does not
+   pass through the anchor.
 
-3. Frames 4-5:
-   Check whether the same continuous event continues or produces a relevant
-   state change.
-
-4. Target-set evidence:
-   Decide whether at least one defining target-action signature is directly
-   supported by visible temporal evidence.
+3. AFTER STATE — Frames 6-9:
+   Check the resulting state or continuation of that same event on the same
+   object. Do not combine separate events or different objects.
 
 Do not output this internal analysis.
 
@@ -415,17 +424,20 @@ Important decision rules:
 - A false target-foreground rescue is more harmful than failing to rescue an
   ambiguous true action.
 
-- Choose TARGET_FOREGROUND only when both conditions are satisfied:
-  (a) a meaningful interaction extends through Frame 3; and
-  (b) the visible evidence directly supports at least one target action
-      signature.
+- Choose TARGET_FOREGROUND only when all three stages support one continuous
+  target event: the before state is compatible, a target-defining change or
+  manipulation passes through Frame 5, and the after state confirms the result
+  or continuation.
 
-- The full start-to-end transition does not need to be visible. However, at
-  least one defining and target-specific cue must be directly visible around
-  Frame 3. Do not infer an unseen target action only from a resulting state.
+- For transition actions such as TAKE, PUT, OPEN, CLOSE, INSERT, TURN-ON,
+  TURN-OFF, and POUR, compare the before and after object states. Do not infer
+  an unseen transition only from one static state.
 
-- Do not use an action occurring only in Frames 1-2 or Frames 4-5 if it does
-  not extend through the neighborhood of Frame 3.
+- For ongoing actions such as WASH and CUT, the target-defining manipulation
+  must be visibly active through Frames 4-6 and supported by adjacent frames.
+
+- Do not use an action occurring only in the outer context if it does not pass
+  through Frames 4-6.
 
 - Do not combine evidence from different objects or separate events.
 
@@ -435,29 +447,44 @@ Important decision rules:
 Choose exactly one semantic label:
 
 TARGET_FOREGROUND:
-Frame 3 contains direct and sufficiently specific evidence that it belongs to
-one of the ten target action events.
+The before state, center change, and after state consistently show that Frame 5
+belongs to one continuous event from the ten-action target set.
 
 OTHER_ACTIVITY:
-A meaningful interaction occurs around Frame 3, but the visible event is
+A meaningful non-target interaction passes through Frame 5, but the event is
 better described as a non-target activity.
 
 TRUE_BACKGROUND:
-No meaningful object interaction occurs around Frame 3.
+No meaningful object interaction passes through Frame 5.
 
 UNCERTAIN:
-An interaction may be occurring, but the visual or temporal evidence is
-insufficient to determine whether Frame 3 belongs to the target action set.
+The before state, center change, after state, object identity, or temporal
+relation to Frame 5 is insufficient or contradictory.
 
 Return exactly one JSON object with exactly these keys and no other text:
 
-"center_interaction": one of "YES", "NO", or "UNCERTAIN".
-"target_signature": one of "YES", "NO", or "UNCERTAIN".
+"before_state": one of "SUPPORTS_TARGET_EVENT",
+"CONTRADICTS_TARGET_EVENT", or "UNCERTAIN".
+"center_change": one of "TARGET_DEFINING_CHANGE", "OTHER_CHANGE",
+"NO_MEANINGFUL_CHANGE", or "UNCERTAIN".
+"after_state": one of "SUPPORTS_TARGET_EVENT",
+"CONTRADICTS_TARGET_EVENT", or "UNCERTAIN".
 "label": one of "TARGET_FOREGROUND", "OTHER_ACTIVITY",
 "TRUE_BACKGROUND", or "UNCERTAIN".
 
-The three fields must be logically consistent. Do not return explanations,
-markdown, probabilities, action names, or additional keys.`;
+The four fields must be logically consistent. TARGET_FOREGROUND requires
+SUPPORTS_TARGET_EVENT, TARGET_DEFINING_CHANGE, and SUPPORTS_TARGET_EVENT in
+that order.
+
+Use this exact label mapping after filling the three evidence fields:
+- If the three fields are SUPPORTS_TARGET_EVENT, TARGET_DEFINING_CHANGE,
+  SUPPORTS_TARGET_EVENT, return TARGET_FOREGROUND.
+- Otherwise, if center_change is OTHER_CHANGE, return OTHER_ACTIVITY.
+- Otherwise, if center_change is NO_MEANINGFUL_CHANGE, return TRUE_BACKGROUND.
+- In every remaining case, return UNCERTAIN.
+
+Do not return explanations, markdown, probabilities, action names, or
+additional keys.`;
 }
 
 const PROMPT_TEXT = foregroundGatePrompt();
@@ -465,6 +492,10 @@ const PROMPT_SHA256 = sha256(PROMPT_TEXT);
 
 function frameLabel(frame) {
   const offset = Number(frame.offset_sec);
+
+  if (frame.index === 5 && offset === 0) {
+    return 'FRAME 5 - EXACT TEMPORAL ANCHOR (0.0 seconds)';
+  }
 
   if (offset === 0) {
     return 'FRAME 3 — EXACT TEMPORAL ANCHOR (0.0 seconds)';
@@ -805,8 +836,9 @@ function parseGateResponse(text) {
     return {
       parse_error: true,
       protocol_error: true,
-      center_interaction: 'UNCERTAIN',
-      target_signature: 'UNCERTAIN',
+      before_state: 'UNCERTAIN',
+      center_change: 'UNCERTAIN',
+      after_state: 'UNCERTAIN',
       model_label: null,
       prediction: 'UNCERTAIN',
       action_rescue: false,
@@ -822,8 +854,9 @@ function parseGateResponse(text) {
     return {
       parse_error: false,
       protocol_error: true,
-      center_interaction: 'UNCERTAIN',
-      target_signature: 'UNCERTAIN',
+      before_state: 'UNCERTAIN',
+      center_change: 'UNCERTAIN',
+      after_state: 'UNCERTAIN',
       model_label: null,
       prediction: 'UNCERTAIN',
       action_rescue: false,
@@ -831,12 +864,16 @@ function parseGateResponse(text) {
     };
   }
 
-  const centerInteraction = normalizeEnum(
-    parsed.center_interaction,
+  const beforeState = normalizeEnum(
+    parsed.before_state,
   );
 
-  const targetSignature = normalizeEnum(
-    parsed.target_signature,
+  const centerChange = normalizeEnum(
+    parsed.center_change,
+  );
+
+  const afterState = normalizeEnum(
+    parsed.after_state,
   );
 
   const modelLabel = normalizeEnum(
@@ -848,41 +885,43 @@ function parseGateResponse(text) {
   const exactKeys = (
     JSON.stringify(keys)
     === JSON.stringify([
-      'center_interaction',
+      'after_state',
+      'before_state',
+      'center_change',
       'label',
-      'target_signature',
     ])
   );
 
   const fieldsValid = (
-    INTERACTION_VALUES.has(centerInteraction)
-    && SIGNATURE_VALUES.has(targetSignature)
+    STATE_VALUES.has(beforeState)
+    && CHANGE_VALUES.has(centerChange)
+    && STATE_VALUES.has(afterState)
     && LABEL_VALUES.has(modelLabel)
   );
 
   const actionRescue = (
     fieldsValid
     && exactKeys
-    && centerInteraction === 'YES'
-    && targetSignature === 'YES'
+    && beforeState === 'SUPPORTS_TARGET_EVENT'
+    && centerChange === 'TARGET_DEFINING_CHANGE'
+    && afterState === 'SUPPORTS_TARGET_EVENT'
     && modelLabel === 'TARGET_FOREGROUND'
   );
 
   let expectedLabel = 'UNCERTAIN';
 
   if (
-    centerInteraction === 'YES'
-    && targetSignature === 'YES'
+    beforeState === 'SUPPORTS_TARGET_EVENT'
+    && centerChange === 'TARGET_DEFINING_CHANGE'
+    && afterState === 'SUPPORTS_TARGET_EVENT'
   ) {
     expectedLabel = 'TARGET_FOREGROUND';
   } else if (
-    centerInteraction === 'YES'
-    && targetSignature === 'NO'
+    centerChange === 'OTHER_CHANGE'
   ) {
     expectedLabel = 'OTHER_ACTIVITY';
   } else if (
-    centerInteraction === 'NO'
-    && targetSignature !== 'YES'
+    centerChange === 'NO_MEANINGFUL_CHANGE'
   ) {
     expectedLabel = 'TRUE_BACKGROUND';
   }
@@ -907,14 +946,19 @@ function parseGateResponse(text) {
   return {
     parse_error: false,
     protocol_error: !fieldsValid || !exactKeys,
-    center_interaction: (
-      INTERACTION_VALUES.has(centerInteraction)
-        ? centerInteraction
+    before_state: (
+      STATE_VALUES.has(beforeState)
+        ? beforeState
         : 'UNCERTAIN'
     ),
-    target_signature: (
-      SIGNATURE_VALUES.has(targetSignature)
-        ? targetSignature
+    center_change: (
+      CHANGE_VALUES.has(centerChange)
+        ? centerChange
+        : 'UNCERTAIN'
+    ),
+    after_state: (
+      STATE_VALUES.has(afterState)
+        ? afterState
         : 'UNCERTAIN'
     ),
     model_label: (
@@ -938,6 +982,94 @@ function teacherTop1Class(row) {
   }
 
   return top1;
+}
+
+const STRUCTURE_FIELDS = Object.freeze([
+  'teacher_regression_left',
+  'teacher_regression_right',
+  'point_stride',
+  'point_regression_range_min',
+  'point_regression_range_max',
+  'teacher_predicted_max_distance',
+  'teacher_predicted_center_distance',
+  'center_sample_radius',
+  'teacher_range_eligible',
+  'teacher_center_eligible',
+  'teacher_duration_eligible',
+  'teacher_structural_eligible',
+]);
+
+function teacherStructure(row) {
+  for (const field of STRUCTURE_FIELDS) {
+    if (!(field in row)) {
+      throw new Error(
+        `manifest row ${row.candidate_id} is missing ${field}`,
+      );
+    }
+  }
+
+  const left = Number(row.teacher_regression_left);
+  const right = Number(row.teacher_regression_right);
+  const stride = Number(row.point_stride);
+  const rangeMin = Number(row.point_regression_range_min);
+  const rangeMax = Number(row.point_regression_range_max);
+  const radius = Number(row.center_sample_radius);
+  const numbers = [left, right, stride, rangeMin, rangeMax, radius];
+
+  if (
+    numbers.some(value => !Number.isFinite(value))
+    || left < 0
+    || right < 0
+    || stride <= 0
+    || rangeMin < 0
+    || rangeMax < rangeMin
+    || radius <= 0
+  ) {
+    throw new Error(
+      `invalid teacher structure for ${row.candidate_id}`,
+    );
+  }
+
+  const maxDistance = Math.max(left, right) * stride;
+  const centerDistance = Math.abs(right - left) / 2;
+  const rangeEligible = (
+    maxDistance >= rangeMin
+    && maxDistance <= rangeMax
+  );
+  const centerEligible = centerDistance <= radius;
+  const durationEligible = left + right > 0;
+  const eligible = (
+    rangeEligible
+    && centerEligible
+    && durationEligible
+  );
+
+  const close = (actual, expected) => (
+    Math.abs(Number(actual) - expected) <= 1e-6
+  );
+  const booleansMatch = (
+    row.teacher_range_eligible === rangeEligible
+    && row.teacher_center_eligible === centerEligible
+    && row.teacher_duration_eligible === durationEligible
+    && row.teacher_structural_eligible === eligible
+  );
+
+  if (
+    !close(row.teacher_predicted_max_distance, maxDistance)
+    || !close(row.teacher_predicted_center_distance, centerDistance)
+    || !booleansMatch
+  ) {
+    throw new Error(
+      `teacher structure fields disagree for ${row.candidate_id}`,
+    );
+  }
+
+  return {
+    eligible,
+    range_eligible: rangeEligible,
+    center_eligible: centerEligible,
+    duration_eligible: durationEligible,
+  };
 }
 
 function exactAnchorKey(row) {
@@ -1004,6 +1136,8 @@ function validateManifestRows(rows) {
     }
 
     const member = members[0];
+    teacherStructure(row);
+    teacherStructure({ ...member, candidate_id: row.candidate_id });
     const memberMatches = (
       Number(member.fpn_level) === Number(row.fpn_level)
       && Number(member.anchor_index) === Number(row.anchor_index)
@@ -1015,6 +1149,9 @@ function validateManifestRows(rows) {
       ) <= 1e-6
       && Number(member.teacher_top1_class)
         === teacherTop1Class(row)
+      && STRUCTURE_FIELDS.every(
+        field => member[field] === row[field],
+      )
     );
 
     if (!memberMatches) {
@@ -1046,6 +1183,9 @@ function requestFingerprint(row, model, wireApi) {
         row.global_anchor_index ?? null,
       teacher_top1_class:
         teacherTop1Class(row),
+      teacher_structure: Object.fromEntries(
+        STRUCTURE_FIELDS.map(field => [field, row[field]]),
+      ),
       frame_offsets_sec: FRAME_OFFSETS_SEC,
       prompt_sha256: PROMPT_SHA256,
       routing_schema_version: ROUTING_SCHEMA_VERSION,
@@ -1072,8 +1212,9 @@ function localUncertainResult(
     route: 'ignore',
     action_rescue: false,
     pseudo_label: null,
-    center_interaction: 'UNCERTAIN',
-    target_signature: 'UNCERTAIN',
+    before_state: 'UNCERTAIN',
+    center_change: 'UNCERTAIN',
+    after_state: 'UNCERTAIN',
     model_reported_label: null,
     parse_error: false,
     protocol_error: false,
@@ -1106,6 +1247,8 @@ function localUncertainResult(
       row.teacher_top1_score
       ?? row.sada_top1_score
       ?? null,
+    teacher_structural_eligible:
+      teacherStructure(row).eligible,
   };
 }
 
@@ -1160,6 +1303,7 @@ function completionSummary(
     apiAttempted = 0,
     apiSuccess = 0,
     localUncertain = 0,
+    localStructuralIgnore = 0,
   } = {},
 ) {
   const current = activeRows
@@ -1177,6 +1321,7 @@ function completionSummary(
     api_attempted: apiAttempted,
     api_success: apiSuccess,
     local_uncertain: localUncertain,
+    local_structural_ignore: localStructuralIgnore,
     completed_total: completed.length,
     action,
     ignore,
@@ -1306,6 +1451,7 @@ async function main() {
     apiAttempted: 0,
     apiSuccess: 0,
     localUncertain: 0,
+    localStructuralIgnore: 0,
   };
 
   const numericOptions = {
@@ -1389,6 +1535,8 @@ async function main() {
         row.teacher_top1_score
         ?? row.sada_top1_score
         ?? null,
+      teacher_structural_eligible:
+        teacherStructure(row).eligible,
     };
 
     try {
@@ -1405,6 +1553,27 @@ async function main() {
           row.frame_cache_id ?? row.candidate_id,
         ),
       );
+
+      if (!teacherStructure(row).eligible) {
+        const local = localUncertainResult(
+          row,
+          frameInfo,
+          fingerprint,
+          model,
+          wireApi,
+          'teacher_fpn_structural_ineligible',
+        );
+
+        appendResult(local);
+        counters.localStructuralIgnore += 1;
+
+        process.stdout.write(
+          `${processed}/${activeRows.length - alreadyCompleted} `
+          + `${row.candidate_id} ok UNCERTAIN structural\n`,
+        );
+
+        continue;
+      }
 
       if (!frameInfo.temporal_context_valid) {
         const local = localUncertainResult(
@@ -1476,10 +1645,13 @@ async function main() {
             ? top1
             : null
         ),
-        center_interaction:
-          parsed.center_interaction,
-        target_signature:
-          parsed.target_signature,
+        before_state:
+          parsed.before_state,
+        center_change:
+          parsed.center_change,
+        after_state:
+          parsed.after_state,
+        teacher_structural_eligible: true,
         model_reported_label:
           parsed.model_label,
         parse_error:
@@ -1512,8 +1684,8 @@ async function main() {
         unique_timestamp_count:
           frameInfo.unique_timestamp_count,
         gate_rule:
-          'candidate_blind_target_foreground'
-          + '_and_exact_anchor_and_teacher_top1',
+          'candidate_blind_state_transition'
+          + '_and_teacher_structure_and_exact_anchor',
       });
     } catch (error) {
       result.error = String(

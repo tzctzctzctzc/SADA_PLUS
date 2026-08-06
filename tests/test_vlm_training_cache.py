@@ -7,6 +7,20 @@ from tools.export_vlm_training_candidates import limit_queries
 
 
 def manifest_row(candidate_id="exact", top1=3, center=12.5):
+    structure = {
+        "teacher_regression_left": 1.0,
+        "teacher_regression_right": 1.5,
+        "point_stride": 2.0,
+        "point_regression_range_min": 2.0,
+        "point_regression_range_max": 8.0,
+        "teacher_predicted_max_distance": 3.0,
+        "teacher_predicted_center_distance": 0.25,
+        "center_sample_radius": 1.5,
+        "teacher_range_eligible": True,
+        "teacher_center_eligible": True,
+        "teacher_duration_eligible": True,
+        "teacher_structural_eligible": True,
+    }
     return {
         "candidate_id": candidate_id,
         "video_id": "video",
@@ -16,6 +30,7 @@ def manifest_row(candidate_id="exact", top1=3, center=12.5):
         "absolute_center_time": center,
         "center_sec": center,
         "teacher_top1_class": top1,
+        **structure,
         "member_anchors": [
             {
                 "fpn_level": 2,
@@ -23,6 +38,7 @@ def manifest_row(candidate_id="exact", top1=3, center=12.5):
                 "global_anchor_index": 123,
                 "absolute_center_time": center,
                 "teacher_top1_class": top1,
+                **structure,
             }
         ],
     }
@@ -31,15 +47,27 @@ def manifest_row(candidate_id="exact", top1=3, center=12.5):
 def prediction_row(manifest, prediction="TARGET_FOREGROUND"):
     is_action = prediction == "TARGET_FOREGROUND"
     fields = {
-        "TARGET_FOREGROUND": ("YES", "YES"),
-        "OTHER_ACTIVITY": ("YES", "NO"),
-        "TRUE_BACKGROUND": ("NO", "NO"),
-        "UNCERTAIN": ("UNCERTAIN", "UNCERTAIN"),
+        "TARGET_FOREGROUND": (
+            "SUPPORTS_TARGET_EVENT",
+            "TARGET_DEFINING_CHANGE",
+            "SUPPORTS_TARGET_EVENT",
+        ),
+        "OTHER_ACTIVITY": (
+            "CONTRADICTS_TARGET_EVENT",
+            "OTHER_CHANGE",
+            "CONTRADICTS_TARGET_EVENT",
+        ),
+        "TRUE_BACKGROUND": (
+            "CONTRADICTS_TARGET_EVENT",
+            "NO_MEANINGFUL_CHANGE",
+            "CONTRADICTS_TARGET_EVENT",
+        ),
+        "UNCERTAIN": ("UNCERTAIN", "UNCERTAIN", "UNCERTAIN"),
     }
-    center_interaction, target_signature = fields[prediction]
+    before_state, center_change, after_state = fields[prediction]
     return {
         "candidate_id": manifest["candidate_id"],
-        "routing_schema_version": "candidate-blind-exact-anchor-routing-v1",
+        "routing_schema_version": "candidate-blind-exact-anchor-routing-v2",
         "prompt_sha256": "a" * 64,
         "model": "qwen-test",
         "wire_api": "chat",
@@ -48,8 +76,10 @@ def prediction_row(manifest, prediction="TARGET_FOREGROUND"):
         "route": "action" if is_action else "ignore",
         "action_rescue": is_action,
         "pseudo_label": manifest["teacher_top1_class"] if is_action else None,
-        "center_interaction": center_interaction,
-        "target_signature": target_signature,
+        "before_state": before_state,
+        "center_change": center_change,
+        "after_state": after_state,
+        "teacher_structural_eligible": manifest["teacher_structural_eligible"],
         "model_reported_label": prediction,
         "parse_error": False,
         "protocol_error": False,
@@ -103,7 +133,7 @@ def test_new_protocol_action_and_ignore_are_serialized_one_to_one():
     payload = build_payload([action_manifest, ignore_manifest], predictions)
     assert payload["counts"] == {"action": 1, "ignore": 1, "background": 0}
     assert payload["routing_schema_version"] == (
-        "candidate-blind-exact-anchor-routing-v1"
+        "candidate-blind-exact-anchor-routing-v2"
     )
 
 
@@ -124,6 +154,30 @@ def test_local_uncertain_is_a_valid_ignore_without_model_label():
     assert build_entries([manifest], [result])[0]["decision"] == "ignore"
 
 
+def test_teacher_structural_reject_is_a_local_ignore():
+    manifest = manifest_row()
+    structure = {
+        "teacher_regression_left": 0.5,
+        "teacher_regression_right": 5.0,
+        "point_stride": 2.0,
+        "point_regression_range_min": 2.0,
+        "point_regression_range_max": 8.0,
+        "teacher_predicted_max_distance": 10.0,
+        "teacher_predicted_center_distance": 2.25,
+        "center_sample_radius": 1.5,
+        "teacher_range_eligible": False,
+        "teacher_center_eligible": False,
+        "teacher_duration_eligible": True,
+        "teacher_structural_eligible": False,
+    }
+    manifest.update(structure)
+    manifest["member_anchors"][0].update(structure)
+    result = prediction_row(manifest, "UNCERTAIN")
+    result["model_reported_label"] = None
+    result["local_gate_reason"] = "teacher_fpn_structural_ineligible"
+    assert build_entries([manifest], [result])[0]["decision"] == "ignore"
+
+
 def test_legacy_confirmation_label_is_rejected():
     manifest = manifest_row()
     result = prediction_row(manifest)
@@ -138,7 +192,7 @@ def test_legacy_confirmation_label_is_rejected():
         ("pseudo_label", 4),
         ("route", "ignore"),
         ("action_rescue", False),
-        ("center_interaction", "NO"),
+        ("center_change", "OTHER_CHANGE"),
         ("parse_error", True),
         ("protocol_error", True),
         ("consistency_error", True),

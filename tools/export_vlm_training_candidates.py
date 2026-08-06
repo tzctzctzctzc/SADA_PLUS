@@ -47,6 +47,49 @@ def limit_queries(rows, max_per_video, min_gap_sec):
     return sorted(selected, key=lambda row: row["candidate_id"])
 
 
+def decode_teacher_offsets(model, fpn_feats, fpn_masks):
+    """Return class-specific decoded offsets as [class, time, left/right]."""
+    import torch.nn.functional as F
+
+    raw_offsets, _ = model.reg_head_target(fpn_feats, fpn_masks)
+    if not model.use_trident_head:
+        return tuple(
+            offsets[0].transpose(0, 1).unsqueeze(0).expand(
+                model.num_class_orig, -1, -1
+            )
+            for offsets in raw_offsets
+        )
+
+    start_logits, _ = model.start_head(fpn_feats, fpn_masks)
+    end_logits, _ = model.end_head(fpn_feats, fpn_masks)
+    decoded = []
+    for offsets, starts, ends in zip(raw_offsets, start_logits, end_logits):
+        offsets = offsets[0].transpose(0, 1)
+        starts = starts[0]
+        ends = ends[0]
+
+        start_windows = F.pad(starts, (model.num_bins, 0)).unsqueeze(-1)
+        window_size = list(start_windows.size())
+        window_size[-1] = model.num_bins + 1
+        window_size[-2] -= model.num_bins
+        window_stride = list(start_windows.stride())
+        window_stride[-2] = window_stride[-1]
+        start_windows = start_windows.as_strided(
+            size=window_size, stride=window_stride
+        )
+
+        end_windows = F.pad(ends, (0, model.num_bins)).unsqueeze(-1)
+        end_windows = end_windows.as_strided(
+            size=window_size, stride=window_stride
+        )
+        decoded.append(
+            model.decode_offset(
+                offsets, start_windows, end_windows, mode="test"
+            )
+        )
+    return tuple(decoded)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
@@ -113,6 +156,11 @@ def main():
             fpn_feats, fpn_masks = model.neck_target(backbone_feats, backbone_masks)
             logits, _ = model.cls_head_target(fpn_feats, fpn_masks)
             points = model.point_generator(fpn_feats)
+            decoded_offsets = (
+                decode_teacher_offsets(model, fpn_feats, fpn_masks)
+                if args.exact_anchor
+                else None
+            )
 
             metadata = raw_video["metadata"]
             video_id = str(metadata["video_id"])
@@ -150,6 +198,39 @@ def main():
                     if args.exact_anchor:
                         time_us = int(round(center_sec * 1000000.0))
                         global_index = global_anchor_offset + int(index)
+                        teacher_offsets = decoded_offsets[level][top1, index]
+                        reg_left = float(teacher_offsets[0])
+                        reg_right = float(teacher_offsets[1])
+                        point_stride = float(point_grid[index, 3])
+                        reg_range_min = float(point_grid[index, 1])
+                        reg_range_max = float(point_grid[index, 2])
+                        max_distance = max(reg_left, reg_right) * point_stride
+                        center_distance = abs(reg_right - reg_left) / 2.0
+                        center_radius = float(model.train_center_sample_radius)
+                        range_eligible = (
+                            reg_range_min <= max_distance <= reg_range_max
+                        )
+                        center_eligible = center_distance <= center_radius
+                        duration_eligible = reg_left + reg_right > 0.0
+                        structural_eligible = (
+                            range_eligible
+                            and center_eligible
+                            and duration_eligible
+                        )
+                        structure = {
+                            "teacher_regression_left": reg_left,
+                            "teacher_regression_right": reg_right,
+                            "point_stride": point_stride,
+                            "point_regression_range_min": reg_range_min,
+                            "point_regression_range_max": reg_range_max,
+                            "teacher_predicted_max_distance": max_distance,
+                            "teacher_predicted_center_distance": center_distance,
+                            "center_sample_radius": center_radius,
+                            "teacher_range_eligible": range_eligible,
+                            "teacher_center_eligible": center_eligible,
+                            "teacher_duration_eligible": duration_eligible,
+                            "teacher_structural_eligible": structural_eligible,
+                        }
                         candidate_id = (
                             "{}-l{:02d}-g{:07d}-t{:012d}-c{:02d}".format(
                                 video_id, level, global_index, time_us, top1
@@ -162,6 +243,7 @@ def main():
                             "absolute_center_time": center_sec,
                             "teacher_top1_class": top1,
                             "center_sampling_position": float(point_grid[index, 0]),
+                            **structure,
                         }
                         score = float(top_scores[index, 0])
                         exact_rows.append(
@@ -181,6 +263,7 @@ def main():
                                 "sada_score_min": score,
                                 "sada_score_max": score,
                                 "sada_score_mean": score,
+                                **structure,
                                 "member_anchors": [member],
                             }
                         )

@@ -8,7 +8,7 @@ from collections import Counter
 from pathlib import Path
 
 
-ROUTING_SCHEMA_VERSION = "candidate-blind-exact-anchor-routing-v1"
+ROUTING_SCHEMA_VERSION = "candidate-blind-exact-anchor-routing-v2"
 ROUTING_POLICY = "exact_anchor_rescue"
 ACTION_PREDICTION = "TARGET_FOREGROUND"
 NON_ACTION_PREDICTIONS = {"OTHER_ACTIVITY", "TRUE_BACKGROUND", "UNCERTAIN"}
@@ -29,13 +29,29 @@ PROTOCOL_FIELDS = {
     "route",
     "action_rescue",
     "pseudo_label",
-    "center_interaction",
-    "target_signature",
+    "before_state",
+    "center_change",
+    "after_state",
+    "teacher_structural_eligible",
     "model_reported_label",
     "parse_error",
     "protocol_error",
     "consistency_error",
 }
+STRUCTURE_FIELDS = (
+    "teacher_regression_left",
+    "teacher_regression_right",
+    "point_stride",
+    "point_regression_range_min",
+    "point_regression_range_max",
+    "teacher_predicted_max_distance",
+    "teacher_predicted_center_distance",
+    "center_sample_radius",
+    "teacher_range_eligible",
+    "teacher_center_eligible",
+    "teacher_duration_eligible",
+    "teacher_structural_eligible",
+)
 
 
 def read_jsonl(path):
@@ -72,6 +88,48 @@ def _strict_key(row):
     )
 
 
+def _teacher_structure(row):
+    if not set(STRUCTURE_FIELDS).issubset(row):
+        raise ValueError("exact-anchor manifest is missing teacher structure")
+    left = float(row["teacher_regression_left"])
+    right = float(row["teacher_regression_right"])
+    stride = float(row["point_stride"])
+    range_min = float(row["point_regression_range_min"])
+    range_max = float(row["point_regression_range_max"])
+    radius = float(row["center_sample_radius"])
+    values = (left, right, stride, range_min, range_max, radius)
+    if (
+        not all(math.isfinite(value) for value in values)
+        or left < 0
+        or right < 0
+        or stride <= 0
+        or range_min < 0
+        or range_max < range_min
+        or radius <= 0
+    ):
+        raise ValueError("invalid teacher structure")
+
+    max_distance = max(left, right) * stride
+    center_distance = abs(right - left) / 2.0
+    range_eligible = range_min <= max_distance <= range_max
+    center_eligible = center_distance <= radius
+    duration_eligible = left + right > 0
+    eligible = range_eligible and center_eligible and duration_eligible
+    if (
+        abs(float(row["teacher_predicted_max_distance"]) - max_distance) > 1e-6
+        or abs(
+            float(row["teacher_predicted_center_distance"]) - center_distance
+        )
+        > 1e-6
+        or row["teacher_range_eligible"] is not range_eligible
+        or row["teacher_center_eligible"] is not center_eligible
+        or row["teacher_duration_eligible"] is not duration_eligible
+        or row["teacher_structural_eligible"] is not eligible
+    ):
+        raise ValueError("teacher structure fields disagree")
+    return eligible
+
+
 def _validate_manifest(manifest_rows):
     by_id = {}
     keys = set()
@@ -81,7 +139,7 @@ def _validate_manifest(manifest_rows):
             "anchor_index",
             "center_sec",
             "member_anchors",
-        }
+        } | set(STRUCTURE_FIELDS)
         if not required.issubset(row):
             raise ValueError("exact-anchor manifest is missing a strict field")
         candidate_id = row["candidate_id"]
@@ -95,6 +153,8 @@ def _validate_manifest(manifest_rows):
         if not isinstance(members, list) or len(members) != 1:
             raise ValueError("exact-anchor query must have exactly one member")
         member = members[0]
+        _teacher_structure(row)
+        _teacher_structure(member)
         if (
             int(member["fpn_level"]) != int(row["fpn_level"])
             or int(member["anchor_index"]) != int(row["anchor_index"])
@@ -107,6 +167,7 @@ def _validate_manifest(manifest_rows):
             > 1e-6
             or int(member["teacher_top1_class"])
             != int(row["teacher_top1_class"])
+            or any(member[field] != row[field] for field in STRUCTURE_FIELDS)
         ):
             raise ValueError("exact-anchor member does not match its query")
         key = _strict_key(row)
@@ -147,12 +208,16 @@ def _validate_provenance(prediction_rows):
     }
 
 
-def _expected_prediction(center_interaction, target_signature):
-    if center_interaction == "YES" and target_signature == "YES":
+def _expected_prediction(before_state, center_change, after_state):
+    if (
+        before_state == "SUPPORTS_TARGET_EVENT"
+        and center_change == "TARGET_DEFINING_CHANGE"
+        and after_state == "SUPPORTS_TARGET_EVENT"
+    ):
         return ACTION_PREDICTION
-    if center_interaction == "YES" and target_signature == "NO":
+    if center_change == "OTHER_CHANGE":
         return "OTHER_ACTIVITY"
-    if center_interaction == "NO" and target_signature != "YES":
+    if center_change == "NO_MEANINGFUL_CHANGE":
         return "TRUE_BACKGROUND"
     return "UNCERTAIN"
 
@@ -175,22 +240,35 @@ def _validate_prediction(prediction, manifest):
     ):
         raise ValueError("prediction contains a protocol or parsing error")
 
-    center_interaction = prediction["center_interaction"]
-    target_signature = prediction["target_signature"]
-    if center_interaction not in {"YES", "NO", "UNCERTAIN"}:
-        raise ValueError("invalid center_interaction")
-    if target_signature not in {"YES", "NO", "UNCERTAIN"}:
-        raise ValueError("invalid target_signature")
-    expected = _expected_prediction(center_interaction, target_signature)
+    before_state = prediction["before_state"]
+    center_change = prediction["center_change"]
+    after_state = prediction["after_state"]
+    state_values = {"SUPPORTS_TARGET_EVENT", "CONTRADICTS_TARGET_EVENT", "UNCERTAIN"}
+    change_values = {
+        "TARGET_DEFINING_CHANGE",
+        "OTHER_CHANGE",
+        "NO_MEANINGFUL_CHANGE",
+        "UNCERTAIN",
+    }
+    if before_state not in state_values or after_state not in state_values:
+        raise ValueError("invalid before_state or after_state")
+    if center_change not in change_values:
+        raise ValueError("invalid center_change")
+    expected = _expected_prediction(before_state, center_change, after_state)
     if prediction["prediction"] != expected:
         raise ValueError("prediction disagrees with gate fields")
+    if prediction["teacher_structural_eligible"] is not _teacher_structure(manifest):
+        raise ValueError("prediction teacher structure differs from manifest")
 
     is_action = (
         prediction["prediction"] == ACTION_PREDICTION
         and prediction["action_rescue"] is True
         and prediction["route"] == "action"
-        and prediction["center_interaction"] == "YES"
-        and prediction["target_signature"] == "YES"
+        and prediction["before_state"] == "SUPPORTS_TARGET_EVENT"
+        and prediction["center_change"] == "TARGET_DEFINING_CHANGE"
+        and prediction["after_state"] == "SUPPORTS_TARGET_EVENT"
+        and prediction["teacher_structural_eligible"] is True
+        and _teacher_structure(manifest)
         and prediction["pseudo_label"]
         == prediction["teacher_top1_class"]
         and prediction["pseudo_label"]
@@ -269,12 +347,14 @@ def build_payload(manifest_rows, prediction_rows):
     entries = build_entries(manifest_rows, prediction_rows)
     counts = Counter(entry["decision"] for entry in entries)
     return {
-        "version": 3,
-        "source": "offline_candidate_blind_exact_anchor_vlm_without_target_gt",
+        "version": 4,
+        "source": "offline_candidate_blind_state_transition_vlm_without_target_gt",
         "routing_policy": ROUTING_POLICY,
         **provenance,
         "routing_rule": {
-            "validated_target_foreground": "action_with_teacher_top1",
+            "validated_target_foreground": (
+                "state_transition_and_teacher_structure_then_action_with_teacher_top1"
+            ),
             "valid_non_confirm_outputs": "ignore",
             "background": "forbidden",
         },
