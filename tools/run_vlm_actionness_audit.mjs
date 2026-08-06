@@ -78,6 +78,8 @@ const CANDIDATE_SPECS = new Map([
   [0, {
     name: 'take',
     definition: 'acquires possession or stable control of an object by grasping, retrieving, or picking it up',
+    evidence: 'The person approaches, reaches for, contacts, grasps, or retrieves the object; control is acquired or consolidated around the central neighborhood; and the object may subsequently be held or carried. The complete acquisition transition does not need to be fully visible.',
+    negatives: 'Do not confirm merely because the object is already held, carried, lifted, pulled, adjusted, or moved. Brief contact without evidence that the exact anchor belongs to an acquisition event is not sufficient.',
   }],
   [1, {
     name: 'put',
