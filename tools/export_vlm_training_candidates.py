@@ -57,6 +57,10 @@ def main():
     parser.add_argument("--weights", choices=("student", "ema"), default="ema")
     parser.add_argument("--beta", type=float, default=0.1)
     parser.add_argument("--time-bin-sec", type=float, default=0.5)
+    parser.add_argument(
+        "--exact-anchor", action="store_true",
+        help="export one VLM query per exact FPN anchor without merging members",
+    )
     parser.add_argument("--max-queries-per-video", type=int, default=0)
     parser.add_argument("--min-query-gap-sec", type=float, default=1.0)
     parser.add_argument("--levels", type=int, nargs="+", default=range(6))
@@ -96,6 +100,7 @@ def main():
 
     alpha = float(cfg["model"].get("pl_threshold", 0.7))
     groups = defaultdict(list)
+    exact_rows = []
     level_counts = Counter()
     valid_anchors = 0
     low_confidence_anchors = 0
@@ -116,11 +121,14 @@ def main():
             fps = float(metadata["fps"])
             frame_offset = 0.5 * float(cfg["dataset"]["num_frames"])
             duration = float(metadata["duration"])
+            global_anchor_offset = 0
 
             for level, (point_grid, level_logits, level_mask) in enumerate(
                 zip(points, logits, fpn_masks)
             ):
+                level_length = int(point_grid.shape[0])
                 if level not in args.levels:
+                    global_anchor_offset += level_length
                     continue
                 probabilities = level_logits[0].transpose(0, 1).sigmoid()
                 top_scores, top_classes = probabilities.topk(k=2, dim=-1)
@@ -139,6 +147,44 @@ def main():
                     center_sec = min(max(float(centers[index]), 0.0), duration)
                     top1 = int(top_classes[index, 0])
                     top2 = int(top_classes[index, 1])
+                    if args.exact_anchor:
+                        time_us = int(round(center_sec * 1000000.0))
+                        global_index = global_anchor_offset + int(index)
+                        candidate_id = (
+                            "{}-l{:02d}-g{:07d}-t{:012d}-c{:02d}".format(
+                                video_id, level, global_index, time_us, top1
+                            )
+                        )
+                        member = {
+                            "fpn_level": level,
+                            "anchor_index": int(index),
+                            "global_anchor_index": global_index,
+                            "absolute_center_time": center_sec,
+                            "teacher_top1_class": top1,
+                            "center_sampling_position": float(point_grid[index, 0]),
+                        }
+                        score = float(top_scores[index, 0])
+                        exact_rows.append(
+                            {
+                                "candidate_id": candidate_id,
+                                "anchor_id": candidate_id,
+                                "frame_cache_id": candidate_id,
+                                "video_id": video_id,
+                                "fpn_level": level,
+                                "anchor_index": int(index),
+                                "global_anchor_index": global_index,
+                                "absolute_center_time": center_sec,
+                                "center_sec": center_sec,
+                                "teacher_top1_class": top1,
+                                "sada_top1_class": top1,
+                                "sada_top2_class": top2,
+                                "sada_score_min": score,
+                                "sada_score_max": score,
+                                "sada_score_mean": score,
+                                "member_anchors": [member],
+                            }
+                        )
+                        continue
                     bin_index = time_bin(center_sec, args.time_bin_sec)
                     groups[(video_id, bin_index, top1)].append(
                         {
@@ -149,41 +195,46 @@ def main():
                             "sada_top2_class": top2,
                         }
                     )
+                global_anchor_offset += level_length
 
-    rows = []
     member_counts = Counter()
-    for (video_id, bin_index, top1), members in sorted(groups.items()):
-        representative = max(members, key=lambda member: member["sada_score"])
-        center_sec = representative["center_sec"]
-        top2 = representative["sada_top2_class"]
-        scores = [member["sada_score"] for member in members]
-        candidate_id = "{}-tb{:07d}-c{:02d}-c{:02d}".format(
-            video_id, bin_index, top1, top2
-        )
-        rows.append(
-            {
-                "candidate_id": candidate_id,
-                "anchor_id": candidate_id,
-                "frame_cache_id": candidate_id,
-                "video_id": video_id,
-                "center_sec": center_sec,
-                "time_bin_index": bin_index,
-                "time_bin_sec": args.time_bin_sec,
-                "sada_top1_class": top1,
-                "sada_top2_class": top2,
-                "sada_score_min": min(scores),
-                "sada_score_max": max(scores),
-                "sada_score_mean": sum(scores) / len(scores),
-                "member_anchors": [
-                    {
-                        "fpn_level": member["fpn_level"],
-                        "anchor_index": member["anchor_index"],
-                    }
-                    for member in members
-                ],
-            }
-        )
-        member_counts[len(members)] += 1
+    if args.exact_anchor:
+        rows = exact_rows
+        member_counts.update(len(row["member_anchors"]) for row in rows)
+    else:
+        rows = []
+        for (video_id, bin_index, top1), members in sorted(groups.items()):
+            representative = max(members, key=lambda member: member["sada_score"])
+            center_sec = representative["center_sec"]
+            top2 = representative["sada_top2_class"]
+            scores = [member["sada_score"] for member in members]
+            candidate_id = "{}-tb{:07d}-c{:02d}-c{:02d}".format(
+                video_id, bin_index, top1, top2
+            )
+            rows.append(
+                {
+                    "candidate_id": candidate_id,
+                    "anchor_id": candidate_id,
+                    "frame_cache_id": candidate_id,
+                    "video_id": video_id,
+                    "center_sec": center_sec,
+                    "time_bin_index": bin_index,
+                    "time_bin_sec": args.time_bin_sec,
+                    "sada_top1_class": top1,
+                    "sada_top2_class": top2,
+                    "sada_score_min": min(scores),
+                    "sada_score_max": max(scores),
+                    "sada_score_mean": sum(scores) / len(scores),
+                    "member_anchors": [
+                        {
+                            "fpn_level": member["fpn_level"],
+                            "anchor_index": member["anchor_index"],
+                        }
+                        for member in members
+                    ],
+                }
+            )
+            member_counts[len(members)] += 1
 
     all_deduplicated_queries = len(rows)
     rows = limit_queries(
@@ -211,7 +262,8 @@ def main():
         "levels": list(args.levels),
         "beta": args.beta,
         "alpha": alpha,
-        "time_bin_sec": args.time_bin_sec,
+        "exact_anchor": args.exact_anchor,
+        "time_bin_sec": None if args.exact_anchor else args.time_bin_sec,
         "valid_anchors": valid_anchors,
         "low_confidence_anchors": low_confidence_anchors,
         "low_confidence_by_level": dict(sorted(level_counts.items())),

@@ -517,12 +517,62 @@ Return exactly one JSON object with no explanation, markdown, or additional
 text, for example: {"label":"CONFIRM_TARGET"}`;
 }
 
+function anchorRescuePrompt(candidateLabelId) {
+  const spec = CANDIDATE_SPECS.get(Number(candidateLabelId));
+  if (!spec) throw new Error(`unsupported candidate label id: ${candidateLabelId}`);
+  return `You are verifying whether one exact temporal anchor should be rescued as
+the SADA candidate action in an egocentric kitchen video.
+
+You are given five chronologically ordered frames. Frame 3 is the exact anchor.
+Frames 1-2 and 4-5 are context only. Do not transfer this decision to another
+time, FPN scale, or anchor.
+
+SADA candidate action: "${spec.name}"
+Candidate definition: "${spec.name}" means that the person deliberately
+${spec.definition}.
+
+Evidence for this candidate may include:
+${spec.evidence}
+No single cue is enough. The central neighborhood must contain clear,
+temporally consistent evidence for this specific candidate action.
+
+Do not confirm because hands, objects, tools, or related motion are visible.
+Do not treat a semantically related action as "${spec.name}".
+Important negative evidence:
+${spec.negatives}
+
+Choose exactly one label:
+
+CONFIRM_KEY_ACTION_EVIDENCE: The exact anchor's temporal neighborhood clearly
+belongs to the specific candidate "${spec.name}". Only this label rescues the
+anchor as an action.
+
+ACTION_CONTEXT_OR_BOUNDARY: The frames may be near, before, after, or at an
+ambiguous boundary of an action, but they do not clearly show that this exact
+anchor belongs to "${spec.name}".
+
+OTHER_ACTIVITY: A meaningful interaction is clearly visible around Frame 3,
+but another action explains it better.
+
+TRUE_BACKGROUND: No meaningful object interaction occurs around Frame 3.
+
+UNCERTAIN: The available frames are insufficient to decide reliably.
+
+Choose CONFIRM_KEY_ACTION_EVIDENCE only with clear evidence for the candidate
+at the exact anchor. Otherwise choose a non-confirm label. Return exactly one
+JSON object and no other text, for example:
+{"label":"CONFIRM_KEY_ACTION_EVIDENCE"}`;
+}
+
 function prompt(ontology, promptMode, candidateLabelId, optionMapping) {
   if (promptMode === 'candidate_listwise') {
     return listwisePrompt(optionMapping);
   }
   if (promptMode === 'candidate_verify' && Number(candidateLabelId) !== 0) {
     return genericCandidatePrompt(candidateLabelId);
+  }
+  if (promptMode === 'anchor_rescue') {
+    return anchorRescuePrompt(candidateLabelId);
   }
   if (promptMode === 'take_verify' || promptMode === 'candidate_verify') {
     return `You are verifying one candidate pseudo-label for temporal action localization
@@ -734,10 +784,10 @@ async function main() {
   const requestTimeoutMs = Number(args['request-timeout-sec'] || process.env.VLM_REQUEST_TIMEOUT_SEC || 120) * 1000;
   const ontology = loadOntology(args['ontology-csv']);
   const promptMode = args['prompt-mode'] || (ontology ? 'full_ontology' : 'target_only');
-  if (!['target_only', 'contrastive', 'contrastive_score', 'full_ontology', 'take_verify', 'candidate_verify', 'candidate_listwise'].includes(promptMode)) {
+  if (!['target_only', 'contrastive', 'contrastive_score', 'full_ontology', 'take_verify', 'candidate_verify', 'candidate_listwise', 'anchor_rescue'].includes(promptMode)) {
     throw new Error('--prompt-mode is not supported');
   }
-  if (!['target_only', 'take_verify', 'candidate_verify', 'candidate_listwise'].includes(promptMode) && !ontology) {
+  if (!['target_only', 'take_verify', 'candidate_verify', 'candidate_listwise', 'anchor_rescue'].includes(promptMode) && !ontology) {
     throw new Error('--ontology-csv is required for taxonomy-aware prompt modes');
   }
   if (!apiKey) throw new Error(`environment variable ${keyEnv} is empty`);
@@ -761,7 +811,7 @@ async function main() {
         path.join(args['cache-dir'], row.frame_cache_id ?? row.candidate_id),
       );
       const candidateLabelId = row.candidate_label_id ?? row.sada_top1_class;
-      if (promptMode === 'candidate_verify' && candidateLabelId == null) {
+      if (['candidate_verify', 'anchor_rescue'].includes(promptMode) && candidateLabelId == null) {
         throw new Error(`candidate class missing for ${row.candidate_id}`);
       }
       if (promptMode === 'candidate_listwise' && !row.option_mapping) {
@@ -784,19 +834,26 @@ async function main() {
       const verifierLabels = new Set([
         'CONFIRM_TARGET', 'OTHER_ACTIVITY', 'TRUE_BACKGROUND', 'UNCERTAIN',
       ]);
+      const rescueLabels = new Set([
+        'CONFIRM_KEY_ACTION_EVIDENCE', 'ACTION_CONTEXT_OR_BOUNDARY',
+        'OTHER_ACTIVITY', 'TRUE_BACKGROUND', 'UNCERTAIN',
+      ]);
       const listwiseLabels = new Set([
         'A', 'B', 'C', 'OTHER_ACTIVITY', 'TRUE_BACKGROUND', 'UNCERTAIN',
       ]);
       const normalizedLabel = String(label || '').trim().toUpperCase();
       const match = normalizedLabel.match(/^([ABU])$/i);
       const verifierMode = ['take_verify', 'candidate_verify'].includes(promptMode);
+      const rescueMode = promptMode === 'anchor_rescue';
       const listwiseMode = promptMode === 'candidate_listwise';
       let prediction = listwiseMode
         ? (listwiseLabels.has(normalizedLabel) ? normalizedLabel : 'UNCERTAIN')
-        : (verifierMode
+        : (rescueMode
+          ? (rescueLabels.has(normalizedLabel) ? normalizedLabel : 'UNCERTAIN')
+          : (verifierMode
           ? (verifierLabels.has(normalizedLabel) ? normalizedLabel : 'UNCERTAIN')
-          : (match ? match[1].toUpperCase() : 'U'));
-      if (!verifierMode && !listwiseMode && ontology && reportedVerb) {
+          : (match ? match[1].toUpperCase() : 'U')));
+      if (!verifierMode && !rescueMode && !listwiseMode && ontology && reportedVerb) {
         const targetVerbs = new Set(
           ontology.filter(item => item.id < 10).map(item => normalizeVerb(item.verb)),
         );
@@ -808,12 +865,15 @@ async function main() {
       result.prediction = prediction;
       result.model_reported_label = listwiseMode
         ? (listwiseLabels.has(normalizedLabel) ? normalizedLabel : null)
-        : (verifierMode
+        : (rescueMode
+          ? (rescueLabels.has(normalizedLabel) ? normalizedLabel : null)
+          : (verifierMode
           ? (verifierLabels.has(normalizedLabel) ? normalizedLabel : null)
-          : (match ? match[1].toUpperCase() : null));
+          : (match ? match[1].toUpperCase() : null)));
       result.parse_error = listwiseMode
         ? !listwiseLabels.has(normalizedLabel)
-        : (verifierMode ? !verifierLabels.has(normalizedLabel) : !match);
+        : (rescueMode ? !rescueLabels.has(normalizedLabel)
+          : (verifierMode ? !verifierLabels.has(normalizedLabel) : !match));
       result.response_text = response.text;
       result.reported_verb = reportedVerb;
       result.target_probability = targetProbability;
@@ -827,15 +887,17 @@ async function main() {
       result.anchor_id = row.anchor_id ?? row.candidate_id;
       result.candidate_role = row.candidate_role ?? null;
       result.option_mapping = listwiseMode ? row.option_mapping : null;
-      result.candidate_label_id = verifierMode ? Number(candidateLabelId ?? 0) : null;
-      result.candidate_name = verifierMode
+      result.candidate_label_id = (verifierMode || rescueMode) ? Number(candidateLabelId ?? 0) : null;
+      result.candidate_name = (verifierMode || rescueMode)
         ? CANDIDATE_SPECS.get(Number(candidateLabelId ?? 0))?.name || null
         : null;
       result.gate_rule = listwiseMode
         ? 'listwise_candidate_competition'
-        : (verifierMode
+        : (rescueMode
+          ? 'exact_anchor_high_precision_rescue'
+          : (verifierMode
           ? 'candidate_semantic_verifier'
-          : (ontology ? 'deterministic_from_reported_verb' : 'model_label'));
+          : (ontology ? 'deterministic_from_reported_verb' : 'model_label')));
     } catch (error) {
       result.error = String(error.message || error);
     }

@@ -56,3 +56,78 @@ def test_query_budget_keeps_separated_highest_scores_per_video():
     ]
     selected = limit_queries(rows, max_per_video=2, min_gap_sec=1.0)
     assert {row["center_sec"] for row in selected} == {1.0, 3.0}
+
+
+def test_exact_anchor_rescue_never_broadcasts_or_routes_background():
+    manifest = [
+        {
+            "candidate_id": "exact",
+            "video_id": "video",
+            "fpn_level": 2,
+            "anchor_index": 7,
+            "global_anchor_index": 123,
+            "absolute_center_time": 12.5,
+            "teacher_top1_class": 3,
+            "member_anchors": [
+                {
+                    "fpn_level": 2,
+                    "anchor_index": 7,
+                    "global_anchor_index": 123,
+                    "absolute_center_time": 12.5,
+                    "teacher_top1_class": 3,
+                }
+            ],
+        },
+        {
+            "candidate_id": "ignore",
+            "video_id": "video",
+            "fpn_level": 1,
+            "anchor_index": 4,
+            "global_anchor_index": 88,
+            "absolute_center_time": 8.0,
+            "teacher_top1_class": 2,
+            "member_anchors": [
+                {
+                    "fpn_level": 1,
+                    "anchor_index": 4,
+                    "global_anchor_index": 88,
+                    "absolute_center_time": 8.0,
+                    "teacher_top1_class": 2,
+                }
+            ],
+        },
+    ]
+    predictions = [
+        {
+            "candidate_id": "exact",
+            "status": "ok",
+            "prediction": "CONFIRM_KEY_ACTION_EVIDENCE",
+        },
+        {"candidate_id": "ignore", "status": "ok", "prediction": "TRUE_BACKGROUND"},
+    ]
+
+    entries = build_entries(
+        manifest, predictions, routing_policy="exact_anchor_rescue"
+    )
+
+    assert entries == [
+        {
+            "video_id": "video",
+            "fpn_level": 2,
+            "anchor_index": 7,
+            "decision": "action",
+            "global_anchor_index": 123,
+            "absolute_center_time": 12.5,
+            "teacher_top1_class": 3,
+            "class_id": 3,
+        },
+        {
+            "video_id": "video",
+            "fpn_level": 1,
+            "anchor_index": 4,
+            "decision": "ignore",
+            "global_anchor_index": 88,
+            "absolute_center_time": 8.0,
+            "teacher_top1_class": 2,
+        },
+    ]

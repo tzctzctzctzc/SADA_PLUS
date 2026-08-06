@@ -13,15 +13,38 @@ def load_vlm_routing_cache(path, num_classes):
     """Load a GT-free offline VLM routing cache indexed by video and level."""
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     entries = payload.get("entries", [])
+    exact_anchor_rescue = payload.get("routing_policy") == "exact_anchor_rescue"
+    strict_fields = {
+        "video_id",
+        "fpn_level",
+        "anchor_index",
+        "global_anchor_index",
+        "absolute_center_time",
+        "teacher_top1_class",
+        "decision",
+    }
+    if exact_anchor_rescue and not strict_fields.issubset(
+        set(payload.get("bank_key_fields") or []) | {"anchor_index", "decision"}
+    ):
+        raise ValueError("exact-anchor VLM cache is missing strict bank key metadata")
     by_video_level = defaultdict(list)
     seen = set()
+    seen_routes = set()
     for entry in entries:
+        if exact_anchor_rescue and not strict_fields.issubset(entry):
+            raise ValueError("exact-anchor VLM cache entry is missing a strict key")
         video_id = str(entry["video_id"])
         level = int(entry["fpn_level"])
         anchor_index = int(entry["anchor_index"])
         decision = entry["decision"]
         class_id = entry.get("class_id")
-        key = (video_id, level, anchor_index)
+        key = (
+            video_id,
+            level,
+            int(entry["global_anchor_index"]),
+            float(entry["absolute_center_time"]),
+            int(entry["teacher_top1_class"]),
+        ) if exact_anchor_rescue else (video_id, level, anchor_index)
         if key in seen:
             raise ValueError("duplicate VLM cache entry: {}".format(key))
         if decision not in VALID_DECISIONS:
@@ -30,9 +53,15 @@ def load_vlm_routing_cache(path, num_classes):
             class_id = int(class_id)
             if class_id < 0 or class_id >= num_classes:
                 raise ValueError("invalid VLM action class: {}".format(class_id))
+            if exact_anchor_rescue and class_id != int(entry["teacher_top1_class"]):
+                raise ValueError("exact-anchor rescue class differs from teacher top-1")
         elif class_id is not None:
             raise ValueError("non-action VLM entry cannot carry class_id")
+        route_key = (video_id, level, anchor_index)
+        if route_key in seen_routes:
+            raise ValueError("multiple VLM cache entries route the same anchor: {}".format(route_key))
         seen.add(key)
+        seen_routes.add(route_key)
         by_video_level[(video_id, level)].append(
             {
                 "anchor_index": anchor_index,
