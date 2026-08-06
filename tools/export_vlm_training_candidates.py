@@ -1,0 +1,194 @@
+"""Export GT-free, deduplicated target anchors for offline VLM routing."""
+
+import argparse
+import json
+import math
+import sys
+from collections import Counter, defaultdict
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+
+def video_ids_in(root):
+    return {
+        path.stem
+        for path in Path(root).iterdir()
+        if path.is_file() and path.suffix.lower() == ".mp4" and path.stat().st_size
+    }
+
+
+def time_bin(center_sec, bin_sec):
+    return int(math.floor(float(center_sec) / bin_sec + 0.5))
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=True)
+    parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--video-root", required=True)
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--weights", choices=("student", "ema"), default="ema")
+    parser.add_argument("--beta", type=float, default=0.1)
+    parser.add_argument("--time-bin-sec", type=float, default=0.5)
+    parser.add_argument("--levels", type=int, nargs="+", default=range(6))
+    args = parser.parse_args()
+
+    if args.time_bin_sec <= 0:
+        raise ValueError("--time-bin-sec must be positive")
+
+    import torch
+
+    from libs.datasets import make_dataset
+    from libs.models.SADA import make_meta_arch
+    from libs.utils.utils import _update_config, read_yaml
+    from tools.audit_original_sada_pseudolabels import move_video
+
+    cfg = read_yaml(args.config)
+    cfg["stage1"] = {"enabled": False, "perturbation": "shift"}
+    _update_config(cfg)
+
+    target_split = cfg["tgt_train_split"]
+    dataset = make_dataset(cfg["dataset_name"], False, target_split, **cfg["dataset"])
+    expected_videos = len(dataset.data_list)
+    available_videos = video_ids_in(args.video_root)
+    dataset.data_list = tuple(
+        item for item in dataset.data_list if item["id"] in available_videos
+    )
+    if not dataset.data_list:
+        raise RuntimeError("No target-train video has a matching MP4")
+
+    model = make_meta_arch(cfg["model_name"], cfg, device=args.device).to(args.device)
+    checkpoint = torch.load(args.checkpoint, map_location=args.device)
+    state_key = "ema_state_dict" if args.weights == "ema" else "state_dict"
+    if state_key not in checkpoint:
+        raise ValueError("checkpoint has no {}".format(state_key))
+    model.load_state_dict(checkpoint[state_key])
+    model.eval()
+
+    alpha = float(cfg["model"].get("pl_threshold", 0.7))
+    groups = defaultdict(list)
+    level_counts = Counter()
+    valid_anchors = 0
+    low_confidence_anchors = 0
+
+    with torch.no_grad():
+        for raw_video in dataset:
+            video = move_video(raw_video, args.device)
+            inputs, masks = model.preprocessing([video], mode="eval")
+            backbone_feats, backbone_masks, _ = model.backbone_target(inputs, masks)
+            fpn_feats, fpn_masks = model.neck_target(backbone_feats, backbone_masks)
+            logits, _ = model.cls_head_target(fpn_feats, fpn_masks)
+            points = model.point_generator(fpn_feats)
+
+            metadata = raw_video["metadata"]
+            video_id = str(metadata["video_id"])
+            crop_start = float(metadata.get("crop_start", 0))
+            feat_stride = float(metadata["feat_stride"])
+            fps = float(metadata["fps"])
+            frame_offset = 0.5 * float(cfg["dataset"]["num_frames"])
+            duration = float(metadata["duration"])
+
+            for level, (point_grid, level_logits, level_mask) in enumerate(
+                zip(points, logits, fpn_masks)
+            ):
+                if level not in args.levels:
+                    continue
+                probabilities = level_logits[0].transpose(0, 1).sigmoid()
+                top_scores, top_classes = probabilities.topk(k=2, dim=-1)
+                valid = level_mask[0, 0].bool()
+                eligible = valid & (top_scores[:, 0] > args.beta) & (
+                    top_scores[:, 0] < alpha
+                )
+                valid_anchors += int(valid.sum())
+                low_confidence_anchors += int(eligible.sum())
+                level_counts[level] += int(eligible.sum())
+                centers = (
+                    (point_grid[:, 0] + crop_start) * feat_stride + frame_offset
+                ) / fps
+
+                for index in torch.nonzero(eligible).flatten().tolist():
+                    center_sec = min(max(float(centers[index]), 0.0), duration)
+                    top1 = int(top_classes[index, 0])
+                    top2 = int(top_classes[index, 1])
+                    bin_index = time_bin(center_sec, args.time_bin_sec)
+                    groups[(video_id, bin_index, top1, top2)].append(
+                        {
+                            "fpn_level": level,
+                            "anchor_index": int(index),
+                            "center_sec": center_sec,
+                            "sada_score": float(top_scores[index, 0]),
+                        }
+                    )
+
+    rows = []
+    member_counts = Counter()
+    for (video_id, bin_index, top1, top2), members in sorted(groups.items()):
+        center_sec = sum(member["center_sec"] for member in members) / len(members)
+        scores = [member["sada_score"] for member in members]
+        candidate_id = "{}-tb{:07d}-c{:02d}-c{:02d}".format(
+            video_id, bin_index, top1, top2
+        )
+        rows.append(
+            {
+                "candidate_id": candidate_id,
+                "anchor_id": candidate_id,
+                "frame_cache_id": candidate_id,
+                "video_id": video_id,
+                "center_sec": center_sec,
+                "time_bin_index": bin_index,
+                "time_bin_sec": args.time_bin_sec,
+                "sada_top1_class": top1,
+                "sada_top2_class": top2,
+                "sada_score_min": min(scores),
+                "sada_score_max": max(scores),
+                "sada_score_mean": sum(scores) / len(scores),
+                "member_anchors": [
+                    {
+                        "fpn_level": member["fpn_level"],
+                        "anchor_index": member["anchor_index"],
+                    }
+                    for member in members
+                ],
+            }
+        )
+        member_counts[len(members)] += 1
+
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", encoding="utf-8") as stream:
+        for row in rows:
+            stream.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    metadata = {
+        "selection_uses_target_gt": False,
+        "source": "frozen SADA target prediction",
+        "target_split": list(target_split),
+        "expected_target_videos": expected_videos,
+        "available_target_videos": len(dataset),
+        "missing_target_videos": expected_videos - len(dataset),
+        "checkpoint": args.checkpoint,
+        "checkpoint_epoch": checkpoint.get("epoch"),
+        "weights": args.weights,
+        "levels": list(args.levels),
+        "beta": args.beta,
+        "alpha": alpha,
+        "time_bin_sec": args.time_bin_sec,
+        "valid_anchors": valid_anchors,
+        "low_confidence_anchors": low_confidence_anchors,
+        "low_confidence_by_level": dict(sorted(level_counts.items())),
+        "deduplicated_vlm_queries": len(rows),
+        "deduplication_ratio": (
+            low_confidence_anchors / len(rows) if rows else None
+        ),
+        "members_per_query": dict(sorted(member_counts.items())),
+    }
+    Path(str(output) + ".meta.json").write_text(
+        json.dumps(metadata, indent=2), encoding="utf-8"
+    )
+    print(json.dumps({"output": str(output), **metadata}, indent=2))
+
+
+if __name__ == "__main__":
+    main()

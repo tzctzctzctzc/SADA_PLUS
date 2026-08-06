@@ -36,15 +36,22 @@ def build_entries(manifest_rows, prediction_rows):
         else:
             decision = "ignore"
             class_id = None
-        entry = {
-            "video_id": row["video_id"],
-            "fpn_level": int(row["fpn_level"]),
-            "anchor_index": int(row["anchor_index"]),
-            "decision": decision,
-        }
-        if class_id is not None:
-            entry["class_id"] = class_id
-        entries.append(entry)
+        members = row.get("member_anchors") or [
+            {
+                "fpn_level": row["fpn_level"],
+                "anchor_index": row["anchor_index"],
+            }
+        ]
+        for member in members:
+            entry = {
+                "video_id": row["video_id"],
+                "fpn_level": int(member["fpn_level"]),
+                "anchor_index": int(member["anchor_index"]),
+                "decision": decision,
+            }
+            if class_id is not None:
+                entry["class_id"] = class_id
+            entries.append(entry)
     return entries
 
 

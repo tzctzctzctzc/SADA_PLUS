@@ -36,8 +36,6 @@ def stable_order(anchors, seed):
 
 
 def build_rows(anchors, names, seed):
-    if len(anchors) % len(PERMUTATIONS):
-        raise ValueError("anchor count must be divisible by six for exact balance")
     rows = []
     for index, anchor in enumerate(stable_order(anchors, seed)):
         top1 = int(anchor["sada_top1_class"])
@@ -80,9 +78,9 @@ def main():
     args = parser.parse_args()
 
     anchors = read_jsonl(args.manifest)
-    required = {"sada_top2_class", "center_all_gt_class_ids"}
+    required = {"sada_top2_class"}
     if any(not required.issubset(row) for row in anchors):
-        raise ValueError("input manifest must contain top-2 and all-class GT")
+        raise ValueError("input manifest must contain SADA top-2")
     names = load_names(args.ontology_csv)
     rows = build_rows(anchors, names, args.seed)
 
@@ -102,9 +100,13 @@ def main():
         "audit": "listwise_candidate_competition",
         "valid_uda_result": False,
         "anchor_selection": "reused exact frozen SADA anchors",
-        "target_gt_use": "post-inference scoring only",
+        "target_gt_use": (
+            "post-inference scoring only"
+            if all("center_all_gt_class_ids" in row for row in anchors)
+            else "not present"
+        ),
         "candidate_roles": ["top1", "top2", "near_confusion"],
-        "position_assignment": "six permutations with exact balance",
+        "position_assignment": "deterministic cycle over six permutations",
         "seed": args.seed,
         "anchors": len(rows),
         "candidate_queries": len(rows),

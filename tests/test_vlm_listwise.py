@@ -30,6 +30,19 @@ class VlmListwiseTest(unittest.TestCase):
                 counts[(option["role"], letter)] += 1
         self.assertEqual(set(counts.values()), {20})
 
+    def test_partial_cycle_does_not_require_multiple_of_six(self):
+        anchors = [
+            {
+                "candidate_id": "anchor-{}".format(index),
+                "sada_top1_class": index % 10,
+                "sada_top2_class": (index + 1) % 10,
+            }
+            for index in range(7)
+        ]
+        names = {index: "class-{}".format(index) for index in range(40)}
+        rows = build_rows(anchors, names, seed=123)
+        self.assertEqual(len(rows), 7)
+
     def test_top1_filter_metrics(self):
         rows = [
             {
