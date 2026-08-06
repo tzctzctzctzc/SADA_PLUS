@@ -669,7 +669,8 @@ function fetchCompat(url, options) {
   });
 }
 
-async function requestOne(baseUrl, apiKey, model, frames, wireApi, ontology, promptMode, candidateLabelId, optionMapping) {
+async function requestOne(baseUrl, apiKey, model, frames, wireApi, ontology, promptMode,
+  candidateLabelId, optionMapping, reasoningEffort, maxOutputTokens) {
   const content = [{
     type: 'input_text',
     text: prompt(ontology, promptMode, candidateLabelId, optionMapping),
@@ -679,7 +680,8 @@ async function requestOne(baseUrl, apiKey, model, frames, wireApi, ontology, pro
     content.push({ type: 'input_image', image_url: `data:image/jpeg;base64,${image}` });
   }
   let endpoint = 'responses';
-  let body = { model, input: [{ role: 'user', content }], max_output_tokens: 32 };
+  let body = { model, input: [{ role: 'user', content }], max_output_tokens: maxOutputTokens };
+  if (reasoningEffort) body.reasoning = { effort: reasoningEffort };
   if (wireApi === 'chat') {
     endpoint = 'chat/completions';
     body = {
@@ -690,7 +692,7 @@ async function requestOne(baseUrl, apiKey, model, frames, wireApi, ontology, pro
           ? { type: 'text', text: item.text }
           : { type: 'image_url', image_url: { url: item.image_url } }),
       }],
-      max_tokens: 32,
+      max_tokens: maxOutputTokens,
       temperature: 0,
       enable_thinking: false,
       response_format: { type: 'json_object' },
@@ -722,6 +724,8 @@ async function main() {
   if (!['responses', 'chat'].includes(wireApi)) throw new Error('--wire-api must be responses or chat');
   const keyEnv = args['api-key-env'] || 'CCH_API_KEY';
   const apiKey = process.env[keyEnv];
+  const reasoningEffort = args['reasoning-effort'] || process.env.VLM_REASONING_EFFORT || null;
+  const maxOutputTokens = Number(args['max-output-tokens'] || (reasoningEffort ? 1024 : 32));
   const ontology = loadOntology(args['ontology-csv']);
   const promptMode = args['prompt-mode'] || (ontology ? 'full_ontology' : 'target_only');
   if (!['target_only', 'contrastive', 'contrastive_score', 'full_ontology', 'take_verify', 'candidate_verify', 'candidate_listwise'].includes(promptMode)) {
@@ -759,7 +763,7 @@ async function main() {
       }
       const response = await requestOne(
         baseUrl, apiKey, model, frames, wireApi, ontology, promptMode,
-        candidateLabelId, row.option_mapping,
+        candidateLabelId, row.option_mapping, reasoningEffort, maxOutputTokens,
       );
       let label = null;
       let reportedVerb = null;
@@ -810,6 +814,8 @@ async function main() {
       result.usage = response.usage;
       result.model = model;
       result.wire_api = wireApi;
+      result.reasoning_effort = reasoningEffort;
+      result.max_output_tokens = maxOutputTokens;
       result.prompt_mode = promptMode;
       result.anchor_id = row.anchor_id ?? row.candidate_id;
       result.candidate_role = row.candidate_role ?? null;
