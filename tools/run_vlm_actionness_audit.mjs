@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -622,6 +624,32 @@ function outputText(response) {
     .filter(item => item.type === 'output_text').map(item => item.text).join('').trim();
 }
 
+function fetchCompat(url, options) {
+  if (typeof globalThis.fetch === 'function') return globalThis.fetch(url, options);
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const transport = parsed.protocol === 'https:' ? https : http;
+    const request = transport.request(parsed, {
+      method: options.method,
+      headers: options.headers,
+    }, response => {
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        const status = Number(response.statusCode || 0);
+        resolve({
+          ok: status >= 200 && status < 300,
+          status,
+          text: async () => body,
+        });
+      });
+    });
+    request.on('error', reject);
+    request.end(options.body);
+  });
+}
+
 async function requestOne(baseUrl, apiKey, model, frames, wireApi, ontology, promptMode, candidateLabelId, optionMapping) {
   const content = [{
     type: 'input_text',
@@ -649,7 +677,7 @@ async function requestOne(baseUrl, apiKey, model, frames, wireApi, ontology, pro
       response_format: { type: 'json_object' },
     };
   }
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/${endpoint}`, {
+  const response = await fetchCompat(`${baseUrl.replace(/\/$/, '')}/${endpoint}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
