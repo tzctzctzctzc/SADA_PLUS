@@ -22,13 +22,32 @@ function findVideo(root, videoId) {
   throw new Error(`video not found: ${videoId}`);
 }
 
+const VIDEO_DURATIONS = new Map();
+
+function videoDuration(video) {
+  if (VIDEO_DURATIONS.has(video)) return VIDEO_DURATIONS.get(video);
+  const result = spawnSync('ffprobe', [
+    '-v', 'error', '-show_entries', 'format=duration',
+    '-of', 'default=nw=1:nk=1', video,
+  ], { encoding: 'utf8' });
+  const duration = Number(String(result.stdout || '').trim());
+  if (result.status !== 0 || !Number.isFinite(duration) || duration <= 0) {
+    throw new Error(`ffprobe failed for ${video}: ${result.stderr}`);
+  }
+  VIDEO_DURATIONS.set(video, duration);
+  return duration;
+}
+
 function prepareFrames(video, center, outputDir) {
   fs.mkdirSync(outputDir, { recursive: true });
   const offsets = [-1.0, -0.5, 0.0, 0.5, 1.0];
+  const duration = videoDuration(video);
   return offsets.map((offset, index) => {
     const file = path.join(outputDir, `frame_${index}.jpg`);
     if (!fs.existsSync(file)) {
-      const timestamp = Math.max(0, Number(center) + offset).toFixed(3);
+      const timestamp = Math.max(
+        0, Math.min(Number(center) + offset, duration - 0.05),
+      ).toFixed(3);
       const result = spawnSync('ffmpeg', [
         '-hide_banner', '-loglevel', 'error', '-ss', timestamp, '-i', video,
         '-frames:v', '1', '-vf', 'scale=640:-2', '-q:v', '3', '-y', file,
