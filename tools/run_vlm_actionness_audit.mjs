@@ -643,7 +643,7 @@ function outputText(response) {
     .filter(item => item.type === 'output_text').map(item => item.text).join('').trim();
 }
 
-function fetchCompat(url, options) {
+function fetchCompat(url, options, timeoutMs = 0) {
   if (typeof globalThis.fetch === 'function') return globalThis.fetch(url, options);
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
@@ -665,12 +665,17 @@ function fetchCompat(url, options) {
       });
     });
     request.on('error', reject);
+    if (timeoutMs > 0) {
+      request.setTimeout(timeoutMs, () => {
+        request.destroy(new Error(`request timed out after ${timeoutMs} ms`));
+      });
+    }
     request.end(options.body);
   });
 }
 
 async function requestOne(baseUrl, apiKey, model, frames, wireApi, ontology, promptMode,
-  candidateLabelId, optionMapping, reasoningEffort, maxOutputTokens) {
+  candidateLabelId, optionMapping, reasoningEffort, maxOutputTokens, requestTimeoutMs) {
   const content = [{
     type: 'input_text',
     text: prompt(ontology, promptMode, candidateLabelId, optionMapping),
@@ -702,7 +707,7 @@ async function requestOne(baseUrl, apiKey, model, frames, wireApi, ontology, pro
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  });
+  }, requestTimeoutMs);
   const responseBody = await response.text();
   let parsed;
   try { parsed = JSON.parse(responseBody); } catch { parsed = { raw: responseBody }; }
@@ -726,6 +731,7 @@ async function main() {
   const apiKey = process.env[keyEnv];
   const reasoningEffort = args['reasoning-effort'] || process.env.VLM_REASONING_EFFORT || null;
   const maxOutputTokens = Number(args['max-output-tokens'] || (reasoningEffort ? 1024 : 32));
+  const requestTimeoutMs = Number(args['request-timeout-sec'] || process.env.VLM_REQUEST_TIMEOUT_SEC || 120) * 1000;
   const ontology = loadOntology(args['ontology-csv']);
   const promptMode = args['prompt-mode'] || (ontology ? 'full_ontology' : 'target_only');
   if (!['target_only', 'contrastive', 'contrastive_score', 'full_ontology', 'take_verify', 'candidate_verify', 'candidate_listwise'].includes(promptMode)) {
@@ -763,7 +769,7 @@ async function main() {
       }
       const response = await requestOne(
         baseUrl, apiKey, model, frames, wireApi, ontology, promptMode,
-        candidateLabelId, row.option_mapping, reasoningEffort, maxOutputTokens,
+        candidateLabelId, row.option_mapping, reasoningEffort, maxOutputTokens, requestTimeoutMs,
       );
       let label = null;
       let reportedVerb = null;
@@ -816,6 +822,7 @@ async function main() {
       result.wire_api = wireApi;
       result.reasoning_effort = reasoningEffort;
       result.max_output_tokens = maxOutputTokens;
+      result.request_timeout_sec = requestTimeoutMs / 1000;
       result.prompt_mode = promptMode;
       result.anchor_id = row.anchor_id ?? row.candidate_id;
       result.candidate_role = row.candidate_role ?? null;
