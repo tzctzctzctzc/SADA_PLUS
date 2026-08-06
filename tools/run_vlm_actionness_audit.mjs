@@ -1,912 +1,1585 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+/**
+ * Candidate-blind, exact-anchor foreground gate for SADA Stage 1.
+ *
+ * This runner intentionally has one task only:
+ *   1. Read one exact low-confidence SADA anchor from the manifest.
+ *   2. Extract five frames centered on that exact anchor.
+ *   3. Hide SADA's top-1 class from the VLM.
+ *   4. Ask whether Frame 3 belongs to the fixed ten-class target foreground set.
+ *   5. Rescue the anchor only when all returned gate fields consistently say YES.
+ *
+ * The VLM never changes the class. A rescued anchor keeps the frozen teacher's
+ * top-1 class. Valid non-confirmed responses are routed to IGNORE. Malformed or
+ * internally inconsistent responses are protocol errors and stop the run.
+ */
+
+const FRAME_OFFSETS_SEC = Object.freeze([-1.0, -0.5, 0.0, 0.5, 1.0]);
+const PROMPT_VERSION = 'candidate-blind-target-foreground-gate-v1';
+const ROUTING_SCHEMA_VERSION = 'candidate-blind-exact-anchor-routing-v1';
+
+const ALLOWED_ARGS = new Set([
+  'manifest',
+  'video-root',
+  'output',
+  'cache-dir',
+  'base-url',
+  'model',
+  'wire-api',
+  'api-key-env',
+  'reasoning-effort',
+  'max-output-tokens',
+  'request-timeout-sec',
+  'max-retries',
+  'retry-base-ms',
+  'limit',
+]);
+
+const INTERACTION_VALUES = new Set(['YES', 'NO', 'UNCERTAIN']);
+const SIGNATURE_VALUES = new Set(['YES', 'NO', 'UNCERTAIN']);
+const LABEL_VALUES = new Set([
+  'TARGET_FOREGROUND',
+  'OTHER_ACTIVITY',
+  'TRUE_BACKGROUND',
+  'UNCERTAIN',
+]);
 
 function argsOf(argv) {
   const out = {};
-  for (let i = 2; i < argv.length; i += 2) out[argv[i].replace(/^--/, '')] = argv[i + 1];
+  for (let i = 2; i < argv.length; i += 2) {
+    const key = String(argv[i] || '').replace(/^--/, '');
+    if (
+      !String(argv[i] || '').startsWith('--')
+      || !key
+      || i + 1 >= argv.length
+    ) {
+      throw new Error(`invalid CLI argument: ${argv[i]}`);
+    }
+    if (!ALLOWED_ARGS.has(key)) {
+      throw new Error(`unsupported CLI argument: --${key}`);
+    }
+    out[key] = argv[i + 1];
+  }
   return out;
 }
 
-function readJsonl(file) {
-  return fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean).map(JSON.parse);
+function readJsonl(file, { allowMissing = false, allowEmpty = false } = {}) {
+  if (!fs.existsSync(file)) {
+    if (allowMissing) return [];
+    throw new Error(`JSONL file not found: ${file}`);
+  }
+
+  const rows = fs.readFileSync(file, 'utf8')
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line, index) => {
+      try {
+        return JSON.parse(line);
+      } catch (error) {
+        throw new Error(
+          `invalid JSONL at ${file}:${index + 1}: ${error.message}`,
+        );
+      }
+    });
+
+  if (!allowEmpty && rows.length === 0) {
+    throw new Error(`JSONL file is empty: ${file}`);
+  }
+
+  return rows;
+}
+
+function sha256(value) {
+  return crypto
+    .createHash('sha256')
+    .update(String(value))
+    .digest('hex');
+}
+
+function normalizeEnum(value) {
+  return String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_');
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function absoluteCenterTime(row) {
+  const absolute = Number(row.absolute_center_time);
+  const alias = Number(row.center_sec);
+
+  if (!Number.isFinite(absolute) || absolute < 0) {
+    throw new Error(
+      `invalid absolute_center_time for ${row.candidate_id}`,
+    );
+  }
+
+  if (!Number.isFinite(alias) || Math.abs(alias - absolute) > 1e-6) {
+    throw new Error(
+      `center_sec differs from absolute_center_time for ${row.candidate_id}`,
+    );
+  }
+
+  return absolute;
 }
 
 function findVideo(root, videoId) {
   for (const ext of ['.MP4', '.mp4']) {
-    const candidate = path.join(root, videoId + ext);
+    const candidate = path.join(root, `${videoId}${ext}`);
     if (fs.existsSync(candidate)) return candidate;
   }
-  throw new Error(`video not found: ${videoId}`);
+
+  throw new Error(`video not found for video_id=${videoId}`);
 }
 
 const VIDEO_DURATIONS = new Map();
 
 function videoDuration(video) {
-  if (VIDEO_DURATIONS.has(video)) return VIDEO_DURATIONS.get(video);
-  const result = spawnSync('ffprobe', [
-    '-v', 'error', '-show_entries', 'format=duration',
-    '-of', 'default=nw=1:nk=1', video,
-  ], { encoding: 'utf8' });
-  const duration = Number(String(result.stdout || '').trim());
-  if (result.status !== 0 || !Number.isFinite(duration) || duration <= 0) {
-    throw new Error(`ffprobe failed for ${video}: ${result.stderr}`);
+  if (VIDEO_DURATIONS.has(video)) {
+    return VIDEO_DURATIONS.get(video);
   }
+
+  const result = spawnSync(
+    'ffprobe',
+    [
+      '-v',
+      'error',
+      '-show_entries',
+      'format=duration',
+      '-of',
+      'default=nw=1:nk=1',
+      video,
+    ],
+    { encoding: 'utf8' },
+  );
+
+  const duration = Number(String(result.stdout || '').trim());
+
+  if (
+    result.status !== 0
+    || !Number.isFinite(duration)
+    || duration <= 0
+  ) {
+    throw new Error(
+      `ffprobe failed for ${video}: `
+      + String(result.stderr || '').trim(),
+    );
+  }
+
   VIDEO_DURATIONS.set(video, duration);
   return duration;
 }
 
-function prepareFrames(video, center, outputDir) {
+function sameFrameManifest(existing, expected) {
+  if (!existing || typeof existing !== 'object') return false;
+
+  return (
+    existing.video === expected.video
+    && Number(existing.center_sec) === Number(expected.center_sec)
+    && JSON.stringify(existing.timestamps_sec)
+      === JSON.stringify(expected.timestamps_sec)
+  );
+}
+
+function prepareFrames(video, centerSec, outputDir) {
   fs.mkdirSync(outputDir, { recursive: true });
-  const offsets = [-1.0, -0.5, 0.0, 0.5, 1.0];
+
+  const center = Number(centerSec);
+
+  if (!Number.isFinite(center) || center < 0) {
+    throw new Error(`invalid center_sec: ${centerSec}`);
+  }
+
   const duration = videoDuration(video);
-  return offsets.map((offset, index) => {
-    const file = path.join(outputDir, `frame_${index}.jpg`);
-    if (!fs.existsSync(file)) {
-      const timestamp = Math.max(
-        0, Math.min(Number(center) + offset, duration - 0.05),
-      ).toFixed(3);
-      const result = spawnSync('ffmpeg', [
-        '-hide_banner', '-loglevel', 'error', '-ss', timestamp, '-i', video,
-        '-frames:v', '1', '-vf', 'scale=640:-2', '-q:v', '3', '-y', file,
-      ], { encoding: 'utf8' });
-      if (result.status !== 0 || !fs.existsSync(file)) {
-        throw new Error(`ffmpeg failed at ${timestamp}s: ${result.stderr}`);
+
+  const timestamps = FRAME_OFFSETS_SEC.map(offset => Number(
+    Math.max(
+      0,
+      Math.min(
+        center + offset,
+        Math.max(0, duration - 0.05),
+      ),
+    ).toFixed(3),
+  ));
+
+  const expectedManifest = {
+    video: path.resolve(video),
+    center_sec: center,
+    offsets_sec: [...FRAME_OFFSETS_SEC],
+    timestamps_sec: timestamps,
+  };
+
+  const frameManifestPath = path.join(
+    outputDir,
+    'frames_manifest.json',
+  );
+
+  let regenerate = true;
+
+  if (fs.existsSync(frameManifestPath)) {
+    try {
+      const existing = JSON.parse(
+        fs.readFileSync(frameManifestPath, 'utf8'),
+      );
+
+      regenerate = !sameFrameManifest(
+        existing,
+        expectedManifest,
+      );
+    } catch {
+      regenerate = true;
+    }
+  }
+
+  const frames = timestamps.map((timestamp, index) => ({
+    index: index + 1,
+    offset_sec: FRAME_OFFSETS_SEC[index],
+    timestamp_sec: timestamp,
+    file: path.join(outputDir, `frame_${index + 1}.jpg`),
+  }));
+
+  if (!regenerate) {
+    regenerate = frames.some(
+      frame => !fs.existsSync(frame.file),
+    );
+  }
+
+  if (regenerate) {
+    for (const frame of frames) {
+      const result = spawnSync(
+        'ffmpeg',
+        [
+          '-hide_banner',
+          '-loglevel',
+          'error',
+          '-ss',
+          frame.timestamp_sec.toFixed(3),
+          '-i',
+          video,
+          '-frames:v',
+          '1',
+          '-vf',
+          'scale=640:-2',
+          '-q:v',
+          '3',
+          '-y',
+          frame.file,
+        ],
+        { encoding: 'utf8' },
+      );
+
+      if (
+        result.status !== 0
+        || !fs.existsSync(frame.file)
+      ) {
+        throw new Error(
+          `ffmpeg failed at `
+          + `${frame.timestamp_sec.toFixed(3)}s: `
+          + String(result.stderr || '').trim(),
+        );
       }
     }
-    return file;
-  });
-}
 
-function loadOntology(csvPath) {
-  if (!csvPath) return null;
-  const rows = fs.readFileSync(csvPath, 'utf8').split(/\r?\n/).slice(1).filter(Boolean);
-  return rows.map(line => {
-    const match = line.match(/^(\d+),([^,]+),/);
-    if (!match) throw new Error(`cannot parse ontology row: ${line.slice(0, 80)}`);
-    return { id: Number(match[1]), verb: match[2] };
-  }).sort((a, b) => a.id - b.id);
-}
-
-function normalizeVerb(value) {
-  return String(value || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
-}
-
-const CANDIDATE_SPECS = new Map([
-  [0, {
-    name: 'take',
-    definition: 'acquires possession or stable control of an object by grasping, retrieving, or picking it up',
-    evidence: 'The person approaches, reaches for, contacts, grasps, or retrieves the object; control is acquired or consolidated around the central neighborhood; and the object may subsequently be held or carried. The complete acquisition transition does not need to be fully visible.',
-    negatives: 'Do not confirm merely because the object is already held, carried, lifted, pulled, adjusted, or moved. Brief contact without evidence that the exact anchor belongs to an acquisition event is not sufficient.',
-  }],
-  [1, {
-    name: 'put',
-    definition: 'places an object at a destination and relinquishes stable control of it',
-    evidence: 'The person holds or carries the object before or near the anchor, moves it to a destination, and places or releases it so that it remains there.',
-    negatives: 'Do not confirm if the object remains held, is only moved or adjusted, or merely contacts a surface without a clear placement-and-release event.',
-  }],
-  [2, {
-    name: 'wash',
-    definition: 'deliberately cleans an object or the hands using water, rubbing, or another cleaning medium',
-    evidence: 'The central neighborhood shows sustained cleaning interaction, such as rinsing under water, rubbing, scrubbing, or applying and removing a cleaning medium.',
-    negatives: 'Being near a sink, holding an object under an inactive tap, filling, pouring, wiping once, or merely moving a wet object is not sufficient.',
-  }],
-  [3, {
-    name: 'open',
-    definition: 'changes a door, lid, drawer, container, or closure from a closed state to an open or accessible state',
-    evidence: 'The person manipulates a closure and the opening or accessibility increases before, around, or after the anchor.',
-    negatives: 'Do not confirm for reaching into something already open, holding an already removed lid, unrelated pulling, or touching a closure without an opening state change.',
-  }],
-  [4, {
-    name: 'close',
-    definition: 'changes a door, lid, drawer, container, or closure from an open state to a closed or secured state',
-    evidence: 'The person moves or secures a closure and the opening or accessibility decreases before, around, or after the anchor.',
-    negatives: 'Do not confirm for touching or adjusting something already closed, putting an object nearby, or moving a door or lid without evidence that it becomes closed.',
-  }],
-  [5, {
-    name: 'insert',
-    definition: 'moves an object from outside into the interior of a container, slot, opening, or enclosing object',
-    evidence: 'The object approaches an opening, crosses its boundary, and becomes at least partly contained inside it around the central neighborhood.',
-    negatives: 'Putting an object on a surface, holding it near an opening, briefly dipping it, or removing it from a container is not insert.',
-  }],
-  [6, {
-    name: 'turn-on',
-    definition: 'operates a control so that a device, appliance, light, flame, or flow changes from inactive to active',
-    evidence: 'The person presses, rotates, toggles, or otherwise operates a control and there is visual evidence that the device or output activates.',
-    negatives: 'Do not confirm for touching or adjusting a control without activation, using a device that was already on, or an activation occurring only outside the central neighborhood.',
-  }],
-  [7, {
-    name: 'cut',
-    definition: 'uses a blade or cutting tool to slice, divide, or sever material',
-    evidence: 'The central neighborhood shows purposeful blade contact and cutting motion that slices or separates the material.',
-    negatives: 'Holding a knife, positioning food, scraping, peeling, pressing, or moving an already cut piece is not sufficient.',
-  }],
-  [8, {
-    name: 'turn-off',
-    definition: 'operates a control so that a device, appliance, light, flame, or flow changes from active to inactive',
-    evidence: 'The person presses, rotates, toggles, or otherwise operates a control and there is visual evidence that the device or output deactivates.',
-    negatives: 'Do not confirm for touching or adjusting a control without deactivation, interacting with a device already off, or a deactivation occurring only outside the central neighborhood.',
-  }],
-  [9, {
-    name: 'pour',
-    definition: 'tilts or controls a source container so that its contents flow into or onto a destination',
-    evidence: 'The source is oriented for transfer and visible liquid, granules, or other contents flow or are clearly transferred around the central neighborhood.',
-    negatives: 'Moving or tilting a container without evidence of content transfer, filling from a tap, stirring, or merely holding containers near each other is not sufficient.',
-  }],
-  [11, {
-    name: 'move',
-    definition: 'changes the location or position of an object without requiring a new possession or release event',
-    evidence: 'The object is deliberately translated or repositioned around the central neighborhood. Stable possession may continue throughout.',
-    negatives: 'Do not confirm merely for acquiring, releasing, opening, or closing an object when no distinct relocation event is visible.',
-  }],
-  [12, {
-    name: 'remove',
-    definition: 'takes an object out of, off, or away from a container, attachment, or prior location',
-    evidence: 'The object crosses from an inside, attached, or resting state to an outside, detached, or removed state.',
-    negatives: 'Generic picking up without evidence of removal from something, continued holding, or unrelated movement is not sufficient.',
-  }],
-  [17, {
-    name: 'adjust',
-    definition: 'changes the position, setting, or configuration of an object or control without requiring activation or deactivation',
-    evidence: 'The central neighborhood shows a deliberate fine change to position, orientation, fit, or setting.',
-    negatives: 'Do not confirm when the defining event is clearly turning a device on or off, opening, closing, inserting, or removing.',
-  }],
-  [20, {
-    name: 'empty',
-    definition: 'removes or discharges contents from a container so that it becomes substantially less full',
-    evidence: 'Contents visibly leave the source container by tipping, dumping, draining, or another discharge action.',
-    negatives: 'Pouring a small controlled amount while retaining contents, filling a destination, or tilting without visible discharge is not sufficient.',
-  }],
-  [25, {
-    name: 'scrape',
-    definition: 'drags a tool or object edge across a surface to detach, collect, clean, or move material',
-    evidence: 'The central neighborhood shows sustained edge-to-surface contact with a dragging or scraping motion.',
-    negatives: 'Cutting through material, merely holding a blade, wiping softly, or moving already detached pieces is not sufficient.',
-  }],
-  [26, {
-    name: 'fill',
-    definition: 'adds material or contents into a container so that its amount or occupancy increases',
-    evidence: 'Material enters a destination container and visibly increases its contents around the central neighborhood.',
-    negatives: 'Inserting one solid object, pouring without a clear destination increase, or handling an already full container is not sufficient.',
-  }],
-  [29, {
-    name: 'scrub',
-    definition: 'cleans a surface or object by repeated forceful rubbing with a hand, pad, brush, or cleaning tool',
-    evidence: 'Repeated back-and-forth rubbing contact for cleaning is visible around the central neighborhood.',
-    negatives: 'Rinsing under water, squeezing a sponge, wiping once, or merely being near a sink is not sufficient.',
-  }],
-  [31, {
-    name: 'pull',
-    definition: 'applies force to draw an object or movable part toward the person or along its constrained path',
-    evidence: 'The object or part translates in the pulling direction while contact and pulling force are maintained.',
-    negatives: 'Opening without visible pulling, lifting vertically, taking possession, or touching a handle without translation is not sufficient.',
-  }],
-  [36, {
-    name: 'wrap',
-    definition: 'covers, encloses, seals, or secures an object with material or a flexible closure',
-    evidence: 'Covering material or a seal is deliberately placed around or over the object and becomes secured.',
-    negatives: 'Closing a rigid door or lid, merely placing material nearby, or holding an already wrapped object is not sufficient.',
-  }],
-]);
-
-// Parallel descriptions used only by the listwise experiment. Keeping this
-// separate preserves the exact prompts used by the earlier independent audit.
-const LISTWISE_SPECS = new Map([
-  [0, {
-    name: 'take',
-    definition: 'acquires possession or stable control of an object, typically by grasping, retrieving, or picking it up',
-    evidence: 'The person approaches, reaches for, contacts, grasps, or retrieves the object; control is acquired or consolidated around the central neighborhood; and the object may subsequently be held or carried. The complete acquisition transition does not need to be fully visible.',
-    negatives: 'Do not confirm merely because the object is already held, carried, lifted, pulled, adjusted, or moved. Brief contact without evidence that the central neighborhood belongs to an acquisition event is not sufficient.',
-    distinction: '"Take" is primarily defined by gaining possession or stable control. Unlike "move", control does not simply continue; unlike "remove", extraction from a container, attachment, or constrained location is not the defining event.',
-  }],
-  [1, {
-    name: 'put',
-    definition: 'places an object at a destination and relinquishes stable control of it',
-    evidence: 'The person holds or carries the object before or near the anchor, moves it toward a destination, and places or releases it so that the object becomes supported by or remains at the destination.',
-    negatives: 'Do not confirm if the object remains held, is only moved or adjusted, merely contacts a surface, or passes near a destination without a placement-and-release event.',
-    distinction: '"Put" requires relinquishing control and establishing a new resting or supported state. Unlike "move", continued possession without release is insufficient.',
-  }],
-  [2, {
-    name: 'wash',
-    definition: 'cleans an object or the hands using water, rubbing, rinsing, or another cleaning medium',
-    evidence: 'The central neighborhood shows a sustained cleaning process, such as rinsing under water, rubbing, applying a cleaning medium, or removing residue from the hands or an object.',
-    negatives: 'Being near a sink, holding an object under an inactive tap, filling, pouring, squeezing a sponge, wiping once, or merely moving a wet object is not sufficient.',
-    distinction: '"Wash" describes the broader cleaning event, often involving water or rinsing. If repeated forceful rubbing is clearly the defining interaction, "scrub" is more specific.',
-  }],
-  [3, {
-    name: 'open',
-    definition: 'changes a door, lid, drawer, container, or closure from a closed state to an open or accessible state',
-    evidence: 'The person manipulates a closure and the opening, separation, or accessibility increases before, around, or after the central neighborhood.',
-    negatives: 'Do not confirm for reaching into something already open, holding an already removed lid, generic pulling, touching a closure without a state change, or moving an open part without increasing accessibility.',
-    distinction: '"Open" is defined by a closed-to-open state change. A pulling motion is only the means; if no opening or accessibility change occurs, "pull" is more accurate.',
-  }],
-  [4, {
-    name: 'close',
-    definition: 'changes a door, lid, drawer, container, or closure from an open state to a closed or secured state',
-    evidence: 'The person moves, presses, aligns, or secures a closure and the opening or accessibility decreases before, around, or after the anchor.',
-    negatives: 'Do not confirm for touching or adjusting something already closed, placing an object nearby, moving a door or lid without evidence of closure, or handling a separate covering material.',
-    distinction: '"Close" requires an open-to-closed state change of a rigid or defined closure. Using flexible material to cover or enclose an object is better described as "wrap".',
-  }],
-  [5, {
-    name: 'insert',
-    definition: 'moves an object from outside into the interior of a container, slot, opening, or enclosing object',
-    evidence: 'The object approaches an opening, crosses its boundary, and becomes at least partly contained inside it around the central neighborhood.',
-    negatives: 'Putting an object on a surface, holding it near an opening, briefly dipping it, placing it beside a container, or removing it from an interior is not insert.',
-    distinction: '"Insert" is defined by crossing an outside-to-inside containment boundary. "Put" may place an object at a destination without entering an enclosing space.',
-  }],
-  [6, {
-    name: 'turn-on',
-    definition: 'operates a control so that a device, appliance, light, flame, or flow changes from inactive to active',
-    evidence: 'The person presses, rotates, toggles, or otherwise operates a control, with visual evidence that the device, output, flame, light, or flow activates.',
-    negatives: 'Do not confirm for touching or adjusting a control without activation, using a device that was already active, or activation occurring only outside the central neighborhood.',
-    distinction: '"Turn-on" requires an inactive-to-active state change. A control manipulation without activation is better described as "adjust".',
-  }],
-  [7, {
-    name: 'cut',
-    definition: 'uses a blade or cutting tool to slice, divide, or sever material',
-    evidence: 'The central neighborhood shows purposeful blade contact and cutting motion, with evidence that the material is sliced, divided, or structurally separated.',
-    negatives: 'Holding a knife, positioning food, pressing without separation, peeling, scraping across a surface, or moving an already cut piece is not sufficient.',
-    distinction: '"Cut" requires slicing or severing material. "Scrape" uses edge-to-surface dragging without cutting through the material.',
-  }],
-  [8, {
-    name: 'turn-off',
-    definition: 'operates a control so that a device, appliance, light, flame, or flow changes from active to inactive',
-    evidence: 'The person presses, rotates, toggles, or otherwise operates a control, with visual evidence that the device, output, flame, light, or flow deactivates.',
-    negatives: 'Do not confirm for touching or adjusting a control without deactivation, interacting with a device already inactive, or deactivation occurring only outside the central neighborhood.',
-    distinction: '"Turn-off" requires an active-to-inactive state change. A setting change without deactivation is better described as "adjust".',
-  }],
-  [9, {
-    name: 'pour',
-    definition: 'tilts or controls a source container so that its contents flow into or onto a destination',
-    evidence: 'The source container is oriented for transfer and liquid, granules, or other contents visibly flow or are clearly transferred around the anchor.',
-    negatives: 'Moving or tilting a container without content transfer, filling directly from a tap, stirring, handling containers near each other, or merely changing the destination amount without evidence of source-controlled flow is insufficient.',
-    distinction: '"Pour" is defined from the source-transfer perspective. Unlike "empty", the source need not become substantially depleted; unlike "fill", the destination state is not the sole defining event.',
-  }],
-  [11, {
-    name: 'move',
-    definition: 'changes the location or position of an object while stable possession or support may continue',
-    evidence: 'The object is deliberately translated or repositioned around the central neighborhood without a defining acquisition, release, containment, or state change event.',
-    negatives: 'Do not confirm merely for acquiring possession, releasing an object at a destination, opening, closing, inserting, or removing when relocation is only a consequence of another defining action.',
-    distinction: '"Move" is primarily relocation. Unlike "take", possession need not be newly acquired; unlike "put", possession need not be relinquished.',
-  }],
-  [12, {
-    name: 'remove',
-    definition: 'extracts an object from an inside, attached, inserted, covering, or constrained state into an outside or detached state',
-    evidence: 'The object crosses from inside to outside, attached to detached, inserted to withdrawn, or constrained to released around the central neighborhood.',
-    negatives: 'Generic picking up from an unconstrained resting position, continued holding, simple relocation, or movement without evidence of extraction or detachment is not sufficient.',
-    distinction: '"Remove" is defined by extraction or detachment from a prior containing or constrained state. "Take" is defined by gaining possession even when no such state transition exists.',
-  }],
-  [17, {
-    name: 'adjust',
-    definition: 'changes the position, setting, orientation, fit, or configuration of an object or control without a defining activation, deactivation, opening, or closing event',
-    evidence: 'The central neighborhood shows a deliberate fine modification to position, orientation, alignment, fit, or setting.',
-    negatives: 'Do not confirm when the defining event is clearly turning a device on or off, opening, closing, inserting, removing, taking, or moving an object to a new destination.',
-    distinction: '"Adjust" changes degree, alignment, configuration, or setting while preserving the broader state. It does not require the binary state transition of turn-on, turn-off, open, or close.',
-  }],
-  [20, {
-    name: 'empty',
-    definition: 'discharges contents from a container so that the source becomes substantially less full or nearly empty',
-    evidence: 'Contents visibly leave the source through tipping, dumping, draining, shaking, or another discharge process, with evidence of substantial depletion.',
-    negatives: 'Pouring a small controlled amount while retaining substantial contents, tilting without visible discharge, filling a destination, or handling an empty container is not sufficient.',
-    distinction: '"Empty" is defined by substantial depletion of the source. "Pour" describes controlled transfer and does not require the source to become nearly empty.',
-  }],
-  [25, {
-    name: 'scrape',
-    definition: 'drags a tool or object edge across a surface to detach, collect, clean, spread, or move material',
-    evidence: 'The central neighborhood shows sustained edge-to-surface contact with a dragging or scraping motion along the surface.',
-    negatives: 'Cutting through material, merely holding a blade, wiping softly, pressing without dragging, or moving already detached pieces is not sufficient.',
-    distinction: '"Scrape" is defined by dragging an edge across a surface. "Cut" is defined by slicing or severing through material.',
-  }],
-  [26, {
-    name: 'fill',
-    definition: 'adds material or contents into a destination container so that its amount, occupancy, or fullness increases',
-    evidence: 'Material enters a destination container and produces a visible or strongly supported increase in its contents around the central neighborhood.',
-    negatives: 'Inserting one solid object, handling an already full container, tilting without transfer, or transferring material without evidence that a destination is being filled is not sufficient.',
-    distinction: '"Fill" is defined by increasing the destination contents. "Pour" is defined by source-controlled flow, and "insert" is defined by one object crossing into an enclosing space.',
-  }],
-  [29, {
-    name: 'scrub',
-    definition: 'cleans a surface or object through repeated forceful rubbing with a hand, pad, brush, sponge, or cleaning tool',
-    evidence: 'Repeated back-and-forth or circular rubbing contact for cleaning is visible around the central neighborhood.',
-    negatives: 'Rinsing under water without repeated rubbing, squeezing a sponge, wiping once, merely being near a sink, or handling a cleaning tool without sustained rubbing is not sufficient.',
-    distinction: '"Scrub" is the specific repeated forceful rubbing action. "Wash" is the broader cleaning event and may instead be dominated by rinsing or water-based cleaning.',
-  }],
-  [31, {
-    name: 'pull',
-    definition: 'applies force to draw an object or movable part toward the person or along its constrained path',
-    evidence: 'The object or part translates in the pulling direction while contact and pulling force are maintained around the central neighborhood.',
-    negatives: 'Touching a handle without translation, lifting vertically, acquiring possession, or opening something without visible pulling evidence is not sufficient.',
-    distinction: '"Pull" is defined by the direction and maintained drawing force. If the defining result is a closed-to-open state change, "open" is more accurate.',
-  }],
-  [36, {
-    name: 'wrap',
-    definition: 'covers, encloses, seals, or secures an object using flexible material or a flexible closure',
-    evidence: 'Flexible covering material or a seal is deliberately placed around or over the object and becomes folded, enclosed, sealed, or secured.',
-    negatives: 'Closing a rigid door or lid, placing material nearby, covering only momentarily, or holding an already wrapped object is not sufficient.',
-    distinction: '"Wrap" requires flexible material enclosing or securing an object. "Close" uses a defined rigid closure or movable part to reduce accessibility.',
-  }],
-]);
-
-function listwiseCandidateBlock(letter, option) {
-  const spec = LISTWISE_SPECS.get(Number(option?.class_id));
-  if (!spec) throw new Error(`unsupported listwise candidate: ${option?.class_id}`);
-  return `Candidate ${letter}
-
-Action name:
-"${spec.name}"
-
-Candidate definition:
-"${spec.name}" means that the person deliberately ${spec.definition}.
-
-Expected temporal evidence:
-${spec.evidence}
-
-Important negative evidence:
-${spec.negatives}
-
-Key distinction:
-${spec.distinction}`;
-}
-
-function listwisePrompt(optionMapping) {
-  if (!optionMapping || !['A', 'B', 'C'].every(key => optionMapping[key])) {
-    throw new Error('listwise option_mapping must contain A, B, and C');
+    fs.writeFileSync(
+      frameManifestPath,
+      `${JSON.stringify(expectedManifest, null, 2)}\n`,
+      'utf8',
+    );
   }
-  const candidateText = ['A', 'B', 'C']
-    .map(letter => listwiseCandidateBlock(letter, optionMapping[letter]))
-    .join('\n\n\n');
-  return `You are comparing candidate pseudo-labels for temporal action localization
+
+  const uniqueTimestamps = new Set(
+    timestamps.map(value => value.toFixed(3)),
+  ).size;
+
+  const hasPreContext = timestamps.some(
+    value => value < center - 0.05,
+  );
+
+  const hasPostContext = timestamps.some(
+    value => value > center + 0.05,
+  );
+
+  const temporalContextValid = (
+    uniqueTimestamps >= 4
+    && hasPreContext
+    && hasPostContext
+  );
+
+  return {
+    frames,
+    duration_sec: duration,
+    unique_timestamp_count: uniqueTimestamps,
+    has_pre_context: hasPreContext,
+    has_post_context: hasPostContext,
+    temporal_context_valid: temporalContextValid,
+  };
+}
+
+function foregroundGatePrompt() {
+  return `You are auditing one exact temporal anchor for temporal action localization
 in an egocentric kitchen video.
 
-You are given five chronologically ordered frames sampled around a temporal
-anchor. Frame 3 corresponds to the temporal anchor. Frames 1-2 provide
-preceding context, and Frames 4-5 provide following context.
+You are given five chronologically ordered frames. Frame 3 is the exact
+anchor being audited. Frames 1-2 are preceding context and Frames 4-5 are
+following context.
 
-Your task is not to identify the exact instant when an action starts or ends.
-Determine which single option, if any, best and most specifically describes
-the temporal neighborhood of Frame 3. Do not assume that Frame 3 belongs to
-an action merely because candidate actions are provided.
+Determine whether the exact temporal neighborhood of Frame 3 contains direct
+visual evidence that it belongs to one of the ten target action events below.
 
-The candidate actions are presented in an arbitrary order. Their order does
-not indicate confidence, priority, likelihood, or whether they were proposed
-by another model. Evaluate all candidates using exactly the same standard.
+No candidate action label is provided. Do not assume that Frame 3 is an action
+anchor merely because it was selected for review.
 
-${candidateText}
+Target action event signatures:
 
+TAKE:
+The person gains possession or stable control of an object. An object that is
+already being held, carried, moved, adjusted, lifted, or removed does not by
+itself establish TAKE.
 
-Temporal localization principles:
+PUT:
+The person places an object at a destination and relinquishes stable control,
+leaving the object supported at or remaining in that destination.
 
-- Evaluate the temporal neighborhood of Frame 3, not merely whether an action
-  appears somewhere in the five frames.
-- The complete state transition of an action does not need to be fully visible
-  within the five frames. Frame 3 may lie near the beginning, middle, or end
-  of the corresponding action segment.
-- However, the frames must contain temporally consistent evidence that the
-  central neighborhood belongs to the selected action event.
-- Evidence appearing only in the outer context frames must not determine the
-  answer if that event does not extend into the neighborhood of Frame 3.
-- The evidence should concern the same object, control, device, material, or
-  interaction and should form one continuous event around Frame 3.
-- Do not combine unrelated evidence from different objects or separate moments.
-- Visible hands, tools, controls, relevant objects, or general motion are not
-  sufficient by themselves.
+WASH:
+The person performs a cleaning event using water, rubbing, rinsing, or another
+cleaning medium. Merely being near a sink, moving a wet object, filling,
+pouring, squeezing, or performing one unrelated manipulation is insufficient.
 
-Before deciding, internally perform the following comparison:
+OPEN:
+A door, lid, drawer, container, or closure changes from closed to open or
+becomes more accessible.
 
-1. Frames 1-2: Determine the preceding object state, hand-object relationship,
-   possession state, location, closure state, device state, or content state.
-2. Frame 3 and its immediate neighborhood: Determine the interaction and event
-   phase occurring at the anchor.
-3. Frames 4-5: Determine whether the same interaction continues, completes,
-   changes into another event, or produces a relevant new state.
-4. Compare Candidates A, B, and C directly: Determine which candidate explains
-   the complete before-anchor-after evidence most accurately and specifically.
-5. Check counter-evidence: Reject a candidate if confirming it requires
-   assuming an unobserved state transition, ignoring contradictory frames,
-   combining unrelated events, or relying only on broad semantic similarity.
+CLOSE:
+A door, lid, drawer, container, or closure changes from open to closed or
+becomes less accessible or secured.
+
+INSERT:
+An object crosses from outside to inside a container, slot, opening, or
+enclosing object.
+
+TURN-ON:
+A control operation produces an observable transition from inactive to active
+in a device, appliance, light, flame, or flow.
+
+CUT:
+A blade or cutting tool visibly slices, divides, or severs material. Merely
+holding a knife, positioning material, pressing, peeling, or scraping is
+insufficient.
+
+TURN-OFF:
+A control operation produces an observable transition from active to inactive
+in a device, appliance, light, flame, or flow.
+
+POUR:
+A source container is controlled so that visible contents flow or are clearly
+transferred into or onto a destination.
+
+Related but non-target activities must not be broadened into a target action.
+Examples include moving an already controlled object, removing an object from
+a container or constrained location, adjusting a position or setting without
+a target state transition, emptying, scraping, filling, scrubbing, pulling,
+or wrapping.
+
+Before deciding, internally inspect:
+
+1. Frames 1-2:
+   Identify the preceding hand-object relationship and any relevant possession,
+   location, containment, closure, device, or content state.
+
+2. Frame 3 and its immediate neighborhood:
+   Decide whether a deliberate interaction actually extends through the exact
+   anchor, rather than occurring only in the outer context.
+
+3. Frames 4-5:
+   Check whether the same continuous event continues or produces a relevant
+   state change.
+
+4. Target-set evidence:
+   Decide whether at least one defining target-action signature is directly
+   supported by visible temporal evidence.
 
 Do not output this internal analysis.
 
-Choose exactly one label:
-
-A: The temporal neighborhood of Frame 3 is best and most specifically
-explained by Candidate A, with better support than Candidates B and C.
-
-B: The temporal neighborhood of Frame 3 is best and most specifically
-explained by Candidate B, with better support than Candidates A and C.
-
-C: The temporal neighborhood of Frame 3 is best and most specifically
-explained by Candidate C, with better support than Candidates A and B.
-
-OTHER_ACTIVITY: A meaningful interaction clearly occurs around Frame 3, but
-none of Candidates A, B, or C accurately describes the central event.
-
-TRUE_BACKGROUND: No deliberate or meaningful object interaction occurs around
-Frame 3. Camera motion, walking, waiting, observation, visible hands, object
-visibility, and idle preparation alone count as background.
-
-UNCERTAIN: The visual or temporal evidence is insufficient to distinguish the
-options reliably, or two or more candidates remain similarly plausible.
-
 Important decision rules:
 
-- Choose a candidate only when it is the single best explanation of the
-  central temporal neighborhood.
-- Semantic compatibility is not sufficient. A candidate must explain the
-  event more accurately and specifically than the other candidates.
-- Do not choose a candidate merely because one or two frames can be made
-  consistent with its definition.
-- Shared objects, hand motions, tools, or intermediate states do not prove that
-  two semantically related actions are equivalent.
-- Prefer the action whose defining state change or interaction is directly
-  supported by the temporal evidence.
-- If Candidates A, B, and C describe related actions, distinguish them using
-  their Key distinction fields.
-- If two or more candidates remain similarly plausible after comparison,
-  choose UNCERTAIN rather than selecting one arbitrarily.
-- Choose OTHER_ACTIVITY only when a meaningful interaction is clearly visible
-  but all three candidates are contradicted or less accurate.
-- Choose TRUE_BACKGROUND only when meaningful interaction is absent.
-- The use of A, B, or C does not indicate any preferred ordering.
+- A false target-foreground rescue is more harmful than failing to rescue an
+  ambiguous true action.
 
-Return exactly one JSON object with no explanation, markdown, or additional
-text. The value of "label" must be exactly one of: "A", "B", "C",
-"OTHER_ACTIVITY", "TRUE_BACKGROUND", "UNCERTAIN".
+- Choose TARGET_FOREGROUND only when both conditions are satisfied:
+  (a) a meaningful interaction extends through Frame 3; and
+  (b) the visible evidence directly supports at least one target action
+      signature.
 
-{"label":"A"}`;
+- The full start-to-end transition does not need to be visible. However, at
+  least one defining and target-specific cue must be directly visible around
+  Frame 3. Do not infer an unseen target action only from a resulting state.
+
+- Do not use an action occurring only in Frames 1-2 or Frames 4-5 if it does
+  not extend through the neighborhood of Frame 3.
+
+- Do not combine evidence from different objects or separate events.
+
+- Visible hands, relevant objects, tools, controls, camera motion, and general
+  motion are not sufficient by themselves.
+
+Choose exactly one semantic label:
+
+TARGET_FOREGROUND:
+Frame 3 contains direct and sufficiently specific evidence that it belongs to
+one of the ten target action events.
+
+OTHER_ACTIVITY:
+A meaningful interaction occurs around Frame 3, but the visible event is
+better described as a non-target activity.
+
+TRUE_BACKGROUND:
+No meaningful object interaction occurs around Frame 3.
+
+UNCERTAIN:
+An interaction may be occurring, but the visual or temporal evidence is
+insufficient to determine whether Frame 3 belongs to the target action set.
+
+Return exactly one JSON object with exactly these keys and no other text:
+
+"center_interaction": one of "YES", "NO", or "UNCERTAIN".
+"target_signature": one of "YES", "NO", or "UNCERTAIN".
+"label": one of "TARGET_FOREGROUND", "OTHER_ACTIVITY",
+"TRUE_BACKGROUND", or "UNCERTAIN".
+
+The three fields must be logically consistent. Do not return explanations,
+markdown, probabilities, action names, or additional keys.`;
 }
 
-function genericCandidatePrompt(candidateLabelId) {
-  const spec = CANDIDATE_SPECS.get(Number(candidateLabelId));
-  if (!spec) throw new Error(`unsupported candidate label id: ${candidateLabelId}`);
-  return `You are verifying one candidate pseudo-label for temporal action localization
-in an egocentric kitchen video.
+const PROMPT_TEXT = foregroundGatePrompt();
+const PROMPT_SHA256 = sha256(PROMPT_TEXT);
 
-You are given five chronologically ordered frames sampled around a temporal
-anchor. Frame 3 corresponds to the anchor. Frames 1-2 provide preceding
-context, and Frames 4-5 provide following context.
+function frameLabel(frame) {
+  const offset = Number(frame.offset_sec);
 
-Your task is not to identify the exact instant when an action starts or ends.
-Determine whether the temporal neighborhood of Frame 3 belongs to the action
-segment represented by the SADA candidate.
+  if (offset === 0) {
+    return 'FRAME 3 — EXACT TEMPORAL ANCHOR (0.0 seconds)';
+  }
 
-SADA candidate action: "${spec.name}"
+  const sign = offset > 0 ? '+' : '';
 
-Candidate definition:
-"${spec.name}" means that the person deliberately ${spec.definition}.
-
-Expected temporal evidence:
-${spec.evidence}
-No single cue is sufficient by itself. The frames should provide temporally
-consistent evidence that the central neighborhood belongs to this event. The
-complete state transition does not need to be fully visible within five frames.
-
-Important negative evidence:
-${spec.negatives}
-Do not confirm merely because hands, tools, controls, or relevant objects are
-visible. Do not confirm an action that occurs only in the outer context frames
-and does not extend into the temporal neighborhood of Frame 3.
-
-Choose exactly one label:
-
-CONFIRM_TARGET: The temporal neighborhood of Frame 3 is clearly part of the
-candidate "${spec.name}" event.
-
-OTHER_ACTIVITY: A meaningful interaction clearly occurs around Frame 3, but
-the overall event is better described by another action rather than
-"${spec.name}".
-
-TRUE_BACKGROUND: No deliberate object interaction or target action occurs
-around Frame 3. Camera motion, walking, waiting, visible hands, object
-visibility, observation, and idle preparation alone count as background.
-
-UNCERTAIN: The frames suggest that an interaction may be occurring, but
-occlusion, sparse temporal evidence, ambiguous state, or insufficient context
-makes it impossible to determine the correct case reliably.
-
-Decision order:
-1. Choose CONFIRM_TARGET only when the central neighborhood is clearly part of
-   the candidate event.
-2. Otherwise choose OTHER_ACTIVITY when another meaningful interaction is
-   clearly identifiable.
-3. Choose TRUE_BACKGROUND only when no meaningful interaction occurs around
-   the anchor.
-4. Choose UNCERTAIN for all remaining ambiguous cases.
-
-Return exactly one JSON object with no explanation, markdown, or additional
-text, for example: {"label":"CONFIRM_TARGET"}`;
+  return (
+    `FRAME ${frame.index} — `
+    + `${sign}${offset.toFixed(1)} seconds relative to the anchor`
+  );
 }
 
-function anchorRescuePrompt(candidateLabelId) {
-  const spec = CANDIDATE_SPECS.get(Number(candidateLabelId));
-  if (!spec) throw new Error(`unsupported candidate label id: ${candidateLabelId}`);
-  return `You are verifying whether one exact temporal anchor should be rescued as
-the SADA candidate action in an egocentric kitchen video.
+function buildMultimodalContent(frames, apiStyle) {
+  const textType = (
+    apiStyle === 'responses'
+      ? 'input_text'
+      : 'text'
+  );
 
-You are given five chronologically ordered frames. Frame 3 is the exact anchor.
-Frames 1-2 and 4-5 are context only. Do not transfer this decision to another
-time, FPN scale, or anchor.
+  const imageType = (
+    apiStyle === 'responses'
+      ? 'input_image'
+      : 'image_url'
+  );
 
-SADA candidate action: "${spec.name}"
-Candidate definition: "${spec.name}" means that the person deliberately
-${spec.definition}.
+  const content = [
+    {
+      type: textType,
+      text: PROMPT_TEXT,
+    },
+  ];
 
-Evidence for this candidate may include:
-${spec.evidence}
-No single cue is enough. The central neighborhood must contain clear,
-temporally consistent evidence for this specific candidate action.
+  for (const frame of frames) {
+    content.push({
+      type: textType,
+      text: frameLabel(frame),
+    });
 
-Do not confirm because hands, objects, tools, or related motion are visible.
-Do not treat a semantically related action as "${spec.name}".
-Important negative evidence:
-${spec.negatives}
+    const image = fs
+      .readFileSync(frame.file)
+      .toString('base64');
 
-Choose exactly one label:
+    const url = `data:image/jpeg;base64,${image}`;
 
-CONFIRM_KEY_ACTION_EVIDENCE: The exact anchor's temporal neighborhood clearly
-belongs to the specific candidate "${spec.name}". Only this label rescues the
-anchor as an action.
-
-ACTION_CONTEXT_OR_BOUNDARY: The frames may be near, before, after, or at an
-ambiguous boundary of an action, but they do not clearly show that this exact
-anchor belongs to "${spec.name}".
-
-OTHER_ACTIVITY: A meaningful interaction is clearly visible around Frame 3,
-but another action explains it better.
-
-TRUE_BACKGROUND: No meaningful object interaction occurs around Frame 3.
-
-UNCERTAIN: The available frames are insufficient to decide reliably.
-
-Choose CONFIRM_KEY_ACTION_EVIDENCE only with clear evidence for the candidate
-at the exact anchor. Otherwise choose a non-confirm label. Return exactly one
-JSON object and no other text, for example:
-{"label":"CONFIRM_KEY_ACTION_EVIDENCE"}`;
-}
-
-function prompt(ontology, promptMode, candidateLabelId, optionMapping) {
-  if (promptMode === 'candidate_listwise') {
-    return listwisePrompt(optionMapping);
+    if (apiStyle === 'responses') {
+      content.push({
+        type: imageType,
+        image_url: url,
+      });
+    } else {
+      content.push({
+        type: imageType,
+        image_url: { url },
+      });
+    }
   }
-  if (promptMode === 'candidate_verify' && Number(candidateLabelId) !== 0) {
-    return genericCandidatePrompt(candidateLabelId);
-  }
-  if (promptMode === 'anchor_rescue') {
-    return anchorRescuePrompt(candidateLabelId);
-  }
-  if (promptMode === 'take_verify' || promptMode === 'candidate_verify') {
-    return `You are verifying one candidate pseudo-label for temporal action localization
-in an egocentric kitchen video.
 
-You are given five chronologically ordered frames sampled around a temporal
-anchor. Frame 3 corresponds to the anchor. Frames 1-2 provide preceding
-context, and Frames 4-5 provide following context.
-
-Your task is not to identify the exact instant when an action starts or ends.
-Determine whether the temporal neighborhood of Frame 3 belongs to the action
-segment represented by the SADA candidate.
-
-SADA candidate action: "take"
-
-Candidate definition:
-"Take" means that the person deliberately acquires possession or stable
-control of an object, typically by grasping, retrieving, or picking it up.
-
-Typical temporal evidence may include approaching, reaching for, contacting,
-grasping, or retrieving the object before or near the anchor; acquiring or
-consolidating control around the anchor; and holding or carrying the object
-after or near the anchor. None of these cues is sufficient by itself. They
-should form temporally consistent evidence that the central neighborhood
-belongs to an acquisition event.
-
-The complete transition from not possessing the object to possessing it does
-not need to be fully visible within the five frames. Frame 3 may lie near the
-beginning, middle, or end of the annotated "take" segment. However, the
-available evidence should indicate that the central temporal neighborhood is
-part of a possession-acquisition event, rather than merely showing an object
-that was already being held and moved for an unrelated purpose.
-
-Choose exactly one label:
-
-CONFIRM_TARGET: The temporal neighborhood of Frame 3 is clearly part of the
-possession-acquisition event described by "take".
-
-OTHER_ACTIVITY: A meaningful interaction clearly occurs around Frame 3, but
-the overall event is better described by another action rather than "take".
-
-TRUE_BACKGROUND: No deliberate object interaction occurs around Frame 3.
-Camera motion, walking, waiting, visible hands, object visibility, observation,
-and idle preparation alone count as background.
-
-UNCERTAIN: The frames suggest that an interaction may be occurring, but
-occlusion, sparse temporal evidence, ambiguous object state, or insufficient
-context makes it impossible to determine reliably whether the central
-neighborhood belongs to "take", another activity, or background.
-
-Important:
-- Evaluate whether Frame 3 lies inside the candidate action event, not whether
-  the exact action transition happens precisely at Frame 3.
-- Use Frames 1-2 and Frames 4-5 as temporal context, but do not confirm an
-  action that occurs only in the outer context frames and does not extend into
-  the temporal neighborhood of Frame 3.
-- Do not confirm merely because hands or relevant objects are visible.
-- If the object remains under stable control throughout the sequence and
-  there is no evidence that the central neighborhood belongs to an acquisition
-  event, do not confirm "take".
-- Brief contact without evidence of acquiring stable control is not sufficient.
-- Actions such as lift, pull, remove, or adjust should not automatically be
-  treated as "take". Confirm only when they are part of gaining possession or
-  stable control and the overall event is best described as "take".
-- If a meaningful interaction is clearly visible but it does not match "take",
-  choose OTHER_ACTIVITY.
-- If a meaningful interaction may be occurring but its identity or temporal
-  relation to Frame 3 is unclear, choose UNCERTAIN rather than TRUE_BACKGROUND.
-
-Decision order:
-1. Choose CONFIRM_TARGET when the central neighborhood is clearly part of the
-   candidate "take" event.
-2. Otherwise choose OTHER_ACTIVITY when another meaningful interaction is
-   clearly identifiable.
-3. Choose TRUE_BACKGROUND only when no meaningful interaction occurs around
-   the anchor.
-4. Choose UNCERTAIN for all remaining ambiguous cases.
-
-Return exactly one JSON object with no explanation, markdown, or additional
-text, for example: {"label":"CONFIRM_TARGET"}`;
-  }
-  const target = ontology
-    ? ontology.filter(item => item.id < 10).map(item => item.verb)
-    : ['take', 'put', 'wash', 'open', 'close', 'insert', 'turn on', 'cut', 'turn off', 'pour'];
-  const contrastiveKeys = new Set([
-    'mix', 'move', 'remove', 'throw', 'dry', 'shake', 'scoop', 'adjust',
-    'squeeze', 'lift', 'pull', 'press', 'fill', 'scrape', 'wrap', 'set',
-    'add', 'hold', 'wear', 'transition',
-  ]);
-  const nonTarget = ontology
-    ? ontology.filter(item => item.id >= 10 && (
-      promptMode === 'full_ontology' || contrastiveKeys.has(item.verb)
-    )).map(item => item.verb)
-    : [];
-  const taxonomyRule = ontology ? `
-The dataset uses a strict verb taxonomy. First identify the single best verb at the center moment.
-Target verb labels: ${target.join(', ')}.
-${promptMode === 'full_ontology' ? 'All non-target verb labels' : 'Easily confused non-target verb labels'} that MUST be treated as background even when they are meaningful actions: ${nonTarget.join(', ')}.
-Near-neighbor labels are intentionally distinct. Do not map a non-target verb to a broad target synonym merely because both involve hand-object interaction.` : `
-Target verb labels: ${target.join(', ')}.`;
-  return `You are a temporal action localization verifier.
-You are given five chronologically ordered frames sampled from a short egocentric kitchen video clip. Frame 3 is the current temporal anchor; frames 1-2 are before it and frames 4-5 are after it.
-
-Decide whether the CENTER MOMENT (frame 3), not merely another part of the clip, lies inside one of the target verb labels.${taxonomyRule}
-
-Do not count camera motion, visible hands without meaningful interaction, idle/preparation states, or a target action appearing only before or after the center moment.
-
-Return JSON only with label, best verb, and target_probability from 0 to 100.
-target_probability means the probability that the CENTER MOMENT belongs to one of the exact target verb labels, not merely the probability that some action is happening.
-Examples:
-{"label":"A","verb":"target verb","target_probability":90}
-{"label":"B","verb":"best non-target verb or background","target_probability":10}
-{"label":"U","verb":"uncertain","target_probability":50}`;
+  return content;
 }
 
 function outputText(response) {
-  return (response.output || []).flatMap(item => item.content || [])
-    .filter(item => item.type === 'output_text').map(item => item.text).join('').trim();
+  return (response.output || [])
+    .flatMap(item => item.content || [])
+    .filter(item => item.type === 'output_text')
+    .map(item => item.text)
+    .join('')
+    .trim();
+}
+
+class HttpStatusError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.name = 'HttpStatusError';
+    this.status = Number(status);
+  }
+}
+
+class RequestTimeoutError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'RequestTimeoutError';
+  }
+}
+
+class ProtocolError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ProtocolError';
+  }
 }
 
 function fetchCompat(url, options, timeoutMs = 0) {
-  if (typeof globalThis.fetch === 'function') return globalThis.fetch(url, options);
+  if (typeof globalThis.fetch === 'function') {
+    const controller = new AbortController();
+    const timeout = timeoutMs > 0
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : null;
+
+    return globalThis.fetch(
+      url,
+      {
+        ...options,
+        signal: controller.signal,
+      },
+    ).catch(error => {
+      if (error?.name === 'AbortError') {
+        throw new RequestTimeoutError(
+          `request timed out after ${timeoutMs} ms`,
+        );
+      }
+      throw error;
+    }).finally(() => {
+      if (timeout !== null) clearTimeout(timeout);
+    });
+  }
+
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
-    const transport = parsed.protocol === 'https:' ? https : http;
-    const request = transport.request(parsed, {
-      method: options.method,
-      headers: options.headers,
-    }, response => {
-      const chunks = [];
-      response.on('data', chunk => chunks.push(chunk));
-      response.on('end', () => {
-        const body = Buffer.concat(chunks).toString('utf8');
-        const status = Number(response.statusCode || 0);
-        resolve({
-          ok: status >= 200 && status < 300,
-          status,
-          text: async () => body,
+    const transport = (
+      parsed.protocol === 'https:'
+        ? https
+        : http
+    );
+
+    const request = transport.request(
+      parsed,
+      {
+        method: options.method,
+        headers: options.headers,
+      },
+      response => {
+        const chunks = [];
+
+        response.on(
+          'data',
+          chunk => chunks.push(chunk),
+        );
+
+        response.on('end', () => {
+          const body = Buffer
+            .concat(chunks)
+            .toString('utf8');
+
+          const status = Number(
+            response.statusCode || 0,
+          );
+
+          resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            text: async () => body,
+          });
         });
-      });
-    });
+      },
+    );
+
     request.on('error', reject);
+
     if (timeoutMs > 0) {
       request.setTimeout(timeoutMs, () => {
-        request.destroy(new Error(`request timed out after ${timeoutMs} ms`));
+        request.destroy(
+          new RequestTimeoutError(
+            `request timed out after ${timeoutMs} ms`,
+          ),
+        );
       });
     }
+
     request.end(options.body);
   });
 }
 
-async function requestOne(baseUrl, apiKey, model, frames, wireApi, ontology, promptMode,
-  candidateLabelId, optionMapping, reasoningEffort, maxOutputTokens, requestTimeoutMs) {
-  const content = [{
-    type: 'input_text',
-    text: prompt(ontology, promptMode, candidateLabelId, optionMapping),
-  }];
-  for (const file of frames) {
-    const image = fs.readFileSync(file).toString('base64');
-    content.push({ type: 'input_image', image_url: `data:image/jpeg;base64,${image}` });
-  }
-  let endpoint = 'responses';
-  let body = { model, input: [{ role: 'user', content }], max_output_tokens: maxOutputTokens };
-  if (reasoningEffort) body.reasoning = { effort: reasoningEffort };
+async function requestOnce({
+  baseUrl,
+  apiKey,
+  model,
+  frames,
+  wireApi,
+  reasoningEffort,
+  maxOutputTokens,
+  requestTimeoutMs,
+}) {
+  const apiStyle = (
+    wireApi === 'chat'
+      ? 'chat'
+      : 'responses'
+  );
+
+  const content = buildMultimodalContent(
+    frames,
+    apiStyle,
+  );
+
+  let endpoint;
+  let body;
+
   if (wireApi === 'chat') {
     endpoint = 'chat/completions';
+
     body = {
       model,
-      messages: [{
-        role: 'user',
-        content: content.map(item => item.type === 'input_text'
-          ? { type: 'text', text: item.text }
-          : { type: 'image_url', image_url: { url: item.image_url } }),
-      }],
+      messages: [
+        {
+          role: 'user',
+          content,
+        },
+      ],
       max_tokens: maxOutputTokens,
       temperature: 0,
       enable_thinking: false,
-      response_format: { type: 'json_object' },
+      response_format: {
+        type: 'json_object',
+      },
+    };
+  } else {
+    endpoint = 'responses';
+
+    body = {
+      model,
+      input: [
+        {
+          role: 'user',
+          content,
+        },
+      ],
+      max_output_tokens: maxOutputTokens,
+    };
+
+    if (reasoningEffort) {
+      body.reasoning = {
+        effort: reasoningEffort,
+      };
+    }
+  }
+
+  const response = await fetchCompat(
+    `${baseUrl.replace(/\/$/, '')}/${endpoint}`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    },
+    requestTimeoutMs,
+  );
+
+  const responseBody = await response.text();
+
+  let parsed;
+
+  try {
+    parsed = JSON.parse(responseBody);
+  } catch {
+    parsed = {
+      raw: responseBody,
     };
   }
-  const response = await fetchCompat(`${baseUrl.replace(/\/$/, '')}/${endpoint}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  }, requestTimeoutMs);
-  const responseBody = await response.text();
+
+  if (!response.ok) {
+    throw new HttpStatusError(
+      response.status,
+      `HTTP ${response.status}: `
+      + JSON.stringify(parsed).slice(0, 600),
+    );
+  }
+
+  const text = (
+    wireApi === 'chat'
+      ? String(
+        parsed.choices?.[0]?.message?.content || '',
+      ).trim()
+      : outputText(parsed)
+  );
+
+  if (!text) {
+    throw new Error('empty model response');
+  }
+
+  return {
+    text,
+    usage: parsed.usage || null,
+  };
+}
+
+async function requestWithRetry(
+  options,
+  maxRetries,
+  retryBaseMs,
+  requestFn = requestOnce,
+) {
+  let lastError;
+
+  for (
+    let attempt = 0;
+    attempt <= maxRetries;
+    attempt += 1
+  ) {
+    try {
+      const response = await requestFn(options);
+
+      return {
+        ...response,
+        attempts: attempt + 1,
+      };
+    } catch (error) {
+      lastError = error;
+
+      const retryable = (
+        error instanceof RequestTimeoutError
+        || error?.status === 408
+        || error?.status === 429
+        || error?.status >= 500
+        || (
+          !(error instanceof HttpStatusError)
+          && error?.name !== 'ProtocolError'
+        )
+      );
+
+      if (attempt >= maxRetries || !retryable) break;
+
+      const delay = retryBaseMs * (2 ** attempt);
+      await sleep(delay);
+    }
+  }
+
+  throw lastError;
+}
+
+function parseGateResponse(text) {
   let parsed;
-  try { parsed = JSON.parse(responseBody); } catch { parsed = { raw: responseBody }; }
-  if (!response.ok) throw new Error(`HTTP ${response.status}: ${JSON.stringify(parsed).slice(0, 400)}`);
-  const text = wireApi === 'chat'
-    ? String(parsed.choices?.[0]?.message?.content || '').trim()
-    : outputText(parsed);
-  return { text, usage: parsed.usage || null };
+
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return {
+      parse_error: true,
+      protocol_error: true,
+      center_interaction: 'UNCERTAIN',
+      target_signature: 'UNCERTAIN',
+      model_label: null,
+      prediction: 'UNCERTAIN',
+      action_rescue: false,
+      consistency_error: true,
+    };
+  }
+
+  if (
+    parsed === null
+    || Array.isArray(parsed)
+    || typeof parsed !== 'object'
+  ) {
+    return {
+      parse_error: false,
+      protocol_error: true,
+      center_interaction: 'UNCERTAIN',
+      target_signature: 'UNCERTAIN',
+      model_label: null,
+      prediction: 'UNCERTAIN',
+      action_rescue: false,
+      consistency_error: true,
+    };
+  }
+
+  const centerInteraction = normalizeEnum(
+    parsed.center_interaction,
+  );
+
+  const targetSignature = normalizeEnum(
+    parsed.target_signature,
+  );
+
+  const modelLabel = normalizeEnum(
+    parsed.label,
+  );
+
+  const keys = Object.keys(parsed).sort();
+
+  const exactKeys = (
+    JSON.stringify(keys)
+    === JSON.stringify([
+      'center_interaction',
+      'label',
+      'target_signature',
+    ])
+  );
+
+  const fieldsValid = (
+    INTERACTION_VALUES.has(centerInteraction)
+    && SIGNATURE_VALUES.has(targetSignature)
+    && LABEL_VALUES.has(modelLabel)
+  );
+
+  const actionRescue = (
+    fieldsValid
+    && exactKeys
+    && centerInteraction === 'YES'
+    && targetSignature === 'YES'
+    && modelLabel === 'TARGET_FOREGROUND'
+  );
+
+  let expectedLabel = 'UNCERTAIN';
+
+  if (
+    centerInteraction === 'YES'
+    && targetSignature === 'YES'
+  ) {
+    expectedLabel = 'TARGET_FOREGROUND';
+  } else if (
+    centerInteraction === 'YES'
+    && targetSignature === 'NO'
+  ) {
+    expectedLabel = 'OTHER_ACTIVITY';
+  } else if (
+    centerInteraction === 'NO'
+    && targetSignature !== 'YES'
+  ) {
+    expectedLabel = 'TRUE_BACKGROUND';
+  }
+
+  const consistencyError = (
+    !fieldsValid
+    || !exactKeys
+    || modelLabel !== expectedLabel
+  );
+
+  const safePrediction = (
+    actionRescue
+      ? 'TARGET_FOREGROUND'
+      : (
+        !consistencyError
+        && LABEL_VALUES.has(modelLabel)
+          ? modelLabel
+          : 'UNCERTAIN'
+      )
+  );
+
+  return {
+    parse_error: false,
+    protocol_error: !fieldsValid || !exactKeys,
+    center_interaction: (
+      INTERACTION_VALUES.has(centerInteraction)
+        ? centerInteraction
+        : 'UNCERTAIN'
+    ),
+    target_signature: (
+      SIGNATURE_VALUES.has(targetSignature)
+        ? targetSignature
+        : 'UNCERTAIN'
+    ),
+    model_label: (
+      LABEL_VALUES.has(modelLabel)
+        ? modelLabel
+        : null
+    ),
+    prediction: safePrediction,
+    action_rescue: actionRescue,
+    consistency_error: consistencyError,
+  };
+}
+
+function teacherTop1Class(row) {
+  const top1 = Number(row.teacher_top1_class);
+
+  if (!Number.isInteger(top1) || top1 < 0 || top1 >= 10) {
+    throw new Error(
+      `invalid teacher_top1_class for ${row.candidate_id}`,
+    );
+  }
+
+  return top1;
+}
+
+function exactAnchorKey(row) {
+  const top1 = teacherTop1Class(row);
+  const center = absoluteCenterTime(row);
+
+  if (
+    row.fpn_level == null
+    || row.global_anchor_index == null
+    || row.teacher_top1_class == null
+  ) {
+    throw new Error(
+      `manifest row ${row.candidate_id} must include `
+      + 'fpn_level, global_anchor_index, and '
+      + 'teacher_top1_class/sada_top1_class',
+    );
+  }
+
+  return [
+    row.video_id,
+    Number(row.fpn_level),
+    Number(row.global_anchor_index),
+    center.toFixed(6),
+    top1,
+  ].join('|');
+}
+
+function validateManifestRows(rows) {
+  const candidateIds = new Set();
+  const anchorKeys = new Set();
+
+  for (const row of rows) {
+    if (
+      !row.candidate_id
+      || !row.video_id
+      || row.center_sec == null
+      || row.absolute_center_time == null
+      || row.anchor_index == null
+      || row.teacher_top1_class == null
+    ) {
+      throw new Error(
+        'each manifest row requires '
+        + 'candidate_id, video_id, anchor_index, '
+        + 'center_sec, absolute_center_time, and teacher_top1_class',
+      );
+    }
+
+    if (candidateIds.has(row.candidate_id)) {
+      throw new Error(
+        `duplicate candidate_id in manifest: `
+        + `${row.candidate_id}`,
+      );
+    }
+
+    candidateIds.add(row.candidate_id);
+
+    const key = exactAnchorKey(row);
+    const members = row.member_anchors;
+
+    if (!Array.isArray(members) || members.length !== 1) {
+      throw new Error(
+        `manifest row ${row.candidate_id} must contain exactly one member anchor`,
+      );
+    }
+
+    const member = members[0];
+    const memberMatches = (
+      Number(member.fpn_level) === Number(row.fpn_level)
+      && Number(member.anchor_index) === Number(row.anchor_index)
+      && Number(member.global_anchor_index)
+        === Number(row.global_anchor_index)
+      && Math.abs(
+        Number(member.absolute_center_time)
+        - absoluteCenterTime(row)
+      ) <= 1e-6
+      && Number(member.teacher_top1_class)
+        === teacherTop1Class(row)
+    );
+
+    if (!memberMatches) {
+      throw new Error(
+        `member anchor differs from exact query fields for ${row.candidate_id}`,
+      );
+    }
+
+    if (anchorKeys.has(key)) {
+      throw new Error(
+        `duplicate exact-anchor five-tuple `
+        + `in manifest: ${key}`,
+      );
+    }
+
+    anchorKeys.add(key);
+  }
+}
+
+function requestFingerprint(row, model, wireApi) {
+  return sha256(
+    JSON.stringify({
+      candidate_id: row.candidate_id,
+      anchor_id: row.anchor_id ?? null,
+      video_id: row.video_id,
+      absolute_center_time: absoluteCenterTime(row),
+      fpn_level: row.fpn_level ?? null,
+      global_anchor_index:
+        row.global_anchor_index ?? null,
+      teacher_top1_class:
+        teacherTop1Class(row),
+      frame_offsets_sec: FRAME_OFFSETS_SEC,
+      prompt_sha256: PROMPT_SHA256,
+      routing_schema_version: ROUTING_SCHEMA_VERSION,
+      model,
+      wire_api: wireApi,
+    }),
+  );
+}
+
+function localUncertainResult(
+  row,
+  frameInfo,
+  fingerprint,
+  model,
+  wireApi,
+  reason,
+) {
+  return {
+    candidate_id: row.candidate_id,
+    anchor_id: row.anchor_id ?? row.candidate_id,
+    request_fingerprint: fingerprint,
+    status: 'ok',
+    prediction: 'UNCERTAIN',
+    route: 'ignore',
+    action_rescue: false,
+    pseudo_label: null,
+    center_interaction: 'UNCERTAIN',
+    target_signature: 'UNCERTAIN',
+    model_reported_label: null,
+    parse_error: false,
+    protocol_error: false,
+    consistency_error: false,
+    local_gate_reason: reason,
+    response_text: null,
+    usage: null,
+    model,
+    wire_api: wireApi,
+    prompt_version: PROMPT_VERSION,
+    prompt_sha256: PROMPT_SHA256,
+    routing_schema_version: ROUTING_SCHEMA_VERSION,
+    frame_offsets_sec: [...FRAME_OFFSETS_SEC],
+    frame_timestamps_sec:
+      frameInfo.frames.map(frame => frame.timestamp_sec),
+    temporal_context_valid:
+      frameInfo.temporal_context_valid,
+    unique_timestamp_count:
+      frameInfo.unique_timestamp_count,
+    video_id: row.video_id,
+    anchor_index: Number(row.anchor_index),
+    absolute_center_time: absoluteCenterTime(row),
+    center_sec: absoluteCenterTime(row),
+    fpn_level: row.fpn_level ?? null,
+    global_anchor_index:
+      row.global_anchor_index ?? null,
+    teacher_top1_class:
+      teacherTop1Class(row),
+    teacher_top1_score:
+      row.teacher_top1_score
+      ?? row.sada_top1_score
+      ?? null,
+  };
+}
+
+function latestRowsByCandidate(rows) {
+  const latest = new Map();
+  for (const row of rows) {
+    latest.set(row.candidate_id, row);
+  }
+  return latest;
+}
+
+function validatePriorRows(priorRows, manifestRows, model, wireApi) {
+  const manifestById = new Map(
+    manifestRows.map(row => [row.candidate_id, row]),
+  );
+
+  for (const prior of priorRows) {
+    const manifest = manifestById.get(prior.candidate_id);
+    if (!manifest) {
+      throw new Error(
+        `output contains candidate not present in manifest: ${prior.candidate_id}`,
+      );
+    }
+    if (prior.routing_schema_version !== ROUTING_SCHEMA_VERSION) {
+      throw new Error('output routing_schema_version does not match this runner');
+    }
+    if (prior.prompt_sha256 !== PROMPT_SHA256) {
+      throw new Error('output prompt_sha256 does not match this runner');
+    }
+    if (prior.model !== model || prior.wire_api !== wireApi) {
+      throw new Error('output model or wire_api differs from this run');
+    }
+
+    const expectedFingerprint = requestFingerprint(
+      manifest,
+      model,
+      wireApi,
+    );
+    if (prior.request_fingerprint !== expectedFingerprint) {
+      throw new Error(
+        `output request fingerprint differs for ${prior.candidate_id}`,
+      );
+    }
+  }
+}
+
+function completionSummary(
+  activeRows,
+  latestRows,
+  {
+    alreadyCompleted = 0,
+    apiAttempted = 0,
+    apiSuccess = 0,
+    localUncertain = 0,
+  } = {},
+) {
+  const current = activeRows
+    .map(row => latestRows.get(row.candidate_id))
+    .filter(Boolean);
+  const completed = current.filter(row => row.status === 'ok');
+  const action = completed.filter(row => row.route === 'action').length;
+  const ignore = completed.filter(row => row.route === 'ignore').length;
+  const background = completed.filter(row => row.route === 'background').length;
+  const error = current.filter(row => row.status === 'error').length;
+
+  return {
+    manifest_total: activeRows.length,
+    already_completed: alreadyCompleted,
+    api_attempted: apiAttempted,
+    api_success: apiSuccess,
+    local_uncertain: localUncertain,
+    completed_total: completed.length,
+    action,
+    ignore,
+    background,
+    error,
+  };
+}
+
+function assertCompleteSummary(summary) {
+  if (summary.completed_total !== summary.manifest_total) {
+    throw new Error('completed_total differs from manifest_total');
+  }
+  if (summary.action + summary.ignore !== summary.manifest_total) {
+    throw new Error('action + ignore differs from manifest_total');
+  }
+  if (summary.error !== 0) {
+    throw new Error('run contains error rows');
+  }
+  if (summary.background !== 0) {
+    throw new Error('candidate-blind rescue must never route background');
+  }
+}
+
+function printSummary(summary) {
+  process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
 }
 
 async function main() {
   const args = argsOf(process.argv);
-  for (const required of ['manifest', 'video-root', 'output', 'cache-dir']) {
-    if (!args[required]) throw new Error(`missing --${required}`);
-  }
-  const baseUrl = args['base-url'] || process.env.VLM_BASE_URL || 'https://api.asxs.top/v1';
-  const model = args.model || process.env.VLM_MODEL || 'gpt-5.4';
-  const wireApi = args['wire-api'] || process.env.VLM_WIRE_API || 'responses';
-  if (!['responses', 'chat'].includes(wireApi)) throw new Error('--wire-api must be responses or chat');
-  const keyEnv = args['api-key-env'] || 'CCH_API_KEY';
-  const apiKey = process.env[keyEnv];
-  const reasoningEffort = args['reasoning-effort'] || process.env.VLM_REASONING_EFFORT || null;
-  const maxOutputTokens = Number(args['max-output-tokens'] || (reasoningEffort ? 1024 : 32));
-  const requestTimeoutMs = Number(args['request-timeout-sec'] || process.env.VLM_REQUEST_TIMEOUT_SEC || 120) * 1000;
-  const ontology = loadOntology(args['ontology-csv']);
-  const promptMode = args['prompt-mode'] || (ontology ? 'full_ontology' : 'target_only');
-  if (!['target_only', 'contrastive', 'contrastive_score', 'full_ontology', 'take_verify', 'candidate_verify', 'candidate_listwise', 'anchor_rescue'].includes(promptMode)) {
-    throw new Error('--prompt-mode is not supported');
-  }
-  if (!['target_only', 'take_verify', 'candidate_verify', 'candidate_listwise', 'anchor_rescue'].includes(promptMode) && !ontology) {
-    throw new Error('--ontology-csv is required for taxonomy-aware prompt modes');
-  }
-  if (!apiKey) throw new Error(`environment variable ${keyEnv} is empty`);
-  const limit = Number(args.limit || Infinity);
-  const rows = readJsonl(args.manifest);
-  const done = fs.existsSync(args.output)
-    ? new Set(readJsonl(args.output).filter(row => row.status === 'ok').map(row => row.candidate_id))
-    : new Set();
-  fs.mkdirSync(path.dirname(path.resolve(args.output)), { recursive: true });
 
-  let attempted = 0;
-  for (const row of rows) {
-    if (done.has(row.candidate_id) || attempted >= limit) continue;
-    attempted += 1;
-    const result = { candidate_id: row.candidate_id, status: 'error' };
-    try {
-      const video = findVideo(args['video-root'], row.video_id);
-      const frames = prepareFrames(
-        video,
-        row.center_sec,
-        path.join(args['cache-dir'], row.frame_cache_id ?? row.candidate_id),
-      );
-      const candidateLabelId = row.candidate_label_id ?? row.sada_top1_class;
-      if (['candidate_verify', 'anchor_rescue'].includes(promptMode) && candidateLabelId == null) {
-        throw new Error(`candidate class missing for ${row.candidate_id}`);
-      }
-      if (promptMode === 'candidate_listwise' && !row.option_mapping) {
-        throw new Error(`option_mapping missing for ${row.candidate_id}`);
-      }
-      const response = await requestOne(
-        baseUrl, apiKey, model, frames, wireApi, ontology, promptMode,
-        candidateLabelId, row.option_mapping, reasoningEffort, maxOutputTokens, requestTimeoutMs,
-      );
-      let label = null;
-      let reportedVerb = null;
-      let targetProbability = null;
-      try {
-        const parsed = JSON.parse(response.text);
-        label = parsed.label;
-        reportedVerb = parsed.verb || null;
-        targetProbability = Number.isFinite(Number(parsed.target_probability))
-          ? Number(parsed.target_probability) : null;
-      } catch {}
-      const verifierLabels = new Set([
-        'CONFIRM_TARGET', 'OTHER_ACTIVITY', 'TRUE_BACKGROUND', 'UNCERTAIN',
-      ]);
-      const rescueLabels = new Set([
-        'CONFIRM_KEY_ACTION_EVIDENCE', 'ACTION_CONTEXT_OR_BOUNDARY',
-        'OTHER_ACTIVITY', 'TRUE_BACKGROUND', 'UNCERTAIN',
-      ]);
-      const listwiseLabels = new Set([
-        'A', 'B', 'C', 'OTHER_ACTIVITY', 'TRUE_BACKGROUND', 'UNCERTAIN',
-      ]);
-      const normalizedLabel = String(label || '').trim().toUpperCase();
-      const match = normalizedLabel.match(/^([ABU])$/i);
-      const verifierMode = ['take_verify', 'candidate_verify'].includes(promptMode);
-      const rescueMode = promptMode === 'anchor_rescue';
-      const listwiseMode = promptMode === 'candidate_listwise';
-      let prediction = listwiseMode
-        ? (listwiseLabels.has(normalizedLabel) ? normalizedLabel : 'UNCERTAIN')
-        : (rescueMode
-          ? (rescueLabels.has(normalizedLabel) ? normalizedLabel : 'UNCERTAIN')
-          : (verifierMode
-          ? (verifierLabels.has(normalizedLabel) ? normalizedLabel : 'UNCERTAIN')
-          : (match ? match[1].toUpperCase() : 'U')));
-      if (!verifierMode && !rescueMode && !listwiseMode && ontology && reportedVerb) {
-        const targetVerbs = new Set(
-          ontology.filter(item => item.id < 10).map(item => normalizeVerb(item.verb)),
-        );
-        prediction = normalizeVerb(reportedVerb) === 'uncertain'
-          ? 'U'
-          : (targetVerbs.has(normalizeVerb(reportedVerb)) ? 'A' : 'B');
-      }
-      result.status = 'ok';
-      result.prediction = prediction;
-      result.model_reported_label = listwiseMode
-        ? (listwiseLabels.has(normalizedLabel) ? normalizedLabel : null)
-        : (rescueMode
-          ? (rescueLabels.has(normalizedLabel) ? normalizedLabel : null)
-          : (verifierMode
-          ? (verifierLabels.has(normalizedLabel) ? normalizedLabel : null)
-          : (match ? match[1].toUpperCase() : null)));
-      result.parse_error = listwiseMode
-        ? !listwiseLabels.has(normalizedLabel)
-        : (rescueMode ? !rescueLabels.has(normalizedLabel)
-          : (verifierMode ? !verifierLabels.has(normalizedLabel) : !match));
-      result.response_text = response.text;
-      result.reported_verb = reportedVerb;
-      result.target_probability = targetProbability;
-      result.usage = response.usage;
-      result.model = model;
-      result.wire_api = wireApi;
-      result.reasoning_effort = reasoningEffort;
-      result.max_output_tokens = maxOutputTokens;
-      result.request_timeout_sec = requestTimeoutMs / 1000;
-      result.prompt_mode = promptMode;
-      result.anchor_id = row.anchor_id ?? row.candidate_id;
-      result.candidate_role = row.candidate_role ?? null;
-      result.option_mapping = listwiseMode ? row.option_mapping : null;
-      result.candidate_label_id = (verifierMode || rescueMode) ? Number(candidateLabelId ?? 0) : null;
-      result.candidate_name = (verifierMode || rescueMode)
-        ? CANDIDATE_SPECS.get(Number(candidateLabelId ?? 0))?.name || null
-        : null;
-      result.gate_rule = listwiseMode
-        ? 'listwise_candidate_competition'
-        : (rescueMode
-          ? 'exact_anchor_high_precision_rescue'
-          : (verifierMode
-          ? 'candidate_semantic_verifier'
-          : (ontology ? 'deterministic_from_reported_verb' : 'model_label')));
-    } catch (error) {
-      result.error = String(error.message || error);
+  for (
+    const required of [
+      'manifest',
+      'video-root',
+      'output',
+      'cache-dir',
+      'base-url',
+      'model',
+      'wire-api',
+    ]
+  ) {
+    if (!args[required]) {
+      throw new Error(`missing --${required}`);
     }
-    fs.appendFileSync(args.output, JSON.stringify(result) + '\n', 'utf8');
-    process.stdout.write(`${attempted}/${Math.min(rows.length, limit)} ${row.candidate_id} ${result.status} ${result.prediction || ''}\n`);
-    if (result.status !== 'ok') throw new Error(result.error);
   }
+
+  const baseUrl = args['base-url'];
+  const model = args.model;
+  const wireApi = args['wire-api'];
+
+  if (!['responses', 'chat'].includes(wireApi)) {
+    throw new Error(
+      '--wire-api must be responses or chat',
+    );
+  }
+
+  const keyEnv = (
+    args['api-key-env']
+    || 'VLM_API_KEY'
+  );
+
+  const apiKey = process.env[keyEnv];
+
+  if (!apiKey) {
+    throw new Error(
+      `environment variable ${keyEnv} is empty`,
+    );
+  }
+
+  const reasoningEffort = (
+    args['reasoning-effort']
+    || process.env.VLM_REASONING_EFFORT
+    || null
+  );
+
+  const maxOutputTokens = Number(
+    args['max-output-tokens']
+    || 96,
+  );
+
+  const requestTimeoutMs = Number(
+    args['request-timeout-sec']
+    || process.env.VLM_REQUEST_TIMEOUT_SEC
+    || 120,
+  ) * 1000;
+
+  const maxRetries = Number(
+    args['max-retries']
+    || 5,
+  );
+
+  const retryBaseMs = Number(
+    args['retry-base-ms']
+    || 1000,
+  );
+
+  const limit = Number(
+    args.limit
+    || Infinity,
+  );
+
+  const rows = readJsonl(args.manifest);
+  validateManifestRows(rows);
+
+  if (
+    limit !== Infinity
+    && (!Number.isInteger(limit) || limit <= 0)
+  ) {
+    throw new Error('--limit must be a positive integer');
+  }
+
+  const activeRows = rows.slice(0, limit);
+
+  const priorRows = readJsonl(
+    args.output,
+    { allowMissing: true, allowEmpty: true },
+  );
+  validatePriorRows(priorRows, rows, model, wireApi);
+
+  const latestRows = latestRowsByCandidate(priorRows);
+  const alreadyCompleted = activeRows.filter(
+    row => latestRows.get(row.candidate_id)?.status === 'ok',
+  ).length;
+
+  const counters = {
+    alreadyCompleted,
+    apiAttempted: 0,
+    apiSuccess: 0,
+    localUncertain: 0,
+  };
+
+  const numericOptions = {
+    maxOutputTokens,
+    requestTimeoutMs,
+    maxRetries,
+    retryBaseMs,
+  };
+  if (
+    !Number.isInteger(maxOutputTokens)
+    || maxOutputTokens <= 0
+    || !Number.isFinite(requestTimeoutMs)
+    || requestTimeoutMs <= 0
+    || !Number.isInteger(maxRetries)
+    || maxRetries < 0
+    || !Number.isFinite(retryBaseMs)
+    || retryBaseMs < 0
+  ) {
+    throw new Error(
+      `invalid numeric request options: ${JSON.stringify(numericOptions)}`,
+    );
+  }
+
+  const appendResult = result => {
+    fs.appendFileSync(
+      args.output,
+      `${JSON.stringify(result)}\n`,
+      'utf8',
+    );
+    latestRows.set(result.candidate_id, result);
+  };
+
+  const summary = () => completionSummary(
+    activeRows,
+    latestRows,
+    counters,
+  );
+
+  fs.mkdirSync(
+    path.dirname(path.resolve(args.output)),
+    { recursive: true },
+  );
+
+  let processed = 0;
+
+  for (const row of activeRows) {
+    if (latestRows.get(row.candidate_id)?.status === 'ok') {
+      continue;
+    }
+
+    const fingerprint = requestFingerprint(
+      row,
+      model,
+      wireApi,
+    );
+
+    processed += 1;
+    const center = absoluteCenterTime(row);
+
+    const result = {
+      candidate_id: row.candidate_id,
+      anchor_id:
+        row.anchor_id ?? row.candidate_id,
+      request_fingerprint: fingerprint,
+      status: 'error',
+      model,
+      wire_api: wireApi,
+      prompt_version: PROMPT_VERSION,
+      prompt_sha256: PROMPT_SHA256,
+      routing_schema_version: ROUTING_SCHEMA_VERSION,
+      video_id: row.video_id,
+      anchor_index: Number(row.anchor_index),
+      absolute_center_time: center,
+      center_sec: center,
+      fpn_level: row.fpn_level ?? null,
+      global_anchor_index:
+        row.global_anchor_index ?? null,
+      teacher_top1_class:
+        teacherTop1Class(row),
+      teacher_top1_score:
+        row.teacher_top1_score
+        ?? row.sada_top1_score
+        ?? null,
+    };
+
+    try {
+      const video = findVideo(
+        args['video-root'],
+        row.video_id,
+      );
+
+      const frameInfo = prepareFrames(
+        video,
+        center,
+        path.join(
+          args['cache-dir'],
+          row.frame_cache_id ?? row.candidate_id,
+        ),
+      );
+
+      if (!frameInfo.temporal_context_valid) {
+        const local = localUncertainResult(
+          row,
+          frameInfo,
+          fingerprint,
+          model,
+          wireApi,
+          'insufficient_pre_or_post_context',
+        );
+
+        appendResult(local);
+        counters.localUncertain += 1;
+
+        process.stdout.write(
+          `${processed}/${activeRows.length - alreadyCompleted} `
+          + `${row.candidate_id} ok UNCERTAIN local\n`,
+        );
+
+        continue;
+      }
+
+      counters.apiAttempted += 1;
+      const response = await requestWithRetry(
+        {
+          baseUrl,
+          apiKey,
+          model,
+          frames: frameInfo.frames,
+          wireApi,
+          reasoningEffort,
+          maxOutputTokens,
+          requestTimeoutMs,
+        },
+        maxRetries,
+        retryBaseMs,
+      );
+
+      const parsed = parseGateResponse(
+        response.text,
+      );
+
+      if (
+        parsed.parse_error
+        || parsed.protocol_error
+        || parsed.consistency_error
+      ) {
+        throw new ProtocolError(
+          `invalid routing response for ${row.candidate_id}: ${response.text}`,
+        );
+      }
+
+      counters.apiSuccess += 1;
+
+      const top1 = teacherTop1Class(row);
+
+      Object.assign(result, {
+        status: 'ok',
+        prediction: parsed.prediction,
+        route: (
+          parsed.action_rescue
+            ? 'action'
+            : 'ignore'
+        ),
+        action_rescue:
+          parsed.action_rescue,
+        pseudo_label: (
+          parsed.action_rescue
+            ? top1
+            : null
+        ),
+        center_interaction:
+          parsed.center_interaction,
+        target_signature:
+          parsed.target_signature,
+        model_reported_label:
+          parsed.model_label,
+        parse_error:
+          parsed.parse_error,
+        protocol_error:
+          parsed.protocol_error,
+        consistency_error:
+          parsed.consistency_error,
+        local_gate_reason: null,
+        response_text:
+          response.text,
+        usage:
+          response.usage,
+        request_attempts:
+          response.attempts,
+        reasoning_effort:
+          reasoningEffort,
+        max_output_tokens:
+          maxOutputTokens,
+        request_timeout_sec:
+          requestTimeoutMs / 1000,
+        frame_offsets_sec:
+          [...FRAME_OFFSETS_SEC],
+        frame_timestamps_sec:
+          frameInfo.frames.map(
+            frame => frame.timestamp_sec,
+          ),
+        temporal_context_valid:
+          frameInfo.temporal_context_valid,
+        unique_timestamp_count:
+          frameInfo.unique_timestamp_count,
+        gate_rule:
+          'candidate_blind_target_foreground'
+          + '_and_exact_anchor_and_teacher_top1',
+      });
+    } catch (error) {
+      result.error = String(
+        error?.message || error,
+      );
+      result.error_type = error?.name || 'Error';
+    }
+
+    appendResult(result);
+
+    process.stdout.write(
+      `${processed}/${activeRows.length - alreadyCompleted} `
+      + `${row.candidate_id} `
+      + `${result.status} `
+      + `${result.prediction || ''}\n`,
+    );
+
+    if (result.status !== 'ok') {
+      printSummary(summary());
+      throw new Error(
+        `failed at ${row.candidate_id}: ${result.error}`,
+      );
+    }
+  }
+
+  const finalSummary = summary();
+  printSummary(finalSummary);
+  assertCompleteSummary(finalSummary);
+  return finalSummary;
 }
 
-main().catch(error => { console.error(error.message || error); process.exitCode = 1; });
+const isDirectRun = (
+  process.argv[1]
+  && path.resolve(process.argv[1])
+    === path.resolve(fileURLToPath(import.meta.url))
+);
+
+if (isDirectRun) {
+  main().catch(error => {
+    console.error(
+      error?.stack
+      || error?.message
+      || String(error),
+    );
+
+    process.exitCode = 1;
+  });
+}
+
+export {
+  FRAME_OFFSETS_SEC,
+  PROMPT_SHA256,
+  PROMPT_VERSION,
+  ROUTING_SCHEMA_VERSION,
+  HttpStatusError,
+  ProtocolError,
+  RequestTimeoutError,
+  absoluteCenterTime,
+  argsOf,
+  assertCompleteSummary,
+  completionSummary,
+  exactAnchorKey,
+  fetchCompat,
+  parseGateResponse,
+  requestFingerprint,
+  requestWithRetry,
+  validateManifestRows,
+  validatePriorRows,
+};

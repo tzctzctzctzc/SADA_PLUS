@@ -7,6 +7,7 @@ import torch
 
 
 VALID_DECISIONS = {"action", "background", "ignore"}
+ROUTING_SCHEMA_VERSION = "candidate-blind-exact-anchor-routing-v1"
 
 
 def load_vlm_routing_cache(path, num_classes):
@@ -14,6 +15,8 @@ def load_vlm_routing_cache(path, num_classes):
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     entries = payload.get("entries", [])
     exact_anchor_rescue = payload.get("routing_policy") == "exact_anchor_rescue"
+    if exact_anchor_rescue and payload.get("routing_schema_version") != ROUTING_SCHEMA_VERSION:
+        raise ValueError("unsupported exact-anchor VLM routing schema")
     strict_fields = {
         "video_id",
         "fpn_level",
