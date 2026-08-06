@@ -22,6 +22,31 @@ def time_bin(center_sec, bin_sec):
     return int(math.floor(float(center_sec) / bin_sec + 0.5))
 
 
+def limit_queries(rows, max_per_video, min_gap_sec):
+    if max_per_video <= 0:
+        return rows
+    by_video = defaultdict(list)
+    for row in rows:
+        by_video[row["video_id"]].append(row)
+    selected = []
+    for video_rows in by_video.values():
+        chosen = []
+        for row in sorted(
+            video_rows,
+            key=lambda item: (-item["sada_score_max"], item["candidate_id"]),
+        ):
+            if any(
+                abs(row["center_sec"] - old["center_sec"]) < min_gap_sec
+                for old in chosen
+            ):
+                continue
+            chosen.append(row)
+            if len(chosen) == max_per_video:
+                break
+        selected.extend(chosen)
+    return sorted(selected, key=lambda row: row["candidate_id"])
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
@@ -32,6 +57,8 @@ def main():
     parser.add_argument("--weights", choices=("student", "ema"), default="ema")
     parser.add_argument("--beta", type=float, default=0.1)
     parser.add_argument("--time-bin-sec", type=float, default=0.5)
+    parser.add_argument("--max-queries-per-video", type=int, default=0)
+    parser.add_argument("--min-query-gap-sec", type=float, default=1.0)
     parser.add_argument("--levels", type=int, nargs="+", default=range(6))
     args = parser.parse_args()
 
@@ -113,19 +140,22 @@ def main():
                     top1 = int(top_classes[index, 0])
                     top2 = int(top_classes[index, 1])
                     bin_index = time_bin(center_sec, args.time_bin_sec)
-                    groups[(video_id, bin_index, top1, top2)].append(
+                    groups[(video_id, bin_index, top1)].append(
                         {
                             "fpn_level": level,
                             "anchor_index": int(index),
                             "center_sec": center_sec,
                             "sada_score": float(top_scores[index, 0]),
+                            "sada_top2_class": top2,
                         }
                     )
 
     rows = []
     member_counts = Counter()
-    for (video_id, bin_index, top1, top2), members in sorted(groups.items()):
-        center_sec = sum(member["center_sec"] for member in members) / len(members)
+    for (video_id, bin_index, top1), members in sorted(groups.items()):
+        representative = max(members, key=lambda member: member["sada_score"])
+        center_sec = representative["center_sec"]
+        top2 = representative["sada_top2_class"]
         scores = [member["sada_score"] for member in members]
         candidate_id = "{}-tb{:07d}-c{:02d}-c{:02d}".format(
             video_id, bin_index, top1, top2
@@ -155,6 +185,13 @@ def main():
         )
         member_counts[len(members)] += 1
 
+    all_deduplicated_queries = len(rows)
+    rows = limit_queries(
+        rows, args.max_queries_per_video, args.min_query_gap_sec
+    )
+    selected_member_counts = Counter(len(row["member_anchors"]) for row in rows)
+    selected_anchor_count = sum(len(row["member_anchors"]) for row in rows)
+
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="utf-8") as stream:
@@ -178,11 +215,18 @@ def main():
         "valid_anchors": valid_anchors,
         "low_confidence_anchors": low_confidence_anchors,
         "low_confidence_by_level": dict(sorted(level_counts.items())),
-        "deduplicated_vlm_queries": len(rows),
+        "deduplicated_queries_before_budget": all_deduplicated_queries,
         "deduplication_ratio": (
-            low_confidence_anchors / len(rows) if rows else None
+            low_confidence_anchors / all_deduplicated_queries
+            if all_deduplicated_queries
+            else None
         ),
-        "members_per_query": dict(sorted(member_counts.items())),
+        "max_queries_per_video": args.max_queries_per_video,
+        "min_query_gap_sec": args.min_query_gap_sec,
+        "deduplicated_vlm_queries": len(rows),
+        "selected_member_anchors": selected_anchor_count,
+        "members_per_query_before_budget": dict(sorted(member_counts.items())),
+        "selected_members_per_query": dict(sorted(selected_member_counts.items())),
     }
     Path(str(output) + ".meta.json").write_text(
         json.dumps(metadata, indent=2), encoding="utf-8"

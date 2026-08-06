@@ -1,4 +1,5 @@
 from tools.build_vlm_training_cache import build_entries
+from tools.export_vlm_training_candidates import limit_queries
 
 
 def test_deduplicated_query_expands_to_all_member_anchors():
@@ -39,3 +40,19 @@ def test_deduplicated_query_expands_to_all_member_anchors():
             "class_id": 3,
         },
     ]
+
+
+def test_query_budget_keeps_separated_highest_scores_per_video():
+    rows = [
+        {
+            "candidate_id": "q{}".format(index),
+            "video_id": "video",
+            "center_sec": center,
+            "sada_score_max": score,
+        }
+        for index, (center, score) in enumerate(
+            [(1.0, 0.49), (1.4, 0.48), (3.0, 0.40), (5.0, 0.30)]
+        )
+    ]
+    selected = limit_queries(rows, max_per_video=2, min_gap_sec=1.0)
+    assert {row["center_sec"] for row in selected} == {1.0, 3.0}
