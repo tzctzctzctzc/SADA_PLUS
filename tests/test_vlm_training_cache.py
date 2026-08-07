@@ -1,4 +1,8 @@
 import copy
+import json
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -183,3 +187,35 @@ def test_legacy_candidate_blind_migration_rejects_coordinate_mismatch():
     prediction["anchor_index"] += 1
     with pytest.raises(ValueError, match="anchor_index differs"):
         migrate_payload([manifest], [prediction], "c" * 64, "d" * 64)
+
+
+def test_legacy_candidate_blind_migration_cli(tmp_path):
+    manifest, prediction = legacy_rows()
+    manifest_path = tmp_path / "manifest.jsonl"
+    prediction_path = tmp_path / "predictions.jsonl"
+    output_path = tmp_path / "cache.json"
+    manifest_path.write_text(json.dumps(manifest) + "\n", encoding="utf-8")
+    prediction_path.write_text(json.dumps(prediction) + "\n", encoding="utf-8")
+    subprocess.run(
+        [
+            sys.executable,
+            str(
+                Path(__file__).parents[1]
+                / "tools"
+                / "migrate_legacy_candidate_blind_semantics.py"
+            ),
+            "--manifest",
+            str(manifest_path),
+            "--predictions",
+            str(prediction_path),
+            "--output",
+            str(output_path),
+        ],
+        check=True,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert json.loads(output_path.read_text(encoding="utf-8"))["counts"] == {
+        "TARGET_ACTION": 1
+    }
