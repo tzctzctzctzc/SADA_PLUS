@@ -38,6 +38,9 @@ validate_vlm_transition = vlm_routing.validate_vlm_transition
 validate_sada_continuation_checkpoint = (
     vlm_routing.validate_sada_continuation_checkpoint
 )
+validate_semantic_selection_provenance = (
+    vlm_routing.validate_semantic_selection_provenance
+)
 restore_training_trajectory = vlm_routing.restore_training_trajectory
 
 
@@ -46,6 +49,13 @@ def semantic_payload(entries):
         "semantic_cache_schema_version": "offline-vlm-semantic-evidence-v1",
         "source": "offline_vlm_candidate_blind_semantics",
         "key_fields": ["video_id", "absolute_feature_index"],
+        "selection_teacher_provenance": {
+            "selection_teacher_checkpoint_sha256": "a" * 64,
+            "selection_teacher_state_sha256": "b" * 64,
+            "selection_teacher_weights": "ema",
+            "selection_beta": 0.1,
+            "selection_alpha": 0.7,
+        },
         "entries": entries,
     }
 
@@ -134,15 +144,42 @@ def test_absolute_index_lookup_never_projects_to_nearest_crop_anchor(tmp_path):
             "semantic_pass": True,
         },
     ])), encoding="utf-8")
-    cache, count, digest = load_semantic_cache(path)
+    cache, count, digest, payload = load_semantic_cache(path)
     assert count == 2
     assert len(digest) == 64
+    validate_semantic_selection_provenance(
+        payload,
+        {
+            "routing_teacher_checkpoint_sha256": "a" * 64,
+            "routing_teacher_state_sha256": "b" * 64,
+            "routing_teacher_weights": "ema",
+        },
+        0.1,
+        0.7,
+    )
     routes = route(cache)
     # crop_start=7 and local lattice 0,2,4 gives exact absolute indices 7,9,11.
     # Cached index 10 must not be rounded or broadcast onto either 9 or 11.
     assert routes["semantic_known"].tolist() == [[False, False, True]]
     assert routes["action"].tolist() == [[False, False, True]]
     assert routes["ignore"].tolist() == [[True, True, False]]
+
+
+def test_semantic_cache_selection_teacher_must_match_routing_teacher(tmp_path):
+    path = tmp_path / "semantic.json"
+    path.write_text(json.dumps(semantic_payload([])), encoding="utf-8")
+    _, _, _, payload = load_semantic_cache(path)
+    with pytest.raises(ValueError, match="differs from routing teacher"):
+        validate_semantic_selection_provenance(
+            payload,
+            {
+                "routing_teacher_checkpoint_sha256": "c" * 64,
+                "routing_teacher_state_sha256": "b" * 64,
+                "routing_teacher_weights": "ema",
+            },
+            0.1,
+            0.7,
+        )
 
 
 def test_online_route_uses_current_teacher_top1_not_cached_class():

@@ -102,16 +102,21 @@ def calibrate_thresholds(records, quantile=0.90, epsilon_bg=0.01):
     }
 
 
-def model_state_sha256(model):
-    """Stable identifier for the exact parameters used during calibration."""
+def state_dict_sha256(state_dict):
+    """Stable identifier for an exact model state dictionary."""
     digest = hashlib.sha256()
-    for name, tensor in sorted(model.state_dict().items()):
+    for name, tensor in sorted(state_dict.items()):
         value = tensor.detach().cpu().contiguous()
         digest.update(name.encode("utf-8"))
         digest.update(str(tuple(value.shape)).encode("utf-8"))
         digest.update(str(value.dtype).encode("utf-8"))
         digest.update(value.numpy().tobytes())
     return digest.hexdigest()
+
+
+def model_state_sha256(model):
+    """Stable identifier for the exact parameters used during calibration."""
+    return state_dict_sha256(model.state_dict())
 
 
 def save_calibration_artifact(path, thresholds, manifest, metadata=None):

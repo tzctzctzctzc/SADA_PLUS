@@ -105,6 +105,8 @@ def main():
 
     from libs.datasets import make_dataset
     from libs.models.SADA import make_meta_arch
+    from libs.models.SADA.stage1_calibration import model_state_sha256
+    from libs.models.SADA.vlm_routing import file_sha256
     from libs.utils.utils import _update_config, read_yaml
     from tools.audit_original_sada_pseudolabels import move_video
 
@@ -129,6 +131,13 @@ def main():
         raise ValueError("checkpoint has no {}".format(state_key))
     model.load_state_dict(checkpoint[state_key])
     model.eval()
+    selection_teacher_provenance = {
+        "selection_teacher_checkpoint_sha256": file_sha256(args.checkpoint),
+        "selection_teacher_state_sha256": model_state_sha256(model),
+        "selection_teacher_weights": args.weights,
+        "selection_beta": float(args.beta),
+        "selection_alpha": float(cfg["model"].get("pl_threshold", 0.7)),
+    }
 
     alpha = float(cfg["model"].get("pl_threshold", 0.7))
     grouped = defaultdict(list)
@@ -231,6 +240,7 @@ def main():
         "checkpoint": args.checkpoint,
         "checkpoint_epoch": checkpoint.get("epoch"),
         "weights": args.weights,
+        "selection_teacher_provenance": selection_teacher_provenance,
         "levels": list(args.levels),
         "beta": args.beta,
         "alpha": alpha,

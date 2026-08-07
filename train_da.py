@@ -29,6 +29,7 @@ from libs.models.SADA.vlm_routing import (
     file_sha256,
     restore_training_trajectory,
     validate_sada_continuation_checkpoint,
+    validate_semantic_selection_provenance,
     validate_vlm_resume,
     validate_vlm_transition,
 )
@@ -283,6 +284,13 @@ def main(cfg, resume, project_name='sada', debug=False):
                 'routing_teacher_state_sha256': teacher_state_sha256,
                 'routing_teacher_weights': teacher_weights,
             }
+            if routing_teacher.vlm_semantic_payload is not None:
+                validate_semantic_selection_provenance(
+                    routing_teacher.vlm_semantic_payload,
+                    expected_teacher_provenance,
+                    cfg['vlm_routing']['beta'],
+                    model.stage1_alpha,
+                )
             if routing_teacher.vlm_validity_payload is not None:
                 validate_validity_provenance(
                     routing_teacher.vlm_validity_payload,

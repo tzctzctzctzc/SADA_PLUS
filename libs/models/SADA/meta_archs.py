@@ -367,6 +367,7 @@ class SADA(nn.Module):
         self.vlm_semantic_cache = {}
         self.vlm_semantic_entry_count = 0
         self.vlm_semantic_cache_sha256 = None
+        self.vlm_semantic_payload = None
         self.vlm_validity_model = None
         self.vlm_validity_payload = None
         self.vlm_validity_sha256 = None
@@ -395,6 +396,7 @@ class SADA(nn.Module):
                     self.vlm_semantic_cache,
                     self.vlm_semantic_entry_count,
                     self.vlm_semantic_cache_sha256,
+                    self.vlm_semantic_payload,
                 ) = load_semantic_cache(semantic_cache_path)
             validity_model_path = vlm_cfg.get('validity_model_path')
             if self.vlm_routing_mode in (

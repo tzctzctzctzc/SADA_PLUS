@@ -5,10 +5,21 @@ import sys
 from pathlib import Path
 
 import pytest
+import torch
 
 from tools.build_vlm_training_cache import build_entries, build_payload
 from tools.export_vlm_training_candidates import limit_queries
 from tools.migrate_legacy_candidate_blind_semantics import migrate_payload
+
+
+def selection_provenance():
+    return {
+        "selection_teacher_checkpoint_sha256": "c" * 64,
+        "selection_teacher_state_sha256": "d" * 64,
+        "selection_teacher_weights": "ema",
+        "selection_beta": 0.1,
+        "selection_alpha": 0.7,
+    }
 
 
 def manifest_row(candidate_id="p123", position=123, center=12.5):
@@ -82,7 +93,9 @@ def test_cache_contains_semantics_only(prediction, expected):
 
 def test_payload_locks_absolute_index_schema_and_provenance():
     manifest = manifest_row()
-    payload = build_payload([manifest], [prediction_row(manifest)])
+    payload = build_payload(
+        [manifest], [prediction_row(manifest)], selection_provenance()
+    )
     assert payload["version"] == 6
     assert payload["semantic_cache_schema_version"] == "offline-vlm-semantic-evidence-v1"
     assert payload["source"] == "offline_vlm_candidate_blind_semantics"
@@ -168,7 +181,13 @@ def legacy_rows():
 
 def test_legacy_candidate_blind_migration_keeps_only_absolute_semantics():
     manifest, prediction = legacy_rows()
-    payload = migrate_payload([manifest], [prediction], "c" * 64, "d" * 64)
+    payload = migrate_payload(
+        [manifest],
+        [prediction],
+        "c" * 64,
+        "d" * 64,
+        selection_provenance(),
+    )
     assert payload["counts"] == {"TARGET_ACTION": 1}
     assert payload["migration"]["input_predictions_sha256"] == "d" * 64
     assert payload["entries"] == [
@@ -186,7 +205,13 @@ def test_legacy_candidate_blind_migration_rejects_coordinate_mismatch():
     manifest, prediction = legacy_rows()
     prediction["anchor_index"] += 1
     with pytest.raises(ValueError, match="anchor_index differs"):
-        migrate_payload([manifest], [prediction], "c" * 64, "d" * 64)
+        migrate_payload(
+            [manifest],
+            [prediction],
+            "c" * 64,
+            "d" * 64,
+            selection_provenance(),
+        )
 
 
 def test_legacy_candidate_blind_migration_cli(tmp_path):
@@ -194,8 +219,24 @@ def test_legacy_candidate_blind_migration_cli(tmp_path):
     manifest_path = tmp_path / "manifest.jsonl"
     prediction_path = tmp_path / "predictions.jsonl"
     output_path = tmp_path / "cache.json"
+    checkpoint_path = tmp_path / "teacher.pt"
     manifest_path.write_text(json.dumps(manifest) + "\n", encoding="utf-8")
     prediction_path.write_text(json.dumps(prediction) + "\n", encoding="utf-8")
+    torch.save(
+        {"ema_state_dict": {"weight": torch.tensor([1.0])}}, checkpoint_path
+    )
+    Path(str(manifest_path) + ".meta.json").write_text(
+        json.dumps(
+            {
+                "selection_uses_target_gt": False,
+                "checkpoint": str(checkpoint_path),
+                "weights": "ema",
+                "beta": 0.1,
+                "alpha": 0.7,
+            }
+        ),
+        encoding="utf-8",
+    )
     subprocess.run(
         [
             sys.executable,

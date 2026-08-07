@@ -9,6 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import torch
+
 from tools.build_vlm_training_cache import (
     SEMANTIC_CACHE_SCHEMA_VERSION,
     build_payload,
@@ -23,6 +25,17 @@ LABEL_MAPPING = {"TARGET_FOREGROUND": "TARGET_ACTION"}
 
 def file_sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def state_dict_sha256(state_dict):
+    digest = hashlib.sha256()
+    for name, tensor in sorted(state_dict.items()):
+        value = tensor.detach().cpu().contiguous()
+        digest.update(name.encode("utf-8"))
+        digest.update(str(tuple(value.shape)).encode("utf-8"))
+        digest.update(str(value.dtype).encode("utf-8"))
+        digest.update(value.numpy().tobytes())
+    return digest.hexdigest()
 
 
 def _absolute_feature_index(row):
@@ -138,9 +151,15 @@ def normalize_legacy_rows(manifest_rows, prediction_rows):
     return normalized_manifests, normalized_predictions
 
 
-def migrate_payload(manifest_rows, prediction_rows, manifest_sha256, predictions_sha256):
+def migrate_payload(
+    manifest_rows,
+    prediction_rows,
+    manifest_sha256,
+    predictions_sha256,
+    selection_teacher_provenance,
+):
     manifests, predictions = normalize_legacy_rows(manifest_rows, prediction_rows)
-    payload = build_payload(manifests, predictions)
+    payload = build_payload(manifests, predictions, selection_teacher_provenance)
     payload["migration"] = {
         "source_routing_schema": LEGACY_ROUTING_SCHEMA,
         "source_prompt_version": LEGACY_PROMPT_VERSION,
@@ -156,13 +175,35 @@ def main():
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--predictions", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--manifest-metadata", default=None)
     args = parser.parse_args()
+    metadata_path = Path(args.manifest_metadata or (args.manifest + ".meta.json"))
+    if not metadata_path.is_file():
+        raise ValueError("legacy manifest metadata not found: {}".format(metadata_path))
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if metadata.get("selection_uses_target_gt") is not False:
+        raise ValueError("legacy candidate selection must forbid target GT")
+    checkpoint_path = Path(metadata["checkpoint"])
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    weights = metadata["weights"]
+    state_key = "ema_state_dict" if weights == "ema" else "state_dict"
+    if state_key not in checkpoint:
+        raise ValueError("legacy selection checkpoint has no {}".format(state_key))
+    selection_teacher_provenance = {
+        "selection_teacher_checkpoint_sha256": file_sha256(checkpoint_path),
+        "selection_teacher_state_sha256": state_dict_sha256(checkpoint[state_key]),
+        "selection_teacher_weights": weights,
+        "selection_beta": float(metadata["beta"]),
+        "selection_alpha": float(metadata["alpha"]),
+    }
     payload = migrate_payload(
         read_jsonl(args.manifest),
         read_jsonl(args.predictions),
         file_sha256(args.manifest),
         file_sha256(args.predictions),
+        selection_teacher_provenance,
     )
+    payload["manifest_metadata_sha256"] = file_sha256(metadata_path)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2), encoding="utf-8")

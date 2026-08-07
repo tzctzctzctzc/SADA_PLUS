@@ -26,6 +26,13 @@ SEMANTIC_LABELS = {
     "TRUE_BACKGROUND",
     "UNCERTAIN",
 }
+SEMANTIC_SELECTION_FIELDS = {
+    "selection_teacher_checkpoint_sha256",
+    "selection_teacher_state_sha256",
+    "selection_teacher_weights",
+    "selection_beta",
+    "selection_alpha",
+}
 
 VLM_TRANSITION_FIELDS = {
     "schema_version",
@@ -259,6 +266,53 @@ def validate_vlm_resume(checkpoint, expected_signature):
     return actual
 
 
+def semantic_selection_provenance(payload):
+    provenance = payload.get("selection_teacher_provenance")
+    if not isinstance(provenance, dict) or set(provenance) != SEMANTIC_SELECTION_FIELDS:
+        raise ValueError("semantic cache selection teacher provenance fields differ")
+    for field in (
+        "selection_teacher_checkpoint_sha256",
+        "selection_teacher_state_sha256",
+    ):
+        value = provenance[field]
+        if not isinstance(value, str) or len(value) != 64 or any(
+            character not in "0123456789abcdef" for character in value
+        ):
+            raise ValueError("semantic cache has an invalid selection teacher hash")
+    if provenance["selection_teacher_weights"] not in {"student", "ema"}:
+        raise ValueError("semantic cache has invalid selection teacher weights")
+    beta = float(provenance["selection_beta"])
+    alpha = float(provenance["selection_alpha"])
+    if not 0.0 <= beta < alpha <= 1.0:
+        raise ValueError("semantic cache has invalid selection thresholds")
+    return {**provenance, "selection_beta": beta, "selection_alpha": alpha}
+
+
+def validate_semantic_selection_provenance(
+    payload,
+    expected_teacher_provenance,
+    expected_beta,
+    expected_alpha,
+):
+    actual = semantic_selection_provenance(payload)
+    expected = {
+        "selection_teacher_checkpoint_sha256": expected_teacher_provenance[
+            "routing_teacher_checkpoint_sha256"
+        ],
+        "selection_teacher_state_sha256": expected_teacher_provenance[
+            "routing_teacher_state_sha256"
+        ],
+        "selection_teacher_weights": expected_teacher_provenance[
+            "routing_teacher_weights"
+        ],
+        "selection_beta": float(expected_beta),
+        "selection_alpha": float(expected_alpha),
+    }
+    if actual != expected:
+        raise ValueError("semantic cache selection teacher differs from routing teacher")
+    return actual
+
+
 def load_semantic_cache(path):
     """Load candidate-blind VLM evidence keyed only by absolute feature index."""
     raw = Path(path).read_bytes()
@@ -269,6 +323,7 @@ def load_semantic_cache(path):
         raise ValueError("VLM cache is not candidate-blind semantic evidence")
     if payload.get("key_fields") != ["video_id", "absolute_feature_index"]:
         raise ValueError("VLM semantic cache must use the exact absolute-index key")
+    semantic_selection_provenance(payload)
 
     cache = {}
     for entry in payload.get("entries", []):
@@ -310,7 +365,7 @@ def load_semantic_cache(path):
             "semantic_label": semantic_label,
             "absolute_center_time": absolute_time,
         }
-    return cache, len(cache), hashlib.sha256(raw).hexdigest()
+    return cache, len(cache), hashlib.sha256(raw).hexdigest(), payload
 
 
 def _exact_absolute_index(local_coordinate, crop_start):

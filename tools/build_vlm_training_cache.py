@@ -1,6 +1,7 @@
 """Validate candidate-blind VLM predictions and build an exact semantic cache."""
 
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -15,6 +16,13 @@ VALID_PREDICTIONS = {
     "OTHER_ACTIVITY",
     "TRUE_BACKGROUND",
     "UNCERTAIN",
+}
+SELECTION_PROVENANCE_FIELDS = {
+    "selection_teacher_checkpoint_sha256",
+    "selection_teacher_state_sha256",
+    "selection_teacher_weights",
+    "selection_beta",
+    "selection_alpha",
 }
 
 
@@ -170,7 +178,31 @@ def build_entries(manifest_rows, prediction_rows):
     return entries
 
 
-def build_payload(manifest_rows, prediction_rows):
+def validate_selection_provenance(provenance):
+    if not isinstance(provenance, dict) or set(provenance) != SELECTION_PROVENANCE_FIELDS:
+        raise ValueError("semantic selection teacher provenance fields differ")
+    for field in (
+        "selection_teacher_checkpoint_sha256",
+        "selection_teacher_state_sha256",
+    ):
+        if not isinstance(provenance[field], str) or not re.fullmatch(
+            r"[0-9a-f]{64}", provenance[field]
+        ):
+            raise ValueError("invalid semantic selection teacher hash")
+    if provenance["selection_teacher_weights"] not in {"student", "ema"}:
+        raise ValueError("invalid semantic selection teacher weights")
+    beta = float(provenance["selection_beta"])
+    alpha = float(provenance["selection_alpha"])
+    if not 0.0 <= beta < alpha <= 1.0:
+        raise ValueError("invalid semantic selection thresholds")
+    return {
+        **provenance,
+        "selection_beta": beta,
+        "selection_alpha": alpha,
+    }
+
+
+def build_payload(manifest_rows, prediction_rows, selection_teacher_provenance):
     provenance = _validate_provenance(prediction_rows)
     entries = build_entries(manifest_rows, prediction_rows)
     counts = Counter(entry["semantic_label"] for entry in entries)
@@ -179,6 +211,9 @@ def build_payload(manifest_rows, prediction_rows):
         "semantic_cache_schema_version": SEMANTIC_CACHE_SCHEMA_VERSION,
         "source": "offline_vlm_candidate_blind_semantics",
         "key_fields": ["video_id", "absolute_feature_index"],
+        "selection_teacher_provenance": validate_selection_provenance(
+            selection_teacher_provenance
+        ),
         **provenance,
         "counts": dict(sorted(counts.items())),
         "entries": entries,
@@ -190,8 +225,28 @@ def main():
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--predictions", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--manifest-metadata", default=None)
     args = parser.parse_args()
-    payload = build_payload(read_jsonl(args.manifest), read_jsonl(args.predictions))
+    metadata_path = Path(args.manifest_metadata or (args.manifest + ".meta.json"))
+    if not metadata_path.is_file():
+        raise ValueError("semantic manifest metadata not found: {}".format(metadata_path))
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if metadata.get("selection_uses_target_gt") is not False:
+        raise ValueError("semantic candidate selection must forbid target GT")
+    payload = build_payload(
+        read_jsonl(args.manifest),
+        read_jsonl(args.predictions),
+        metadata.get("selection_teacher_provenance"),
+    )
+    payload["manifest_sha256"] = hashlib.sha256(
+        Path(args.manifest).read_bytes()
+    ).hexdigest()
+    payload["predictions_sha256"] = hashlib.sha256(
+        Path(args.predictions).read_bytes()
+    ).hexdigest()
+    payload["manifest_metadata_sha256"] = hashlib.sha256(
+        metadata_path.read_bytes()
+    ).hexdigest()
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2), encoding="utf-8")
