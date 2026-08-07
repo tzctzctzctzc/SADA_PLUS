@@ -69,6 +69,22 @@ def sampling_protocol():
     }
 
 
+def fit_protocol():
+    return {
+        "model_type": "logistic",
+        "feature_group": "reliability_full",
+        "max_iter": 50,
+        "epochs": 200,
+        "learning_rate": 0.001,
+        "l2": 0.01,
+        "gbdt_estimators": 100,
+        "gbdt_learning_rate": 0.05,
+        "gbdt_max_depth": 3,
+        "fit_batch_size": 4096,
+        "seed": 7,
+    }
+
+
 def provenance_metadata():
     metadata = {}
     for name, protocol in (
@@ -76,6 +92,7 @@ def provenance_metadata():
         ("assignment_protocol", assignment_protocol()),
         ("cohort_protocol", cohort_protocol()),
         ("sampling_protocol", sampling_protocol()),
+        ("fit_protocol", fit_protocol()),
     ):
         metadata[name] = protocol
         metadata[name + "_sha256"] = anchor_validity.protocol_sha256(protocol)
@@ -110,7 +127,9 @@ def test_tabular_models_share_probability_interface(model_type):
     if model_type == "logistic":
         model = anchor_validity.fit_logistic_probe(features, labels, max_iter=10)
     elif model_type == "mlp":
-        model = anchor_validity.fit_mlp_probe(features, labels, epochs=5)
+        model = anchor_validity.fit_mlp_probe(
+            features, labels, epochs=5, batch_size=8
+        )
     else:
         model = anchor_validity.fit_gbdt_probe(
             features, labels, n_estimators=5, max_depth=2
@@ -123,7 +142,7 @@ def test_tabular_models_share_probability_interface(model_type):
 def test_frozen_fpn_validity_head_uses_fpn_and_structural_inputs():
     features, fpn, labels = sample_data()
     model = anchor_validity.fit_fpn_mlp_probe(
-        features, fpn, labels, epochs=5
+        features, fpn, labels, epochs=5, batch_size=8
     )
     scores = anchor_validity.probe_probabilities(features, model, fpn)
     assert scores.shape == labels.shape

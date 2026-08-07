@@ -74,11 +74,25 @@ MODEL_PROVENANCE_FIELDS = (
     "threshold",
     "model_sha256",
 )
+FIT_PROTOCOL_FIELDS = (
+    "model_type",
+    "feature_group",
+    "max_iter",
+    "epochs",
+    "learning_rate",
+    "l2",
+    "gbdt_estimators",
+    "gbdt_learning_rate",
+    "gbdt_max_depth",
+    "fit_batch_size",
+    "seed",
+)
 PROTOCOL_FIELDS = {
     "teacher_provenance": TEACHER_PROVENANCE_FIELDS,
     "assignment_protocol": ASSIGNMENT_PROTOCOL_FIELDS,
     "cohort_protocol": COHORT_PROTOCOL_FIELDS,
     "sampling_protocol": SAMPLING_PROTOCOL_FIELDS,
+    "fit_protocol": FIT_PROTOCOL_FIELDS,
     "model_provenance": MODEL_PROVENANCE_FIELDS,
 }
 
@@ -301,27 +315,56 @@ class _FPNValidityMLP(nn.Module):
         return self.output(joined).squeeze(-1)
 
 
-def _weighted_bce(logits, labels):
+def _weighted_bce(logits, labels, pos_weight=None):
     labels = labels.float()
-    positives = labels.sum().clamp_min(1.0)
-    negatives = (1.0 - labels).sum().clamp_min(1.0)
+    if pos_weight is None:
+        positives = labels.sum().clamp_min(1.0)
+        negatives = (1.0 - labels).sum().clamp_min(1.0)
+        pos_weight = negatives / positives
     return F.binary_cross_entropy_with_logits(
-        logits, labels, pos_weight=negatives / positives
+        logits, labels, pos_weight=pos_weight
     )
 
 
-def _fit_torch_model(model, train_args, train_labels, epochs, learning_rate, l2, seed):
+def _fit_torch_model(
+    model,
+    train_args,
+    train_labels,
+    epochs,
+    learning_rate,
+    l2,
+    seed,
+    device=None,
+    batch_size=None,
+):
     torch.manual_seed(seed)
+    device = torch.device(device or train_labels.device)
+    model = model.to(device)
+    train_args = tuple(value.to(device) for value in train_args)
+    train_labels = train_labels.to(device)
+    count = len(train_labels)
+    batch_size = count if batch_size is None else min(int(batch_size), count)
+    if batch_size <= 0:
+        raise ValueError("fit batch size must be positive")
+    positives = train_labels.sum().clamp_min(1.0)
+    negatives = (1.0 - train_labels).sum().clamp_min(1.0)
+    pos_weight = negatives / positives
+    generator = torch.Generator().manual_seed(seed)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=l2)
     model.train()
     for _ in range(int(epochs)):
-        optimizer.zero_grad()
-        logits = model(*train_args)
-        loss = _weighted_bce(logits, train_labels)
-        loss.backward()
-        optimizer.step()
+        order = torch.randperm(count, generator=generator)
+        for start in range(0, count, batch_size):
+            indices = order[start:start + batch_size].to(device)
+            optimizer.zero_grad()
+            logits = model(*(value[indices] for value in train_args))
+            loss = _weighted_bce(
+                logits, train_labels[indices], pos_weight=pos_weight
+            )
+            loss.backward()
+            optimizer.step()
     model.eval()
-    return model
+    return model.cpu()
 
 
 def _linear_payload(linear):
@@ -339,6 +382,8 @@ def fit_mlp_probe(
     learning_rate=1e-3,
     l2=1e-4,
     seed=20260808,
+    device=None,
+    batch_size=None,
 ):
     labels = _check_binary_labels(labels)
     torch.manual_seed(seed)
@@ -354,6 +399,8 @@ def fit_mlp_probe(
         learning_rate,
         l2,
         seed,
+        device,
+        batch_size,
     )
     linear_layers = [layer for layer in model.layers if isinstance(layer, nn.Linear)]
     return {
@@ -419,6 +466,8 @@ def fit_fpn_mlp_probe(
     learning_rate=1e-3,
     l2=1e-4,
     seed=20260808,
+    device=None,
+    batch_size=None,
 ):
     labels = _check_binary_labels(labels)
     torch.manual_seed(seed)
@@ -439,6 +488,8 @@ def fit_fpn_mlp_probe(
         learning_rate,
         l2,
         seed,
+        device,
+        batch_size,
     )
     return {
         "model_type": "fpn_mlp",

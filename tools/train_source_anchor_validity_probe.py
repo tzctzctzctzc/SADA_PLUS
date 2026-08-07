@@ -59,6 +59,7 @@ def parse_args():
     parser.add_argument("--gbdt-estimators", type=int, default=100)
     parser.add_argument("--gbdt-learning-rate", type=float, default=0.05)
     parser.add_argument("--gbdt-max-depth", type=int, default=3)
+    parser.add_argument("--fit-batch-size", type=int, default=4096)
     parser.add_argument("--crop-alignment", type=int, default=1)
     parser.add_argument("--max-train-anchors", type=int, default=200000)
     parser.add_argument("--max-videos", type=int, default=None)
@@ -218,6 +219,8 @@ def fit_model(args, features, fpn_features, labels):
             args.learning_rate,
             args.l2,
             args.seed,
+            args.device,
+            args.fit_batch_size,
         )
     if args.model_type == "gbdt":
         return fit_gbdt_probe(
@@ -237,6 +240,8 @@ def fit_model(args, features, fpn_features, labels):
         args.learning_rate,
         args.l2,
         args.seed,
+        args.device,
+        args.fit_batch_size,
     )
 
 
@@ -246,6 +251,8 @@ def main():
         raise ValueError("--crop-alignment must be positive")
     if args.train_crops_per_video <= 0 or args.val_crops_per_video <= 0:
         raise ValueError("crops per video must be positive")
+    if args.fit_batch_size <= 0:
+        raise ValueError("--fit-batch-size must be positive")
     if args.model_type == "fpn_mlp" and args.feature_group != "structure_pure":
         raise ValueError("fpn_mlp uses FPN + structural scalars; select structure_pure")
     random.seed(args.seed)
@@ -284,6 +291,19 @@ def main():
         args.train_crops_per_video,
         args.val_crops_per_video,
     )
+    fit_protocol = {
+        "model_type": args.model_type,
+        "feature_group": args.feature_group,
+        "max_iter": args.max_iter,
+        "epochs": args.epochs,
+        "learning_rate": args.learning_rate,
+        "l2": args.l2,
+        "gbdt_estimators": args.gbdt_estimators,
+        "gbdt_learning_rate": args.gbdt_learning_rate,
+        "gbdt_max_depth": args.gbdt_max_depth,
+        "fit_batch_size": args.fit_batch_size,
+        "seed": args.seed,
+    }
     try:
         git_commit = subprocess.check_output(
             ["git", "rev-parse", "HEAD"],
@@ -346,6 +366,8 @@ def main():
             "cohort_protocol_sha256": protocol_sha256(cohort_protocol),
             "sampling_protocol": sampling_protocol,
             "sampling_protocol_sha256": protocol_sha256(sampling_protocol),
+            "fit_protocol": fit_protocol,
+            "fit_protocol_sha256": protocol_sha256(fit_protocol),
             "git_commit": git_commit,
             "calibration": calibration,
             "source_train": {
