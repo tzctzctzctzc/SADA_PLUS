@@ -590,6 +590,7 @@ def high_precision_threshold(scores, labels, minimum_precision):
     labels = labels.bool()
     candidates = torch.unique(scores).sort(descending=True).values
     best = None
+    observed = None
     positives = int(labels.sum())
     for threshold in candidates:
         selected = scores >= threshold
@@ -597,13 +598,21 @@ def high_precision_threshold(scores, labels, minimum_precision):
         count = int(selected.sum())
         precision = true_positive / max(count, 1)
         recall = true_positive / max(positives, 1)
+        observation = (precision, count, float(threshold), recall)
+        if observed is None or observation[:2] > observed[:2]:
+            observed = observation
         if precision + 1e-12 < minimum_precision:
             continue
         candidate = (recall, count, float(threshold), precision)
         if best is None or candidate[:2] > best[:2]:
             best = candidate
     if best is None:
-        raise ValueError("source val cannot satisfy minimum validity precision")
+        precision, count, threshold, recall = observed
+        raise ValueError(
+            "source val cannot satisfy minimum validity precision; "
+            "maximum observed precision={:.6f}, selected={}, threshold={:.6f}, "
+            "recall={:.6f}".format(precision, count, threshold, recall)
+        )
     recall, count, threshold, precision = best
     return {
         "threshold": threshold,

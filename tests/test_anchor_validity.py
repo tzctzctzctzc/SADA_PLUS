@@ -161,6 +161,15 @@ def test_high_precision_calibration_uses_source_val_labels_only():
     assert result["recall"] == pytest.approx(2 / 3)
 
 
+def test_high_precision_failure_reports_observed_ceiling():
+    with pytest.raises(ValueError, match="maximum observed precision=0.500000"):
+        anchor_validity.high_precision_threshold(
+            torch.tensor([0.9, 0.8]),
+            torch.tensor([0, 1]),
+            minimum_precision=0.9,
+        )
+
+
 def test_validity_artifact_is_source_only_and_hashes_exact_bytes(tmp_path):
     features, _, labels = sample_data()
     model = anchor_validity.fit_logistic_probe(features, labels, max_iter=5)
