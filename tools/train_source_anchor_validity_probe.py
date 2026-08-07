@@ -1,6 +1,7 @@
 """Train and calibrate a source-only anchor-validity model on current crops."""
 
 import argparse
+import copy
 import json
 import random
 import subprocess
@@ -23,6 +24,7 @@ from libs.models.SADA.anchor_validity import (
     fit_logistic_probe,
     fit_mlp_probe,
     high_precision_threshold,
+    partition_source_validation_videos,
     probe_probabilities,
     protocol_sha256,
     sampling_protocol_from_config,
@@ -65,6 +67,8 @@ def parse_args():
     parser.add_argument("--max-videos", type=int, default=None)
     parser.add_argument("--train-crops-per-video", type=int, default=1)
     parser.add_argument("--val-crops-per-video", type=int, default=1)
+    parser.add_argument("--source-calibration-fraction", type=float, default=0.6)
+    parser.add_argument("--validation-split-seed", type=int, default=20260809)
     parser.add_argument("--seed", type=int, default=20260808)
     return parser.parse_args()
 
@@ -253,6 +257,8 @@ def main():
         raise ValueError("crops per video must be positive")
     if args.fit_batch_size <= 0:
         raise ValueError("--fit-batch-size must be positive")
+    if not 0.0 < args.source_calibration_fraction < 1.0:
+        raise ValueError("--source-calibration-fraction must be in (0, 1)")
     if args.model_type == "fpn_mlp" and args.feature_group != "structure_pure":
         raise ValueError("fpn_mlp uses FPN + structural scalars; select structure_pure")
     random.seed(args.seed)
@@ -269,6 +275,20 @@ def main():
     source_val = make_dataset(
         cfg["dataset_name"], True, cfg["src_val_split"], **cfg["dataset"]
     )
+    val_items = tuple(source_val.data_list)
+    if args.max_videos is not None:
+        val_items = val_items[:args.max_videos]
+    calibration_items, report_items, validation_partition = (
+        partition_source_validation_videos(
+            val_items,
+            args.source_calibration_fraction,
+            args.validation_split_seed,
+        )
+    )
+    source_calibration = copy.copy(source_val)
+    source_calibration.data_list = calibration_items
+    source_report = copy.copy(source_val)
+    source_report.data_list = report_items
     model = make_meta_arch(cfg["model_name"], cfg, device=args.device).to(args.device)
     checkpoint = torch.load(args.checkpoint, map_location=args.device)
     state_key = "ema_state_dict" if args.weights == "ema" else "state_dict"
@@ -322,13 +342,22 @@ def main():
         args.max_videos,
         args.train_crops_per_video,
     )
-    val_x, val_fpn, val_y, val_stats = collect_split(
+    calibration_x, calibration_fpn, calibration_y, calibration_stats = collect_split(
         model,
-        source_val,
+        source_calibration,
         alpha,
         args.beta,
         args.device,
-        args.max_videos,
+        None,
+        args.val_crops_per_video,
+    )
+    report_x, report_fpn, report_y, report_stats = collect_split(
+        model,
+        source_report,
+        alpha,
+        args.beta,
+        args.device,
+        None,
         args.val_crops_per_video,
     )
     train_x, train_fpn, train_y = bounded_sample(
@@ -336,8 +365,13 @@ def main():
     )
     probe = fit_model(args, train_x, train_fpn, train_y)
     train_scores = probe_probabilities(train_x, probe, train_fpn)
-    val_scores = probe_probabilities(val_x, probe, val_fpn)
-    calibration = high_precision_threshold(val_scores, val_y, args.minimum_precision)
+    calibration_scores = probe_probabilities(
+        calibration_x, probe, calibration_fpn
+    )
+    report_scores = probe_probabilities(report_x, probe, report_fpn)
+    calibration = high_precision_threshold(
+        calibration_scores, calibration_y, args.minimum_precision
+    )
     threshold = calibration["threshold"]
     payload = serialize_probe(
         probe,
@@ -368,22 +402,32 @@ def main():
             "sampling_protocol_sha256": protocol_sha256(sampling_protocol),
             "fit_protocol": fit_protocol,
             "fit_protocol_sha256": protocol_sha256(fit_protocol),
+            "validation_partition": validation_partition,
+            "validation_partition_sha256": protocol_sha256(
+                validation_partition
+            ),
             "git_commit": git_commit,
             "calibration": calibration,
             "source_train": {
                 **train_stats,
                 **split_metrics(train_scores, train_y, threshold),
             },
-            "source_val": {
-                **val_stats,
-                **split_metrics(val_scores, val_y, threshold),
+            "source_calibration": {
+                **calibration_stats,
+                **split_metrics(
+                    calibration_scores, calibration_y, threshold
+                ),
+            },
+            "source_report": {
+                **report_stats,
+                **split_metrics(report_scores, report_y, threshold),
             },
         },
     )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    print(json.dumps({"output": str(output), **payload["source_val"]}, indent=2))
+    print(json.dumps({"output": str(output), **payload["source_report"]}, indent=2))
 
 
 if __name__ == "__main__":

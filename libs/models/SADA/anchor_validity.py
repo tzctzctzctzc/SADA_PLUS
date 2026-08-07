@@ -3,6 +3,7 @@
 import hashlib
 import json
 import math
+import random
 from pathlib import Path
 
 import torch
@@ -10,7 +11,7 @@ from torch import nn
 from torch.nn import functional as F
 
 
-STRUCTURE_PROBE_SCHEMA_VERSION = "source-supervised-anchor-validity-v4"
+STRUCTURE_PROBE_SCHEMA_VERSION = "source-supervised-anchor-validity-v5"
 BASE_FEATURE_NAMES = (
     "teacher_score",
     "teacher_margin",
@@ -87,12 +88,20 @@ FIT_PROTOCOL_FIELDS = (
     "fit_batch_size",
     "seed",
 )
+VALIDATION_PARTITION_FIELDS = (
+    "policy",
+    "seed",
+    "calibration_fraction",
+    "calibration_video_ids",
+    "report_video_ids",
+)
 PROTOCOL_FIELDS = {
     "teacher_provenance": TEACHER_PROVENANCE_FIELDS,
     "assignment_protocol": ASSIGNMENT_PROTOCOL_FIELDS,
     "cohort_protocol": COHORT_PROTOCOL_FIELDS,
     "sampling_protocol": SAMPLING_PROTOCOL_FIELDS,
     "fit_protocol": FIT_PROTOCOL_FIELDS,
+    "validation_partition": VALIDATION_PARTITION_FIELDS,
     "model_provenance": MODEL_PROVENANCE_FIELDS,
 }
 
@@ -186,6 +195,38 @@ def sampling_protocol_from_config(
         "calibration_crops_per_video": int(calibration_crops_per_video),
         "stratification_policy": "none_random_without_replacement",
     }
+
+
+def partition_source_validation_videos(data_list, calibration_fraction, seed):
+    """Create deterministic, video-disjoint calibration and report subsets."""
+    if not 0.0 < float(calibration_fraction) < 1.0:
+        raise ValueError("source calibration fraction must be in (0, 1)")
+    rows = sorted(data_list, key=lambda item: str(item["id"]))
+    if len(rows) < 2:
+        raise ValueError("source validation needs at least two videos")
+    video_ids = [str(item["id"]) for item in rows]
+    if len(set(video_ids)) != len(video_ids):
+        raise ValueError("source validation video ids must be unique")
+    shuffled = list(video_ids)
+    random.Random(int(seed)).shuffle(shuffled)
+    calibration_count = max(
+        1, min(len(rows) - 1, int(round(len(rows) * float(calibration_fraction))))
+    )
+    calibration_ids = set(shuffled[:calibration_count])
+    calibration_rows = tuple(
+        item for item in rows if str(item["id"]) in calibration_ids
+    )
+    report_rows = tuple(
+        item for item in rows if str(item["id"]) not in calibration_ids
+    )
+    protocol = {
+        "policy": "deterministic_video_disjoint_holdout",
+        "seed": int(seed),
+        "calibration_fraction": float(calibration_fraction),
+        "calibration_video_ids": [str(item["id"]) for item in calibration_rows],
+        "report_video_ids": [str(item["id"]) for item in report_rows],
+    }
+    return calibration_rows, report_rows, protocol
 
 
 def anchor_validity_features(

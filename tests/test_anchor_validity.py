@@ -85,6 +85,16 @@ def fit_protocol():
     }
 
 
+def validation_partition():
+    return {
+        "policy": "deterministic_video_disjoint_holdout",
+        "seed": 11,
+        "calibration_fraction": 0.6,
+        "calibration_video_ids": ["v1", "v3"],
+        "report_video_ids": ["v2"],
+    }
+
+
 def provenance_metadata():
     metadata = {}
     for name, protocol in (
@@ -93,6 +103,7 @@ def provenance_metadata():
         ("cohort_protocol", cohort_protocol()),
         ("sampling_protocol", sampling_protocol()),
         ("fit_protocol", fit_protocol()),
+        ("validation_partition", validation_partition()),
     ):
         metadata[name] = protocol
         metadata[name + "_sha256"] = anchor_validity.protocol_sha256(protocol)
@@ -170,6 +181,22 @@ def test_high_precision_failure_reports_observed_ceiling():
         )
 
 
+def test_source_validation_partition_is_deterministic_and_video_disjoint():
+    rows = [{"id": "v{}".format(index)} for index in range(7)]
+    first = anchor_validity.partition_source_validation_videos(rows, 0.6, 11)
+    second = anchor_validity.partition_source_validation_videos(rows, 0.6, 11)
+    assert first == second
+    calibration, report, protocol = first
+    calibration_ids = {row["id"] for row in calibration}
+    report_ids = {row["id"] for row in report}
+    assert len(calibration_ids) == 4
+    assert len(report_ids) == 3
+    assert calibration_ids.isdisjoint(report_ids)
+    assert calibration_ids | report_ids == {row["id"] for row in rows}
+    assert protocol["calibration_video_ids"] == [row["id"] for row in calibration]
+    assert protocol["report_video_ids"] == [row["id"] for row in report]
+
+
 def test_validity_artifact_is_source_only_and_hashes_exact_bytes(tmp_path):
     features, _, labels = sample_data()
     model = anchor_validity.fit_logistic_probe(features, labels, max_iter=5)
@@ -185,7 +212,7 @@ def test_validity_artifact_is_source_only_and_hashes_exact_bytes(tmp_path):
     path = tmp_path / "probe.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     loaded, restored, digest = anchor_validity.load_validity_model(path)
-    assert loaded["schema_version"] == "source-supervised-anchor-validity-v4"
+    assert loaded["schema_version"] == "source-supervised-anchor-validity-v5"
     assert loaded["evidence_family"] == "reliability_full"
     assert loaded["model_provenance"]["model_type"] == "logistic"
     assert len(digest) == 64
