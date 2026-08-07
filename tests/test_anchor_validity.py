@@ -22,18 +22,62 @@ def sample_data(count=40):
     return features, fpn, labels
 
 
-def routing_context():
+def teacher_provenance():
     return {
+        "routing_teacher_checkpoint_sha256": "f" * 64,
         "routing_teacher_state_sha256": "a" * 64,
         "routing_teacher_weights": "ema",
+    }
+
+
+def assignment_protocol():
+    return {
+        "regression_range": [[0, 4], [2, 8]],
+        "center_sample": "radius",
+        "center_sample_radius": 1.5,
+        "reg_distance": True,
+        "fpn_strides": [1, 2],
+        "n_levels": 2,
+    }
+
+
+def cohort_protocol():
+    return {
+        "target_class_ids": list(range(10)),
+        "action_subsampling": "10_majority_classes",
+        "semantic_condition": "center_inside_target_event_strict",
+        "confidence_condition": "beta < teacher_score < alpha",
         "alpha": 0.7,
         "beta": 0.1,
-        "crop_alignment": 1,
-        "fpn_dim": 16,
-        "feat_stride": 16.0,
-        "feat_num_frames": 32,
-        "num_classes": 10,
+        "source_train_split": ["train"],
+        "source_calibration_split": ["val"],
     }
+
+
+def sampling_protocol():
+    return {
+        "max_seq_len": 2304,
+        "crop_ratio": [0.9, 1.0],
+        "trunc_thresh": 0.3,
+        "crop_alignment": 1,
+        "sampling_seed": 7,
+        "max_train_anchors": 200000,
+        "max_videos": None,
+        "stratification_policy": "none_random_without_replacement",
+    }
+
+
+def provenance_metadata():
+    metadata = {}
+    for name, protocol in (
+        ("teacher_provenance", teacher_provenance()),
+        ("assignment_protocol", assignment_protocol()),
+        ("cohort_protocol", cohort_protocol()),
+        ("sampling_protocol", sampling_protocol()),
+    ):
+        metadata[name] = protocol
+        metadata[name + "_sha256"] = anchor_validity.protocol_sha256(protocol)
+    return metadata
 
 
 def test_anchor_features_exclude_actionness_and_keep_geometry_and_level():
@@ -105,17 +149,15 @@ def test_validity_artifact_is_source_only_and_hashes_exact_bytes(tmp_path):
         {
             "target_gt_usage": "forbidden",
             "supervision": "source_gt_official_label_points_conditioned_on_target_event",
-            "routing_context": routing_context(),
-            "routing_context_sha256": anchor_validity.routing_context_sha256(
-                routing_context()
-            ),
+            **provenance_metadata(),
         },
     )
     path = tmp_path / "probe.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     loaded, restored, digest = anchor_validity.load_validity_model(path)
-    assert loaded["schema_version"] == "source-supervised-anchor-validity-v3"
+    assert loaded["schema_version"] == "source-supervised-anchor-validity-v4"
     assert loaded["evidence_family"] == "reliability_full"
+    assert loaded["model_provenance"]["model_type"] == "logistic"
     assert len(digest) == 64
     assert anchor_validity.probe_probabilities(features, restored).shape == labels.shape
 
@@ -123,23 +165,67 @@ def test_validity_artifact_is_source_only_and_hashes_exact_bytes(tmp_path):
 def test_validity_artifact_fails_on_teacher_context_mismatch(tmp_path):
     features, _, labels = sample_data()
     model = anchor_validity.fit_logistic_probe(features, labels, max_iter=5)
-    context = routing_context()
     payload = anchor_validity.serialize_probe(
         model,
         0.8,
         {
             "target_gt_usage": "forbidden",
             "supervision": "source_gt_official_label_points_conditioned_on_target_event",
-            "routing_context": context,
-            "routing_context_sha256": anchor_validity.routing_context_sha256(
-                context
-            ),
+            **provenance_metadata(),
         },
     )
     path = tmp_path / "probe.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     loaded, _, _ = anchor_validity.load_validity_model(path)
-    expected = dict(context)
+    expected = dict(teacher_provenance())
     expected["routing_teacher_state_sha256"] = "b" * 64
-    with pytest.raises(ValueError, match="differs from frozen routing teacher"):
-        anchor_validity.validate_validity_routing_context(loaded, expected)
+    with pytest.raises(ValueError, match="provenance differs"):
+        anchor_validity.validate_validity_provenance(
+            loaded, expected, assignment_protocol(), cohort_protocol()
+        )
+
+
+def test_validity_artifact_fails_when_tal_assignment_definition_changes(tmp_path):
+    features, _, labels = sample_data()
+    model = anchor_validity.fit_logistic_probe(features, labels, max_iter=5)
+    payload = anchor_validity.serialize_probe(
+        model,
+        0.8,
+        {
+            "target_gt_usage": "forbidden",
+            "supervision": "source_gt_official_label_points_conditioned_on_target_event",
+            **provenance_metadata(),
+        },
+    )
+    path = tmp_path / "probe.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    loaded, _, _ = anchor_validity.load_validity_model(path)
+    expected_assignment = dict(assignment_protocol())
+    expected_assignment["center_sample_radius"] = 2.0
+    with pytest.raises(ValueError, match="assignment_protocol"):
+        anchor_validity.validate_validity_provenance(
+            loaded,
+            teacher_provenance(),
+            expected_assignment,
+            cohort_protocol(),
+        )
+
+
+def test_validity_artifact_rejects_tampered_sampling_protocol(tmp_path):
+    features, _, labels = sample_data()
+    model = anchor_validity.fit_logistic_probe(features, labels, max_iter=5)
+    metadata = provenance_metadata()
+    metadata["sampling_protocol"]["sampling_seed"] = 99
+    payload = anchor_validity.serialize_probe(
+        model,
+        0.8,
+        {
+            "target_gt_usage": "forbidden",
+            "supervision": "source_gt_official_label_points_conditioned_on_target_event",
+            **metadata,
+        },
+    )
+    path = tmp_path / "probe.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="sampling_protocol hash mismatch"):
+        anchor_validity.load_validity_model(path)

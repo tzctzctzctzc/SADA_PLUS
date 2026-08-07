@@ -12,7 +12,8 @@ from .anchor_validity import anchor_validity_features, probe_probabilities
 
 
 SEMANTIC_CACHE_SCHEMA_VERSION = "offline-vlm-semantic-evidence-v1"
-VLM_RESUME_SCHEMA_VERSION = "frozen-routing-teacher-v1"
+VLM_RESUME_SCHEMA_VERSION = "frozen-routing-teacher-v2"
+VLM_TRANSITION_SCHEMA_VERSION = "sada-to-vlm-continuation-v1"
 ROUTING_MODES = {
     "semantic_only",
     "validity_only",
@@ -25,6 +26,196 @@ SEMANTIC_LABELS = {
     "TRUE_BACKGROUND",
     "UNCERTAIN",
 }
+
+VLM_TRANSITION_FIELDS = {
+    "schema_version",
+    "transition_mode",
+    "parent_sada_checkpoint_sha256",
+    "parent_epoch",
+    "student_weights",
+    "student_state_sha256",
+    "routing_teacher_checkpoint_sha256",
+    "routing_teacher_state_sha256",
+    "routing_teacher_weights",
+    "completed_steps",
+    "transition_sha256",
+}
+
+
+def _canonical_sha256(payload):
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _plain_config(config):
+    if hasattr(config, "config"):
+        config = config.config
+    if isinstance(config, dict):
+        return {str(key): _plain_config(value) for key, value in config.items()}
+    if isinstance(config, (list, tuple)):
+        return [_plain_config(value) for value in config]
+    return config
+
+
+def _continuation_protocol(config):
+    config = _plain_config(config)
+    if not isinstance(config, dict):
+        raise ValueError("continuation checkpoint has no readable config")
+    dataset = dict(config.get("dataset", {}))
+    dataset.setdefault("crop_alignment", 1)
+    dataset.pop("stage1_context", None)
+    keys = (
+        "dataset_name",
+        "src_train_split",
+        "src_val_split",
+        "tgt_train_split",
+        "tgt_val_split",
+        "loader",
+        "model",
+        "opt",
+        "train_cfg",
+    )
+    protocol = {key: config.get(key) for key in keys}
+    protocol["dataset"] = dataset
+    return protocol
+
+
+def validate_sada_continuation_checkpoint(checkpoint, current_config):
+    """Require a genuine ordinary-SADA training state for the first VLM fork."""
+    if checkpoint.get("vlm_routing") is not None:
+        raise ValueError(
+            "SADA-to-VLM transition requires an ordinary SADA checkpoint; "
+            "use --resume for a VLM checkpoint"
+        )
+    if checkpoint.get("stage1") is not None:
+        raise ValueError("SADA-to-VLM transition cannot start from a Stage 1 checkpoint")
+    required = {
+        "epoch",
+        "state_dict",
+        "optimizer_gen_source",
+        "optimizer_gen_source_alignment",
+        "optimizer_disc",
+        "config",
+    }
+    missing = sorted(required.difference(checkpoint))
+    if missing:
+        raise ValueError(
+            "SADA continuation checkpoint is missing training state: {}".format(
+                missing
+            )
+        )
+    parent = _continuation_protocol(checkpoint["config"])
+    current = _continuation_protocol(current_config)
+    mismatches = [key for key in parent if parent[key] != current[key]]
+    if mismatches:
+        raise ValueError(
+            "SADA continuation changes the training protocol outside routing: {}".format(
+                mismatches
+            )
+        )
+    return int(checkpoint["epoch"])
+
+
+def restore_training_trajectory(
+    checkpoint,
+    num_iters_epoch,
+    optimizer_gen_source,
+    optimizer_gen_source_alignment,
+    optimizer_disc,
+    scheduler_gen_source,
+    scheduler_gen_source_alignment,
+    scheduler_disc,
+):
+    optimizer_gen_source.load_state_dict(checkpoint["optimizer_gen_source"])
+    optimizer_gen_source_alignment.load_state_dict(
+        checkpoint["optimizer_gen_source_alignment"]
+    )
+    optimizer_disc.load_state_dict(checkpoint["optimizer_disc"])
+    completed_steps = int(checkpoint["epoch"]) * int(num_iters_epoch)
+    for scheduler, optimizer in (
+        (scheduler_gen_source, optimizer_gen_source),
+        (scheduler_gen_source_alignment, optimizer_gen_source_alignment),
+        (scheduler_disc, optimizer_disc),
+    ):
+        if scheduler is not None:
+            scheduler.last_epoch = completed_steps
+            scheduler._step_count = completed_steps + 1
+            scheduler._last_lr = [group["lr"] for group in optimizer.param_groups]
+    return completed_steps
+
+
+def build_vlm_transition(
+    parent_sada_checkpoint_sha256,
+    parent_epoch,
+    student_state_sha256,
+    routing_teacher_checkpoint_sha256,
+    routing_teacher_state_sha256,
+    routing_teacher_weights,
+    completed_steps,
+):
+    transition = {
+        "schema_version": VLM_TRANSITION_SCHEMA_VERSION,
+        "transition_mode": "continuation",
+        "parent_sada_checkpoint_sha256": parent_sada_checkpoint_sha256,
+        "parent_epoch": int(parent_epoch),
+        "student_weights": "student",
+        "student_state_sha256": student_state_sha256,
+        "routing_teacher_checkpoint_sha256": routing_teacher_checkpoint_sha256,
+        "routing_teacher_state_sha256": routing_teacher_state_sha256,
+        "routing_teacher_weights": routing_teacher_weights,
+        "completed_steps": int(completed_steps),
+    }
+    transition["transition_sha256"] = _canonical_sha256(transition)
+    return transition
+
+
+def validate_vlm_transition(
+    checkpoint,
+    expected_transition=None,
+    expected_teacher_checkpoint_sha256=None,
+    expected_teacher_state_sha256=None,
+    expected_teacher_weights=None,
+):
+    transition = checkpoint.get("vlm_transition")
+    if not isinstance(transition, dict):
+        raise ValueError("checkpoint has no SADA-to-VLM continuation provenance")
+    if set(transition) != VLM_TRANSITION_FIELDS:
+        raise ValueError("checkpoint VLM transition fields differ")
+    if transition.get("schema_version") != VLM_TRANSITION_SCHEMA_VERSION:
+        raise ValueError("unsupported SADA-to-VLM transition schema")
+    unsigned = dict(transition)
+    recorded_hash = unsigned.pop("transition_sha256")
+    if recorded_hash != _canonical_sha256(unsigned):
+        raise ValueError("checkpoint VLM transition hash mismatch")
+    if expected_transition is not None and transition != expected_transition:
+        raise ValueError("checkpoint VLM transition provenance differs")
+    expected_teacher = {
+        "routing_teacher_checkpoint_sha256": expected_teacher_checkpoint_sha256,
+        "routing_teacher_state_sha256": expected_teacher_state_sha256,
+        "routing_teacher_weights": expected_teacher_weights,
+    }
+    mismatches = {
+        key: (transition[key], value)
+        for key, value in expected_teacher.items()
+        if value is not None and transition[key] != value
+    }
+    if mismatches:
+        raise ValueError(
+            "checkpoint VLM transition teacher differs from this run: {}".format(
+                mismatches
+            )
+        )
+    return transition
 
 
 def build_vlm_signature(
@@ -48,12 +239,7 @@ def build_vlm_signature(
         "routing_teacher_state_sha256": routing_teacher_state_sha256,
         "routing_teacher_weights": routing_teacher_weights,
     }
-    canonical = json.dumps(
-        signature, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    )
-    signature["signature_sha256"] = hashlib.sha256(
-        canonical.encode("utf-8")
-    ).hexdigest()
+    signature["signature_sha256"] = _canonical_sha256(signature)
     return signature
 
 

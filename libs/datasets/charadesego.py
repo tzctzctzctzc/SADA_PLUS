@@ -225,6 +225,10 @@ class CharadesEgo(Dataset):
                 self.crop_ratio,
                 crop_alignment=self.crop_alignment,
             )
+        else:
+            data_dict['metadata']['original_feat_len'] = data.shape[1]
+            data_dict['metadata']['crop_feat_len'] = data.shape[1]
+            data_dict['metadata']['crop_start'] = 0
         
         return data_dict
           

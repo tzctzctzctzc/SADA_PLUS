@@ -10,7 +10,7 @@ from torch import nn
 from torch.nn import functional as F
 
 
-STRUCTURE_PROBE_SCHEMA_VERSION = "source-supervised-anchor-validity-v3"
+STRUCTURE_PROBE_SCHEMA_VERSION = "source-supervised-anchor-validity-v4"
 BASE_FEATURE_NAMES = (
     "teacher_score",
     "teacher_margin",
@@ -32,45 +32,140 @@ FEATURE_GROUPS = {
 }
 MODEL_TYPES = {"logistic", "mlp", "gbdt", "fpn_mlp"}
 FEATURE_NAMES = BASE_FEATURE_NAMES
-ROUTING_CONTEXT_FIELDS = (
+TEACHER_PROVENANCE_FIELDS = (
+    "routing_teacher_checkpoint_sha256",
     "routing_teacher_state_sha256",
     "routing_teacher_weights",
-    "alpha",
-    "beta",
-    "crop_alignment",
-    "fpn_dim",
-    "feat_stride",
-    "feat_num_frames",
-    "num_classes",
 )
+ASSIGNMENT_PROTOCOL_FIELDS = (
+    "regression_range",
+    "center_sample",
+    "center_sample_radius",
+    "reg_distance",
+    "fpn_strides",
+    "n_levels",
+)
+COHORT_PROTOCOL_FIELDS = (
+    "target_class_ids",
+    "action_subsampling",
+    "semantic_condition",
+    "confidence_condition",
+    "beta",
+    "alpha",
+    "source_train_split",
+    "source_calibration_split",
+)
+SAMPLING_PROTOCOL_FIELDS = (
+    "max_seq_len",
+    "crop_ratio",
+    "trunc_thresh",
+    "crop_alignment",
+    "sampling_seed",
+    "max_train_anchors",
+    "max_videos",
+    "stratification_policy",
+)
+MODEL_PROVENANCE_FIELDS = (
+    "model_type",
+    "feature_group",
+    "evidence_family",
+    "threshold",
+    "model_sha256",
+)
+PROTOCOL_FIELDS = {
+    "teacher_provenance": TEACHER_PROVENANCE_FIELDS,
+    "assignment_protocol": ASSIGNMENT_PROTOCOL_FIELDS,
+    "cohort_protocol": COHORT_PROTOCOL_FIELDS,
+    "sampling_protocol": SAMPLING_PROTOCOL_FIELDS,
+    "model_provenance": MODEL_PROVENANCE_FIELDS,
+}
 
 
-def routing_context_sha256(context):
+def protocol_sha256(context):
     canonical = json.dumps(
         context, sort_keys=True, separators=(",", ":"), ensure_ascii=False
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def validate_validity_routing_context(payload, expected_context):
-    context = payload.get("routing_context")
-    if not isinstance(context, dict):
-        raise ValueError("validity artifact has no routing teacher context")
-    if set(context) != set(ROUTING_CONTEXT_FIELDS):
-        raise ValueError("validity routing context fields differ")
-    if payload.get("routing_context_sha256") != routing_context_sha256(context):
-        raise ValueError("validity routing context hash mismatch")
-    mismatches = {
-        key: (context.get(key), expected_context.get(key))
-        for key in ROUTING_CONTEXT_FIELDS
-        if context.get(key) != expected_context.get(key)
+def _validate_protocol(payload, name):
+    protocol = payload.get(name)
+    if not isinstance(protocol, dict):
+        raise ValueError("validity artifact has no {}".format(name))
+    if set(protocol) != set(PROTOCOL_FIELDS[name]):
+        raise ValueError("validity {} fields differ".format(name))
+    if payload.get(name + "_sha256") != protocol_sha256(protocol):
+        raise ValueError("validity {} hash mismatch".format(name))
+    return protocol
+
+
+def validate_validity_provenance(
+    payload,
+    expected_teacher_provenance,
+    expected_assignment_protocol,
+    expected_cohort_protocol,
+):
+    expected = {
+        "teacher_provenance": expected_teacher_provenance,
+        "assignment_protocol": expected_assignment_protocol,
+        "cohort_protocol": expected_cohort_protocol,
     }
+    mismatches = {}
+    for name in PROTOCOL_FIELDS:
+        actual = _validate_protocol(payload, name)
+        if name in expected and actual != expected[name]:
+            mismatches[name] = (actual, expected[name])
     if mismatches:
         raise ValueError(
-            "validity artifact differs from frozen routing teacher: {}".format(
+            "validity artifact provenance differs from this run: {}".format(
                 mismatches
             )
         )
+
+
+def assignment_protocol_from_model(model):
+    return {
+        "regression_range": [list(value) for value in model.reg_range],
+        "center_sample": model.train_center_sample,
+        "center_sample_radius": float(model.train_center_sample_radius),
+        "reg_distance": bool(model.train_reg_distance),
+        "fpn_strides": [int(value) for value in model.fpn_strides],
+        "n_levels": int(model.n_levels),
+    }
+
+
+def cohort_protocol_from_config(config, model, beta, alpha):
+    return {
+        "target_class_ids": list(range(int(model.num_class_orig))),
+        "action_subsampling": config["dataset"].get(
+            "action_subsampling", "all"
+        ),
+        "semantic_condition": "center_inside_target_event_strict",
+        "confidence_condition": "beta < teacher_score < alpha",
+        "beta": float(beta),
+        "alpha": float(alpha),
+        "source_train_split": list(config["src_train_split"]),
+        "source_calibration_split": list(config["src_val_split"]),
+    }
+
+
+def sampling_protocol_from_config(
+    config,
+    sampling_seed,
+    max_train_anchors,
+    max_videos,
+):
+    crop_ratio = config["dataset"].get("crop_ratio")
+    return {
+        "max_seq_len": int(config["dataset"]["max_seq_len"]),
+        "crop_ratio": None if crop_ratio is None else list(crop_ratio),
+        "trunc_thresh": float(config["dataset"]["trunc_thresh"]),
+        "crop_alignment": int(config["dataset"].get("crop_alignment", 1)),
+        "sampling_seed": int(sampling_seed),
+        "max_train_anchors": int(max_train_anchors),
+        "max_videos": None if max_videos is None else int(max_videos),
+        "stratification_policy": "none_random_without_replacement",
+    }
 
 
 def anchor_validity_features(
@@ -477,6 +572,14 @@ def serialize_probe(probe, threshold, metadata):
         if probe["model_type"] == "fpn_mlp"
         else probe["feature_group"]
     )
+    serialized_model = _json_value(probe)
+    model_provenance = {
+        "model_type": probe["model_type"],
+        "feature_group": probe["feature_group"],
+        "evidence_family": evidence_family,
+        "threshold": float(threshold),
+        "model_sha256": protocol_sha256(serialized_model),
+    }
     return {
         "schema_version": STRUCTURE_PROBE_SCHEMA_VERSION,
         "model_type": probe["model_type"],
@@ -485,7 +588,9 @@ def serialize_probe(probe, threshold, metadata):
         "feature_names": list(FEATURE_GROUPS[probe["feature_group"]]),
         "base_feature_names": list(BASE_FEATURE_NAMES),
         "threshold": float(threshold),
-        "model": _json_value(probe),
+        "model": serialized_model,
+        "model_provenance": model_provenance,
+        "model_provenance_sha256": protocol_sha256(model_provenance),
         **metadata,
     }
 
@@ -537,11 +642,18 @@ def load_validity_model(path):
     threshold = float(payload["threshold"])
     if not math.isfinite(threshold) or not 0.0 <= threshold <= 1.0:
         raise ValueError("invalid validity threshold")
-    context = payload.get("routing_context")
-    if not isinstance(context, dict) or set(context) != set(ROUTING_CONTEXT_FIELDS):
-        raise ValueError("validity artifact has no strict routing context")
-    if payload.get("routing_context_sha256") != routing_context_sha256(context):
-        raise ValueError("validity routing context hash mismatch")
+    for protocol_name in PROTOCOL_FIELDS:
+        _validate_protocol(payload, protocol_name)
+    model_provenance = payload["model_provenance"]
+    if (
+        model_provenance["model_type"] != model_type
+        or model_provenance["feature_group"] != feature_group
+        or model_provenance["evidence_family"] != expected_family
+        or model_provenance["threshold"] != threshold
+        or model_provenance["model_sha256"]
+        != protocol_sha256(payload["model"])
+    ):
+        raise ValueError("validity model provenance differs from serialized model")
     model = _tensorize_model(payload["model"])
     model["model_type"] = model_type
     model["feature_group"] = feature_group

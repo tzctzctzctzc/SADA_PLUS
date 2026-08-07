@@ -250,6 +250,7 @@ class EpicKitchensDataset(Dataset):
             )
         else:
             data_dict['metadata']['original_feat_len'] = feats.shape[1]
+            data_dict['metadata']['crop_feat_len'] = feats.shape[1]
             data_dict['metadata']['crop_start'] = 0
 
         if self.stage1_context:

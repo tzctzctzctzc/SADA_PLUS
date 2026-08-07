@@ -18,12 +18,19 @@ from torch.optim.lr_scheduler import LambdaLR, CyclicLR
 from libs.models.SADA.optimizer import make_scheduler, make_optimizer
 from libs.models.SADA.stage1_utils import validate_stage1_resume
 from libs.models.SADA.anchor_validity import (
-    validate_validity_routing_context,
+    assignment_protocol_from_model,
+    cohort_protocol_from_config,
+    validate_validity_provenance,
 )
 from libs.models.SADA.stage1_calibration import model_state_sha256
 from libs.models.SADA.vlm_routing import (
+    build_vlm_transition,
     build_vlm_signature,
+    file_sha256,
+    restore_training_trajectory,
+    validate_sada_continuation_checkpoint,
     validate_vlm_resume,
+    validate_vlm_transition,
 )
 
 os.environ['NUMBA_NUM_THREADS'] = "8"
@@ -234,6 +241,8 @@ def main(cfg, resume, project_name='sada', debug=False):
     model_ema = None
     routing_teacher = None
     vlm_signature = None
+    vlm_transition = None
+    routing_teacher_checkpoint_sha256 = None
     if use_ema:
         # enable model EMA
         print("Using model EMA ...")
@@ -249,6 +258,7 @@ def main(cfg, resume, project_name='sada', debug=False):
         model_ema = ModelEma2(new_model, decay=cfg['train_cfg']['ema_decay']).to(device)
         if cfg.get('vlm_routing', {}).get('enabled', False):
             teacher_path = cfg['vlm_routing']['teacher_checkpoint']
+            routing_teacher_checkpoint_sha256 = file_sha256(teacher_path)
             teacher_checkpoint = torch.load(teacher_path, map_location=device)
             teacher_weights = cfg['vlm_routing']['teacher_weights']
             teacher_state_key = (
@@ -269,22 +279,24 @@ def main(cfg, resume, project_name='sada', debug=False):
             model_ema.module.requires_grad_(False)
             routing_teacher = model_ema.module
             teacher_state_sha256 = model_state_sha256(routing_teacher)
-            expected_validity_context = {
+            expected_teacher_provenance = {
+                'routing_teacher_checkpoint_sha256': (
+                    routing_teacher_checkpoint_sha256
+                ),
                 'routing_teacher_state_sha256': teacher_state_sha256,
                 'routing_teacher_weights': teacher_weights,
-                'alpha': float(model.stage1_alpha),
-                'beta': float(cfg['vlm_routing']['beta']),
-                'crop_alignment': int(cfg['dataset']['crop_alignment']),
-                'fpn_dim': int(cfg['model']['fpn_dim']),
-                'feat_stride': float(cfg['dataset']['feat_stride'])
-                * int(cfg['dataset'].get('downsample_rate', 1)),
-                'feat_num_frames': int(cfg['dataset']['num_frames']),
-                'num_classes': int(model.num_class_orig),
             }
             if routing_teacher.vlm_validity_payload is not None:
-                validate_validity_routing_context(
+                validate_validity_provenance(
                     routing_teacher.vlm_validity_payload,
-                    expected_validity_context,
+                    expected_teacher_provenance,
+                    assignment_protocol_from_model(routing_teacher),
+                    cohort_protocol_from_config(
+                        cfg,
+                        routing_teacher,
+                        cfg['vlm_routing']['beta'],
+                        model.stage1_alpha,
+                    ),
                 )
             vlm_signature = build_vlm_signature(
                 routing_teacher.vlm_semantic_cache_sha256,
@@ -304,7 +316,50 @@ def main(cfg, resume, project_name='sada', debug=False):
         
 
     """4. Resume from model / Misc"""
-    # resume from a checkpoint?
+    # First transition: continue the exact ordinary-SADA trajectory while
+    # changing only subsequent target routing.
+    if args.vlm_continue_from_sada:
+        transition_path = args.vlm_continue_from_sada
+        if not os.path.isfile(transition_path):
+            raise ValueError(
+                'SADA continuation checkpoint not found: {}'.format(
+                    transition_path
+                )
+            )
+        checkpoint = torch.load(
+            transition_path,
+            map_location=device,
+        )
+        parent_epoch = validate_sada_continuation_checkpoint(checkpoint, cfg)
+        model.load_state_dict(checkpoint['state_dict'])
+        args.start_epoch = parent_epoch + 1
+        completed_steps = restore_training_trajectory(
+            checkpoint,
+            num_iters_epoch,
+            optimizer_gen_source,
+            optimizer_gen_source_alignment,
+            optimizer_disc,
+            scheduler_gen_source,
+            scheduler_gen_source_alignment,
+            scheduler_disc,
+        )
+        vlm_transition = build_vlm_transition(
+            file_sha256(transition_path),
+            parent_epoch,
+            model_state_sha256(model),
+            routing_teacher_checkpoint_sha256,
+            vlm_signature['routing_teacher_state_sha256'],
+            vlm_signature['routing_teacher_weights'],
+            completed_steps,
+        )
+        print(
+            "=> continued ordinary SADA checkpoint '{}' at epoch {} into VLM".format(
+                transition_path, parent_epoch
+            )
+        )
+        del checkpoint
+
+    # Resume an existing VLM experiment. This path remains signature-strict.
     if args.resume:
         if os.path.isfile(args.resume):
             # load ckpt, reset epoch / best rmse
@@ -320,6 +375,18 @@ def main(cfg, resume, project_name='sada', debug=False):
             )
             if cfg.get('vlm_routing', {}).get('enabled', False):
                 validate_vlm_resume(checkpoint, vlm_signature)
+                vlm_transition = validate_vlm_transition(
+                    checkpoint,
+                    expected_teacher_checkpoint_sha256=(
+                        routing_teacher_checkpoint_sha256
+                    ),
+                    expected_teacher_state_sha256=vlm_signature[
+                        'routing_teacher_state_sha256'
+                    ],
+                    expected_teacher_weights=vlm_signature[
+                        'routing_teacher_weights'
+                    ],
+                )
             model.load_state_dict(checkpoint['state_dict'])
             if stage1 is not None:
                 legacy_rng = stage1.get('rng_state')
@@ -352,19 +419,16 @@ def main(cfg, resume, project_name='sada', debug=False):
                     model_ema.module.eval()
                     model_ema.module.requires_grad_(False)
             
-            # also load the optimizer / scheduler if necessary
-            optimizer_gen_source.load_state_dict(checkpoint['optimizer_gen_source'])
-            optimizer_gen_source_alignment.load_state_dict(checkpoint['optimizer_gen_source_alignment'])
-            optimizer_disc.load_state_dict(checkpoint['optimizer_disc'])
-            completed_steps = checkpoint['epoch'] * num_iters_epoch
-            for scheduler, optimizer in (
-                    (scheduler_gen_source, optimizer_gen_source),
-                    (scheduler_gen_source_alignment, optimizer_gen_source_alignment),
-                    (scheduler_disc, optimizer_disc)):
-                if scheduler is not None:
-                    scheduler.last_epoch = completed_steps
-                    scheduler._step_count = completed_steps + 1
-                    scheduler._last_lr = [group['lr'] for group in optimizer.param_groups]
+            restore_training_trajectory(
+                checkpoint,
+                num_iters_epoch,
+                optimizer_gen_source,
+                optimizer_gen_source_alignment,
+                optimizer_disc,
+                scheduler_gen_source,
+                scheduler_gen_source_alignment,
+                scheduler_disc,
+            )
             print("=> loaded checkpoint '{:s}' (epoch {:d}".format(
                 args.resume, checkpoint['epoch']
             ))
@@ -477,6 +541,7 @@ def main(cfg, resume, project_name='sada', debug=False):
                         model_ema=model_ema,
                         routing_teacher=routing_teacher,
                         vlm_signature=vlm_signature,
+                        vlm_transition=vlm_transition,
                         train_loader_src=train_loader_src,
                         train_loader_src2=train_loader_src2,
                         val_loader_src=val_loader_src,
@@ -519,8 +584,18 @@ def create_argparser():
                         help='config file path (default: None)')
     parser.add_argument('-n', '--name', required=True, type=str,
                         help='name of the run')
-    parser.add_argument('-r', '--resume', default=None, type=str,
-                        help='path to latest checkpoint (default: None)')
+    start_group = parser.add_mutually_exclusive_group()
+    start_group.add_argument(
+        '-r', '--resume', default=None, type=str,
+        help='resume an existing run; VLM checkpoints must match all signatures',
+    )
+    start_group.add_argument(
+        '--vlm-continue-from-sada', default=None, type=str,
+        help=(
+            'true continuation from an ordinary SADA checkpoint: restore student, '
+            'optimizers, scheduler phase, and epoch before enabling VLM routing'
+        ),
+    )
     parser.add_argument('-s', '--seed', default=DEFAULT_SEED, type=int,
                         help='random seed')
     parser.add_argument('-i', '--gpu', default=GPU, type=int,
@@ -651,6 +726,13 @@ if __name__ == '__main__':
             and args.vlm_validity_model is None
         ):
             raise ValueError('validity routing requires --vlm-validity-model')
+        if args.resume is None and args.vlm_continue_from_sada is None:
+            raise ValueError(
+                'a VLM run must use --vlm-continue-from-sada for its first fork '
+                'or --resume for a later VLM checkpoint'
+            )
+    elif args.vlm_continue_from_sada is not None:
+        raise ValueError('--vlm-continue-from-sada requires VLM routing')
     config_dict['vlm_routing'] = {
         'enabled': vlm_enabled,
         'semantic_cache_path': args.vlm_semantic_cache,

@@ -23,11 +23,22 @@ for module_name in ("anchor_validity", "vlm_routing"):
     spec.loader.exec_module(module)
 
 vlm_routing = sys.modules["libs.models.SADA.vlm_routing"]
+data_spec = importlib.util.spec_from_file_location(
+    "vlm_test_data_utils", ROOT / "libs/datasets/data_utils.py"
+)
+data_utils = importlib.util.module_from_spec(data_spec)
+data_spec.loader.exec_module(data_utils)
 build_online_vlm_routing = vlm_routing.build_online_vlm_routing
 load_semantic_cache = vlm_routing.load_semantic_cache
 target_labels_from_full_routing = vlm_routing.target_labels_from_full_routing
 build_vlm_signature = vlm_routing.build_vlm_signature
 validate_vlm_resume = vlm_routing.validate_vlm_resume
+build_vlm_transition = vlm_routing.build_vlm_transition
+validate_vlm_transition = vlm_routing.validate_vlm_transition
+validate_sada_continuation_checkpoint = (
+    vlm_routing.validate_sada_continuation_checkpoint
+)
+restore_training_trajectory = vlm_routing.restore_training_trajectory
 
 
 def semantic_payload(entries):
@@ -239,6 +250,57 @@ def test_semantic_timestamp_must_match_current_feature_configuration():
         route(cache)
 
 
+def test_real_crop_metadata_preserves_feature_receptive_field_for_router():
+    class FixedRng:
+        def randint(self, lower, upper):
+            assert (lower, upper) == (0, 5)
+            return 3
+
+    video = data_utils.truncate_feats(
+        {
+            "feats": torch.zeros(4, 10),
+            "segments": torch.tensor([[0.0, 10.0]]),
+            "labels": torch.tensor([1]),
+            "metadata": {
+                "video_id": "video",
+                "feat_stride": 16,
+                "feat_num_frames": 32,
+                "fps": 30,
+                "duration": 10.0,
+            },
+        },
+        max_seq_len=5,
+        trunc_thresh=0.3,
+        rng=FixedRng(),
+    )
+    assert video["metadata"]["feat_num_frames"] == 32
+    assert video["metadata"]["crop_feat_len"] == 5
+    absolute_index = video["metadata"]["crop_start"]
+    center_time = (absolute_index * 16 + 0.5 * 32) / 30
+    routes = build_online_vlm_routing(
+        {
+            ("video", absolute_index): {
+                "semantic_pass": True,
+                "semantic_label": "TARGET_ACTION",
+                "absolute_center_time": center_time,
+            }
+        },
+        None,
+        None,
+        "semantic_only",
+        [video],
+        [torch.tensor([[0.0, 0.0, 0.0, 1.0]])],
+        [torch.tensor([[True]])],
+        [torch.tensor([[[-1.0, 0.0]]])],
+        [torch.ones(1, 1, 2)],
+        [torch.zeros(1, 4, 1)],
+        beta=0.1,
+        alpha=0.7,
+    )[0]
+    assert routes["semantic_known"].tolist() == [[True]]
+    assert routes["action"].tolist() == [[True]]
+
+
 def test_resume_signature_rejects_changed_mode_or_artifact():
     signature = build_vlm_signature(
         "a" * 64,
@@ -257,3 +319,110 @@ def test_resume_signature_rejects_changed_mode_or_artifact():
         validate_vlm_resume({"vlm_routing": signature}, changed)
     with pytest.raises(ValueError, match="no frozen VLM routing signature"):
         validate_vlm_resume({}, signature)
+
+
+def continuation_config():
+    return {
+        "dataset_name": "epic",
+        "src_train_split": ["source_train"],
+        "src_val_split": ["source_val"],
+        "tgt_train_split": ["target_train"],
+        "tgt_val_split": ["target_val"],
+        "dataset": {"max_seq_len": 2304},
+        "loader": {"batch_size": 2},
+        "model": {"pl_threshold": 0.7},
+        "opt": {"type": "AdamW", "epochs": 10},
+        "train_cfg": {"warmup_adv": 5, "ema_active": True},
+    }
+
+
+def ordinary_sada_checkpoint():
+    return {
+        "epoch": 5,
+        "state_dict": {},
+        "optimizer_gen_source": {},
+        "optimizer_gen_source_alignment": {},
+        "optimizer_disc": {},
+        "config": continuation_config(),
+    }
+
+
+def test_sada_to_vlm_transition_is_distinct_from_strict_vlm_resume():
+    checkpoint = ordinary_sada_checkpoint()
+    current = continuation_config()
+    current["dataset"]["crop_alignment"] = 1
+    current["dataset"]["stage1_context"] = False
+    assert validate_sada_continuation_checkpoint(checkpoint, current) == 5
+    transition = build_vlm_transition(
+        "a" * 64,
+        5,
+        "b" * 64,
+        "c" * 64,
+        "d" * 64,
+        "ema",
+        500,
+    )
+    assert validate_vlm_transition({"vlm_transition": transition}) == transition
+    with pytest.raises(ValueError, match="teacher differs"):
+        validate_vlm_transition(
+            {"vlm_transition": transition},
+            expected_teacher_checkpoint_sha256="e" * 64,
+        )
+    with pytest.raises(ValueError, match="ordinary SADA checkpoint"):
+        validate_sada_continuation_checkpoint(
+            {**checkpoint, "vlm_routing": {}}, current
+        )
+
+
+def test_sada_continuation_rejects_nonrouting_training_protocol_change():
+    checkpoint = ordinary_sada_checkpoint()
+    changed = continuation_config()
+    changed["opt"] = {"type": "AdamW", "epochs": 20}
+    with pytest.raises(ValueError, match="outside routing"):
+        validate_sada_continuation_checkpoint(checkpoint, changed)
+
+
+def test_true_continuation_restores_all_optimizers_and_scheduler_phase():
+    parameters = [torch.nn.Parameter(torch.tensor([1.0])) for _ in range(3)]
+    old_optimizers = [
+        torch.optim.SGD([parameter], lr=lr, momentum=0.9)
+        for parameter, lr in zip(parameters, (0.1, 0.2, 0.3))
+    ]
+    checkpoint = ordinary_sada_checkpoint()
+    checkpoint.update({
+        "optimizer_gen_source": old_optimizers[0].state_dict(),
+        "optimizer_gen_source_alignment": old_optimizers[1].state_dict(),
+        "optimizer_disc": old_optimizers[2].state_dict(),
+    })
+    new_optimizers = [
+        torch.optim.SGD([torch.nn.Parameter(torch.tensor([0.0]))], lr=1.0)
+        for _ in range(3)
+    ]
+
+    class Scheduler:
+        pass
+
+    schedulers = [Scheduler(), Scheduler(), Scheduler()]
+    completed_steps = restore_training_trajectory(
+        checkpoint,
+        20,
+        *new_optimizers,
+        *schedulers,
+    )
+    assert completed_steps == 100
+    assert [optimizer.param_groups[0]["lr"] for optimizer in new_optimizers] == [
+        0.1,
+        0.2,
+        0.3,
+    ]
+    assert [scheduler.last_epoch for scheduler in schedulers] == [100, 100, 100]
+    assert [scheduler._step_count for scheduler in schedulers] == [101, 101, 101]
+
+
+def test_vlm_transition_hash_rejects_tampering():
+    transition = build_vlm_transition(
+        "a" * 64, 5, "b" * 64, "c" * 64, "d" * 64, "ema", 500
+    )
+    transition["parent_epoch"] = 4
+    with pytest.raises(ValueError, match="hash mismatch"):
+        validate_vlm_transition({"vlm_transition": transition})

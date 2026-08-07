@@ -15,18 +15,22 @@ from libs.datasets import make_dataset
 from libs.models.SADA import make_meta_arch
 from libs.models.SADA.anchor_validity import (
     FEATURE_GROUPS,
+    assignment_protocol_from_model,
     anchor_validity_features,
+    cohort_protocol_from_config,
     fit_fpn_mlp_probe,
     fit_gbdt_probe,
     fit_logistic_probe,
     fit_mlp_probe,
     high_precision_threshold,
     probe_probabilities,
-    routing_context_sha256,
+    protocol_sha256,
+    sampling_protocol_from_config,
     serialize_probe,
 )
 from libs.utils.utils import _update_config, read_yaml
 from libs.models.SADA.stage1_calibration import model_state_sha256
+from libs.models.SADA.vlm_routing import file_sha256
 from tools.audit_original_sada_pseudolabels import move_video
 from tools.export_vlm_training_candidates import decode_teacher_offsets
 
@@ -217,18 +221,16 @@ def main():
         raise ValueError("checkpoint has no {}".format(state_key))
     model.load_state_dict(checkpoint[state_key])
     model.eval()
-    routing_context = {
+    teacher_provenance = {
+        "routing_teacher_checkpoint_sha256": file_sha256(args.checkpoint),
         "routing_teacher_state_sha256": model_state_sha256(model),
         "routing_teacher_weights": args.weights,
-        "alpha": alpha,
-        "beta": float(args.beta),
-        "crop_alignment": int(args.crop_alignment),
-        "fpn_dim": int(cfg["model"]["fpn_dim"]),
-        "feat_stride": float(cfg["dataset"]["feat_stride"])
-        * int(cfg["dataset"].get("downsample_rate", 1)),
-        "feat_num_frames": int(cfg["dataset"]["num_frames"]),
-        "num_classes": int(model.num_class_orig),
     }
+    assignment_protocol = assignment_protocol_from_model(model)
+    cohort_protocol = cohort_protocol_from_config(cfg, model, args.beta, alpha)
+    sampling_protocol = sampling_protocol_from_config(
+        cfg, args.seed, args.max_train_anchors, args.max_videos
+    )
     try:
         git_commit = subprocess.check_output(
             ["git", "rev-parse", "HEAD"],
@@ -269,8 +271,16 @@ def main():
             "beta": args.beta,
             "alpha": alpha,
             "minimum_precision": args.minimum_precision,
-            "routing_context": routing_context,
-            "routing_context_sha256": routing_context_sha256(routing_context),
+            "teacher_provenance": teacher_provenance,
+            "teacher_provenance_sha256": protocol_sha256(teacher_provenance),
+            "assignment_protocol": assignment_protocol,
+            "assignment_protocol_sha256": protocol_sha256(
+                assignment_protocol
+            ),
+            "cohort_protocol": cohort_protocol,
+            "cohort_protocol_sha256": protocol_sha256(cohort_protocol),
+            "sampling_protocol": sampling_protocol,
+            "sampling_protocol_sha256": protocol_sha256(sampling_protocol),
             "git_commit": git_commit,
             "calibration": calibration,
             "source_train": {

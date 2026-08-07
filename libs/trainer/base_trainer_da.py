@@ -12,7 +12,10 @@ import json
 from libs.evaluation.metrics import MetricTracker
 from libs.models.SADA.stage1_utils import validate_stage1_resume
 from libs.models.SADA.stage1_calibration import model_state_sha256
-from libs.models.SADA.vlm_routing import validate_vlm_resume
+from libs.models.SADA.vlm_routing import (
+    validate_vlm_resume,
+    validate_vlm_transition,
+)
 
 class BaseTrainerDA:
     """
@@ -24,6 +27,7 @@ class BaseTrainerDA:
                  model_ema,
                  routing_teacher,
                  vlm_signature,
+                 vlm_transition,
                  train_loader_src,
                  train_loader_src2,
                  val_loader_src,
@@ -45,6 +49,7 @@ class BaseTrainerDA:
         self.model_ema = model_ema
         self.routing_teacher = routing_teacher
         self.vlm_signature = vlm_signature
+        self.vlm_transition = vlm_transition
         
         self.train_loader_src = train_loader_src
         self.train_loader_src2 = train_loader_src2
@@ -478,14 +483,21 @@ class BaseTrainerDA:
                 'calibrated': self.model.stage1_calibrated,
             }
         if self.cfg.get('vlm_routing', {}).get('enabled', False):
-            if self.vlm_signature is None or self.routing_teacher is None:
-                raise ValueError('VLM checkpoint requires a frozen teacher signature')
+            if (
+                self.vlm_signature is None
+                or self.vlm_transition is None
+                or self.routing_teacher is None
+            ):
+                raise ValueError(
+                    'VLM checkpoint requires routing and continuation provenance'
+                )
             teacher_sha256 = model_state_sha256(self.routing_teacher)
             if teacher_sha256 != self.vlm_signature[
                 'routing_teacher_state_sha256'
             ]:
                 raise ValueError('frozen routing teacher changed during training')
             state['vlm_routing'] = self.vlm_signature
+            state['vlm_transition'] = self.vlm_transition
         return state
 
 
@@ -508,6 +520,11 @@ class BaseTrainerDA:
         )
         if self.cfg.get('vlm_routing', {}).get('enabled', False):
             validate_vlm_resume(checkpoint, self.vlm_signature)
+            transition = validate_vlm_transition(
+                checkpoint, self.vlm_transition
+            )
+            if self.vlm_transition is None:
+                self.vlm_transition = transition
 
         # Load state only after the checkpoint mode has been validated.
         self.model.load_state_dict(checkpoint['state_dict'])
