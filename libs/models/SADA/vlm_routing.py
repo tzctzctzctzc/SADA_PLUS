@@ -12,8 +12,8 @@ from .anchor_validity import anchor_validity_features, probe_probabilities
 
 
 SEMANTIC_CACHE_SCHEMA_VERSION = "offline-vlm-semantic-evidence-v1"
-VLM_RESUME_SCHEMA_VERSION = "frozen-routing-teacher-v2"
-VLM_TRANSITION_SCHEMA_VERSION = "sada-to-vlm-continuation-v1"
+VLM_RESUME_SCHEMA_VERSION = "frozen-routing-teacher-v3"
+VLM_TRANSITION_SCHEMA_VERSION = "sada-to-vlm-continuation-v2"
 ROUTING_MODES = {
     "semantic_only",
     "validity_only",
@@ -34,6 +34,8 @@ VLM_TRANSITION_FIELDS = {
     "parent_epoch",
     "student_weights",
     "student_state_sha256",
+    "student_ema_weights",
+    "student_ema_state_sha256",
     "routing_teacher_checkpoint_sha256",
     "routing_teacher_state_sha256",
     "routing_teacher_weights",
@@ -102,6 +104,7 @@ def validate_sada_continuation_checkpoint(checkpoint, current_config):
     required = {
         "epoch",
         "state_dict",
+        "ema_state_dict",
         "optimizer_gen_source",
         "optimizer_gen_source_alignment",
         "optimizer_disc",
@@ -158,6 +161,7 @@ def build_vlm_transition(
     parent_sada_checkpoint_sha256,
     parent_epoch,
     student_state_sha256,
+    student_ema_state_sha256,
     routing_teacher_checkpoint_sha256,
     routing_teacher_state_sha256,
     routing_teacher_weights,
@@ -170,6 +174,8 @@ def build_vlm_transition(
         "parent_epoch": int(parent_epoch),
         "student_weights": "student",
         "student_state_sha256": student_state_sha256,
+        "student_ema_weights": "ema",
+        "student_ema_state_sha256": student_ema_state_sha256,
         "routing_teacher_checkpoint_sha256": routing_teacher_checkpoint_sha256,
         "routing_teacher_state_sha256": routing_teacher_state_sha256,
         "routing_teacher_weights": routing_teacher_weights,
@@ -238,6 +244,7 @@ def build_vlm_signature(
         "crop_alignment": int(crop_alignment),
         "routing_teacher_state_sha256": routing_teacher_state_sha256,
         "routing_teacher_weights": routing_teacher_weights,
+        "evaluation_weights": "student_ema",
     }
     signature["signature_sha256"] = _canonical_sha256(signature)
     return signature

@@ -312,6 +312,8 @@ def test_resume_signature_rejects_changed_mode_or_artifact():
         "c" * 64,
         "ema",
     )
+    assert signature["schema_version"] == "frozen-routing-teacher-v3"
+    assert signature["evaluation_weights"] == "student_ema"
     validate_vlm_resume({"vlm_routing": signature}, signature)
     changed = dict(signature)
     changed["routing_mode"] = "validity_only"
@@ -340,6 +342,7 @@ def ordinary_sada_checkpoint():
     return {
         "epoch": 5,
         "state_dict": {},
+        "ema_state_dict": {},
         "optimizer_gen_source": {},
         "optimizer_gen_source_alignment": {},
         "optimizer_disc": {},
@@ -357,12 +360,15 @@ def test_sada_to_vlm_transition_is_distinct_from_strict_vlm_resume():
         "a" * 64,
         5,
         "b" * 64,
+        "e" * 64,
         "c" * 64,
         "d" * 64,
         "ema",
         500,
     )
     assert validate_vlm_transition({"vlm_transition": transition}) == transition
+    assert transition["schema_version"] == "sada-to-vlm-continuation-v2"
+    assert transition["student_ema_state_sha256"] == "e" * 64
     with pytest.raises(ValueError, match="teacher differs"):
         validate_vlm_transition(
             {"vlm_transition": transition},
@@ -421,7 +427,7 @@ def test_true_continuation_restores_all_optimizers_and_scheduler_phase():
 
 def test_vlm_transition_hash_rejects_tampering():
     transition = build_vlm_transition(
-        "a" * 64, 5, "b" * 64, "c" * 64, "d" * 64, "ema", 500
+        "a" * 64, 5, "b" * 64, "e" * 64, "c" * 64, "d" * 64, "ema", 500
     )
     transition["parent_epoch"] = 4
     with pytest.raises(ValueError, match="hash mismatch"):

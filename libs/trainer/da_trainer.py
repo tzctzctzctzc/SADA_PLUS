@@ -130,8 +130,6 @@ class Trainer(BaseTrainerDA):
         return metadata
         
     def get_evaluation_model(self):
-        if self.cfg.get('vlm_routing', {}).get('enabled', False):
-            return self.model
         return self.model if not self.ema_active else self.model_ema.module
         #return self.model
 
@@ -400,7 +398,6 @@ class Trainer(BaseTrainerDA):
                 
             if (
                 self.cfg['train_cfg']['ema_active']
-                and not self.cfg.get('vlm_routing', {}).get('enabled', False)
                 and iter_idx % self.cfg['train_cfg']['update_ema_every'] == 0
             ):
                 step = (curr_epoch - 1) * num_iters + iter_idx

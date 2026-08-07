@@ -246,17 +246,17 @@ def main(cfg, resume, project_name='sada', debug=False):
     if use_ema:
         # enable model EMA
         print("Using model EMA ...")
-        # Avoid deep copy so that we can have learnable parameters in the underlying model
-        ema_cfg = cfg
-        if cfg.get('vlm_routing', {}).get('enabled', False):
-            ema_cfg = copy.deepcopy(cfg.config)
-            ema_cfg['vlm_routing']['load_evidence'] = True
         new_model = make_meta_arch(
-            cfg['model_name'], ema_cfg, device=device
+            cfg['model_name'], cfg, device=device
         ).to(device)
         
         model_ema = ModelEma2(new_model, decay=cfg['train_cfg']['ema_decay']).to(device)
         if cfg.get('vlm_routing', {}).get('enabled', False):
+            teacher_cfg = copy.deepcopy(cfg.config)
+            teacher_cfg['vlm_routing']['load_evidence'] = True
+            routing_teacher = make_meta_arch(
+                cfg['model_name'], teacher_cfg, device=device
+            ).to(device)
             teacher_path = cfg['vlm_routing']['teacher_checkpoint']
             routing_teacher_checkpoint_sha256 = file_sha256(teacher_path)
             teacher_checkpoint = torch.load(teacher_path, map_location=device)
@@ -272,12 +272,9 @@ def main(cfg, resume, project_name='sada', debug=False):
                         teacher_state_key
                     )
                 )
-            model_ema.module.load_state_dict(
-                teacher_checkpoint[teacher_state_key]
-            )
-            model_ema.module.eval()
-            model_ema.module.requires_grad_(False)
-            routing_teacher = model_ema.module
+            routing_teacher.load_state_dict(teacher_checkpoint[teacher_state_key])
+            routing_teacher.eval()
+            routing_teacher.requires_grad_(False)
             teacher_state_sha256 = model_state_sha256(routing_teacher)
             expected_teacher_provenance = {
                 'routing_teacher_checkpoint_sha256': (
@@ -332,6 +329,8 @@ def main(cfg, resume, project_name='sada', debug=False):
         )
         parent_epoch = validate_sada_continuation_checkpoint(checkpoint, cfg)
         model.load_state_dict(checkpoint['state_dict'])
+        if use_ema:
+            model_ema.module.load_state_dict(checkpoint['ema_state_dict'])
         args.start_epoch = parent_epoch + 1
         completed_steps = restore_training_trajectory(
             checkpoint,
@@ -347,6 +346,7 @@ def main(cfg, resume, project_name='sada', debug=False):
             file_sha256(transition_path),
             parent_epoch,
             model_state_sha256(model),
+            model_state_sha256(model_ema.module),
             routing_teacher_checkpoint_sha256,
             vlm_signature['routing_teacher_state_sha256'],
             vlm_signature['routing_teacher_weights'],
@@ -409,15 +409,22 @@ def main(cfg, resume, project_name='sada', debug=False):
             if use_ema:
                 model_ema.module.load_state_dict(checkpoint['ema_state_dict'])
                 if cfg.get('vlm_routing', {}).get('enabled', False):
-                    actual_teacher_sha256 = model_state_sha256(model_ema.module)
+                    if 'routing_teacher_state_dict' not in checkpoint:
+                        raise ValueError(
+                            'VLM checkpoint has no frozen routing teacher state'
+                        )
+                    routing_teacher.load_state_dict(
+                        checkpoint['routing_teacher_state_dict']
+                    )
+                    actual_teacher_sha256 = model_state_sha256(routing_teacher)
                     if actual_teacher_sha256 != vlm_signature[
                         'routing_teacher_state_sha256'
                     ]:
                         raise ValueError(
                             'checkpoint routing teacher state hash differs'
                         )
-                    model_ema.module.eval()
-                    model_ema.module.requires_grad_(False)
+                    routing_teacher.eval()
+                    routing_teacher.requires_grad_(False)
             
             restore_training_trajectory(
                 checkpoint,

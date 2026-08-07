@@ -498,6 +498,9 @@ class BaseTrainerDA:
                 raise ValueError('frozen routing teacher changed during training')
             state['vlm_routing'] = self.vlm_signature
             state['vlm_transition'] = self.vlm_transition
+            state['routing_teacher_state_dict'] = (
+                self.routing_teacher.state_dict()
+            )
         return state
 
 
@@ -528,8 +531,14 @@ class BaseTrainerDA:
 
         # Load state only after the checkpoint mode has been validated.
         self.model.load_state_dict(checkpoint['state_dict'])
+        if self.ema_active:
+            self.model_ema.module.load_state_dict(checkpoint['ema_state_dict'])
         if self.cfg.get('vlm_routing', {}).get('enabled', False):
-            self.routing_teacher.load_state_dict(checkpoint['ema_state_dict'])
+            if 'routing_teacher_state_dict' not in checkpoint:
+                raise ValueError('VLM checkpoint has no frozen routing teacher state')
+            self.routing_teacher.load_state_dict(
+                checkpoint['routing_teacher_state_dict']
+            )
             teacher_sha256 = model_state_sha256(self.routing_teacher)
             if teacher_sha256 != self.vlm_signature[
                 'routing_teacher_state_sha256'
