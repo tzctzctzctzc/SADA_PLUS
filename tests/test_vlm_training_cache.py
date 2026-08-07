@@ -4,6 +4,7 @@ import pytest
 
 from tools.build_vlm_training_cache import build_entries, build_payload
 from tools.export_vlm_training_candidates import limit_queries
+from tools.migrate_legacy_candidate_blind_semantics import migrate_payload
 
 
 def manifest_row(candidate_id="p123", position=123, center=12.5):
@@ -122,3 +123,63 @@ def test_prediction_coverage_must_equal_manifest():
     second = manifest_row("second", 11)
     with pytest.raises(ValueError, match="coverage differs"):
         build_entries([first, second], [prediction_row(first)])
+
+
+def legacy_rows():
+    manifest = {
+        "candidate_id": "video-l02-g0000042",
+        "video_id": "video",
+        "fpn_level": 2,
+        "anchor_index": 10,
+        "global_anchor_index": 42,
+        "point_stride": 4.0,
+        "absolute_center_time": 22.0,
+        "center_sec": 22.0,
+        "teacher_top1_class": 5,
+        "teacher_structural_eligible": True,
+    }
+    prediction = {
+        "candidate_id": manifest["candidate_id"],
+        "video_id": manifest["video_id"],
+        "fpn_level": manifest["fpn_level"],
+        "anchor_index": manifest["anchor_index"],
+        "global_anchor_index": manifest["global_anchor_index"],
+        "absolute_center_time": manifest["absolute_center_time"],
+        "center_sec": manifest["center_sec"],
+        "routing_schema_version": "candidate-blind-exact-anchor-routing-v1",
+        "prompt_version": "candidate-blind-target-foreground-gate-v1",
+        "prompt_sha256": "b" * 64,
+        "model": "qwen-test",
+        "wire_api": "chat",
+        "status": "ok",
+        "prediction": "TARGET_FOREGROUND",
+        "parse_error": False,
+        "protocol_error": False,
+        "consistency_error": False,
+        "teacher_top1_class": 5,
+        "route": "action",
+    }
+    return manifest, prediction
+
+
+def test_legacy_candidate_blind_migration_keeps_only_absolute_semantics():
+    manifest, prediction = legacy_rows()
+    payload = migrate_payload([manifest], [prediction], "c" * 64, "d" * 64)
+    assert payload["counts"] == {"TARGET_ACTION": 1}
+    assert payload["migration"]["input_predictions_sha256"] == "d" * 64
+    assert payload["entries"] == [
+        {
+            "video_id": "video",
+            "absolute_feature_index": 40,
+            "absolute_center_time": 22.0,
+            "semantic_label": "TARGET_ACTION",
+            "semantic_pass": True,
+        }
+    ]
+
+
+def test_legacy_candidate_blind_migration_rejects_coordinate_mismatch():
+    manifest, prediction = legacy_rows()
+    prediction["anchor_index"] += 1
+    with pytest.raises(ValueError, match="anchor_index differs"):
+        migrate_payload([manifest], [prediction], "c" * 64, "d" * 64)
