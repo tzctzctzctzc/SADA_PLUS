@@ -62,6 +62,8 @@ def parse_args():
     parser.add_argument("--crop-alignment", type=int, default=1)
     parser.add_argument("--max-train-anchors", type=int, default=200000)
     parser.add_argument("--max-videos", type=int, default=None)
+    parser.add_argument("--train-crops-per-video", type=int, default=1)
+    parser.add_argument("--val-crops-per-video", type=int, default=1)
     parser.add_argument("--seed", type=int, default=20260808)
     return parser.parse_args()
 
@@ -73,56 +75,95 @@ def center_inside_target_event(points, segments):
     return ((centers > segments[None, :, 0]) & (centers < segments[None, :, 1])).any(1)
 
 
-def collect_split(model, dataset, alpha, beta, device, max_videos):
+def collect_split(
+    model,
+    dataset,
+    alpha,
+    beta,
+    device,
+    max_videos,
+    crops_per_video,
+):
     feature_rows = []
     fpn_rows = []
     label_rows = []
     semantic_rows = 0
     low_confidence_rows = 0
+    sampled_crops = 0
+    duplicate_draws = 0
+    crops_by_video = {}
     video_count = min(len(dataset), max_videos or len(dataset))
     with torch.inference_mode():
         for index in range(video_count):
-            raw_video = dataset[index]
-            video = move_video(raw_video, device)
-            inputs, masks = model.preprocessing([video], mode="eval")
-            backbone, backbone_masks, _ = model.backbone_source(inputs, masks)
-            fpn, fpn_masks = model.neck_source(backbone, backbone_masks)
-            logits, _ = model.cls_head(fpn, fpn_masks)
-            decoded = decode_teacher_offsets(model, fpn, fpn_masks, domain="source")
-            points = model.point_generator(fpn)
-            gt_cls, _ = model.label_points(
-                points, [video["segments"]], [video["labels"]]
-            )
-            gt_cls = gt_cls[0].sum(-1) > 0
-            concat_start = 0
-            for level, (point_grid, level_logits, level_mask, level_fpn) in enumerate(
-                zip(points, logits, fpn_masks, fpn)
-            ):
-                length = point_grid.shape[0]
-                probabilities = level_logits[0].transpose(0, 1).sigmoid()
-                top2 = probabilities.topk(k=2, dim=-1).values
-                valid = level_mask[0, 0].bool()
-                low_confidence = valid & (top2[:, 0] > beta) & (top2[:, 0] < alpha)
-                semantic = center_inside_target_event(point_grid, video["segments"])
-                cohort = low_confidence & semantic
-                semantic_rows += int((valid & semantic).sum())
-                low_confidence_rows += int(low_confidence.sum())
-                if cohort.any():
-                    top1 = probabilities.argmax(-1)
-                    row_indices = torch.arange(length, device=device)
-                    class_offsets = decoded[level][top1, row_indices]
-                    features = anchor_validity_features(
-                        probabilities,
-                        class_offsets[:, 0],
-                        class_offsets[:, 1],
-                        float(point_grid[0, 3]),
-                        level,
+            seen_crops = set()
+            attempts = 0
+            max_attempts = max(crops_per_video * 4, crops_per_video)
+            while len(seen_crops) < crops_per_video and attempts < max_attempts:
+                attempts += 1
+                raw_video = dataset[index]
+                metadata = raw_video["metadata"]
+                crop_key = (
+                    int(metadata.get("crop_start", 0)),
+                    int(metadata.get("crop_feat_len", raw_video["feats"].shape[-1])),
+                )
+                if crop_key in seen_crops:
+                    duplicate_draws += 1
+                    continue
+                seen_crops.add(crop_key)
+                sampled_crops += 1
+                video = move_video(raw_video, device)
+                inputs, masks = model.preprocessing([video], mode="eval")
+                backbone, backbone_masks, _ = model.backbone_source(inputs, masks)
+                fpn, fpn_masks = model.neck_source(backbone, backbone_masks)
+                logits, _ = model.cls_head(fpn, fpn_masks)
+                decoded = decode_teacher_offsets(
+                    model, fpn, fpn_masks, domain="source"
+                )
+                points = model.point_generator(fpn)
+                gt_cls, _ = model.label_points(
+                    points, [video["segments"]], [video["labels"]]
+                )
+                gt_cls = gt_cls[0].sum(-1) > 0
+                concat_start = 0
+                for level, (
+                    point_grid,
+                    level_logits,
+                    level_mask,
+                    level_fpn,
+                ) in enumerate(zip(points, logits, fpn_masks, fpn)):
+                    length = point_grid.shape[0]
+                    probabilities = level_logits[0].transpose(0, 1).sigmoid()
+                    top2 = probabilities.topk(k=2, dim=-1).values
+                    valid = level_mask[0, 0].bool()
+                    low_confidence = (
+                        valid & (top2[:, 0] > beta) & (top2[:, 0] < alpha)
                     )
-                    labels = gt_cls[concat_start:concat_start + length]
-                    feature_rows.append(features[cohort].cpu())
-                    fpn_rows.append(level_fpn[0].transpose(0, 1)[cohort].cpu())
-                    label_rows.append(labels[cohort].cpu())
-                concat_start += length
+                    semantic = center_inside_target_event(
+                        point_grid, video["segments"]
+                    )
+                    cohort = low_confidence & semantic
+                    semantic_rows += int((valid & semantic).sum())
+                    low_confidence_rows += int(low_confidence.sum())
+                    if cohort.any():
+                        top1 = probabilities.argmax(-1)
+                        row_indices = torch.arange(length, device=device)
+                        class_offsets = decoded[level][top1, row_indices]
+                        features = anchor_validity_features(
+                            probabilities,
+                            class_offsets[:, 0],
+                            class_offsets[:, 1],
+                            float(point_grid[0, 3]),
+                            level,
+                        )
+                        labels = gt_cls[concat_start:concat_start + length]
+                        feature_rows.append(features[cohort].cpu())
+                        fpn_rows.append(
+                            level_fpn[0].transpose(0, 1)[cohort].cpu()
+                        )
+                        label_rows.append(labels[cohort].cpu())
+                    concat_start += length
+            video_id = str(raw_video["metadata"]["video_id"])
+            crops_by_video[video_id] = len(seen_crops)
     if not feature_rows:
         raise RuntimeError("source split produced no semantic low-confidence anchors")
     return (
@@ -131,6 +172,11 @@ def collect_split(model, dataset, alpha, beta, device, max_videos):
         torch.cat(label_rows),
         {
             "videos": video_count,
+            "requested_crops_per_video": crops_per_video,
+            "sampled_crops": sampled_crops,
+            "duplicate_crop_draws": duplicate_draws,
+            "minimum_unique_crops_per_video": min(crops_by_video.values()),
+            "maximum_unique_crops_per_video": max(crops_by_video.values()),
             "semantic_anchor_count": semantic_rows,
             "low_confidence_anchor_count": low_confidence_rows,
             "model_cohort_count": sum(len(row) for row in label_rows),
@@ -198,6 +244,8 @@ def main():
     args = parse_args()
     if args.crop_alignment <= 0:
         raise ValueError("--crop-alignment must be positive")
+    if args.train_crops_per_video <= 0 or args.val_crops_per_video <= 0:
+        raise ValueError("crops per video must be positive")
     if args.model_type == "fpn_mlp" and args.feature_group != "structure_pure":
         raise ValueError("fpn_mlp uses FPN + structural scalars; select structure_pure")
     random.seed(args.seed)
@@ -229,7 +277,12 @@ def main():
     assignment_protocol = assignment_protocol_from_model(model)
     cohort_protocol = cohort_protocol_from_config(cfg, model, args.beta, alpha)
     sampling_protocol = sampling_protocol_from_config(
-        cfg, args.seed, args.max_train_anchors, args.max_videos
+        cfg,
+        args.seed,
+        args.max_train_anchors,
+        args.max_videos,
+        args.train_crops_per_video,
+        args.val_crops_per_video,
     )
     try:
         git_commit = subprocess.check_output(
@@ -241,10 +294,22 @@ def main():
         git_commit = "unknown"
 
     train_x, train_fpn, train_y, train_stats = collect_split(
-        model, source_train, alpha, args.beta, args.device, args.max_videos
+        model,
+        source_train,
+        alpha,
+        args.beta,
+        args.device,
+        args.max_videos,
+        args.train_crops_per_video,
     )
     val_x, val_fpn, val_y, val_stats = collect_split(
-        model, source_val, alpha, args.beta, args.device, args.max_videos
+        model,
+        source_val,
+        alpha,
+        args.beta,
+        args.device,
+        args.max_videos,
+        args.val_crops_per_video,
     )
     train_x, train_fpn, train_y = bounded_sample(
         train_x, train_fpn, train_y, args.max_train_anchors, args.seed

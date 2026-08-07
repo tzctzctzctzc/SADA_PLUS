@@ -63,6 +63,8 @@ SAMPLING_PROTOCOL_FIELDS = (
     "sampling_seed",
     "max_train_anchors",
     "max_videos",
+    "train_crops_per_video",
+    "calibration_crops_per_video",
     "stratification_policy",
 )
 MODEL_PROVENANCE_FIELDS = (
@@ -154,6 +156,8 @@ def sampling_protocol_from_config(
     sampling_seed,
     max_train_anchors,
     max_videos,
+    train_crops_per_video,
+    calibration_crops_per_video,
 ):
     crop_ratio = config["dataset"].get("crop_ratio")
     return {
@@ -164,6 +168,8 @@ def sampling_protocol_from_config(
         "sampling_seed": int(sampling_seed),
         "max_train_anchors": int(max_train_anchors),
         "max_videos": None if max_videos is None else int(max_videos),
+        "train_crops_per_video": int(train_crops_per_video),
+        "calibration_crops_per_video": int(calibration_crops_per_video),
         "stratification_policy": "none_random_without_replacement",
     }
 

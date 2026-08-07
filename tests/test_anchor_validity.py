@@ -63,6 +63,8 @@ def sampling_protocol():
         "sampling_seed": 7,
         "max_train_anchors": 200000,
         "max_videos": None,
+        "train_crops_per_video": 8,
+        "calibration_crops_per_video": 4,
         "stratification_policy": "none_random_without_replacement",
     }
 
