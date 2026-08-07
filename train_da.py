@@ -1,5 +1,6 @@
 # python imports
 import argparse
+import copy
 import os
 import time
 import datetime
@@ -16,6 +17,14 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import LambdaLR, CyclicLR
 from libs.models.SADA.optimizer import make_scheduler, make_optimizer
 from libs.models.SADA.stage1_utils import validate_stage1_resume
+from libs.models.SADA.anchor_validity import (
+    validate_validity_routing_context,
+)
+from libs.models.SADA.stage1_calibration import model_state_sha256
+from libs.models.SADA.vlm_routing import (
+    build_vlm_signature,
+    validate_vlm_resume,
+)
 
 os.environ['NUMBA_NUM_THREADS'] = "8"
 
@@ -222,13 +231,76 @@ def main(cfg, resume, project_name='sada', debug=False):
         logger.info(f"Validation is not activated.")
     
     use_ema = cfg['train_cfg']['ema_active']
+    model_ema = None
+    routing_teacher = None
+    vlm_signature = None
     if use_ema:
         # enable model EMA
         print("Using model EMA ...")
         # Avoid deep copy so that we can have learnable parameters in the underlying model
-        new_model = make_meta_arch(cfg['model_name'], cfg, device = device).to(device)
+        ema_cfg = cfg
+        if cfg.get('vlm_routing', {}).get('enabled', False):
+            ema_cfg = copy.deepcopy(cfg.config)
+            ema_cfg['vlm_routing']['load_evidence'] = True
+        new_model = make_meta_arch(
+            cfg['model_name'], ema_cfg, device=device
+        ).to(device)
         
         model_ema = ModelEma2(new_model, decay=cfg['train_cfg']['ema_decay']).to(device)
+        if cfg.get('vlm_routing', {}).get('enabled', False):
+            teacher_path = cfg['vlm_routing']['teacher_checkpoint']
+            teacher_checkpoint = torch.load(teacher_path, map_location=device)
+            teacher_weights = cfg['vlm_routing']['teacher_weights']
+            teacher_state_key = (
+                'ema_state_dict'
+                if teacher_weights == 'ema'
+                else 'state_dict'
+            )
+            if teacher_state_key not in teacher_checkpoint:
+                raise ValueError(
+                    'routing teacher checkpoint has no {}'.format(
+                        teacher_state_key
+                    )
+                )
+            model_ema.module.load_state_dict(
+                teacher_checkpoint[teacher_state_key]
+            )
+            model_ema.module.eval()
+            model_ema.module.requires_grad_(False)
+            routing_teacher = model_ema.module
+            teacher_state_sha256 = model_state_sha256(routing_teacher)
+            expected_validity_context = {
+                'routing_teacher_state_sha256': teacher_state_sha256,
+                'routing_teacher_weights': teacher_weights,
+                'alpha': float(model.stage1_alpha),
+                'beta': float(cfg['vlm_routing']['beta']),
+                'crop_alignment': int(cfg['dataset']['crop_alignment']),
+                'fpn_dim': int(cfg['model']['fpn_dim']),
+                'feat_stride': float(cfg['dataset']['feat_stride'])
+                * int(cfg['dataset'].get('downsample_rate', 1)),
+                'feat_num_frames': int(cfg['dataset']['num_frames']),
+                'num_classes': int(model.num_class_orig),
+            }
+            if routing_teacher.vlm_validity_payload is not None:
+                validate_validity_routing_context(
+                    routing_teacher.vlm_validity_payload,
+                    expected_validity_context,
+                )
+            vlm_signature = build_vlm_signature(
+                routing_teacher.vlm_semantic_cache_sha256,
+                routing_teacher.vlm_validity_sha256,
+                routing_teacher.vlm_routing_mode,
+                routing_teacher.vlm_beta,
+                routing_teacher.stage1_alpha,
+                cfg['dataset']['crop_alignment'],
+                teacher_state_sha256,
+                teacher_weights,
+            )
+            del teacher_checkpoint
+    elif cfg.get('vlm_routing', {}).get('enabled', False):
+        raise ValueError(
+            'frozen VLM routing currently requires train_cfg.ema_active=true'
+        )
         
 
     """4. Resume from model / Misc"""
@@ -246,6 +318,8 @@ def main(cfg, resume, project_name='sada', debug=False):
                 current_alpha=model.stage1_alpha,
                 calibration_epoch=max(1, model.warmup_adv),
             )
+            if cfg.get('vlm_routing', {}).get('enabled', False):
+                validate_vlm_resume(checkpoint, vlm_signature)
             model.load_state_dict(checkpoint['state_dict'])
             if stage1 is not None:
                 legacy_rng = stage1.get('rng_state')
@@ -267,6 +341,16 @@ def main(cfg, resume, project_name='sada', debug=False):
             
             if use_ema:
                 model_ema.module.load_state_dict(checkpoint['ema_state_dict'])
+                if cfg.get('vlm_routing', {}).get('enabled', False):
+                    actual_teacher_sha256 = model_state_sha256(model_ema.module)
+                    if actual_teacher_sha256 != vlm_signature[
+                        'routing_teacher_state_sha256'
+                    ]:
+                        raise ValueError(
+                            'checkpoint routing teacher state hash differs'
+                        )
+                    model_ema.module.eval()
+                    model_ema.module.requires_grad_(False)
             
             # also load the optimizer / scheduler if necessary
             optimizer_gen_source.load_state_dict(checkpoint['optimizer_gen_source'])
@@ -391,6 +475,8 @@ def main(cfg, resume, project_name='sada', debug=False):
     trainer = Trainer(cfg=cfg,
                         model=model,
                         model_ema=model_ema,
+                        routing_teacher=routing_teacher,
+                        vlm_signature=vlm_signature,
                         train_loader_src=train_loader_src,
                         train_loader_src2=train_loader_src2,
                         val_loader_src=val_loader_src,
@@ -455,12 +541,26 @@ def create_argparser():
     )
     parser.add_argument(
         '--vlm-validity-model', default=None,
-        help='source-only validity model evaluated on the current target crop',
+        help='source-only validity model evaluated by the frozen routing teacher',
+    )
+    parser.add_argument(
+        '--vlm-routing-teacher-checkpoint', default=None,
+        help='checkpoint for the frozen eval-mode routing teacher',
+    )
+    parser.add_argument(
+        '--vlm-routing-teacher-weights',
+        choices=['student', 'ema'],
+        default='ema',
     )
     parser.add_argument(
         '--vlm-routing-mode',
-        choices=['semantic_only', 'structure_only', 'semantic_and_structure'],
-        default='semantic_and_structure',
+        choices=[
+            'semantic_only',
+            'validity_only',
+            'semantic_and_validity',
+            'mid_confidence_ignore',
+        ],
+        default='semantic_and_validity',
     )
     parser.add_argument(
         '--vlm-beta', type=float, default=0.1,
@@ -524,27 +624,42 @@ if __name__ == '__main__':
     vlm_enabled = (
         args.vlm_semantic_cache is not None
         or args.vlm_validity_model is not None
+        or args.vlm_routing_teacher_checkpoint is not None
     )
     if args.vlm_crop_alignment <= 0:
         raise ValueError('VLM crop alignment must be positive')
+    vlm_alpha = float(config_dict['model'].get('pl_threshold', 0.7))
+    if not 0.0 <= args.vlm_beta < vlm_alpha <= 1.0:
+        raise ValueError('VLM thresholds must satisfy 0 <= beta < alpha <= 1')
     config_dict['dataset']['crop_alignment'] = args.vlm_crop_alignment
     if vlm_enabled:
+        if args.vlm_routing_teacher_checkpoint is None:
+            raise ValueError(
+                'VLM routing requires --vlm-routing-teacher-checkpoint'
+            )
         if (
-            args.vlm_routing_mode != 'structure_only'
+            args.vlm_routing_mode in (
+                'semantic_only', 'semantic_and_validity'
+            )
             and args.vlm_semantic_cache is None
         ):
             raise ValueError('semantic routing requires --vlm-semantic-cache')
         if (
-            args.vlm_routing_mode != 'semantic_only'
+            args.vlm_routing_mode in (
+                'validity_only', 'semantic_and_validity'
+            )
             and args.vlm_validity_model is None
         ):
-            raise ValueError('structural routing requires --vlm-validity-model')
+            raise ValueError('validity routing requires --vlm-validity-model')
     config_dict['vlm_routing'] = {
         'enabled': vlm_enabled,
         'semantic_cache_path': args.vlm_semantic_cache,
         'validity_model_path': args.vlm_validity_model,
         'mode': args.vlm_routing_mode,
         'beta': args.vlm_beta,
+        'teacher_checkpoint': args.vlm_routing_teacher_checkpoint,
+        'teacher_weights': args.vlm_routing_teacher_weights,
+        'load_evidence': False,
     }
     if vlm_enabled and args.stage1 != 'off':
         raise ValueError('VLM routing and Stage 1 stability cannot both be enabled')

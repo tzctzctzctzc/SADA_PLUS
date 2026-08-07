@@ -33,6 +33,8 @@ class Trainer(BaseTrainerDA):
                  cfg,
                  model,
                  model_ema,
+                 routing_teacher,
+                 vlm_signature,
                  train_loader_src,
                  train_loader_src2,
                  val_loader_src,
@@ -52,6 +54,8 @@ class Trainer(BaseTrainerDA):
         super().__init__(cfg=cfg, 
                          model=model, 
                          model_ema=model_ema, 
+                         routing_teacher=routing_teacher,
+                         vlm_signature=vlm_signature,
                          train_loader_src = train_loader_src,
                          train_loader_src2 = train_loader_src2,
                          val_loader_src = val_loader_src,
@@ -124,6 +128,8 @@ class Trainer(BaseTrainerDA):
         return metadata
         
     def get_evaluation_model(self):
+        if self.cfg.get('vlm_routing', {}).get('enabled', False):
+            return self.model
         return self.model if not self.ema_active else self.model_ema.module
         #return self.model
 
@@ -275,6 +281,7 @@ class Trainer(BaseTrainerDA):
         # switch to train mode
         self.model.train()
         self.stage1_epoch_summary = {}
+        self.vlm_epoch_summary = {}
         
         # Create iterator for the source and target data loaders
         iter_src = iter(self.train_loader_src)
@@ -297,12 +304,24 @@ class Trainer(BaseTrainerDA):
             video_list_tgt = move_to_device(video_list_tgt, self.model.device)
             
             # forward / backward the model
+            vlm_routes = None
+            if (
+                self.cfg.get('vlm_routing', {}).get('enabled', False)
+                and curr_epoch >= self.model.warmup_adv
+            ):
+                if self.routing_teacher is None:
+                    raise ValueError('VLM routing requires a frozen routing teacher')
+                self.routing_teacher.eval()
+                vlm_routes = self.routing_teacher.build_frozen_vlm_routes(
+                    video_list_tgt
+                )
             losses, _, _, _, _, _, _ = self.model(video_list_src = video_list_src,
                                 video_list_tgt = video_list_tgt,
                                 mode='train',
                                 curr_epoch=curr_epoch,
                                 cls_static_anchors=cls_static_anchors,
-                                mean_class_conf=mean_class_conf) 
+                                mean_class_conf=mean_class_conf,
+                                vlm_routes=vlm_routes)
 
             # Update the final loss with the adversarial loss
             
@@ -377,7 +396,11 @@ class Trainer(BaseTrainerDA):
                 self.optimizer_gen_source_alignment.step()
                     
                 
-            if self.cfg['train_cfg']['ema_active'] and iter_idx % self.cfg['train_cfg']['update_ema_every'] == 0:
+            if (
+                self.cfg['train_cfg']['ema_active']
+                and not self.cfg.get('vlm_routing', {}).get('enabled', False)
+                and iter_idx % self.cfg['train_cfg']['update_ema_every'] == 0
+            ):
                 step = (curr_epoch - 1) * num_iters + iter_idx
                 if step > self.cfg['train_cfg']['step_start_ema']:
                     self.model_ema.update(self.model)
@@ -394,6 +417,11 @@ class Trainer(BaseTrainerDA):
                     key = 't_' + raw_loss_name + '_total'
                     self.stage1_epoch_summary[key] = (
                         self.stage1_epoch_summary.get(key, 0.0) + loss_tr.item()
+                    )
+                if raw_loss_name.startswith('vlm_'):
+                    key = 't_' + raw_loss_name + '_total'
+                    self.vlm_epoch_summary[key] = (
+                        self.vlm_epoch_summary.get(key, 0.0) + loss_tr.item()
                     )
             
             
@@ -576,7 +604,7 @@ class Trainer(BaseTrainerDA):
         print(f"evaluating on {mode} set + visualizing...")
 
         # Set the model to evaluation mode
-        model = self.model_ema
+        model = self.get_evaluation_model()
 
         counter = 0
         num_iters = len(data_loader)

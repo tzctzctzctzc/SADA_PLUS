@@ -22,6 +22,20 @@ def sample_data(count=40):
     return features, fpn, labels
 
 
+def routing_context():
+    return {
+        "routing_teacher_state_sha256": "a" * 64,
+        "routing_teacher_weights": "ema",
+        "alpha": 0.7,
+        "beta": 0.1,
+        "crop_alignment": 1,
+        "fpn_dim": 16,
+        "feat_stride": 16.0,
+        "feat_num_frames": 32,
+        "num_classes": 10,
+    }
+
+
 def test_anchor_features_exclude_actionness_and_keep_geometry_and_level():
     features = anchor_validity.anchor_validity_features(
         torch.tensor([[0.8, 0.2, 0.1]]),
@@ -67,6 +81,8 @@ def test_frozen_fpn_validity_head_uses_fpn_and_structural_inputs():
     )
     scores = anchor_validity.probe_probabilities(features, model, fpn)
     assert scores.shape == labels.shape
+    payload = anchor_validity.serialize_probe(model, 0.8, {})
+    assert payload["evidence_family"] == "representation_validity"
 
 
 def test_high_precision_calibration_uses_source_val_labels_only():
@@ -89,11 +105,41 @@ def test_validity_artifact_is_source_only_and_hashes_exact_bytes(tmp_path):
         {
             "target_gt_usage": "forbidden",
             "supervision": "source_gt_official_label_points_conditioned_on_target_event",
+            "routing_context": routing_context(),
+            "routing_context_sha256": anchor_validity.routing_context_sha256(
+                routing_context()
+            ),
         },
     )
     path = tmp_path / "probe.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     loaded, restored, digest = anchor_validity.load_validity_model(path)
-    assert loaded["schema_version"] == "source-supervised-anchor-validity-v2"
+    assert loaded["schema_version"] == "source-supervised-anchor-validity-v3"
+    assert loaded["evidence_family"] == "reliability_full"
     assert len(digest) == 64
     assert anchor_validity.probe_probabilities(features, restored).shape == labels.shape
+
+
+def test_validity_artifact_fails_on_teacher_context_mismatch(tmp_path):
+    features, _, labels = sample_data()
+    model = anchor_validity.fit_logistic_probe(features, labels, max_iter=5)
+    context = routing_context()
+    payload = anchor_validity.serialize_probe(
+        model,
+        0.8,
+        {
+            "target_gt_usage": "forbidden",
+            "supervision": "source_gt_official_label_points_conditioned_on_target_event",
+            "routing_context": context,
+            "routing_context_sha256": anchor_validity.routing_context_sha256(
+                context
+            ),
+        },
+    )
+    path = tmp_path / "probe.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    loaded, _, _ = anchor_validity.load_validity_model(path)
+    expected = dict(context)
+    expected["routing_teacher_state_sha256"] = "b" * 64
+    with pytest.raises(ValueError, match="differs from frozen routing teacher"):
+        anchor_validity.validate_validity_routing_context(loaded, expected)

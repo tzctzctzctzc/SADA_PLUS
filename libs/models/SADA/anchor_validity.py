@@ -10,7 +10,7 @@ from torch import nn
 from torch.nn import functional as F
 
 
-STRUCTURE_PROBE_SCHEMA_VERSION = "source-supervised-anchor-validity-v2"
+STRUCTURE_PROBE_SCHEMA_VERSION = "source-supervised-anchor-validity-v3"
 BASE_FEATURE_NAMES = (
     "teacher_score",
     "teacher_margin",
@@ -32,6 +32,45 @@ FEATURE_GROUPS = {
 }
 MODEL_TYPES = {"logistic", "mlp", "gbdt", "fpn_mlp"}
 FEATURE_NAMES = BASE_FEATURE_NAMES
+ROUTING_CONTEXT_FIELDS = (
+    "routing_teacher_state_sha256",
+    "routing_teacher_weights",
+    "alpha",
+    "beta",
+    "crop_alignment",
+    "fpn_dim",
+    "feat_stride",
+    "feat_num_frames",
+    "num_classes",
+)
+
+
+def routing_context_sha256(context):
+    canonical = json.dumps(
+        context, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def validate_validity_routing_context(payload, expected_context):
+    context = payload.get("routing_context")
+    if not isinstance(context, dict):
+        raise ValueError("validity artifact has no routing teacher context")
+    if set(context) != set(ROUTING_CONTEXT_FIELDS):
+        raise ValueError("validity routing context fields differ")
+    if payload.get("routing_context_sha256") != routing_context_sha256(context):
+        raise ValueError("validity routing context hash mismatch")
+    mismatches = {
+        key: (context.get(key), expected_context.get(key))
+        for key in ROUTING_CONTEXT_FIELDS
+        if context.get(key) != expected_context.get(key)
+    }
+    if mismatches:
+        raise ValueError(
+            "validity artifact differs from frozen routing teacher: {}".format(
+                mismatches
+            )
+        )
 
 
 def anchor_validity_features(
@@ -433,10 +472,16 @@ def _json_value(value):
 
 
 def serialize_probe(probe, threshold, metadata):
+    evidence_family = (
+        "representation_validity"
+        if probe["model_type"] == "fpn_mlp"
+        else probe["feature_group"]
+    )
     return {
         "schema_version": STRUCTURE_PROBE_SCHEMA_VERSION,
         "model_type": probe["model_type"],
         "feature_group": probe["feature_group"],
+        "evidence_family": evidence_family,
         "feature_names": list(FEATURE_GROUPS[probe["feature_group"]]),
         "base_feature_names": list(BASE_FEATURE_NAMES),
         "threshold": float(threshold),
@@ -472,6 +517,13 @@ def load_validity_model(path):
         raise ValueError("unsupported validity model type")
     if feature_group not in FEATURE_GROUPS:
         raise ValueError("unsupported validity feature group")
+    expected_family = (
+        "representation_validity"
+        if model_type == "fpn_mlp"
+        else feature_group
+    )
+    if payload.get("evidence_family") != expected_family:
+        raise ValueError("validity evidence family differs")
     if tuple(payload.get("base_feature_names", ())) != BASE_FEATURE_NAMES:
         raise ValueError("validity base feature schema differs")
     if tuple(payload.get("feature_names", ())) != FEATURE_GROUPS[feature_group]:
@@ -485,6 +537,11 @@ def load_validity_model(path):
     threshold = float(payload["threshold"])
     if not math.isfinite(threshold) or not 0.0 <= threshold <= 1.0:
         raise ValueError("invalid validity threshold")
+    context = payload.get("routing_context")
+    if not isinstance(context, dict) or set(context) != set(ROUTING_CONTEXT_FIELDS):
+        raise ValueError("validity artifact has no strict routing context")
+    if payload.get("routing_context_sha256") != routing_context_sha256(context):
+        raise ValueError("validity routing context hash mismatch")
     model = _tensorize_model(payload["model"])
     model["model_type"] = model_type
     model["feature_group"] = feature_group

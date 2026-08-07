@@ -25,6 +25,9 @@ for module_name in ("anchor_validity", "vlm_routing"):
 vlm_routing = sys.modules["libs.models.SADA.vlm_routing"]
 build_online_vlm_routing = vlm_routing.build_online_vlm_routing
 load_semantic_cache = vlm_routing.load_semantic_cache
+target_labels_from_full_routing = vlm_routing.target_labels_from_full_routing
+build_vlm_signature = vlm_routing.build_vlm_signature
+validate_vlm_resume = vlm_routing.validate_vlm_resume
 
 
 def semantic_payload(entries):
@@ -46,7 +49,14 @@ def inputs(crop_start=7):
     logits = [torch.tensor([[[-1.0, 0.0], [-1.0, 0.0], [-1.0, 0.0]]])]
     offsets = [torch.ones(1, 3, 2)]
     fpn = [torch.zeros(1, 4, 3)]
-    videos = [{"metadata": {"video_id": "video", "crop_start": crop_start}}]
+    videos = [{"metadata": {
+        "video_id": "video",
+        "crop_start": crop_start,
+        "feat_stride": 1,
+        "feat_num_frames": 0,
+        "fps": 10,
+        "duration": 100,
+    }}]
     return videos, points, masks, logits, offsets, fpn
 
 
@@ -113,8 +123,9 @@ def test_absolute_index_lookup_never_projects_to_nearest_crop_anchor(tmp_path):
             "semantic_pass": True,
         },
     ])), encoding="utf-8")
-    cache, count = load_semantic_cache(path)
+    cache, count, digest = load_semantic_cache(path)
     assert count == 2
+    assert len(digest) == 64
     routes = route(cache)
     # crop_start=7 and local lattice 0,2,4 gives exact absolute indices 7,9,11.
     # Cached index 10 must not be rounded or broadcast onto either 9 or 11.
@@ -135,7 +146,7 @@ def test_online_route_uses_current_teacher_top1_not_cached_class():
     assert routes["pseudo_class"].tolist() == [[1, 1, 1]]
 
 
-def test_joint_gate_uses_online_structure_and_unmatched_cache_is_untouched():
+def test_joint_gate_uses_online_validity_and_missing_cache_is_ignore():
     cache = {
         ("video", 9): {
             "semantic_pass": True,
@@ -151,13 +162,13 @@ def test_joint_gate_uses_online_structure_and_unmatched_cache_is_untouched():
         "weight": torch.zeros(9),
         "bias": -10.0,
     }
-    routes = route(cache, "semantic_and_structure", validity_model, 0.8)
+    routes = route(cache, "semantic_and_validity", validity_model, 0.8)
     assert routes["semantic_known"].tolist() == [[False, True, False]]
     assert routes["action"].tolist() == [[False, False, False]]
     assert routes["ignore"].tolist() == [[True, True, True]]
 
 
-def test_structure_only_routes_current_low_confidence_without_semantic_cache():
+def test_validity_only_routes_current_mid_confidence_without_semantic_cache():
     validity_model = {
         "model_type": "logistic",
         "feature_group": "structure_pure",
@@ -166,6 +177,83 @@ def test_structure_only_routes_current_low_confidence_without_semantic_cache():
         "weight": torch.zeros(9),
         "bias": 10.0,
     }
-    routes = route({}, "structure_only", validity_model, 0.8)
+    routes = route({}, "validity_only", validity_model, 0.8)
     assert routes["matched"].tolist() == [[True, True, True]]
     assert routes["action"].tolist() == [[True, True, True]]
+
+
+def test_mid_confidence_ignore_control_never_rescues():
+    routes = route({}, "mid_confidence_ignore")
+    assert routes["action"].tolist() == [[False, False, False]]
+    assert routes["ignore"].tolist() == [[True, True, True]]
+
+
+def test_full_route_has_high_action_mid_ignore_and_low_background():
+    videos, points, masks, _, offsets, fpn = inputs()
+    logits = [torch.tensor([[
+        [2.0, 0.0],
+        [-1.0, 0.0],
+        [-3.0, -4.0],
+    ]])]
+    routes = build_online_vlm_routing(
+        {}, None, None, "mid_confidence_ignore",
+        videos, points, masks, logits, offsets, fpn,
+        beta=0.1, alpha=0.7,
+    )[0]
+    assert routes["action"].tolist() == [[True, False, False]]
+    assert routes["ignore"].tolist() == [[False, True, False]]
+    assert routes["background"].tolist() == [[False, False, True]]
+
+
+def test_student_logits_cannot_change_frozen_teacher_labels():
+    routes = route({
+        ("video", 11): {
+            "semantic_pass": True,
+            "semantic_label": "TARGET_ACTION",
+            "absolute_center_time": 1.1,
+        }
+    })
+    valid_mask = torch.tensor([[True, True, True]])
+    first = target_labels_from_full_routing(
+        routes, valid_mask, num_classes=2, dtype=torch.float32
+    )
+    student_high_teacher_mid = torch.tensor([[[9.0, -9.0]] * 3])
+    student_mid_teacher_high = torch.tensor([[[0.0, -1.0]] * 3])
+    assert not torch.equal(student_high_teacher_mid, student_mid_teacher_high)
+    second = target_labels_from_full_routing(
+        routes, valid_mask, num_classes=2, dtype=torch.float32
+    )
+    for left, right in zip(first, second):
+        assert torch.equal(left, right)
+
+
+def test_semantic_timestamp_must_match_current_feature_configuration():
+    cache = {
+        ("video", 11): {
+            "semantic_pass": True,
+            "semantic_label": "TARGET_ACTION",
+            "absolute_center_time": 99.0,
+        }
+    }
+    with pytest.raises(ValueError, match="timestamp differs"):
+        route(cache)
+
+
+def test_resume_signature_rejects_changed_mode_or_artifact():
+    signature = build_vlm_signature(
+        "a" * 64,
+        "b" * 64,
+        "semantic_and_validity",
+        0.1,
+        0.7,
+        1,
+        "c" * 64,
+        "ema",
+    )
+    validate_vlm_resume({"vlm_routing": signature}, signature)
+    changed = dict(signature)
+    changed["routing_mode"] = "validity_only"
+    with pytest.raises(ValueError, match="signature differs"):
+        validate_vlm_resume({"vlm_routing": signature}, changed)
+    with pytest.raises(ValueError, match="no frozen VLM routing signature"):
+        validate_vlm_resume({}, signature)

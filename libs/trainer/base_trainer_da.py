@@ -11,6 +11,8 @@ import json
 
 from libs.evaluation.metrics import MetricTracker
 from libs.models.SADA.stage1_utils import validate_stage1_resume
+from libs.models.SADA.stage1_calibration import model_state_sha256
+from libs.models.SADA.vlm_routing import validate_vlm_resume
 
 class BaseTrainerDA:
     """
@@ -20,6 +22,8 @@ class BaseTrainerDA:
                  cfg,
                  model,
                  model_ema,
+                 routing_teacher,
+                 vlm_signature,
                  train_loader_src,
                  train_loader_src2,
                  val_loader_src,
@@ -39,6 +43,8 @@ class BaseTrainerDA:
         self.cfg = cfg
         self.model = model
         self.model_ema = model_ema
+        self.routing_teacher = routing_teacher
+        self.vlm_signature = vlm_signature
         
         self.train_loader_src = train_loader_src
         self.train_loader_src2 = train_loader_src2
@@ -88,6 +94,7 @@ class BaseTrainerDA:
         os.makedirs(self.checkpoint_dir, exist_ok=True)
         os.makedirs(self.plots_dir, exist_ok=True)
         self.stage1_writer = None
+        self.vlm_writer = None
         if self.cfg.get('stage1', {}).get('enabled', False):
             try:
                 from torch.utils.tensorboard import SummaryWriter
@@ -96,6 +103,16 @@ class BaseTrainerDA:
                 )
             except ImportError:
                 self.logger.warning("TensorBoard is unavailable; CSV/JSON logging remains active")
+        if self.cfg.get('vlm_routing', {}).get('enabled', False):
+            try:
+                from torch.utils.tensorboard import SummaryWriter
+                self.vlm_writer = SummaryWriter(
+                    os.path.join(self.cfg.save_dir, 'vlm_tensorboard')
+                )
+            except ImportError:
+                self.logger.warning(
+                    "TensorBoard is unavailable; VLM CSV/JSON logging remains active"
+                )
 
 
         # Pretraining: pretrain the model for a number of epochs before starting the training
@@ -300,6 +317,29 @@ class BaseTrainerDA:
                     anchor_valid / anchor_total
                 )
             log_data.update(stage1_summary)
+            vlm_summary = getattr(self, 'vlm_epoch_summary', {})
+            vlm_mid = sum(
+                vlm_summary.get(
+                    't_vlm_l{}_mid_confidence_total'.format(level), 0.0
+                )
+                for level in range(getattr(self.model, 'n_levels', 0))
+            )
+            vlm_known = sum(
+                vlm_summary.get(
+                    't_vlm_l{}_semantic_known_total'.format(level), 0.0
+                )
+                for level in range(getattr(self.model, 'n_levels', 0))
+            )
+            vlm_rescued = sum(
+                vlm_summary.get(
+                    't_vlm_l{}_mid_action_total'.format(level), 0.0
+                )
+                for level in range(getattr(self.model, 'n_levels', 0))
+            )
+            if vlm_mid > 0:
+                vlm_summary['t_vlm_semantic_hit_rate'] = vlm_known / vlm_mid
+                vlm_summary['t_vlm_mid_rescue_rate'] = vlm_rescued / vlm_mid
+            log_data.update(vlm_summary)
             
             # Upload to wandb
             if wandb.run is not None:
@@ -326,6 +366,32 @@ class BaseTrainerDA:
                         for key, value in stage1_values.items():
                             if key != 'epoch':
                                 self.stage1_writer.add_scalar(key, value, epoch)
+            if self.cfg.get('vlm_routing', {}).get('enabled', False):
+                vlm_log = os.path.join(
+                    self.cfg.save_dir, 'vlm_epoch_metrics.jsonl'
+                )
+                with open(vlm_log, 'a', encoding='utf-8') as handle:
+                    handle.write(json.dumps(log_data, ensure_ascii=False) + '\n')
+                vlm_values = {
+                    key: value for key, value in log_data.items()
+                    if key == 'epoch' or 'vlm_' in key
+                }
+                if len(vlm_values) > 1:
+                    vlm_csv = os.path.join(
+                        self.cfg.save_dir, 'vlm_epoch_metrics.csv'
+                    )
+                    write_header = not os.path.exists(vlm_csv)
+                    with open(vlm_csv, 'a', newline='', encoding='utf-8') as handle:
+                        writer = csv.DictWriter(
+                            handle, fieldnames=list(vlm_values.keys())
+                        )
+                        if write_header:
+                            writer.writeheader()
+                        writer.writerow(vlm_values)
+                    if self.vlm_writer is not None:
+                        for key, value in vlm_values.items():
+                            if key != 'epoch':
+                                self.vlm_writer.add_scalar(key, value, epoch)
             
             # print logged informations to the screen
             t = time.time() - t0
@@ -411,6 +477,15 @@ class BaseTrainerDA:
                 'tau_bg': self.model.stage1_tau_bg,
                 'calibrated': self.model.stage1_calibrated,
             }
+        if self.cfg.get('vlm_routing', {}).get('enabled', False):
+            if self.vlm_signature is None or self.routing_teacher is None:
+                raise ValueError('VLM checkpoint requires a frozen teacher signature')
+            teacher_sha256 = model_state_sha256(self.routing_teacher)
+            if teacher_sha256 != self.vlm_signature[
+                'routing_teacher_state_sha256'
+            ]:
+                raise ValueError('frozen routing teacher changed during training')
+            state['vlm_routing'] = self.vlm_signature
         return state
 
 
@@ -431,9 +506,20 @@ class BaseTrainerDA:
             current_alpha=self.model.stage1_alpha,
             calibration_epoch=max(1, self.model.warmup_adv),
         )
+        if self.cfg.get('vlm_routing', {}).get('enabled', False):
+            validate_vlm_resume(checkpoint, self.vlm_signature)
 
         # Load state only after the checkpoint mode has been validated.
         self.model.load_state_dict(checkpoint['state_dict'])
+        if self.cfg.get('vlm_routing', {}).get('enabled', False):
+            self.routing_teacher.load_state_dict(checkpoint['ema_state_dict'])
+            teacher_sha256 = model_state_sha256(self.routing_teacher)
+            if teacher_sha256 != self.vlm_signature[
+                'routing_teacher_state_sha256'
+            ]:
+                raise ValueError('resumed routing teacher state hash differs')
+            self.routing_teacher.eval()
+            self.routing_teacher.requires_grad_(False)
         if stage1 is not None:
             legacy_rng = stage1.get('rng_state')
             train_rng_state = stage1.get('train_rng_state', legacy_rng)

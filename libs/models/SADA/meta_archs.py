@@ -17,7 +17,12 @@ from .stage1_utils import (
     source_action_eligible,
 )
 from .anchor_validity import load_validity_model, validity_model_to
-from .vlm_routing import build_online_vlm_routing, load_semantic_cache
+from .vlm_routing import (
+    ROUTING_MODES,
+    build_full_vlm_routing,
+    load_semantic_cache,
+    target_labels_from_full_routing,
+)
 from libs.utils import batched_nms
 import einops
 import copy
@@ -361,32 +366,48 @@ class SADA(nn.Module):
         self.vlm_routing_enabled = vlm_cfg.get('enabled', False)
         self.vlm_semantic_cache = {}
         self.vlm_semantic_entry_count = 0
+        self.vlm_semantic_cache_sha256 = None
         self.vlm_validity_model = None
+        self.vlm_validity_payload = None
+        self.vlm_validity_sha256 = None
         self.vlm_validity_threshold = None
         self.vlm_routing_mode = vlm_cfg.get(
-            'mode', 'semantic_and_structure'
+            'mode', 'semantic_and_validity'
         )
+        if self.vlm_routing_mode not in ROUTING_MODES:
+            raise ValueError(
+                'unknown VLM routing mode: {}'.format(self.vlm_routing_mode)
+            )
         self.vlm_beta = float(vlm_cfg.get('beta', 0.1))
-        if self.vlm_routing_enabled:
+        self.vlm_load_evidence = vlm_cfg.get('load_evidence', False)
+        if self.vlm_routing_enabled and self.vlm_load_evidence:
             if self.stage1_enabled or self.oracle_routing_mode != 'off':
                 raise ValueError(
                     'VLM routing cannot be combined with Stage 1 stability or Oracle routing'
                 )
             semantic_cache_path = vlm_cfg.get('semantic_cache_path')
-            if self.vlm_routing_mode != 'structure_only':
+            if self.vlm_routing_mode in (
+                'semantic_only', 'semantic_and_validity'
+            ):
                 if not semantic_cache_path:
                     raise ValueError('semantic VLM routing requires a semantic cache')
                 (
                     self.vlm_semantic_cache,
                     self.vlm_semantic_entry_count,
+                    self.vlm_semantic_cache_sha256,
                 ) = load_semantic_cache(semantic_cache_path)
             validity_model_path = vlm_cfg.get('validity_model_path')
-            if self.vlm_routing_mode != 'semantic_only':
+            if self.vlm_routing_mode in (
+                'validity_only', 'semantic_and_validity'
+            ):
                 if not validity_model_path:
-                    raise ValueError('structural routing requires a validity model')
-                validity_payload, validity_model, _ = load_validity_model(
-                    validity_model_path
-                )
+                    raise ValueError('validity routing requires a validity model')
+                (
+                    validity_payload,
+                    validity_model,
+                    self.vlm_validity_sha256,
+                ) = load_validity_model(validity_model_path)
+                self.vlm_validity_payload = validity_payload
                 self.vlm_validity_model = validity_model_to(
                     validity_model, self.device
                 )
@@ -1043,10 +1064,48 @@ class SADA(nn.Module):
         return self._stage1_context_routing(
             video_list, points, rng=self.stage1_dryrun_rng
         )
+
+    @torch.no_grad()
+    def build_frozen_vlm_routes(self, video_list_tgt):
+        """Run the complete target router from this frozen eval-mode model."""
+        if not self.vlm_routing_enabled or not self.vlm_load_evidence:
+            raise ValueError('routing teacher has no loaded VLM evidence')
+        if self.training:
+            raise ValueError('frozen routing teacher must remain in eval mode')
+        inputs, masks = self.preprocessing(video_list_tgt, mode='validation')
+        feats, backbone_masks, _ = self.backbone_target(inputs, masks)
+        fpn_feats, fpn_masks = self.neck_target(feats, backbone_masks)
+        logits, _ = self.cls_head_target(fpn_feats, fpn_masks)
+        offsets, _ = self.reg_head_target(fpn_feats, fpn_masks)
+        points = self.point_generator(fpn_feats)
+        return build_full_vlm_routing(
+            self.vlm_semantic_cache,
+            self.vlm_validity_model,
+            self.vlm_validity_threshold,
+            self.vlm_routing_mode,
+            video_list_tgt,
+            points,
+            [mask.squeeze(1) for mask in fpn_masks],
+            [value.permute(0, 2, 1) for value in logits],
+            [value.permute(0, 2, 1) for value in offsets],
+            fpn_feats,
+            self.vlm_beta,
+            self.stage1_alpha,
+        )
     
     
 
-    def forward(self, video_list_src, video_list_tgt, mode=None, domain='src', curr_epoch=0, cls_static_anchors=None, mean_class_conf=None):
+    def forward(
+        self,
+        video_list_src,
+        video_list_tgt,
+        mode=None,
+        domain='src',
+        curr_epoch=0,
+        cls_static_anchors=None,
+        mean_class_conf=None,
+        vlm_routes=None,
+    ):
         
         # Note: The domain is by default src, which indicates in the case of training that we care about applying supervision on the source domain (upper part of the architecture)
         # While during validation, we may want to evaluate the losses on the target domain only (lower part of the architecture)
@@ -1075,9 +1134,18 @@ class SADA(nn.Module):
         feats_tgt, masks_tgt, _ = self.backbone_target(batched_inputs_tgt, batched_masks_tgt)
         fpn_feats_tgt, fpn_masks_tgt = self.neck_target(feats_tgt, masks_tgt)  # Maintains the same shape as its input
 
-        # Generate the logits that we use for the pseudo-label computation (static)
-        feats_tgt_pl, masks_tgt_pl, _ = self.backbone_pl(batched_inputs_tgt, batched_masks_tgt)
-        fpn_feats_tgt_pl, fpn_masks_tgt_pl = self.neck_pl(feats_tgt_pl, masks_tgt_pl)  # Maintains the same shape as its input
+        if self.vlm_routing_enabled:
+            # VLM routing comes from the external frozen teacher. Keep the
+            # legacy return contract without a second stochastic student pass.
+            fpn_feats_tgt_pl = fpn_feats_tgt
+            fpn_masks_tgt_pl = fpn_masks_tgt
+        else:
+            feats_tgt_pl, masks_tgt_pl, _ = self.backbone_pl(
+                batched_inputs_tgt, batched_masks_tgt
+            )
+            fpn_feats_tgt_pl, fpn_masks_tgt_pl = self.neck_pl(
+                feats_tgt_pl, masks_tgt_pl
+            )
         
 
         # Concatenate the two lists L features levels, each of which with shape [B x F x T] into L feature levels of shape [2B x F x T]
@@ -1107,7 +1175,6 @@ class SADA(nn.Module):
                 stage1_routes = self._stage1_shift_routing(video_list_tgt, points)
             else:
                 stage1_routes = self._stage1_context_routing(video_list_tgt, points)
-        vlm_routes = None
 
         # ------------------------------------------------------------
         # Apply the classification and regression head for the source and target domains, separately
@@ -1122,8 +1189,12 @@ class SADA(nn.Module):
         
         out_cls_logits = [torch.cat((out_cls_logits_src[i], out_cls_logits_tgt[i]), dim=0) for i in range(len(out_cls_logits_src))]
 
-        # Generate the logits using the pseudo-label network (frozen in the case of static, or changing in the case of dynamic)
-        out_cls_logits_tgt_pl, _ = self.cls_head_pl(fpn_feats_tgt_pl, fpn_masks_tgt_pl)
+        if self.vlm_routing_enabled:
+            out_cls_logits_tgt_pl = out_cls_logits_tgt
+        else:
+            out_cls_logits_tgt_pl, _ = self.cls_head_pl(
+                fpn_feats_tgt_pl, fpn_masks_tgt_pl
+            )
         
         if self.use_trident_head:
             out_lb_logits_src = self.start_head(fpn_feats_src, fpn_masks_src)
@@ -1149,10 +1220,13 @@ class SADA(nn.Module):
         out_offsets = [torch.cat((out_offsets_src[i], out_offsets_tgt[i]), dim=0) for i in range(len(out_offsets_src))]
         out_actionness = [torch.cat((out_actionness_src[i], out_actionness_tgt[i]), dim=0) for i in range(len(out_offsets_src))]
 
-        # Generate the regression offsets of the frozen pseudo-label network (frozen in the case of static, or changing in the case of dynamic)
-        out_offsets_tgt_pl, out_actionness_tgt_pl = self.reg_head_pl(
-            fpn_feats_tgt_pl, fpn_masks_tgt_pl
-        )
+        if self.vlm_routing_enabled:
+            out_offsets_tgt_pl = out_offsets_tgt
+            out_actionness_tgt_pl = out_actionness_tgt
+        else:
+            out_offsets_tgt_pl, out_actionness_tgt_pl = self.reg_head_pl(
+                fpn_feats_tgt_pl, fpn_masks_tgt_pl
+            )
 
         # ------------------------------------------------------------
         # permute the outputs
@@ -1176,21 +1250,9 @@ class SADA(nn.Module):
             self.vlm_routing_enabled
             and curr_epoch >= self.warmup_adv
             and mode == 'train'
+            and vlm_routes is None
         ):
-            vlm_routes = build_online_vlm_routing(
-                self.vlm_semantic_cache,
-                self.vlm_validity_model,
-                self.vlm_validity_threshold,
-                self.vlm_routing_mode,
-                video_list_tgt,
-                points,
-                fpn_masks_tgt_pl,
-                out_cls_logits_tgt_pl,
-                out_offsets_tgt_pl,
-                fpn_feats_tgt_pl,
-                self.vlm_beta,
-                self.stage1_alpha,
-            )
+            raise ValueError('VLM training requires routes from the frozen teacher')
         
         valid_mask_tgt_pl = torch.cat(fpn_masks_tgt_pl, dim=1)    # List of B elements of shape [T_i * L]
         # ------------------------------------------------------------      
@@ -1834,58 +1896,50 @@ class SADA(nn.Module):
                         losses[metric_prefix + 'high_confidence'] = (
                             oracle_route['high_confidence'].sum().float()
                         )
+                    elif vlm_routes is not None:
+                        route_l = vlm_routes[l]
+                        route_valid = fpn_masks_tgt[l]
+                        (
+                            pseudo_gt_cls_target,
+                            selected_anchors_mask,
+                            stage1_background_mask,
+                            vlm_ignore,
+                        ) = target_labels_from_full_routing(
+                            route_l,
+                            route_valid,
+                            self.num_classes,
+                            out_cls_logits_tgt2.dtype,
+                        )
+                        metric_prefix = 'vlm_l{}_'.format(l)
+                        for metric_name in (
+                            'valid',
+                            'action',
+                            'background',
+                            'ignore',
+                            'high_confidence',
+                            'mid_confidence',
+                            'mid_action',
+                            'low_confidence',
+                            'semantic_known',
+                            'semantic_pass',
+                            'structural_pass',
+                        ):
+                            metric_mask = route_l[metric_name]
+                            if metric_name in (
+                                'semantic_known',
+                                'semantic_pass',
+                                'structural_pass',
+                            ):
+                                metric_mask = (
+                                    metric_mask & route_l['mid_confidence']
+                                )
+                            losses[metric_prefix + metric_name] = (
+                                metric_mask.sum().float()
+                            )
                     elif stage1_routes is None:
                         selected_anchors_mask = max_cls_prob_tgt >= threshold[max_cls_idx_tgt]
                         pseudo_gt_cls_target[selected_anchors_mask] = F.one_hot(max_cls_idx_tgt[selected_anchors_mask], num_classes=self.num_classes).float()
-                        if vlm_routes is None:
-                            stage1_background_mask = None
-                        else:
-                            route_l = vlm_routes[l]
-                            route_valid = fpn_masks_tgt[l]
-                            matched = route_l['matched'][route_valid]
-                            vlm_action = route_l['action'][route_valid]
-                            vlm_background = route_l['background'][route_valid]
-                            vlm_ignore = route_l['ignore'][route_valid]
-                            vlm_classes = route_l['pseudo_class'][route_valid]
-
-                            pseudo_gt_cls_target[matched] = 0
-                            pseudo_gt_cls_target[vlm_action] = F.one_hot(
-                                vlm_classes[vlm_action],
-                                num_classes=self.num_classes,
-                            ).float()
-                            stage1_background_mask = torch.all(
-                                pseudo_gt_cls_target == 0, dim=-1
-                            )
-                            stage1_background_mask[vlm_ignore] = False
-                            stage1_background_mask[vlm_background] = True
-                            metric_prefix = 'vlm_l{}_'.format(l)
-                            losses[metric_prefix + 'matched'] = matched.sum().float()
-                            losses[metric_prefix + 'action'] = vlm_action.sum().float()
-                            losses[metric_prefix + 'background'] = (
-                                vlm_background.sum().float()
-                            )
-                            losses[metric_prefix + 'ignore'] = vlm_ignore.sum().float()
-                            losses[metric_prefix + 'low_confidence'] = (
-                                route_l['low_confidence'].sum().float()
-                            )
-                            losses[metric_prefix + 'semantic_known'] = (
-                                (
-                                    route_l['semantic_known']
-                                    & route_l['low_confidence']
-                                ).sum().float()
-                            )
-                            losses[metric_prefix + 'semantic_pass'] = (
-                                (
-                                    route_l['semantic_pass']
-                                    & route_l['low_confidence']
-                                ).sum().float()
-                            )
-                            losses[metric_prefix + 'structural_pass'] = (
-                                (
-                                    route_l['structural_pass']
-                                    & route_l['low_confidence']
-                                ).sum().float()
-                            )
+                        stage1_background_mask = None
                     else:
                         route_l = stage1_routes[l]
                         route_valid = fpn_masks_tgt[l]

@@ -3,6 +3,7 @@
 import argparse
 import json
 import random
+import subprocess
 import sys
 from pathlib import Path
 
@@ -21,9 +22,11 @@ from libs.models.SADA.anchor_validity import (
     fit_mlp_probe,
     high_precision_threshold,
     probe_probabilities,
+    routing_context_sha256,
     serialize_probe,
 )
 from libs.utils.utils import _update_config, read_yaml
+from libs.models.SADA.stage1_calibration import model_state_sha256
 from tools.audit_original_sada_pseudolabels import move_video
 from tools.export_vlm_training_candidates import decode_teacher_offsets
 
@@ -214,6 +217,26 @@ def main():
         raise ValueError("checkpoint has no {}".format(state_key))
     model.load_state_dict(checkpoint[state_key])
     model.eval()
+    routing_context = {
+        "routing_teacher_state_sha256": model_state_sha256(model),
+        "routing_teacher_weights": args.weights,
+        "alpha": alpha,
+        "beta": float(args.beta),
+        "crop_alignment": int(args.crop_alignment),
+        "fpn_dim": int(cfg["model"]["fpn_dim"]),
+        "feat_stride": float(cfg["dataset"]["feat_stride"])
+        * int(cfg["dataset"].get("downsample_rate", 1)),
+        "feat_num_frames": int(cfg["dataset"]["num_frames"]),
+        "num_classes": int(model.num_class_orig),
+    }
+    try:
+        git_commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parents[1],
+            text=True,
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        git_commit = "unknown"
 
     train_x, train_fpn, train_y, train_stats = collect_split(
         model, source_train, alpha, args.beta, args.device, args.max_videos
@@ -246,6 +269,9 @@ def main():
             "beta": args.beta,
             "alpha": alpha,
             "minimum_precision": args.minimum_precision,
+            "routing_context": routing_context,
+            "routing_context_sha256": routing_context_sha256(routing_context),
+            "git_commit": git_commit,
             "calibration": calibration,
             "source_train": {
                 **train_stats,
