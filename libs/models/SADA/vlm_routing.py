@@ -385,6 +385,12 @@ def _expected_center_time(metadata, absolute_index):
     return min(max(expected, 0.0), duration)
 
 
+# Legacy manifests serialized timestamps after float32 tensor arithmetic.  The
+# exact anchor identity is the integer key above; this tolerance only absorbs
+# sub-millisecond timestamp round-off while still rejecting feature-config drift.
+SEMANTIC_TIMESTAMP_TOLERANCE_SEC = 1e-3
+
+
 def build_full_vlm_routing(
     semantic_cache,
     validity_model,
@@ -466,7 +472,7 @@ def build_full_vlm_routing(
                     )
                     if abs(
                         evidence["absolute_center_time"] - expected_time
-                    ) > 1e-5:
+                    ) > SEMANTIC_TIMESTAMP_TOLERANCE_SEC:
                         raise ValueError(
                             "semantic cache timestamp differs from current "
                             "feature configuration for {} index {}".format(

@@ -287,6 +287,40 @@ def test_semantic_timestamp_must_match_current_feature_configuration():
         route(cache)
 
 
+def test_semantic_timestamp_accepts_legacy_float32_roundoff():
+    videos, points, masks, logits, offsets, fpn = inputs(crop_start=747)
+    videos[0]["metadata"].update({
+        "feat_stride": 16,
+        "feat_num_frames": 32,
+        "fps": 30,
+        "duration": 1000,
+    })
+    expected = (747 * 16 + 0.5 * 32) / 30
+    legacy_float32 = torch.tensor(expected, dtype=torch.float32).item()
+    routes = build_online_vlm_routing(
+        {
+            ("video", 747): {
+                "semantic_pass": True,
+                "semantic_label": "TARGET_ACTION",
+                "absolute_center_time": legacy_float32,
+            }
+        },
+        None,
+        None,
+        "semantic_only",
+        videos,
+        points,
+        masks,
+        logits,
+        offsets,
+        fpn,
+        beta=0.1,
+        alpha=0.7,
+    )[0]
+    assert routes["semantic_known"].tolist() == [[True, False, False]]
+    assert routes["action"].tolist() == [[True, False, False]]
+
+
 def test_real_crop_metadata_preserves_feature_receptive_field_for_router():
     class FixedRng:
         def randint(self, lower, upper):
