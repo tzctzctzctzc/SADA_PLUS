@@ -47,18 +47,20 @@ def limit_queries(rows, max_per_video, min_gap_sec):
     return sorted(selected, key=lambda row: row["candidate_id"])
 
 
-def decode_teacher_offsets(model, fpn_feats, fpn_masks):
+def decode_teacher_offsets(model, fpn_feats, fpn_masks, domain="target"):
     """Return class-specific decoded offsets as [class, time, left/right]."""
     import torch.nn.functional as F
 
-    raw_offsets, _ = model.reg_head_target(fpn_feats, fpn_masks)
+    reg_head = model.reg_head if domain == "source" else model.reg_head_target
+    raw_offsets, actionness = reg_head(fpn_feats, fpn_masks)
     if not model.use_trident_head:
-        return tuple(
+        decoded = tuple(
             offsets[0].transpose(0, 1).unsqueeze(0).expand(
                 model.num_class_orig, -1, -1
             )
             for offsets in raw_offsets
         )
+        return decoded, actionness
 
     start_logits, _ = model.start_head(fpn_feats, fpn_masks)
     end_logits, _ = model.end_head(fpn_feats, fpn_masks)
@@ -87,7 +89,7 @@ def decode_teacher_offsets(model, fpn_feats, fpn_masks):
                 offsets, start_windows, end_windows, mode="test"
             )
         )
-    return tuple(decoded)
+    return tuple(decoded), actionness
 
 
 def main():
@@ -98,6 +100,7 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--weights", choices=("student", "ema"), default="ema")
+    parser.add_argument("--structure-probe")
     parser.add_argument("--beta", type=float, default=0.1)
     parser.add_argument("--time-bin-sec", type=float, default=0.5)
     parser.add_argument(
@@ -111,11 +114,18 @@ def main():
 
     if args.time_bin_sec <= 0:
         raise ValueError("--time-bin-sec must be positive")
+    if args.exact_anchor and not args.structure_probe:
+        raise ValueError("--exact-anchor requires --structure-probe")
 
     import torch
 
     from libs.datasets import make_dataset
     from libs.models.SADA import make_meta_arch
+    from libs.models.SADA.anchor_validity import (
+        anchor_validity_features,
+        load_structure_probe,
+        probe_probabilities,
+    )
     from libs.utils.utils import _update_config, read_yaml
     from tools.audit_original_sada_pseudolabels import move_video
 
@@ -141,6 +151,12 @@ def main():
     model.load_state_dict(checkpoint[state_key])
     model.eval()
 
+    structure_payload = structure_probe = structure_probe_sha256 = None
+    if args.exact_anchor:
+        structure_payload, structure_probe, structure_probe_sha256 = (
+            load_structure_probe(args.structure_probe)
+        )
+
     alpha = float(cfg["model"].get("pl_threshold", 0.7))
     groups = defaultdict(list)
     exact_rows = []
@@ -156,11 +172,11 @@ def main():
             fpn_feats, fpn_masks = model.neck_target(backbone_feats, backbone_masks)
             logits, _ = model.cls_head_target(fpn_feats, fpn_masks)
             points = model.point_generator(fpn_feats)
-            decoded_offsets = (
-                decode_teacher_offsets(model, fpn_feats, fpn_masks)
-                if args.exact_anchor
-                else None
-            )
+            decoded_offsets = actionness = None
+            if args.exact_anchor:
+                decoded_offsets, actionness = decode_teacher_offsets(
+                    model, fpn_feats, fpn_masks
+                )
 
             metadata = raw_video["metadata"]
             video_id = str(metadata["video_id"])
@@ -202,34 +218,28 @@ def main():
                         reg_left = float(teacher_offsets[0])
                         reg_right = float(teacher_offsets[1])
                         point_stride = float(point_grid[index, 3])
-                        reg_range_min = float(point_grid[index, 1])
-                        reg_range_max = float(point_grid[index, 2])
-                        max_distance = max(reg_left, reg_right) * point_stride
-                        center_distance = abs(reg_right - reg_left) / 2.0
-                        center_radius = float(model.train_center_sample_radius)
-                        range_eligible = (
-                            reg_range_min <= max_distance <= reg_range_max
+                        feature_tensor = anchor_validity_features(
+                            probabilities[index:index + 1],
+                            actionness[level][0, 0, index:index + 1],
+                            teacher_offsets[0:1],
+                            teacher_offsets[1:2],
+                            point_stride,
+                            level,
                         )
-                        center_eligible = center_distance <= center_radius
-                        duration_eligible = reg_left + reg_right > 0.0
-                        structural_eligible = (
-                            range_eligible
-                            and center_eligible
-                            and duration_eligible
+                        structure_score = float(
+                            probe_probabilities(feature_tensor.cpu(), structure_probe)[0]
                         )
+                        structure_threshold = float(structure_payload["threshold"])
+                        structural_pass = structure_score >= structure_threshold
                         structure = {
-                            "teacher_regression_left": reg_left,
-                            "teacher_regression_right": reg_right,
-                            "point_stride": point_stride,
-                            "point_regression_range_min": reg_range_min,
-                            "point_regression_range_max": reg_range_max,
-                            "teacher_predicted_max_distance": max_distance,
-                            "teacher_predicted_center_distance": center_distance,
-                            "center_sample_radius": center_radius,
-                            "teacher_range_eligible": range_eligible,
-                            "teacher_center_eligible": center_eligible,
-                            "teacher_duration_eligible": duration_eligible,
-                            "teacher_structural_eligible": structural_eligible,
+                            "structure_probe_schema_version": structure_payload[
+                                "schema_version"
+                            ],
+                            "structure_probe_sha256": structure_probe_sha256,
+                            "structure_score": structure_score,
+                            "structure_threshold": structure_threshold,
+                            "structural_pass": structural_pass,
+                            "structure_feature_values": feature_tensor[0].tolist(),
                         }
                         candidate_id = (
                             "{}-l{:02d}-g{:07d}-t{:012d}-c{:02d}".format(
@@ -342,6 +352,8 @@ def main():
         "checkpoint": args.checkpoint,
         "checkpoint_epoch": checkpoint.get("epoch"),
         "weights": args.weights,
+        "structure_probe": args.structure_probe,
+        "structure_probe_sha256": structure_probe_sha256,
         "levels": list(args.levels),
         "beta": args.beta,
         "alpha": alpha,

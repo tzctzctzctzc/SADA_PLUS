@@ -13,8 +13,8 @@ import { fileURLToPath } from 'node:url';
  *   1. Read one exact low-confidence SADA anchor from the manifest.
  *   2. Extract nine dense frames centered on that exact anchor.
  *   3. Hide SADA's top-1 class from the VLM.
- *   4. Ask whether a target-defining state change passes through Frame 5.
- *   5. Rescue only when visual state evidence and teacher structure both pass.
+ *   4. Ask whether Frame 5 belongs to an event in the ten-action ontology.
+ *   5. Combine the semantic result with a source-supervised structure probe.
  *
  * The VLM never changes the class. A rescued anchor keeps the frozen teacher's
  * top-1 class. Valid non-confirmed responses are routed to IGNORE. Malformed or
@@ -24,8 +24,8 @@ import { fileURLToPath } from 'node:url';
 const FRAME_OFFSETS_SEC = Object.freeze([
   -0.8, -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8,
 ]);
-const PROMPT_VERSION = 'candidate-blind-state-transition-gate-v2';
-const ROUTING_SCHEMA_VERSION = 'candidate-blind-exact-anchor-routing-v2';
+const PROMPT_VERSION = 'candidate-blind-epic-semantic-gate-v3';
+const ROUTING_SCHEMA_VERSION = 'semantic-structural-exact-anchor-routing-v3';
 
 const ALLOWED_ARGS = new Set([
   'manifest',
@@ -44,19 +44,8 @@ const ALLOWED_ARGS = new Set([
   'limit',
 ]);
 
-const STATE_VALUES = new Set([
-  'SUPPORTS_TARGET_EVENT',
-  'CONTRADICTS_TARGET_EVENT',
-  'UNCERTAIN',
-]);
-const CHANGE_VALUES = new Set([
-  'TARGET_DEFINING_CHANGE',
-  'OTHER_CHANGE',
-  'NO_MEANINGFUL_CHANGE',
-  'UNCERTAIN',
-]);
 const LABEL_VALUES = new Set([
-  'TARGET_FOREGROUND',
+  'TARGET_ACTION',
   'OTHER_ACTIVITY',
   'TRUE_BACKGROUND',
   'UNCERTAIN',
@@ -337,154 +326,57 @@ function prepareFrames(video, centerSec, outputDir) {
 }
 
 function foregroundGatePrompt() {
-  return `You are auditing one exact temporal anchor for temporal action localization
-in an egocentric kitchen video.
+  return `You are auditing the event-level semantic evidence around one exact
+temporal anchor for temporal action localization in an egocentric kitchen video.
 
 You are given nine chronologically ordered frames sampled every 0.2 seconds.
-Frame 5 is the exact anchor being audited. Frames 1-4 are preceding context
-and Frames 6-9 are following context.
+Frame 5 is the exact anchor. Frames 1-4 are preceding context and Frames 6-9
+are following context.
 
-Determine whether one continuous target action event passes through Frame 5.
-Use the dense sequence to compare the relevant object state before, during,
-and after the anchor. Do not classify the whole clip from general activity.
+Determine whether the temporal neighborhood of Frame 5 belongs to an event in
+the ten-action target ontology below. This is only a semantic judgment. Do not
+judge FPN level, anchor scale, center sampling, regression range, or alignment
+eligibility; a separate source-supervised structural gate handles those.
 
-No candidate action label is provided. Do not assume that Frame 5 is an action
-anchor merely because it was selected for review.
+No candidate label is provided. Do not assume the anchor is foreground merely
+because it was selected for review.
 
-Target action event signatures:
+Target ontology:
+- TAKE: gaining possession or stable control of an object.
+- PUT: placing an object at a destination and relinquishing stable control.
+- WASH: cleaning using water, rubbing, rinsing, or another cleaning medium.
+- OPEN: changing a closure from closed to open or more accessible.
+- CLOSE: changing a closure from open to closed or secured.
+- INSERT: moving an object from outside to inside a container or opening.
+- TURN-ON: operating a control so a device, light, flame, or flow becomes active.
+- CUT: visibly slicing, dividing, or severing material with a cutting tool.
+- TURN-OFF: operating a control so an active device, light, flame, or flow stops.
+- POUR: controlling a source container so contents visibly transfer to a destination.
 
-TAKE:
-The person gains possession or stable control of an object. An object that is
-already being held, carried, moved, adjusted, lifted, or removed does not by
-itself establish TAKE.
+Related non-target activities must not be broadened into a target action. These
+include merely holding or moving an already controlled object, removing from a
+constrained location, adjusting, setting without the target state transition,
+emptying, scraping, filling, scrubbing, pulling, pressing, or wrapping.
 
-PUT:
-The person places an object at a destination and relinquishes stable control,
-leaving the object supported at or remaining in that destination.
-
-WASH:
-The person performs a cleaning event using water, rubbing, rinsing, or another
-cleaning medium. Merely being near a sink, moving a wet object, filling,
-pouring, squeezing, or performing one unrelated manipulation is insufficient.
-
-OPEN:
-A door, lid, drawer, container, or closure changes from closed to open or
-becomes more accessible.
-
-CLOSE:
-A door, lid, drawer, container, or closure changes from open to closed or
-becomes less accessible or secured.
-
-INSERT:
-An object crosses from outside to inside a container, slot, opening, or
-enclosing object.
-
-TURN-ON:
-A control operation produces an observable transition from inactive to active
-in a device, appliance, light, flame, or flow.
-
-CUT:
-A blade or cutting tool visibly slices, divides, or severs material. Merely
-holding a knife, positioning material, pressing, peeling, or scraping is
-insufficient.
-
-TURN-OFF:
-A control operation produces an observable transition from active to inactive
-in a device, appliance, light, flame, or flow.
-
-POUR:
-A source container is controlled so that visible contents flow or are clearly
-transferred into or onto a destination.
-
-Related but non-target activities must not be broadened into a target action.
-Examples include moving an already controlled object, removing an object from
-a container or constrained location, adjusting a position or setting without
-a target state transition, emptying, scraping, filling, scrubbing, pulling,
-or wrapping.
-
-Before deciding, internally inspect three stages:
-
-1. BEFORE STATE — Frames 1-4:
-   Identify the preceding possession, location, containment, closure, device,
-   cleaning, cutting, or content state for the same hand and object.
-
-2. CENTER CHANGE — Frames 4-6, especially Frame 5:
-   Identify the visible change or continuing target-defining manipulation that
-   passes through the exact anchor. An event only in Frames 1-3 or 7-9 does not
-   pass through the anchor.
-
-3. AFTER STATE — Frames 6-9:
-   Check the resulting state or continuation of that same event on the same
-   object. Do not combine separate events or different objects.
-
-Do not output this internal analysis.
-
-Important decision rules:
-
-- A false target-foreground rescue is more harmful than failing to rescue an
-  ambiguous true action.
-
-- Choose TARGET_FOREGROUND only when all three stages support one continuous
-  target event: the before state is compatible, a target-defining change or
-  manipulation passes through Frame 5, and the after state confirms the result
-  or continuation.
-
-- For transition actions such as TAKE, PUT, OPEN, CLOSE, INSERT, TURN-ON,
-  TURN-OFF, and POUR, compare the before and after object states. Do not infer
-  an unseen transition only from one static state.
-
-- For ongoing actions such as WASH and CUT, the target-defining manipulation
-  must be visibly active through Frames 4-6 and supported by adjacent frames.
-
-- Do not use an action occurring only in the outer context if it does not pass
-  through Frames 4-6.
-
+Decision rules:
+- False rescue is more harmful than leaving an ambiguous anchor ignored.
+- Choose TARGET_ACTION only when Frame 5's temporal neighborhood clearly belongs
+  to one continuous event in the target ontology.
+- Frame 5 may be near the beginning, middle, or end of the event. The complete
+  transition need not be visible, but the central neighborhood must belong to it.
+- Use surrounding frames as evidence, but do not confirm an event that occurs
+  only in the outer context and does not include Frame 5.
 - Do not combine evidence from different objects or separate events.
+- Visible hands, objects, tools, camera motion, and general motion are not enough.
 
-- Visible hands, relevant objects, tools, controls, camera motion, and general
-  motion are not sufficient by themselves.
+Labels:
+- TARGET_ACTION: Frame 5 belongs to one event in the ten-action target ontology.
+- OTHER_ACTIVITY: a meaningful interaction occurs, but it is outside that ontology.
+- TRUE_BACKGROUND: no meaningful object interaction occurs around Frame 5.
+- UNCERTAIN: the semantic or temporal evidence is insufficient or contradictory.
 
-Choose exactly one semantic label:
-
-TARGET_FOREGROUND:
-The before state, center change, and after state consistently show that Frame 5
-belongs to one continuous event from the ten-action target set.
-
-OTHER_ACTIVITY:
-A meaningful non-target interaction passes through Frame 5, but the event is
-better described as a non-target activity.
-
-TRUE_BACKGROUND:
-No meaningful object interaction passes through Frame 5.
-
-UNCERTAIN:
-The before state, center change, after state, object identity, or temporal
-relation to Frame 5 is insufficient or contradictory.
-
-Return exactly one JSON object with exactly these keys and no other text:
-
-"before_state": one of "SUPPORTS_TARGET_EVENT",
-"CONTRADICTS_TARGET_EVENT", or "UNCERTAIN".
-"center_change": one of "TARGET_DEFINING_CHANGE", "OTHER_CHANGE",
-"NO_MEANINGFUL_CHANGE", or "UNCERTAIN".
-"after_state": one of "SUPPORTS_TARGET_EVENT",
-"CONTRADICTS_TARGET_EVENT", or "UNCERTAIN".
-"label": one of "TARGET_FOREGROUND", "OTHER_ACTIVITY",
-"TRUE_BACKGROUND", or "UNCERTAIN".
-
-The four fields must be logically consistent. TARGET_FOREGROUND requires
-SUPPORTS_TARGET_EVENT, TARGET_DEFINING_CHANGE, and SUPPORTS_TARGET_EVENT in
-that order.
-
-Use this exact label mapping after filling the three evidence fields:
-- If the three fields are SUPPORTS_TARGET_EVENT, TARGET_DEFINING_CHANGE,
-  SUPPORTS_TARGET_EVENT, return TARGET_FOREGROUND.
-- Otherwise, if center_change is OTHER_CHANGE, return OTHER_ACTIVITY.
-- Otherwise, if center_change is NO_MEANINGFUL_CHANGE, return TRUE_BACKGROUND.
-- In every remaining case, return UNCERTAIN.
-
-Do not return explanations, markdown, probabilities, action names, or
-additional keys.`;
+Return exactly one JSON object with exactly one key and no other text:
+{"label":"TARGET_ACTION|OTHER_ACTIVITY|TRUE_BACKGROUND|UNCERTAIN"}`;
 }
 
 const PROMPT_TEXT = foregroundGatePrompt();
@@ -497,14 +389,10 @@ function frameLabel(frame) {
     return 'FRAME 5 - EXACT TEMPORAL ANCHOR (0.0 seconds)';
   }
 
-  if (offset === 0) {
-    return 'FRAME 3 — EXACT TEMPORAL ANCHOR (0.0 seconds)';
-  }
-
   const sign = offset > 0 ? '+' : '';
 
   return (
-    `FRAME ${frame.index} — `
+    `FRAME ${frame.index} - `
     + `${sign}${offset.toFixed(1)} seconds relative to the anchor`
   );
 }
@@ -836,139 +724,30 @@ function parseGateResponse(text) {
     return {
       parse_error: true,
       protocol_error: true,
-      before_state: 'UNCERTAIN',
-      center_change: 'UNCERTAIN',
-      after_state: 'UNCERTAIN',
       model_label: null,
       prediction: 'UNCERTAIN',
-      action_rescue: false,
+      semantic_pass: false,
       consistency_error: true,
     };
   }
 
-  if (
-    parsed === null
-    || Array.isArray(parsed)
-    || typeof parsed !== 'object'
-  ) {
-    return {
-      parse_error: false,
-      protocol_error: true,
-      before_state: 'UNCERTAIN',
-      center_change: 'UNCERTAIN',
-      after_state: 'UNCERTAIN',
-      model_label: null,
-      prediction: 'UNCERTAIN',
-      action_rescue: false,
-      consistency_error: true,
-    };
-  }
-
-  const beforeState = normalizeEnum(
-    parsed.before_state,
+  const exactObject = (
+    parsed !== null
+    && !Array.isArray(parsed)
+    && typeof parsed === 'object'
+    && Object.keys(parsed).length === 1
+    && Object.hasOwn(parsed, 'label')
   );
-
-  const centerChange = normalizeEnum(
-    parsed.center_change,
-  );
-
-  const afterState = normalizeEnum(
-    parsed.after_state,
-  );
-
-  const modelLabel = normalizeEnum(
-    parsed.label,
-  );
-
-  const keys = Object.keys(parsed).sort();
-
-  const exactKeys = (
-    JSON.stringify(keys)
-    === JSON.stringify([
-      'after_state',
-      'before_state',
-      'center_change',
-      'label',
-    ])
-  );
-
-  const fieldsValid = (
-    STATE_VALUES.has(beforeState)
-    && CHANGE_VALUES.has(centerChange)
-    && STATE_VALUES.has(afterState)
-    && LABEL_VALUES.has(modelLabel)
-  );
-
-  const actionRescue = (
-    fieldsValid
-    && exactKeys
-    && beforeState === 'SUPPORTS_TARGET_EVENT'
-    && centerChange === 'TARGET_DEFINING_CHANGE'
-    && afterState === 'SUPPORTS_TARGET_EVENT'
-    && modelLabel === 'TARGET_FOREGROUND'
-  );
-
-  let expectedLabel = 'UNCERTAIN';
-
-  if (
-    beforeState === 'SUPPORTS_TARGET_EVENT'
-    && centerChange === 'TARGET_DEFINING_CHANGE'
-    && afterState === 'SUPPORTS_TARGET_EVENT'
-  ) {
-    expectedLabel = 'TARGET_FOREGROUND';
-  } else if (
-    centerChange === 'OTHER_CHANGE'
-  ) {
-    expectedLabel = 'OTHER_ACTIVITY';
-  } else if (
-    centerChange === 'NO_MEANINGFUL_CHANGE'
-  ) {
-    expectedLabel = 'TRUE_BACKGROUND';
-  }
-
-  const consistencyError = (
-    !fieldsValid
-    || !exactKeys
-    || modelLabel !== expectedLabel
-  );
-
-  const safePrediction = (
-    actionRescue
-      ? 'TARGET_FOREGROUND'
-      : (
-        !consistencyError
-        && LABEL_VALUES.has(modelLabel)
-          ? modelLabel
-          : 'UNCERTAIN'
-      )
-  );
+  const modelLabel = exactObject ? normalizeEnum(parsed.label) : null;
+  const valid = exactObject && LABEL_VALUES.has(modelLabel);
 
   return {
     parse_error: false,
-    protocol_error: !fieldsValid || !exactKeys,
-    before_state: (
-      STATE_VALUES.has(beforeState)
-        ? beforeState
-        : 'UNCERTAIN'
-    ),
-    center_change: (
-      CHANGE_VALUES.has(centerChange)
-        ? centerChange
-        : 'UNCERTAIN'
-    ),
-    after_state: (
-      STATE_VALUES.has(afterState)
-        ? afterState
-        : 'UNCERTAIN'
-    ),
-    model_label: (
-      LABEL_VALUES.has(modelLabel)
-        ? modelLabel
-        : null
-    ),
-    prediction: safePrediction,
-    action_rescue: actionRescue,
-    consistency_error: consistencyError,
+    protocol_error: !valid,
+    model_label: valid ? modelLabel : null,
+    prediction: valid ? modelLabel : 'UNCERTAIN',
+    semantic_pass: valid && modelLabel === 'TARGET_ACTION',
+    consistency_error: !valid,
   };
 }
 
@@ -984,92 +763,50 @@ function teacherTop1Class(row) {
   return top1;
 }
 
-const STRUCTURE_FIELDS = Object.freeze([
-  'teacher_regression_left',
-  'teacher_regression_right',
-  'point_stride',
-  'point_regression_range_min',
-  'point_regression_range_max',
-  'teacher_predicted_max_distance',
-  'teacher_predicted_center_distance',
-  'center_sample_radius',
-  'teacher_range_eligible',
-  'teacher_center_eligible',
-  'teacher_duration_eligible',
-  'teacher_structural_eligible',
+const SOURCE_STRUCTURE_FIELDS = Object.freeze([
+  'structure_probe_schema_version',
+  'structure_probe_sha256',
+  'structure_score',
+  'structure_threshold',
+  'structural_pass',
+  'structure_feature_values',
 ]);
 
-function teacherStructure(row) {
-  for (const field of STRUCTURE_FIELDS) {
+function sourceSupervisedStructure(row) {
+  for (const field of SOURCE_STRUCTURE_FIELDS) {
     if (!(field in row)) {
       throw new Error(
         `manifest row ${row.candidate_id} is missing ${field}`,
       );
     }
   }
-
-  const left = Number(row.teacher_regression_left);
-  const right = Number(row.teacher_regression_right);
-  const stride = Number(row.point_stride);
-  const rangeMin = Number(row.point_regression_range_min);
-  const rangeMax = Number(row.point_regression_range_max);
-  const radius = Number(row.center_sample_radius);
-  const numbers = [left, right, stride, rangeMin, rangeMax, radius];
-
   if (
-    numbers.some(value => !Number.isFinite(value))
-    || left < 0
-    || right < 0
-    || stride <= 0
-    || rangeMin < 0
-    || rangeMax < rangeMin
-    || radius <= 0
+    row.structure_probe_schema_version
+      !== 'source-supervised-anchor-validity-v1'
+    || !/^[0-9a-f]{64}$/.test(row.structure_probe_sha256)
+    || !Array.isArray(row.structure_feature_values)
+    || row.structure_feature_values.length !== 13
+    || row.structure_feature_values.some(value => !Number.isFinite(Number(value)))
   ) {
-    throw new Error(
-      `invalid teacher structure for ${row.candidate_id}`,
-    );
+    throw new Error(`invalid source-supervised structure provenance for ${row.candidate_id}`);
   }
-
-  const maxDistance = Math.max(left, right) * stride;
-  const centerDistance = Math.abs(right - left) / 2;
-  const rangeEligible = (
-    maxDistance >= rangeMin
-    && maxDistance <= rangeMax
-  );
-  const centerEligible = centerDistance <= radius;
-  const durationEligible = left + right > 0;
-  const eligible = (
-    rangeEligible
-    && centerEligible
-    && durationEligible
-  );
-
-  const close = (actual, expected) => (
-    Math.abs(Number(actual) - expected) <= 1e-6
-  );
-  const booleansMatch = (
-    row.teacher_range_eligible === rangeEligible
-    && row.teacher_center_eligible === centerEligible
-    && row.teacher_duration_eligible === durationEligible
-    && row.teacher_structural_eligible === eligible
-  );
-
+  const score = Number(row.structure_score);
+  const threshold = Number(row.structure_threshold);
   if (
-    !close(row.teacher_predicted_max_distance, maxDistance)
-    || !close(row.teacher_predicted_center_distance, centerDistance)
-    || !booleansMatch
+    !Number.isFinite(score)
+    || !Number.isFinite(threshold)
+    || score < 0
+    || score > 1
+    || threshold < 0
+    || threshold > 1
   ) {
-    throw new Error(
-      `teacher structure fields disagree for ${row.candidate_id}`,
-    );
+    throw new Error(`invalid source-supervised structure score for ${row.candidate_id}`);
   }
-
-  return {
-    eligible,
-    range_eligible: rangeEligible,
-    center_eligible: centerEligible,
-    duration_eligible: durationEligible,
-  };
+  const pass = score >= threshold;
+  if (row.structural_pass !== pass) {
+    throw new Error(`source-supervised structure decision disagrees for ${row.candidate_id}`);
+  }
+  return { score, threshold, pass };
 }
 
 function exactAnchorKey(row) {
@@ -1136,8 +873,8 @@ function validateManifestRows(rows) {
     }
 
     const member = members[0];
-    teacherStructure(row);
-    teacherStructure({ ...member, candidate_id: row.candidate_id });
+    sourceSupervisedStructure(row);
+    sourceSupervisedStructure({ ...member, candidate_id: row.candidate_id });
     const memberMatches = (
       Number(member.fpn_level) === Number(row.fpn_level)
       && Number(member.anchor_index) === Number(row.anchor_index)
@@ -1149,7 +886,7 @@ function validateManifestRows(rows) {
       ) <= 1e-6
       && Number(member.teacher_top1_class)
         === teacherTop1Class(row)
-      && STRUCTURE_FIELDS.every(
+      && SOURCE_STRUCTURE_FIELDS.every(
         field => member[field] === row[field],
       )
     );
@@ -1183,8 +920,8 @@ function requestFingerprint(row, model, wireApi) {
         row.global_anchor_index ?? null,
       teacher_top1_class:
         teacherTop1Class(row),
-      teacher_structure: Object.fromEntries(
-        STRUCTURE_FIELDS.map(field => [field, row[field]]),
+      source_supervised_structure: Object.fromEntries(
+        SOURCE_STRUCTURE_FIELDS.map(field => [field, row[field]]),
       ),
       frame_offsets_sec: FRAME_OFFSETS_SEC,
       prompt_sha256: PROMPT_SHA256,
@@ -1210,11 +947,15 @@ function localUncertainResult(
     status: 'ok',
     prediction: 'UNCERTAIN',
     route: 'ignore',
+    semantic_pass: false,
+    structural_pass: sourceSupervisedStructure(row).pass,
+    ablation_routes: {
+      semantic_only: 'ignore',
+      structure_only: sourceSupervisedStructure(row).pass ? 'action' : 'ignore',
+      semantic_and_structure: 'ignore',
+    },
     action_rescue: false,
     pseudo_label: null,
-    before_state: 'UNCERTAIN',
-    center_change: 'UNCERTAIN',
-    after_state: 'UNCERTAIN',
     model_reported_label: null,
     parse_error: false,
     protocol_error: false,
@@ -1247,8 +988,11 @@ function localUncertainResult(
       row.teacher_top1_score
       ?? row.sada_top1_score
       ?? null,
-    teacher_structural_eligible:
-      teacherStructure(row).eligible,
+    structure_probe_schema_version: row.structure_probe_schema_version,
+    structure_probe_sha256: row.structure_probe_sha256,
+    structure_score: Number(row.structure_score),
+    structure_threshold: Number(row.structure_threshold),
+    structure_feature_values: [...row.structure_feature_values],
   };
 }
 
@@ -1535,8 +1279,12 @@ async function main() {
         row.teacher_top1_score
         ?? row.sada_top1_score
         ?? null,
-      teacher_structural_eligible:
-        teacherStructure(row).eligible,
+      structure_probe_schema_version: row.structure_probe_schema_version,
+      structure_probe_sha256: row.structure_probe_sha256,
+      structure_score: Number(row.structure_score),
+      structure_threshold: Number(row.structure_threshold),
+      structural_pass: sourceSupervisedStructure(row).pass,
+      structure_feature_values: [...row.structure_feature_values],
     };
 
     try {
@@ -1553,27 +1301,6 @@ async function main() {
           row.frame_cache_id ?? row.candidate_id,
         ),
       );
-
-      if (!teacherStructure(row).eligible) {
-        const local = localUncertainResult(
-          row,
-          frameInfo,
-          fingerprint,
-          model,
-          wireApi,
-          'teacher_fpn_structural_ineligible',
-        );
-
-        appendResult(local);
-        counters.localStructuralIgnore += 1;
-
-        process.stdout.write(
-          `${processed}/${activeRows.length - alreadyCompleted} `
-          + `${row.candidate_id} ok UNCERTAIN structural\n`,
-        );
-
-        continue;
-      }
 
       if (!frameInfo.temporal_context_valid) {
         const local = localUncertainResult(
@@ -1630,28 +1357,26 @@ async function main() {
 
       const top1 = teacherTop1Class(row);
 
+      const structure = sourceSupervisedStructure(row);
+      const semanticPass = parsed.semantic_pass;
+      const jointPass = semanticPass && structure.pass;
       Object.assign(result, {
         status: 'ok',
         prediction: parsed.prediction,
-        route: (
-          parsed.action_rescue
-            ? 'action'
-            : 'ignore'
-        ),
-        action_rescue:
-          parsed.action_rescue,
+        semantic_pass: semanticPass,
+        structural_pass: structure.pass,
+        ablation_routes: {
+          semantic_only: semanticPass ? 'action' : 'ignore',
+          structure_only: structure.pass ? 'action' : 'ignore',
+          semantic_and_structure: jointPass ? 'action' : 'ignore',
+        },
+        route: jointPass ? 'action' : 'ignore',
+        action_rescue: jointPass,
         pseudo_label: (
-          parsed.action_rescue
+          jointPass
             ? top1
             : null
         ),
-        before_state:
-          parsed.before_state,
-        center_change:
-          parsed.center_change,
-        after_state:
-          parsed.after_state,
-        teacher_structural_eligible: true,
         model_reported_label:
           parsed.model_label,
         parse_error:
@@ -1684,8 +1409,8 @@ async function main() {
         unique_timestamp_count:
           frameInfo.unique_timestamp_count,
         gate_rule:
-          'candidate_blind_state_transition'
-          + '_and_teacher_structure_and_exact_anchor',
+          'candidate_blind_epic_semantics'
+          + '_and_source_supervised_structure_and_exact_anchor',
       });
     } catch (error) {
       result.error = String(

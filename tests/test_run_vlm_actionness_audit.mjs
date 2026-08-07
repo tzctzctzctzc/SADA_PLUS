@@ -22,18 +22,12 @@ import {
 
 function manifestRow() {
   const structure = {
-    teacher_regression_left: 1.0,
-    teacher_regression_right: 1.5,
-    point_stride: 2.0,
-    point_regression_range_min: 2.0,
-    point_regression_range_max: 8.0,
-    teacher_predicted_max_distance: 3.0,
-    teacher_predicted_center_distance: 0.25,
-    center_sample_radius: 1.5,
-    teacher_range_eligible: true,
-    teacher_center_eligible: true,
-    teacher_duration_eligible: true,
-    teacher_structural_eligible: true,
+    structure_probe_schema_version: 'source-supervised-anchor-validity-v1',
+    structure_probe_sha256: 'b'.repeat(64),
+    structure_score: 0.9,
+    structure_threshold: 0.8,
+    structural_pass: true,
+    structure_feature_values: Array(13).fill(0.1),
   };
   return {
     candidate_id: 'exact',
@@ -60,10 +54,10 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-test('routing schema is locked to state-transition exact-anchor v2', () => {
+test('routing schema is locked to dual-gate exact-anchor v3', () => {
   assert.equal(
     ROUTING_SCHEMA_VERSION,
-    'candidate-blind-exact-anchor-routing-v2',
+    'semantic-structural-exact-anchor-routing-v3',
   );
   assert.deepEqual(
     FRAME_OFFSETS_SEC,
@@ -72,32 +66,18 @@ test('routing schema is locked to state-transition exact-anchor v2', () => {
 });
 
 test('valid target foreground is the only action rescue', () => {
-  const parsed = parseGateResponse(JSON.stringify({
-    before_state: 'SUPPORTS_TARGET_EVENT',
-    center_change: 'TARGET_DEFINING_CHANGE',
-    after_state: 'SUPPORTS_TARGET_EVENT',
-    label: 'TARGET_FOREGROUND',
-  }));
-  assert.equal(parsed.action_rescue, true);
-  assert.equal(parsed.prediction, 'TARGET_FOREGROUND');
+  const parsed = parseGateResponse(JSON.stringify({ label: 'TARGET_ACTION' }));
+  assert.equal(parsed.semantic_pass, true);
+  assert.equal(parsed.prediction, 'TARGET_ACTION');
   assert.equal(parsed.protocol_error, false);
   assert.equal(parsed.consistency_error, false);
 });
 
 test('valid non-confirm responses remain normalized ignores', () => {
-  const cases = [
-    ['CONTRADICTS_TARGET_EVENT', 'OTHER_CHANGE', 'CONTRADICTS_TARGET_EVENT', 'OTHER_ACTIVITY'],
-    ['CONTRADICTS_TARGET_EVENT', 'NO_MEANINGFUL_CHANGE', 'CONTRADICTS_TARGET_EVENT', 'TRUE_BACKGROUND'],
-    ['UNCERTAIN', 'UNCERTAIN', 'UNCERTAIN', 'UNCERTAIN'],
-  ];
-  for (const [before, center, after, label] of cases) {
-    const parsed = parseGateResponse(JSON.stringify({
-      before_state: before,
-      center_change: center,
-      after_state: after,
-      label,
-    }));
-    assert.equal(parsed.action_rescue, false);
+  const cases = ['OTHER_ACTIVITY', 'TRUE_BACKGROUND', 'UNCERTAIN'];
+  for (const label of cases) {
+    const parsed = parseGateResponse(JSON.stringify({ label }));
+    assert.equal(parsed.semantic_pass, false);
     assert.equal(parsed.prediction, label);
     assert.equal(parsed.consistency_error, false);
   }
@@ -107,13 +87,10 @@ test('malformed and inconsistent responses are protocol failures', () => {
   assert.equal(parseGateResponse('not-json').parse_error, true);
   assert.equal(parseGateResponse('null').protocol_error, true);
   const inconsistent = parseGateResponse(JSON.stringify({
-    before_state: 'SUPPORTS_TARGET_EVENT',
-    center_change: 'OTHER_CHANGE',
-    after_state: 'SUPPORTS_TARGET_EVENT',
-    label: 'TARGET_FOREGROUND',
+    label: 'TARGET_ACTION', extra: true,
   }));
   assert.equal(inconsistent.consistency_error, true);
-  assert.equal(inconsistent.action_rescue, false);
+  assert.equal(inconsistent.semantic_pass, false);
 });
 
 test('manifest enforces absolute time and one exact member', () => {
@@ -136,10 +113,10 @@ test('manifest enforces absolute time and one exact member', () => {
   );
 
   const badStructure = clone(row);
-  badStructure.teacher_predicted_max_distance = 99;
+  badStructure.structural_pass = false;
   assert.throws(
     () => validateManifestRows([badStructure]),
-    /structure fields disagree/,
+    /structure decision disagrees/,
   );
 });
 

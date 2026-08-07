@@ -15,7 +15,7 @@ load_vlm_routing_cache = vlm_routing.load_vlm_routing_cache
 def exact_payload():
     return {
         "routing_policy": "exact_anchor_rescue",
-        "routing_schema_version": "candidate-blind-exact-anchor-routing-v2",
+        "routing_schema_version": "semantic-structural-exact-anchor-routing-v3",
         "bank_key_fields": [
             "video_id",
             "fpn_level",

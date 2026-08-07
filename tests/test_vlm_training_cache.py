@@ -6,21 +6,19 @@ from tools.build_vlm_training_cache import build_entries, build_payload
 from tools.export_vlm_training_candidates import limit_queries
 
 
-def manifest_row(candidate_id="exact", top1=3, center=12.5):
-    structure = {
-        "teacher_regression_left": 1.0,
-        "teacher_regression_right": 1.5,
-        "point_stride": 2.0,
-        "point_regression_range_min": 2.0,
-        "point_regression_range_max": 8.0,
-        "teacher_predicted_max_distance": 3.0,
-        "teacher_predicted_center_distance": 0.25,
-        "center_sample_radius": 1.5,
-        "teacher_range_eligible": True,
-        "teacher_center_eligible": True,
-        "teacher_duration_eligible": True,
-        "teacher_structural_eligible": True,
+def structure(score=0.9, threshold=0.8):
+    return {
+        "structure_probe_schema_version": "source-supervised-anchor-validity-v1",
+        "structure_probe_sha256": "b" * 64,
+        "structure_score": score,
+        "structure_threshold": threshold,
+        "structural_pass": score >= threshold,
+        "structure_feature_values": [0.1] * 13,
     }
+
+
+def manifest_row(candidate_id="exact", top1=3, center=12.5, score=0.9):
+    gate = structure(score)
     return {
         "candidate_id": candidate_id,
         "video_id": "video",
@@ -30,56 +28,41 @@ def manifest_row(candidate_id="exact", top1=3, center=12.5):
         "absolute_center_time": center,
         "center_sec": center,
         "teacher_top1_class": top1,
-        **structure,
-        "member_anchors": [
-            {
-                "fpn_level": 2,
-                "anchor_index": 7,
-                "global_anchor_index": 123,
-                "absolute_center_time": center,
-                "teacher_top1_class": top1,
-                **structure,
-            }
-        ],
+        **gate,
+        "member_anchors": [{
+            "fpn_level": 2,
+            "anchor_index": 7,
+            "global_anchor_index": 123,
+            "absolute_center_time": center,
+            "teacher_top1_class": top1,
+            **gate,
+        }],
     }
 
 
-def prediction_row(manifest, prediction="TARGET_FOREGROUND"):
-    is_action = prediction == "TARGET_FOREGROUND"
-    fields = {
-        "TARGET_FOREGROUND": (
-            "SUPPORTS_TARGET_EVENT",
-            "TARGET_DEFINING_CHANGE",
-            "SUPPORTS_TARGET_EVENT",
-        ),
-        "OTHER_ACTIVITY": (
-            "CONTRADICTS_TARGET_EVENT",
-            "OTHER_CHANGE",
-            "CONTRADICTS_TARGET_EVENT",
-        ),
-        "TRUE_BACKGROUND": (
-            "CONTRADICTS_TARGET_EVENT",
-            "NO_MEANINGFUL_CHANGE",
-            "CONTRADICTS_TARGET_EVENT",
-        ),
-        "UNCERTAIN": ("UNCERTAIN", "UNCERTAIN", "UNCERTAIN"),
+def prediction_row(manifest, prediction="TARGET_ACTION"):
+    semantic = prediction == "TARGET_ACTION"
+    structural = manifest["structural_pass"]
+    routes = {
+        "semantic_only": "action" if semantic else "ignore",
+        "structure_only": "action" if structural else "ignore",
+        "semantic_and_structure": "action" if semantic and structural else "ignore",
     }
-    before_state, center_change, after_state = fields[prediction]
+    joint = routes["semantic_and_structure"] == "action"
     return {
         "candidate_id": manifest["candidate_id"],
-        "routing_schema_version": "candidate-blind-exact-anchor-routing-v2",
+        "routing_schema_version": "semantic-structural-exact-anchor-routing-v3",
         "prompt_sha256": "a" * 64,
         "model": "qwen-test",
         "wire_api": "chat",
         "status": "ok",
         "prediction": prediction,
-        "route": "action" if is_action else "ignore",
-        "action_rescue": is_action,
-        "pseudo_label": manifest["teacher_top1_class"] if is_action else None,
-        "before_state": before_state,
-        "center_change": center_change,
-        "after_state": after_state,
-        "teacher_structural_eligible": manifest["teacher_structural_eligible"],
+        "semantic_pass": semantic,
+        "structural_pass": structural,
+        "ablation_routes": routes,
+        "route": routes["semantic_and_structure"],
+        "action_rescue": joint,
+        "pseudo_label": manifest["teacher_top1_class"] if joint else None,
         "model_reported_label": prediction,
         "parse_error": False,
         "protocol_error": False,
@@ -92,163 +75,98 @@ def prediction_row(manifest, prediction="TARGET_FOREGROUND"):
         "absolute_center_time": manifest["absolute_center_time"],
         "center_sec": manifest["absolute_center_time"],
         "teacher_top1_class": manifest["teacher_top1_class"],
+        **{key: manifest[key] for key in structure()},
     }
 
 
 def test_query_budget_keeps_separated_highest_scores_per_video():
     rows = [
-        {
-            "candidate_id": "q{}".format(index),
-            "video_id": "video",
-            "center_sec": center,
-            "sada_score_max": score,
-        }
-        for index, (center, score) in enumerate(
-            [(1.0, 0.49), (1.4, 0.48), (3.0, 0.40), (5.0, 0.30)]
-        )
+        {"candidate_id": "q{}".format(index), "video_id": "video", "center_sec": center, "sada_score_max": score}
+        for index, (center, score) in enumerate([(1.0, 0.49), (1.4, 0.48), (3.0, 0.40), (5.0, 0.30)])
     ]
     selected = limit_queries(rows, max_per_video=2, min_gap_sec=1.0)
     assert {row["center_sec"] for row in selected} == {1.0, 3.0}
 
 
-def test_new_protocol_action_and_ignore_are_serialized_one_to_one():
-    action_manifest = manifest_row("action")
-    ignore_manifest = manifest_row("ignore", top1=2, center=8.0)
-    ignore_manifest["anchor_index"] = 4
-    ignore_manifest["global_anchor_index"] = 88
-    ignore_manifest["member_anchors"][0].update(
-        {"anchor_index": 4, "global_anchor_index": 88}
-    )
-    predictions = [
-        prediction_row(action_manifest),
-        prediction_row(ignore_manifest, "TRUE_BACKGROUND"),
-    ]
+def test_three_ablation_routes_are_derived_from_the_same_two_gates():
+    both = manifest_row("both", score=0.9)
+    semantic_only = manifest_row("semantic", center=14.0, score=0.2)
+    semantic_only["anchor_index"] = 8
+    semantic_only["global_anchor_index"] = 124
+    semantic_only["member_anchors"][0].update({"anchor_index": 8, "global_anchor_index": 124})
+    predictions = [prediction_row(both), prediction_row(semantic_only)]
 
-    entries = build_entries([action_manifest, ignore_manifest], predictions)
-
-    assert entries[0]["decision"] == "action"
-    assert entries[0]["class_id"] == action_manifest["teacher_top1_class"]
-    assert entries[1]["decision"] == "ignore"
-    assert "class_id" not in entries[1]
-    payload = build_payload([action_manifest, ignore_manifest], predictions)
-    assert payload["counts"] == {"action": 1, "ignore": 1, "background": 0}
-    assert payload["routing_schema_version"] == (
-        "candidate-blind-exact-anchor-routing-v2"
-    )
+    assert [row["decision"] for row in build_entries([both, semantic_only], predictions, "semantic_only")] == ["action", "action"]
+    assert [row["decision"] for row in build_entries([both, semantic_only], predictions, "structure_only")] == ["action", "ignore"]
+    joint = build_entries([both, semantic_only], predictions)
+    assert [row["decision"] for row in joint] == ["action", "ignore"]
+    assert joint[0]["class_id"] == both["teacher_top1_class"]
 
 
-@pytest.mark.parametrize(
-    "prediction", ["OTHER_ACTIVITY", "TRUE_BACKGROUND", "UNCERTAIN"]
-)
-def test_all_valid_non_confirm_results_route_to_ignore(prediction):
+def test_payload_records_probe_and_ablation_provenance():
     manifest = manifest_row()
-    result = prediction_row(manifest, prediction)
+    payload = build_payload([manifest], [prediction_row(manifest)])
+    assert payload["routing_schema_version"] == "semantic-structural-exact-anchor-routing-v3"
+    assert payload["routing_mode"] == "semantic_and_structure"
+    assert payload["structure_probe_sha256"] == "b" * 64
+    assert payload["counts"] == {"action": 1, "ignore": 0, "background": 0}
+
+
+@pytest.mark.parametrize("prediction", ["OTHER_ACTIVITY", "TRUE_BACKGROUND", "UNCERTAIN"])
+def test_valid_non_target_semantics_are_ignore(prediction):
+    manifest = manifest_row()
+    assert build_entries([manifest], [prediction_row(manifest, prediction)])[0]["decision"] == "ignore"
+
+
+def test_structure_failure_does_not_erase_semantic_only_ablation():
+    manifest = manifest_row(score=0.2)
+    result = prediction_row(manifest)
+    assert build_entries([manifest], [result], "semantic_only")[0]["decision"] == "action"
+    assert build_entries([manifest], [result], "structure_only")[0]["decision"] == "ignore"
     assert build_entries([manifest], [result])[0]["decision"] == "ignore"
 
 
-def test_local_uncertain_is_a_valid_ignore_without_model_label():
+def test_local_uncertain_is_valid_and_structure_only_remains_available():
     manifest = manifest_row()
     result = prediction_row(manifest, "UNCERTAIN")
     result["model_reported_label"] = None
     result["local_gate_reason"] = "insufficient_pre_or_post_context"
     assert build_entries([manifest], [result])[0]["decision"] == "ignore"
+    assert build_entries([manifest], [result], "structure_only")[0]["decision"] == "action"
 
 
-def test_teacher_structural_reject_is_a_local_ignore():
-    manifest = manifest_row()
-    structure = {
-        "teacher_regression_left": 0.5,
-        "teacher_regression_right": 5.0,
-        "point_stride": 2.0,
-        "point_regression_range_min": 2.0,
-        "point_regression_range_max": 8.0,
-        "teacher_predicted_max_distance": 10.0,
-        "teacher_predicted_center_distance": 2.25,
-        "center_sample_radius": 1.5,
-        "teacher_range_eligible": False,
-        "teacher_center_eligible": False,
-        "teacher_duration_eligible": True,
-        "teacher_structural_eligible": False,
-    }
-    manifest.update(structure)
-    manifest["member_anchors"][0].update(structure)
-    result = prediction_row(manifest, "UNCERTAIN")
-    result["model_reported_label"] = None
-    result["local_gate_reason"] = "teacher_fpn_structural_ineligible"
-    assert build_entries([manifest], [result])[0]["decision"] == "ignore"
-
-
-def test_legacy_confirmation_label_is_rejected():
+def test_legacy_protocol_and_silent_inconsistency_are_rejected():
     manifest = manifest_row()
     result = prediction_row(manifest)
-    result["prediction"] = "CONFIRM_KEY_ACTION_EVIDENCE"
-    with pytest.raises(ValueError, match="disagrees with gate fields"):
+    result["routing_schema_version"] = "candidate-blind-exact-anchor-routing-v2"
+    with pytest.raises(ValueError, match="unsupported routing_schema_version"):
         build_entries([manifest], [result])
 
-
-@pytest.mark.parametrize(
-    "field,value",
-    [
-        ("pseudo_label", 4),
-        ("route", "ignore"),
-        ("action_rescue", False),
-        ("center_change", "OTHER_CHANGE"),
-        ("parse_error", True),
-        ("protocol_error", True),
-        ("consistency_error", True),
-    ],
-)
-def test_inconsistent_action_protocol_is_rejected(field, value):
-    manifest = manifest_row()
     result = prediction_row(manifest)
-    result[field] = value
-    with pytest.raises(ValueError):
+    result["semantic_pass"] = False
+    with pytest.raises(ValueError, match="semantic_pass"):
         build_entries([manifest], [result])
 
 
-def test_missing_protocol_field_is_rejected_instead_of_ignored():
+def test_source_probe_score_and_member_are_strictly_validated():
     manifest = manifest_row()
-    result = prediction_row(manifest, "UNCERTAIN")
-    result.pop("protocol_error")
-    with pytest.raises(ValueError, match="missing a routing protocol field"):
-        build_entries([manifest], [result])
-
-
-def test_absolute_time_alias_and_member_must_match():
-    manifest = manifest_row()
-    bad_alias = copy.deepcopy(manifest)
-    bad_alias["center_sec"] += 0.1
-    with pytest.raises(ValueError, match="center_sec differs"):
-        build_entries([bad_alias], [prediction_row(manifest)])
+    bad_score = copy.deepcopy(manifest)
+    bad_score["structural_pass"] = False
+    with pytest.raises(ValueError, match="structural_pass disagrees"):
+        build_entries([bad_score], [prediction_row(manifest)])
 
     bad_member = copy.deepcopy(manifest)
-    bad_member["member_anchors"][0]["absolute_center_time"] += 0.1
+    bad_member["member_anchors"][0]["structure_score"] = 0.1
+    bad_member["member_anchors"][0]["structural_pass"] = False
     with pytest.raises(ValueError, match="member does not match"):
         build_entries([bad_member], [prediction_row(manifest)])
-
-
-def test_mixed_prompt_or_model_is_rejected():
-    first = manifest_row("first")
-    second = manifest_row("second", center=14.0)
-    second["global_anchor_index"] = 124
-    second["anchor_index"] = 8
-    second["member_anchors"][0].update(
-        {"global_anchor_index": 124, "anchor_index": 8}
-    )
-    first_prediction = prediction_row(first)
-    second_prediction = prediction_row(second, "UNCERTAIN")
-    second_prediction["model"] = "another-model"
-    with pytest.raises(ValueError, match="mixes Prompt, model, or wire API"):
-        build_entries([first, second], [first_prediction, second_prediction])
 
 
 def test_prediction_coverage_must_equal_manifest():
     first = manifest_row("first")
     second = manifest_row("second", center=14.0)
-    second["global_anchor_index"] = 124
     second["anchor_index"] = 8
-    second["member_anchors"][0].update(
-        {"global_anchor_index": 124, "anchor_index": 8}
-    )
+    second["global_anchor_index"] = 124
+    second["member_anchors"][0].update({"anchor_index": 8, "global_anchor_index": 124})
     with pytest.raises(ValueError, match="coverage differs"):
         build_entries([first, second], [prediction_row(first)])

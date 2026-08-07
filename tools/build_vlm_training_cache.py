@@ -1,4 +1,4 @@
-"""Validate candidate-blind exact-anchor VLM routes and serialize a cache."""
+"""Validate dual-gate exact-anchor routes and serialize a training cache."""
 
 import argparse
 import json
@@ -8,9 +8,14 @@ from collections import Counter
 from pathlib import Path
 
 
-ROUTING_SCHEMA_VERSION = "candidate-blind-exact-anchor-routing-v2"
+ROUTING_SCHEMA_VERSION = "semantic-structural-exact-anchor-routing-v3"
 ROUTING_POLICY = "exact_anchor_rescue"
-ACTION_PREDICTION = "TARGET_FOREGROUND"
+ROUTING_MODES = (
+    "semantic_only",
+    "structure_only",
+    "semantic_and_structure",
+)
+ACTION_PREDICTION = "TARGET_ACTION"
 NON_ACTION_PREDICTIONS = {"OTHER_ACTIVITY", "TRUE_BACKGROUND", "UNCERTAIN"}
 EXACT_KEY_FIELDS = (
     "video_id",
@@ -19,6 +24,14 @@ EXACT_KEY_FIELDS = (
     "absolute_center_time",
     "teacher_top1_class",
 )
+STRUCTURE_FIELDS = (
+    "structure_probe_schema_version",
+    "structure_probe_sha256",
+    "structure_score",
+    "structure_threshold",
+    "structural_pass",
+    "structure_feature_values",
+)
 PROTOCOL_FIELDS = {
     "routing_schema_version",
     "prompt_sha256",
@@ -26,32 +39,17 @@ PROTOCOL_FIELDS = {
     "wire_api",
     "status",
     "prediction",
+    "semantic_pass",
+    "structural_pass",
+    "ablation_routes",
     "route",
     "action_rescue",
     "pseudo_label",
-    "before_state",
-    "center_change",
-    "after_state",
-    "teacher_structural_eligible",
     "model_reported_label",
     "parse_error",
     "protocol_error",
     "consistency_error",
-}
-STRUCTURE_FIELDS = (
-    "teacher_regression_left",
-    "teacher_regression_right",
-    "point_stride",
-    "point_regression_range_min",
-    "point_regression_range_max",
-    "teacher_predicted_max_distance",
-    "teacher_predicted_center_distance",
-    "center_sample_radius",
-    "teacher_range_eligible",
-    "teacher_center_eligible",
-    "teacher_duration_eligible",
-    "teacher_structural_eligible",
-)
+} | set(STRUCTURE_FIELDS)
 
 
 def read_jsonl(path):
@@ -88,57 +86,39 @@ def _strict_key(row):
     )
 
 
-def _teacher_structure(row):
+def _source_structure(row):
     if not set(STRUCTURE_FIELDS).issubset(row):
-        raise ValueError("exact-anchor manifest is missing teacher structure")
-    left = float(row["teacher_regression_left"])
-    right = float(row["teacher_regression_right"])
-    stride = float(row["point_stride"])
-    range_min = float(row["point_regression_range_min"])
-    range_max = float(row["point_regression_range_max"])
-    radius = float(row["center_sample_radius"])
-    values = (left, right, stride, range_min, range_max, radius)
+        raise ValueError("exact-anchor row is missing source-supervised structure")
+    if row["structure_probe_schema_version"] != "source-supervised-anchor-validity-v1":
+        raise ValueError("unsupported structure probe schema")
+    if not re.fullmatch(r"[0-9a-f]{64}", row["structure_probe_sha256"]):
+        raise ValueError("invalid structure probe sha256")
+    score = float(row["structure_score"])
+    threshold = float(row["structure_threshold"])
+    features = row["structure_feature_values"]
     if (
-        not all(math.isfinite(value) for value in values)
-        or left < 0
-        or right < 0
-        or stride <= 0
-        or range_min < 0
-        or range_max < range_min
-        or radius <= 0
+        not math.isfinite(score)
+        or not math.isfinite(threshold)
+        or not 0.0 <= score <= 1.0
+        or not 0.0 <= threshold <= 1.0
+        or not isinstance(features, list)
+        or len(features) != 13
+        or not all(math.isfinite(float(value)) for value in features)
     ):
-        raise ValueError("invalid teacher structure")
-
-    max_distance = max(left, right) * stride
-    center_distance = abs(right - left) / 2.0
-    range_eligible = range_min <= max_distance <= range_max
-    center_eligible = center_distance <= radius
-    duration_eligible = left + right > 0
-    eligible = range_eligible and center_eligible and duration_eligible
-    if (
-        abs(float(row["teacher_predicted_max_distance"]) - max_distance) > 1e-6
-        or abs(
-            float(row["teacher_predicted_center_distance"]) - center_distance
-        )
-        > 1e-6
-        or row["teacher_range_eligible"] is not range_eligible
-        or row["teacher_center_eligible"] is not center_eligible
-        or row["teacher_duration_eligible"] is not duration_eligible
-        or row["teacher_structural_eligible"] is not eligible
-    ):
-        raise ValueError("teacher structure fields disagree")
-    return eligible
+        raise ValueError("invalid source-supervised structure values")
+    passed = score >= threshold
+    if row["structural_pass"] is not passed:
+        raise ValueError("structural_pass disagrees with source-supervised score")
+    return passed
 
 
 def _validate_manifest(manifest_rows):
     by_id = {}
     keys = set()
+    structure_signatures = set()
     for row in manifest_rows:
         required = set(EXACT_KEY_FIELDS) | {
-            "candidate_id",
-            "anchor_index",
-            "center_sec",
-            "member_anchors",
+            "candidate_id", "anchor_index", "center_sec", "member_anchors"
         } | set(STRUCTURE_FIELDS)
         if not required.issubset(row):
             raise ValueError("exact-anchor manifest is missing a strict field")
@@ -153,20 +133,14 @@ def _validate_manifest(manifest_rows):
         if not isinstance(members, list) or len(members) != 1:
             raise ValueError("exact-anchor query must have exactly one member")
         member = members[0]
-        _teacher_structure(row)
-        _teacher_structure(member)
+        _source_structure(row)
+        _source_structure(member)
         if (
             int(member["fpn_level"]) != int(row["fpn_level"])
             or int(member["anchor_index"]) != int(row["anchor_index"])
-            or int(member["global_anchor_index"])
-            != int(row["global_anchor_index"])
-            or abs(
-                float(member["absolute_center_time"])
-                - float(row["absolute_center_time"])
-            )
-            > 1e-6
-            or int(member["teacher_top1_class"])
-            != int(row["teacher_top1_class"])
+            or int(member["global_anchor_index"]) != int(row["global_anchor_index"])
+            or abs(float(member["absolute_center_time"]) - float(row["absolute_center_time"])) > 1e-6
+            or int(member["teacher_top1_class"]) != top1
             or any(member[field] != row[field] for field in STRUCTURE_FIELDS)
         ):
             raise ValueError("exact-anchor member does not match its query")
@@ -174,10 +148,15 @@ def _validate_manifest(manifest_rows):
         if key in keys:
             raise ValueError("duplicate exact-anchor key: {}".format(key))
         keys.add(key)
+        structure_signatures.add(
+            (row["structure_probe_schema_version"], row["structure_probe_sha256"], float(row["structure_threshold"]))
+        )
         by_id[candidate_id] = row
     if not by_id:
         raise ValueError("manifest is empty")
-    return by_id
+    if len(structure_signatures) != 1:
+        raise ValueError("manifest mixes structure probes or thresholds")
+    return by_id, structure_signatures.pop()
 
 
 def _validate_provenance(prediction_rows):
@@ -186,9 +165,7 @@ def _validate_provenance(prediction_rows):
         if row.get("routing_schema_version") != ROUTING_SCHEMA_VERSION:
             raise ValueError("unsupported routing_schema_version")
         prompt_sha256 = row.get("prompt_sha256")
-        if not isinstance(prompt_sha256, str) or not re.fullmatch(
-            r"[0-9a-f]{64}", prompt_sha256
-        ):
+        if not isinstance(prompt_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", prompt_sha256):
             raise ValueError("invalid prompt_sha256")
         model = row.get("model")
         wire_api = row.get("wire_api")
@@ -208,18 +185,14 @@ def _validate_provenance(prediction_rows):
     }
 
 
-def _expected_prediction(before_state, center_change, after_state):
-    if (
-        before_state == "SUPPORTS_TARGET_EVENT"
-        and center_change == "TARGET_DEFINING_CHANGE"
-        and after_state == "SUPPORTS_TARGET_EVENT"
-    ):
-        return ACTION_PREDICTION
-    if center_change == "OTHER_CHANGE":
-        return "OTHER_ACTIVITY"
-    if center_change == "NO_MEANINGFUL_CHANGE":
-        return "TRUE_BACKGROUND"
-    return "UNCERTAIN"
+def _expected_routes(semantic_pass, structural_pass):
+    return {
+        "semantic_only": "action" if semantic_pass else "ignore",
+        "structure_only": "action" if structural_pass else "ignore",
+        "semantic_and_structure": (
+            "action" if semantic_pass and structural_pass else "ignore"
+        ),
+    }
 
 
 def _validate_prediction(prediction, manifest):
@@ -234,75 +207,47 @@ def _validate_prediction(prediction, manifest):
         raise ValueError("prediction exact-anchor key differs from manifest")
     if prediction.get("anchor_index") != manifest["anchor_index"]:
         raise ValueError("prediction anchor_index differs from manifest")
-    if any(
-        prediction[field] is not False
-        for field in ("parse_error", "protocol_error", "consistency_error")
-    ):
+    if any(prediction[field] is not False for field in ("parse_error", "protocol_error", "consistency_error")):
         raise ValueError("prediction contains a protocol or parsing error")
+    for field in STRUCTURE_FIELDS:
+        if prediction[field] != manifest[field]:
+            raise ValueError("prediction structure differs from manifest")
+    structural_pass = _source_structure(manifest)
+    if prediction["structural_pass"] is not structural_pass:
+        raise ValueError("prediction structural_pass differs from manifest")
 
-    before_state = prediction["before_state"]
-    center_change = prediction["center_change"]
-    after_state = prediction["after_state"]
-    state_values = {"SUPPORTS_TARGET_EVENT", "CONTRADICTS_TARGET_EVENT", "UNCERTAIN"}
-    change_values = {
-        "TARGET_DEFINING_CHANGE",
-        "OTHER_CHANGE",
-        "NO_MEANINGFUL_CHANGE",
-        "UNCERTAIN",
-    }
-    if before_state not in state_values or after_state not in state_values:
-        raise ValueError("invalid before_state or after_state")
-    if center_change not in change_values:
-        raise ValueError("invalid center_change")
-    expected = _expected_prediction(before_state, center_change, after_state)
-    if prediction["prediction"] != expected:
-        raise ValueError("prediction disagrees with gate fields")
-    if prediction["teacher_structural_eligible"] is not _teacher_structure(manifest):
-        raise ValueError("prediction teacher structure differs from manifest")
-
-    is_action = (
-        prediction["prediction"] == ACTION_PREDICTION
-        and prediction["action_rescue"] is True
-        and prediction["route"] == "action"
-        and prediction["before_state"] == "SUPPORTS_TARGET_EVENT"
-        and prediction["center_change"] == "TARGET_DEFINING_CHANGE"
-        and prediction["after_state"] == "SUPPORTS_TARGET_EVENT"
-        and prediction["teacher_structural_eligible"] is True
-        and _teacher_structure(manifest)
-        and prediction["pseudo_label"]
-        == prediction["teacher_top1_class"]
-        and prediction["pseudo_label"]
-        == manifest["teacher_top1_class"]
-        and prediction["model_reported_label"] == ACTION_PREDICTION
-    )
-    if prediction["action_rescue"] is True and not is_action:
-        raise ValueError("action route does not satisfy the complete protocol")
-    if is_action:
-        return "action"
-
-    if prediction["prediction"] not in NON_ACTION_PREDICTIONS:
+    label = prediction["prediction"]
+    if label not in {ACTION_PREDICTION} | NON_ACTION_PREDICTIONS:
         raise ValueError("legacy or unsupported prediction label")
-    if (
-        prediction["action_rescue"] is not False
-        or prediction["route"] != "ignore"
-        or prediction["pseudo_label"] is not None
-    ):
-        raise ValueError("non-confirmed prediction must route to ignore")
-
+    semantic_pass = label == ACTION_PREDICTION
+    if prediction["semantic_pass"] is not semantic_pass:
+        raise ValueError("semantic_pass disagrees with VLM prediction")
     local_uncertain = prediction.get("local_gate_reason") is not None
     if local_uncertain:
-        if (
-            prediction["prediction"] != "UNCERTAIN"
-            or prediction["model_reported_label"] is not None
-        ):
+        if label != "UNCERTAIN" or prediction["model_reported_label"] is not None:
             raise ValueError("invalid local UNCERTAIN result")
-    elif prediction["model_reported_label"] != prediction["prediction"]:
+    elif prediction["model_reported_label"] != label:
         raise ValueError("model label differs from normalized prediction")
-    return "ignore"
+
+    routes = _expected_routes(semantic_pass, structural_pass)
+    if prediction["ablation_routes"] != routes:
+        raise ValueError("runner ablation routes disagree with gate decisions")
+    joint_action = routes["semantic_and_structure"] == "action"
+    if (
+        prediction["route"] != routes["semantic_and_structure"]
+        or prediction["action_rescue"] is not joint_action
+        or prediction["pseudo_label"] != (
+            manifest["teacher_top1_class"] if joint_action else None
+        )
+    ):
+        raise ValueError("runner joint route disagrees with dual-gate protocol")
+    return routes
 
 
-def build_entries(manifest_rows, prediction_rows):
-    manifest_by_id = _validate_manifest(manifest_rows)
+def build_entries(manifest_rows, prediction_rows, routing_mode="semantic_and_structure"):
+    if routing_mode not in ROUTING_MODES:
+        raise ValueError("unsupported routing mode: {}".format(routing_mode))
+    manifest_by_id, _ = _validate_manifest(manifest_rows)
     _validate_provenance(prediction_rows)
     latest_predictions = {}
     for prediction in prediction_rows:
@@ -314,10 +259,9 @@ def build_entries(manifest_rows, prediction_rows):
         raise ValueError("prediction coverage differs from manifest")
 
     entries = []
-    runner_action_keys = set()
     for candidate_id, manifest in manifest_by_id.items():
-        prediction = latest_predictions[candidate_id]
-        decision = _validate_prediction(prediction, manifest)
+        routes = _validate_prediction(latest_predictions[candidate_id], manifest)
+        decision = routes[routing_mode]
         entry = {
             "video_id": manifest["video_id"],
             "fpn_level": int(manifest["fpn_level"]),
@@ -329,40 +273,37 @@ def build_entries(manifest_rows, prediction_rows):
         }
         if decision == "action":
             entry["class_id"] = int(manifest["teacher_top1_class"])
-            runner_action_keys.add(_strict_key(prediction))
         entries.append(entry)
-
-    cache_action_keys = {
-        _strict_key(entry) for entry in entries if entry["decision"] == "action"
-    }
-    if runner_action_keys != cache_action_keys:
-        raise ValueError("runner action keys differ from cache action keys")
-    if any(entry["decision"] == "background" for entry in entries):
-        raise ValueError("candidate-blind rescue must not produce background")
     return entries
 
 
-def build_payload(manifest_rows, prediction_rows):
+def build_payload(manifest_rows, prediction_rows, routing_mode="semantic_and_structure"):
     provenance = _validate_provenance(prediction_rows)
-    entries = build_entries(manifest_rows, prediction_rows)
+    _, structure_signature = _validate_manifest(manifest_rows)
+    entries = build_entries(manifest_rows, prediction_rows, routing_mode)
     counts = Counter(entry["decision"] for entry in entries)
     return {
-        "version": 4,
-        "source": "offline_candidate_blind_state_transition_vlm_without_target_gt",
+        "version": 5,
+        "source": "offline_vlm_semantics_plus_source_supervised_anchor_validity",
         "routing_policy": ROUTING_POLICY,
+        "routing_mode": routing_mode,
         **provenance,
+        "structure_probe_schema_version": structure_signature[0],
+        "structure_probe_sha256": structure_signature[1],
+        "structure_threshold": structure_signature[2],
         "routing_rule": {
-            "validated_target_foreground": (
-                "state_transition_and_teacher_structure_then_action_with_teacher_top1"
-            ),
-            "valid_non_confirm_outputs": "ignore",
+            "semantic_only": "VLM TARGET_ACTION",
+            "structure_only": "source-supervised structural_pass",
+            "semantic_and_structure": "both gates pass",
+            "class": "always SADA teacher top-1",
+            "valid_non_action": "ignore",
             "background": "forbidden",
         },
         "bank_key_fields": list(EXACT_KEY_FIELDS),
         "counts": {
             "action": counts.get("action", 0),
             "ignore": counts.get("ignore", 0),
-            "background": counts.get("background", 0),
+            "background": 0,
         },
         "entries": entries,
     }
@@ -373,16 +314,17 @@ def main():
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--predictions", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--routing-mode", choices=ROUTING_MODES, default="semantic_and_structure")
     args = parser.parse_args()
-
     payload = build_payload(
         read_jsonl(args.manifest),
         read_jsonl(args.predictions),
+        args.routing_mode,
     )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    print(json.dumps({"output": str(output), **payload["counts"]}, indent=2))
+    print(json.dumps({"output": str(output), "routing_mode": args.routing_mode, **payload["counts"]}, indent=2))
 
 
 if __name__ == "__main__":
