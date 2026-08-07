@@ -324,6 +324,29 @@ class Stage1UtilsTest(unittest.TestCase):
         self.assertEqual(cropped["segments"].tolist(), [[2.0, 5.0]])
         self.assertEqual(cropped["labels"].tolist(), [2])
 
+    def test_crop_alignment_samples_only_aligned_feature_starts(self):
+        class FixedRng:
+            def randint(self, lower, upper):
+                self_bounds = (lower, upper)
+                self.assert_bounds = self_bounds
+                return 2
+
+        item = {
+            "feats": torch.arange(80).float().view(1, 80),
+            "segments": torch.empty(0, 2),
+            "labels": torch.empty(0, dtype=torch.long),
+            "metadata": {},
+        }
+        cropped = stage1_data_utils.truncate_feats(
+            item,
+            max_seq_len=32,
+            trunc_thresh=0.3,
+            has_action=False,
+            crop_alignment=16,
+            rng=FixedRng(),
+        )
+        self.assertEqual(cropped["metadata"]["crop_start"], 32)
+
     def test_calibration_artifact_validates_manifest_and_metadata(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "calibration.json"

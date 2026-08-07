@@ -450,8 +450,25 @@ def create_argparser():
         help='independent perturbation RNG seed',
     )
     parser.add_argument(
-        '--vlm-routing-cache', default=None,
-        help='GT-free offline VLM routing cache for conservative Stage 1 refinement',
+        '--vlm-semantic-cache', default=None,
+        help='candidate-blind offline VLM semantics keyed by absolute feature index',
+    )
+    parser.add_argument(
+        '--vlm-validity-model', default=None,
+        help='source-only validity model evaluated on the current target crop',
+    )
+    parser.add_argument(
+        '--vlm-routing-mode',
+        choices=['semantic_only', 'structure_only', 'semantic_and_structure'],
+        default='semantic_and_structure',
+    )
+    parser.add_argument(
+        '--vlm-beta', type=float, default=0.1,
+        help='lower current-teacher confidence bound for low-confidence rescue',
+    )
+    parser.add_argument(
+        '--vlm-crop-alignment', type=int, default=1,
+        help='controlled experiment: align random crop starts; 1 is the final method',
     )
     parser.add_argument(
         '--oracle-routing', choices=['off', 'o1', 'o2', 'o3', 'o4'], default='off',
@@ -504,11 +521,32 @@ if __name__ == '__main__':
         'context_rho': 64.0 / 2304.0,
         'context_rho_max': 2.0 * 64.0 / 2304.0,
     }
+    vlm_enabled = (
+        args.vlm_semantic_cache is not None
+        or args.vlm_validity_model is not None
+    )
+    if args.vlm_crop_alignment <= 0:
+        raise ValueError('VLM crop alignment must be positive')
+    config_dict['dataset']['crop_alignment'] = args.vlm_crop_alignment
+    if vlm_enabled:
+        if (
+            args.vlm_routing_mode != 'structure_only'
+            and args.vlm_semantic_cache is None
+        ):
+            raise ValueError('semantic routing requires --vlm-semantic-cache')
+        if (
+            args.vlm_routing_mode != 'semantic_only'
+            and args.vlm_validity_model is None
+        ):
+            raise ValueError('structural routing requires --vlm-validity-model')
     config_dict['vlm_routing'] = {
-        'enabled': args.vlm_routing_cache is not None,
-        'cache_path': args.vlm_routing_cache,
+        'enabled': vlm_enabled,
+        'semantic_cache_path': args.vlm_semantic_cache,
+        'validity_model_path': args.vlm_validity_model,
+        'mode': args.vlm_routing_mode,
+        'beta': args.vlm_beta,
     }
-    if args.vlm_routing_cache is not None and args.stage1 != 'off':
+    if vlm_enabled and args.stage1 != 'off':
         raise ValueError('VLM routing and Stage 1 stability cannot both be enabled')
     if (
         args.stage1 != 'off'

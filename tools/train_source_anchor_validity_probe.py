@@ -1,4 +1,4 @@
-"""Train and calibrate an anchor-validity probe using source GT only."""
+"""Train and calibrate a source-only anchor-validity model on current crops."""
 
 import argparse
 import json
@@ -13,8 +13,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from libs.datasets import make_dataset
 from libs.models.SADA import make_meta_arch
 from libs.models.SADA.anchor_validity import (
+    FEATURE_GROUPS,
     anchor_validity_features,
+    fit_fpn_mlp_probe,
+    fit_gbdt_probe,
     fit_logistic_probe,
+    fit_mlp_probe,
     high_precision_threshold,
     probe_probabilities,
     serialize_probe,
@@ -31,10 +35,24 @@ def parse_args():
     parser.add_argument("--output", required=True)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--weights", choices=("student", "ema"), default="ema")
+    parser.add_argument(
+        "--model-type",
+        choices=("logistic", "mlp", "gbdt", "fpn_mlp"),
+        default="logistic",
+    )
+    parser.add_argument(
+        "--feature-group", choices=tuple(FEATURE_GROUPS), default="reliability_full"
+    )
     parser.add_argument("--beta", type=float, default=0.1)
     parser.add_argument("--minimum-precision", type=float, default=0.9)
     parser.add_argument("--max-iter", type=int, default=50)
+    parser.add_argument("--epochs", type=int, default=200)
+    parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--l2", type=float, default=0.01)
+    parser.add_argument("--gbdt-estimators", type=int, default=100)
+    parser.add_argument("--gbdt-learning-rate", type=float, default=0.05)
+    parser.add_argument("--gbdt-max-depth", type=int, default=3)
+    parser.add_argument("--crop-alignment", type=int, default=1)
     parser.add_argument("--max-train-anchors", type=int, default=200000)
     parser.add_argument("--max-videos", type=int, default=None)
     parser.add_argument("--seed", type=int, default=20260808)
@@ -50,6 +68,7 @@ def center_inside_target_event(points, segments):
 
 def collect_split(model, dataset, alpha, beta, device, max_videos):
     feature_rows = []
+    fpn_rows = []
     label_rows = []
     semantic_rows = 0
     low_confidence_rows = 0
@@ -62,27 +81,21 @@ def collect_split(model, dataset, alpha, beta, device, max_videos):
             backbone, backbone_masks, _ = model.backbone_source(inputs, masks)
             fpn, fpn_masks = model.neck_source(backbone, backbone_masks)
             logits, _ = model.cls_head(fpn, fpn_masks)
-            decoded, actionness = decode_teacher_offsets(
-                model, fpn, fpn_masks, domain="source"
-            )
+            decoded = decode_teacher_offsets(model, fpn, fpn_masks, domain="source")
             points = model.point_generator(fpn)
             gt_cls, _ = model.label_points(
-                points,
-                [video["segments"]],
-                [video["labels"]],
+                points, [video["segments"]], [video["labels"]]
             )
             gt_cls = gt_cls[0].sum(-1) > 0
             concat_start = 0
-            for level, (point_grid, level_logits, level_mask) in enumerate(
-                zip(points, logits, fpn_masks)
+            for level, (point_grid, level_logits, level_mask, level_fpn) in enumerate(
+                zip(points, logits, fpn_masks, fpn)
             ):
                 length = point_grid.shape[0]
                 probabilities = level_logits[0].transpose(0, 1).sigmoid()
                 top2 = probabilities.topk(k=2, dim=-1).values
                 valid = level_mask[0, 0].bool()
-                low_confidence = (
-                    valid & (top2[:, 0] > beta) & (top2[:, 0] < alpha)
-                )
+                low_confidence = valid & (top2[:, 0] > beta) & (top2[:, 0] < alpha)
                 semantic = center_inside_target_event(point_grid, video["segments"])
                 cohort = low_confidence & semantic
                 semantic_rows += int((valid & semantic).sum())
@@ -91,10 +104,8 @@ def collect_split(model, dataset, alpha, beta, device, max_videos):
                     top1 = probabilities.argmax(-1)
                     row_indices = torch.arange(length, device=device)
                     class_offsets = decoded[level][top1, row_indices]
-                    level_actionness = actionness[level][0, 0]
                     features = anchor_validity_features(
                         probabilities,
-                        level_actionness,
                         class_offsets[:, 0],
                         class_offsets[:, 1],
                         float(point_grid[0, 3]),
@@ -102,28 +113,30 @@ def collect_split(model, dataset, alpha, beta, device, max_videos):
                     )
                     labels = gt_cls[concat_start:concat_start + length]
                     feature_rows.append(features[cohort].cpu())
+                    fpn_rows.append(level_fpn[0].transpose(0, 1)[cohort].cpu())
                     label_rows.append(labels[cohort].cpu())
                 concat_start += length
     if not feature_rows:
         raise RuntimeError("source split produced no semantic low-confidence anchors")
     return (
         torch.cat(feature_rows),
+        torch.cat(fpn_rows),
         torch.cat(label_rows),
         {
             "videos": video_count,
             "semantic_anchor_count": semantic_rows,
             "low_confidence_anchor_count": low_confidence_rows,
-            "probe_cohort_count": sum(len(row) for row in label_rows),
+            "model_cohort_count": sum(len(row) for row in label_rows),
         },
     )
 
 
-def bounded_sample(features, labels, maximum, seed):
+def bounded_sample(features, fpn_features, labels, maximum, seed):
     if maximum <= 0 or len(labels) <= maximum:
-        return features, labels
+        return features, fpn_features, labels
     generator = torch.Generator().manual_seed(seed)
     selected = torch.randperm(len(labels), generator=generator)[:maximum]
-    return features[selected], labels[selected]
+    return features[selected], fpn_features[selected], labels[selected]
 
 
 def split_metrics(scores, labels, threshold):
@@ -138,20 +151,61 @@ def split_metrics(scores, labels, threshold):
     }
 
 
+def fit_model(args, features, fpn_features, labels):
+    if args.model_type == "logistic":
+        return fit_logistic_probe(
+            features, labels, args.max_iter, args.l2, args.feature_group
+        )
+    if args.model_type == "mlp":
+        return fit_mlp_probe(
+            features,
+            labels,
+            args.feature_group,
+            args.epochs,
+            args.learning_rate,
+            args.l2,
+            args.seed,
+        )
+    if args.model_type == "gbdt":
+        return fit_gbdt_probe(
+            features,
+            labels,
+            args.feature_group,
+            args.gbdt_estimators,
+            args.gbdt_learning_rate,
+            args.gbdt_max_depth,
+            args.seed,
+        )
+    return fit_fpn_mlp_probe(
+        features,
+        fpn_features,
+        labels,
+        args.epochs,
+        args.learning_rate,
+        args.l2,
+        args.seed,
+    )
+
+
 def main():
     args = parse_args()
+    if args.crop_alignment <= 0:
+        raise ValueError("--crop-alignment must be positive")
+    if args.model_type == "fpn_mlp" and args.feature_group != "structure_pure":
+        raise ValueError("fpn_mlp uses FPN + structural scalars; select structure_pure")
     random.seed(args.seed)
     torch.manual_seed(args.seed)
     cfg = read_yaml(args.config)
     cfg["stage1"] = {"enabled": False, "perturbation": "shift"}
+    cfg["dataset"]["crop_alignment"] = args.crop_alignment
     _update_config(cfg)
     alpha = float(cfg["model"].get("pl_threshold", 0.7))
 
     source_train = make_dataset(
-        cfg["dataset_name"], False, cfg["src_train_split"], **cfg["dataset"]
+        cfg["dataset_name"], True, cfg["src_train_split"], **cfg["dataset"]
     )
     source_val = make_dataset(
-        cfg["dataset_name"], False, cfg["src_val_split"], **cfg["dataset"]
+        cfg["dataset_name"], True, cfg["src_val_split"], **cfg["dataset"]
     )
     model = make_meta_arch(cfg["model_name"], cfg, device=args.device).to(args.device)
     checkpoint = torch.load(args.checkpoint, map_location=args.device)
@@ -161,21 +215,19 @@ def main():
     model.load_state_dict(checkpoint[state_key])
     model.eval()
 
-    train_x, train_y, train_stats = collect_split(
+    train_x, train_fpn, train_y, train_stats = collect_split(
         model, source_train, alpha, args.beta, args.device, args.max_videos
     )
-    val_x, val_y, val_stats = collect_split(
+    val_x, val_fpn, val_y, val_stats = collect_split(
         model, source_val, alpha, args.beta, args.device, args.max_videos
     )
-    train_x, train_y = bounded_sample(
-        train_x, train_y, args.max_train_anchors, args.seed
+    train_x, train_fpn, train_y = bounded_sample(
+        train_x, train_fpn, train_y, args.max_train_anchors, args.seed
     )
-    probe = fit_logistic_probe(train_x, train_y, args.max_iter, args.l2)
-    train_scores = probe_probabilities(train_x, probe)
-    val_scores = probe_probabilities(val_x, probe)
-    calibration = high_precision_threshold(
-        val_scores, val_y, args.minimum_precision
-    )
+    probe = fit_model(args, train_x, train_fpn, train_y)
+    train_scores = probe_probabilities(train_x, probe, train_fpn)
+    val_scores = probe_probabilities(val_x, probe, val_fpn)
+    calibration = high_precision_threshold(val_scores, val_y, args.minimum_precision)
     threshold = calibration["threshold"]
     payload = serialize_probe(
         probe,
@@ -189,6 +241,8 @@ def main():
             "weights": args.weights,
             "source_train_split": list(cfg["src_train_split"]),
             "source_val_split": list(cfg["src_val_split"]),
+            "crop_training": True,
+            "crop_alignment": args.crop_alignment,
             "beta": args.beta,
             "alpha": alpha,
             "minimum_precision": args.minimum_precision,

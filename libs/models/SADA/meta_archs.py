@@ -16,7 +16,8 @@ from .stage1_utils import (
     shift_features,
     source_action_eligible,
 )
-from .vlm_routing import build_vlm_routing, load_vlm_routing_cache
+from .anchor_validity import load_validity_model, validity_model_to
+from .vlm_routing import build_online_vlm_routing, load_semantic_cache
 from libs.utils import batched_nms
 import einops
 import copy
@@ -358,20 +359,42 @@ class SADA(nn.Module):
 
         vlm_cfg = cfg.get('vlm_routing', {})
         self.vlm_routing_enabled = vlm_cfg.get('enabled', False)
-        self.vlm_routing_cache = {}
-        self.vlm_routing_entry_count = 0
+        self.vlm_semantic_cache = {}
+        self.vlm_semantic_entry_count = 0
+        self.vlm_validity_model = None
+        self.vlm_validity_threshold = None
+        self.vlm_routing_mode = vlm_cfg.get(
+            'mode', 'semantic_and_structure'
+        )
+        self.vlm_beta = float(vlm_cfg.get('beta', 0.1))
         if self.vlm_routing_enabled:
             if self.stage1_enabled or self.oracle_routing_mode != 'off':
                 raise ValueError(
                     'VLM routing cannot be combined with Stage 1 stability or Oracle routing'
                 )
-            cache_path = vlm_cfg.get('cache_path')
-            if not cache_path:
-                raise ValueError('VLM routing requires a cache path')
-            (
-                self.vlm_routing_cache,
-                self.vlm_routing_entry_count,
-            ) = load_vlm_routing_cache(cache_path, self.num_classes)
+            semantic_cache_path = vlm_cfg.get('semantic_cache_path')
+            if self.vlm_routing_mode != 'structure_only':
+                if not semantic_cache_path:
+                    raise ValueError('semantic VLM routing requires a semantic cache')
+                (
+                    self.vlm_semantic_cache,
+                    self.vlm_semantic_entry_count,
+                ) = load_semantic_cache(semantic_cache_path)
+            validity_model_path = vlm_cfg.get('validity_model_path')
+            if self.vlm_routing_mode != 'semantic_only':
+                if not validity_model_path:
+                    raise ValueError('structural routing requires a validity model')
+                validity_payload, validity_model, _ = load_validity_model(
+                    validity_model_path
+                )
+                self.vlm_validity_model = validity_model_to(
+                    validity_model, self.device
+                )
+                self.vlm_validity_threshold = float(
+                    validity_payload['threshold']
+                )
+            if cfg['model']['use_trident_head']:
+                raise ValueError('online VLM routing currently requires non-trident offsets')
         
         
         # check the feature pyramid and local attention window size
@@ -1085,17 +1108,6 @@ class SADA(nn.Module):
             else:
                 stage1_routes = self._stage1_context_routing(video_list_tgt, points)
         vlm_routes = None
-        if (
-            self.vlm_routing_enabled
-            and curr_epoch >= self.warmup_adv
-            and mode == 'train'
-        ):
-            vlm_routes = build_vlm_routing(
-                self.vlm_routing_cache,
-                video_list_tgt,
-                points,
-                [mask.squeeze(1) for mask in fpn_masks_tgt],
-            )
 
         # ------------------------------------------------------------
         # Apply the classification and regression head for the source and target domains, separately
@@ -1138,7 +1150,9 @@ class SADA(nn.Module):
         out_actionness = [torch.cat((out_actionness_src[i], out_actionness_tgt[i]), dim=0) for i in range(len(out_offsets_src))]
 
         # Generate the regression offsets of the frozen pseudo-label network (frozen in the case of static, or changing in the case of dynamic)
-        out_offsets_tgt_pl, out_actionness_tgt_pl = self.reg_head_pl(fpn_feats_tgt, fpn_masks_tgt)
+        out_offsets_tgt_pl, out_actionness_tgt_pl = self.reg_head_pl(
+            fpn_feats_tgt_pl, fpn_masks_tgt_pl
+        )
 
         # ------------------------------------------------------------
         # permute the outputs
@@ -1157,6 +1171,26 @@ class SADA(nn.Module):
         # fpn_masks: F list[B, 1, T_i] -> F List[B, T_i]
         fpn_masks = [x.squeeze(1) for x in fpn_masks]
         fpn_masks_tgt_pl = [x.squeeze(1) for x in fpn_masks_tgt_pl]
+
+        if (
+            self.vlm_routing_enabled
+            and curr_epoch >= self.warmup_adv
+            and mode == 'train'
+        ):
+            vlm_routes = build_online_vlm_routing(
+                self.vlm_semantic_cache,
+                self.vlm_validity_model,
+                self.vlm_validity_threshold,
+                self.vlm_routing_mode,
+                video_list_tgt,
+                points,
+                fpn_masks_tgt_pl,
+                out_cls_logits_tgt_pl,
+                out_offsets_tgt_pl,
+                fpn_feats_tgt_pl,
+                self.vlm_beta,
+                self.stage1_alpha,
+            )
         
         valid_mask_tgt_pl = torch.cat(fpn_masks_tgt_pl, dim=1)    # List of B elements of shape [T_i * L]
         # ------------------------------------------------------------      
@@ -1831,6 +1865,27 @@ class SADA(nn.Module):
                                 vlm_background.sum().float()
                             )
                             losses[metric_prefix + 'ignore'] = vlm_ignore.sum().float()
+                            losses[metric_prefix + 'low_confidence'] = (
+                                route_l['low_confidence'].sum().float()
+                            )
+                            losses[metric_prefix + 'semantic_known'] = (
+                                (
+                                    route_l['semantic_known']
+                                    & route_l['low_confidence']
+                                ).sum().float()
+                            )
+                            losses[metric_prefix + 'semantic_pass'] = (
+                                (
+                                    route_l['semantic_pass']
+                                    & route_l['low_confidence']
+                                ).sum().float()
+                            )
+                            losses[metric_prefix + 'structural_pass'] = (
+                                (
+                                    route_l['structural_pass']
+                                    & route_l['low_confidence']
+                                ).sum().float()
+                            )
                     else:
                         route_l = stage1_routes[l]
                         route_valid = fpn_masks_tgt[l]

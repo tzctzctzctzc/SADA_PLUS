@@ -1,8 +1,7 @@
-"""Export GT-free, deduplicated target anchors for offline VLM routing."""
+"""Export GT-free VLM queries keyed by absolute feature position."""
 
 import argparse
 import json
-import math
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -16,10 +15,6 @@ def video_ids_in(root):
         for path in Path(root).iterdir()
         if path.is_file() and path.suffix.lower() == ".mp4" and path.stat().st_size
     }
-
-
-def time_bin(center_sec, bin_sec):
-    return int(math.floor(float(center_sec) / bin_sec + 0.5))
 
 
 def limit_queries(rows, max_per_video, min_gap_sec):
@@ -52,15 +47,14 @@ def decode_teacher_offsets(model, fpn_feats, fpn_masks, domain="target"):
     import torch.nn.functional as F
 
     reg_head = model.reg_head if domain == "source" else model.reg_head_target
-    raw_offsets, actionness = reg_head(fpn_feats, fpn_masks)
+    raw_offsets, _ = reg_head(fpn_feats, fpn_masks)
     if not model.use_trident_head:
-        decoded = tuple(
+        return tuple(
             offsets[0].transpose(0, 1).unsqueeze(0).expand(
                 model.num_class_orig, -1, -1
             )
             for offsets in raw_offsets
         )
-        return decoded, actionness
 
     start_logits, _ = model.start_head(fpn_feats, fpn_masks)
     end_logits, _ = model.end_head(fpn_feats, fpn_masks)
@@ -69,7 +63,6 @@ def decode_teacher_offsets(model, fpn_feats, fpn_masks, domain="target"):
         offsets = offsets[0].transpose(0, 1)
         starts = starts[0]
         ends = ends[0]
-
         start_windows = F.pad(starts, (model.num_bins, 0)).unsqueeze(-1)
         window_size = list(start_windows.size())
         window_size[-1] = model.num_bins + 1
@@ -79,17 +72,14 @@ def decode_teacher_offsets(model, fpn_feats, fpn_masks, domain="target"):
         start_windows = start_windows.as_strided(
             size=window_size, stride=window_stride
         )
-
         end_windows = F.pad(ends, (0, model.num_bins)).unsqueeze(-1)
         end_windows = end_windows.as_strided(
             size=window_size, stride=window_stride
         )
         decoded.append(
-            model.decode_offset(
-                offsets, start_windows, end_windows, mode="test"
-            )
+            model.decode_offset(offsets, start_windows, end_windows, mode="test")
         )
-    return tuple(decoded), actionness
+    return tuple(decoded)
 
 
 def main():
@@ -100,41 +90,30 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--weights", choices=("student", "ema"), default="ema")
-    parser.add_argument("--structure-probe")
     parser.add_argument("--beta", type=float, default=0.1)
-    parser.add_argument("--time-bin-sec", type=float, default=0.5)
-    parser.add_argument(
-        "--exact-anchor", action="store_true",
-        help="export one VLM query per exact FPN anchor without merging members",
-    )
     parser.add_argument("--max-queries-per-video", type=int, default=0)
     parser.add_argument("--min-query-gap-sec", type=float, default=1.0)
     parser.add_argument("--levels", type=int, nargs="+", default=range(6))
+    parser.add_argument(
+        "--exact-anchor",
+        action="store_true",
+        help="compatibility flag; absolute-feature exact semantics are now mandatory",
+    )
     args = parser.parse_args()
-
-    if args.time_bin_sec <= 0:
-        raise ValueError("--time-bin-sec must be positive")
-    if args.exact_anchor and not args.structure_probe:
-        raise ValueError("--exact-anchor requires --structure-probe")
 
     import torch
 
     from libs.datasets import make_dataset
     from libs.models.SADA import make_meta_arch
-    from libs.models.SADA.anchor_validity import (
-        anchor_validity_features,
-        load_structure_probe,
-        probe_probabilities,
-    )
     from libs.utils.utils import _update_config, read_yaml
     from tools.audit_original_sada_pseudolabels import move_video
 
     cfg = read_yaml(args.config)
     cfg["stage1"] = {"enabled": False, "perturbation": "shift"}
     _update_config(cfg)
-
-    target_split = cfg["tgt_train_split"]
-    dataset = make_dataset(cfg["dataset_name"], False, target_split, **cfg["dataset"])
+    dataset = make_dataset(
+        cfg["dataset_name"], False, cfg["tgt_train_split"], **cfg["dataset"]
+    )
     expected_videos = len(dataset.data_list)
     available_videos = video_ids_in(args.video_root)
     dataset.data_list = tuple(
@@ -151,51 +130,34 @@ def main():
     model.load_state_dict(checkpoint[state_key])
     model.eval()
 
-    structure_payload = structure_probe = structure_probe_sha256 = None
-    if args.exact_anchor:
-        structure_payload, structure_probe, structure_probe_sha256 = (
-            load_structure_probe(args.structure_probe)
-        )
-
     alpha = float(cfg["model"].get("pl_threshold", 0.7))
-    groups = defaultdict(list)
-    exact_rows = []
+    grouped = defaultdict(list)
     level_counts = Counter()
     valid_anchors = 0
     low_confidence_anchors = 0
-
     with torch.no_grad():
         for raw_video in dataset:
             video = move_video(raw_video, args.device)
             inputs, masks = model.preprocessing([video], mode="eval")
-            backbone_feats, backbone_masks, _ = model.backbone_target(inputs, masks)
-            fpn_feats, fpn_masks = model.neck_target(backbone_feats, backbone_masks)
-            logits, _ = model.cls_head_target(fpn_feats, fpn_masks)
-            points = model.point_generator(fpn_feats)
-            decoded_offsets = actionness = None
-            if args.exact_anchor:
-                decoded_offsets, actionness = decode_teacher_offsets(
-                    model, fpn_feats, fpn_masks
-                )
-
+            backbone, backbone_masks, _ = model.backbone_target(inputs, masks)
+            fpn, fpn_masks = model.neck_target(backbone, backbone_masks)
+            logits, _ = model.cls_head_target(fpn, fpn_masks)
+            points = model.point_generator(fpn)
             metadata = raw_video["metadata"]
             video_id = str(metadata["video_id"])
-            crop_start = float(metadata.get("crop_start", 0))
+            crop_start = int(metadata.get("crop_start", 0))
             feat_stride = float(metadata["feat_stride"])
             fps = float(metadata["fps"])
             frame_offset = 0.5 * float(cfg["dataset"]["num_frames"])
             duration = float(metadata["duration"])
-            global_anchor_offset = 0
 
             for level, (point_grid, level_logits, level_mask) in enumerate(
                 zip(points, logits, fpn_masks)
             ):
-                level_length = int(point_grid.shape[0])
                 if level not in args.levels:
-                    global_anchor_offset += level_length
                     continue
                 probabilities = level_logits[0].transpose(0, 1).sigmoid()
-                top_scores, top_classes = probabilities.topk(k=2, dim=-1)
+                top_scores = probabilities.topk(k=2, dim=-1).values
                 valid = level_mask[0, 0].bool()
                 eligible = valid & (top_scores[:, 0] > args.beta) & (
                     top_scores[:, 0] < alpha
@@ -203,139 +165,55 @@ def main():
                 valid_anchors += int(valid.sum())
                 low_confidence_anchors += int(eligible.sum())
                 level_counts[level] += int(eligible.sum())
-                centers = (
-                    (point_grid[:, 0] + crop_start) * feat_stride + frame_offset
-                ) / fps
-
                 for index in torch.nonzero(eligible).flatten().tolist():
-                    center_sec = min(max(float(centers[index]), 0.0), duration)
-                    top1 = int(top_classes[index, 0])
-                    top2 = int(top_classes[index, 1])
-                    if args.exact_anchor:
-                        time_us = int(round(center_sec * 1000000.0))
-                        global_index = global_anchor_offset + int(index)
-                        teacher_offsets = decoded_offsets[level][top1, index]
-                        reg_left = float(teacher_offsets[0])
-                        reg_right = float(teacher_offsets[1])
-                        point_stride = float(point_grid[index, 3])
-                        feature_tensor = anchor_validity_features(
-                            probabilities[index:index + 1],
-                            actionness[level][0, 0, index:index + 1],
-                            teacher_offsets[0:1],
-                            teacher_offsets[1:2],
-                            point_stride,
-                            level,
-                        )
-                        structure_score = float(
-                            probe_probabilities(feature_tensor.cpu(), structure_probe)[0]
-                        )
-                        structure_threshold = float(structure_payload["threshold"])
-                        structural_pass = structure_score >= structure_threshold
-                        structure = {
-                            "structure_probe_schema_version": structure_payload[
-                                "schema_version"
-                            ],
-                            "structure_probe_sha256": structure_probe_sha256,
-                            "structure_score": structure_score,
-                            "structure_threshold": structure_threshold,
-                            "structural_pass": structural_pass,
-                            "structure_feature_values": feature_tensor[0].tolist(),
-                        }
-                        candidate_id = (
-                            "{}-l{:02d}-g{:07d}-t{:012d}-c{:02d}".format(
-                                video_id, level, global_index, time_us, top1
-                            )
-                        )
-                        member = {
-                            "fpn_level": level,
-                            "anchor_index": int(index),
-                            "global_anchor_index": global_index,
-                            "absolute_center_time": center_sec,
-                            "teacher_top1_class": top1,
-                            "center_sampling_position": float(point_grid[index, 0]),
-                            **structure,
-                        }
-                        score = float(top_scores[index, 0])
-                        exact_rows.append(
-                            {
-                                "candidate_id": candidate_id,
-                                "anchor_id": candidate_id,
-                                "frame_cache_id": candidate_id,
-                                "video_id": video_id,
-                                "fpn_level": level,
-                                "anchor_index": int(index),
-                                "global_anchor_index": global_index,
-                                "absolute_center_time": center_sec,
-                                "center_sec": center_sec,
-                                "teacher_top1_class": top1,
-                                "sada_top1_class": top1,
-                                "sada_top2_class": top2,
-                                "sada_score_min": score,
-                                "sada_score_max": score,
-                                "sada_score_mean": score,
-                                **structure,
-                                "member_anchors": [member],
-                            }
-                        )
-                        continue
-                    bin_index = time_bin(center_sec, args.time_bin_sec)
-                    groups[(video_id, bin_index, top1)].append(
+                    local_coordinate = float(point_grid[index, 0])
+                    rounded = int(round(local_coordinate))
+                    if abs(local_coordinate - rounded) > 1e-6:
+                        raise ValueError("FPN point is not an integer feature coordinate")
+                    absolute_index = crop_start + rounded
+                    center_sec = (
+                        absolute_index * feat_stride + frame_offset
+                    ) / fps
+                    center_sec = min(max(float(center_sec), 0.0), duration)
+                    grouped[(video_id, absolute_index)].append(
                         {
-                            "fpn_level": level,
-                            "anchor_index": int(index),
                             "center_sec": center_sec,
+                            "fpn_level": level,
                             "sada_score": float(top_scores[index, 0]),
-                            "sada_top2_class": top2,
                         }
                     )
-                global_anchor_offset += level_length
 
-    member_counts = Counter()
-    if args.exact_anchor:
-        rows = exact_rows
-        member_counts.update(len(row["member_anchors"]) for row in rows)
-    else:
-        rows = []
-        for (video_id, bin_index, top1), members in sorted(groups.items()):
-            representative = max(members, key=lambda member: member["sada_score"])
-            center_sec = representative["center_sec"]
-            top2 = representative["sada_top2_class"]
-            scores = [member["sada_score"] for member in members]
-            candidate_id = "{}-tb{:07d}-c{:02d}-c{:02d}".format(
-                video_id, bin_index, top1, top2
-            )
-            rows.append(
-                {
-                    "candidate_id": candidate_id,
-                    "anchor_id": candidate_id,
-                    "frame_cache_id": candidate_id,
-                    "video_id": video_id,
-                    "center_sec": center_sec,
-                    "time_bin_index": bin_index,
-                    "time_bin_sec": args.time_bin_sec,
-                    "sada_top1_class": top1,
-                    "sada_top2_class": top2,
-                    "sada_score_min": min(scores),
-                    "sada_score_max": max(scores),
-                    "sada_score_mean": sum(scores) / len(scores),
-                    "member_anchors": [
-                        {
-                            "fpn_level": member["fpn_level"],
-                            "anchor_index": member["anchor_index"],
-                        }
-                        for member in members
-                    ],
-                }
-            )
-            member_counts[len(members)] += 1
+    rows = []
+    for (video_id, absolute_index), members in sorted(grouped.items()):
+        center_sec = members[0]["center_sec"]
+        if any(abs(member["center_sec"] - center_sec) > 1e-6 for member in members):
+            raise ValueError("one absolute feature index has inconsistent timestamps")
+        time_us = int(round(center_sec * 1000000.0))
+        candidate_id = "{}-p{:07d}-t{:012d}".format(
+            video_id, absolute_index, time_us
+        )
+        scores = [member["sada_score"] for member in members]
+        rows.append(
+            {
+                "candidate_id": candidate_id,
+                "anchor_id": candidate_id,
+                "frame_cache_id": candidate_id,
+                "video_id": video_id,
+                "absolute_feature_index": absolute_index,
+                "absolute_center_time": center_sec,
+                "center_sec": center_sec,
+                "source_candidate_count": len(members),
+                "source_fpn_levels": sorted(
+                    {member["fpn_level"] for member in members}
+                ),
+                "sada_score_min": min(scores),
+                "sada_score_max": max(scores),
+                "sada_score_mean": sum(scores) / len(scores),
+            }
+        )
 
-    all_deduplicated_queries = len(rows)
-    rows = limit_queries(
-        rows, args.max_queries_per_video, args.min_query_gap_sec
-    )
-    selected_member_counts = Counter(len(row["member_anchors"]) for row in rows)
-    selected_anchor_count = sum(len(row["member_anchors"]) for row in rows)
-
+    query_count_before_budget = len(rows)
+    rows = limit_queries(rows, args.max_queries_per_video, args.min_query_gap_sec)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="utf-8") as stream:
@@ -344,36 +222,30 @@ def main():
 
     metadata = {
         "selection_uses_target_gt": False,
-        "source": "frozen SADA target prediction",
-        "target_split": list(target_split),
+        "source": "frozen SADA target prediction; VLM input remains candidate-blind",
+        "semantic_key_fields": ["video_id", "absolute_feature_index"],
+        "target_split": list(cfg["tgt_train_split"]),
         "expected_target_videos": expected_videos,
         "available_target_videos": len(dataset),
         "missing_target_videos": expected_videos - len(dataset),
         "checkpoint": args.checkpoint,
         "checkpoint_epoch": checkpoint.get("epoch"),
         "weights": args.weights,
-        "structure_probe": args.structure_probe,
-        "structure_probe_sha256": structure_probe_sha256,
         "levels": list(args.levels),
         "beta": args.beta,
         "alpha": alpha,
-        "exact_anchor": args.exact_anchor,
-        "time_bin_sec": None if args.exact_anchor else args.time_bin_sec,
         "valid_anchors": valid_anchors,
         "low_confidence_anchors": low_confidence_anchors,
         "low_confidence_by_level": dict(sorted(level_counts.items())),
-        "deduplicated_queries_before_budget": all_deduplicated_queries,
+        "absolute_semantic_queries_before_budget": query_count_before_budget,
         "deduplication_ratio": (
-            low_confidence_anchors / all_deduplicated_queries
-            if all_deduplicated_queries
+            low_confidence_anchors / query_count_before_budget
+            if query_count_before_budget
             else None
         ),
         "max_queries_per_video": args.max_queries_per_video,
         "min_query_gap_sec": args.min_query_gap_sec,
-        "deduplicated_vlm_queries": len(rows),
-        "selected_member_anchors": selected_anchor_count,
-        "members_per_query_before_budget": dict(sorted(member_counts.items())),
-        "selected_members_per_query": dict(sorted(selected_member_counts.items())),
+        "selected_vlm_queries": len(rows),
     }
     Path(str(output) + ".meta.json").write_text(
         json.dumps(metadata, indent=2), encoding="utf-8"

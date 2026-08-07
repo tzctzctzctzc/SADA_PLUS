@@ -30,6 +30,7 @@ class EpicKitchensDataset(Dataset):
         file_ext,        # feature file extension if any
         force_upsampling, # force to upsample to max_seq_len
         action_subsampling='all', # subsample actions to max_seq_len
+        crop_alignment=1,
         stage1_context=False,
     ):
         # file path
@@ -77,6 +78,9 @@ class EpicKitchensDataset(Dataset):
         }
         
         self.action_subsampling = action_subsampling
+        self.crop_alignment = int(crop_alignment)
+        if self.crop_alignment <= 0:
+            raise ValueError("crop_alignment must be a positive integer")
         self.stage1_context = stage1_context
 
     def find_empty_cls(self, label_dict, num_classes):
@@ -238,7 +242,11 @@ class EpicKitchensDataset(Dataset):
         # truncate the features during training
         if self.is_training and (segments is not None):
             data_dict = truncate_feats(
-                data_dict, self.max_seq_len, self.trunc_thresh, self.crop_ratio
+                data_dict,
+                self.max_seq_len,
+                self.trunc_thresh,
+                self.crop_ratio,
+                crop_alignment=self.crop_alignment,
             )
         else:
             data_dict['metadata']['original_feat_len'] = feats.shape[1]

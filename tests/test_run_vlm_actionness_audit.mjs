@@ -6,9 +6,10 @@ import {
   FRAME_OFFSETS_SEC,
   HttpStatusError,
   PROMPT_SHA256,
-  ROUTING_SCHEMA_VERSION,
+  SEMANTIC_CACHE_SCHEMA_VERSION,
   RequestTimeoutError,
   absoluteCenterTime,
+  absoluteFeatureIndex,
   argsOf,
   assertCompleteSummary,
   completionSummary,
@@ -16,72 +17,55 @@ import {
   parseGateResponse,
   requestFingerprint,
   requestWithRetry,
+  semanticKey,
   validateManifestRows,
   validatePriorRows,
 } from '../tools/run_vlm_actionness_audit.mjs';
 
+
 function manifestRow() {
-  const structure = {
-    structure_probe_schema_version: 'source-supervised-anchor-validity-v1',
-    structure_probe_sha256: 'b'.repeat(64),
-    structure_score: 0.9,
-    structure_threshold: 0.8,
-    structural_pass: true,
-    structure_feature_values: Array(13).fill(0.1),
-  };
   return {
-    candidate_id: 'exact',
+    candidate_id: 'p123',
+    anchor_id: 'p123',
     video_id: 'video',
-    fpn_level: 2,
-    anchor_index: 7,
-    global_anchor_index: 123,
+    absolute_feature_index: 123,
     absolute_center_time: 12.5,
     center_sec: 12.5,
-    teacher_top1_class: 3,
-    ...structure,
-    member_anchors: [{
-      fpn_level: 2,
-      anchor_index: 7,
-      global_anchor_index: 123,
-      absolute_center_time: 12.5,
-      teacher_top1_class: 3,
-      ...structure,
-    }],
   };
 }
+
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-test('routing schema is locked to dual-gate exact-anchor v3', () => {
+
+test('schema is semantic-only and absolute-index keyed', () => {
   assert.equal(
-    ROUTING_SCHEMA_VERSION,
-    'semantic-structural-exact-anchor-routing-v3',
+    SEMANTIC_CACHE_SCHEMA_VERSION,
+    'offline-vlm-semantic-evidence-v1',
   );
   assert.deepEqual(
     FRAME_OFFSETS_SEC,
     [-0.8, -0.6, -0.4, -0.2, 0, 0.2, 0.4, 0.6, 0.8],
   );
+  const row = manifestRow();
+  assert.equal(absoluteFeatureIndex(row), 123);
+  assert.equal(semanticKey(row), 'video|123');
 });
 
-test('valid target foreground is the only action rescue', () => {
+
+test('valid target foreground is the only semantic pass', () => {
   const parsed = parseGateResponse(JSON.stringify({ label: 'TARGET_ACTION' }));
   assert.equal(parsed.semantic_pass, true);
   assert.equal(parsed.prediction, 'TARGET_ACTION');
-  assert.equal(parsed.protocol_error, false);
-  assert.equal(parsed.consistency_error, false);
-});
-
-test('valid non-confirm responses remain normalized ignores', () => {
-  const cases = ['OTHER_ACTIVITY', 'TRUE_BACKGROUND', 'UNCERTAIN'];
-  for (const label of cases) {
-    const parsed = parseGateResponse(JSON.stringify({ label }));
-    assert.equal(parsed.semantic_pass, false);
-    assert.equal(parsed.prediction, label);
-    assert.equal(parsed.consistency_error, false);
+  for (const label of ['OTHER_ACTIVITY', 'TRUE_BACKGROUND', 'UNCERTAIN']) {
+    const ignored = parseGateResponse(JSON.stringify({ label }));
+    assert.equal(ignored.semantic_pass, false);
+    assert.equal(ignored.prediction, label);
   }
 });
+
 
 test('malformed and inconsistent responses are protocol failures', () => {
   assert.equal(parseGateResponse('not-json').parse_error, true);
@@ -93,32 +77,28 @@ test('malformed and inconsistent responses are protocol failures', () => {
   assert.equal(inconsistent.semantic_pass, false);
 });
 
-test('manifest enforces absolute time and one exact member', () => {
+
+test('manifest enforces exact absolute index and timestamp', () => {
   const row = manifestRow();
   validateManifestRows([row]);
   assert.equal(absoluteCenterTime(row), 12.5);
 
   const badAlias = clone(row);
   badAlias.center_sec = 12.6;
-  assert.throws(
-    () => validateManifestRows([badAlias]),
-    /center_sec differs/,
-  );
+  assert.throws(() => validateManifestRows([badAlias]), /center_sec differs/);
 
-  const broadcast = clone(row);
-  broadcast.member_anchors.push(clone(row.member_anchors[0]));
-  assert.throws(
-    () => validateManifestRows([broadcast]),
-    /exactly one member anchor/,
-  );
+  const nonInteger = clone(row);
+  nonInteger.absolute_feature_index = 123.5;
+  assert.throws(() => validateManifestRows([nonInteger]), /absolute_feature_index/);
 
-  const badStructure = clone(row);
-  badStructure.structural_pass = false;
+  const duplicate = clone(row);
+  duplicate.candidate_id = 'duplicate';
   assert.throws(
-    () => validateManifestRows([badStructure]),
-    /structure decision disagrees/,
+    () => validateManifestRows([row, duplicate]),
+    /duplicate exact semantic key/,
   );
 });
+
 
 test('legacy prompt-mode argument is rejected', () => {
   assert.throws(
@@ -126,6 +106,7 @@ test('legacy prompt-mode argument is rejected', () => {
     /unsupported CLI argument/,
   );
 });
+
 
 test('retry only handles timeout, 429, and server errors', async () => {
   let calls = 0;
@@ -149,6 +130,7 @@ test('retry only handles timeout, 429, and server errors', async () => {
   assert.equal(calls, 1);
 });
 
+
 test('native fetch timeout aborts an outstanding request', async () => {
   const server = http.createServer((request, response) => {
     setTimeout(() => response.end('late'), 100);
@@ -165,13 +147,14 @@ test('native fetch timeout aborts an outstanding request', async () => {
   }
 });
 
-test('resume output cannot mix Prompt, model, or wire API', () => {
+
+test('resume output cannot mix schema, prompt, model, or wire API', () => {
   const manifest = manifestRow();
   const model = 'qwen-test';
   const wireApi = 'chat';
   const prior = {
     candidate_id: manifest.candidate_id,
-    routing_schema_version: ROUTING_SCHEMA_VERSION,
+    semantic_cache_schema_version: SEMANTIC_CACHE_SCHEMA_VERSION,
     prompt_sha256: PROMPT_SHA256,
     model,
     wire_api: wireApi,
@@ -182,25 +165,24 @@ test('resume output cannot mix Prompt, model, or wire API', () => {
   );
   assert.throws(
     () => validatePriorRows(
-      [{ ...prior, model: 'another-model' }],
-      [manifest],
-      model,
-      wireApi,
+      [{ ...prior, semantic_cache_schema_version: 'old-v3' }],
+      [manifest], model, wireApi,
     ),
-    /model or wire_api differs/,
+    /semantic cache schema/,
   );
 });
 
-test('completion summary distinguishes resumed, API, and local work', () => {
+
+test('completion summary reports semantic pass and ignore only', () => {
   const rows = [
     { candidate_id: 'a' },
     { candidate_id: 'b' },
     { candidate_id: 'c' },
   ];
   const latest = new Map([
-    ['a', { status: 'ok', route: 'action' }],
-    ['b', { status: 'ok', route: 'ignore' }],
-    ['c', { status: 'ok', route: 'ignore' }],
+    ['a', { status: 'ok', semantic_pass: true }],
+    ['b', { status: 'ok', semantic_pass: false }],
+    ['c', { status: 'ok', semantic_pass: false }],
   ]);
   const summary = completionSummary(rows, latest, {
     alreadyCompleted: 1,
@@ -214,16 +196,10 @@ test('completion summary distinguishes resumed, API, and local work', () => {
     api_attempted: 1,
     api_success: 1,
     local_uncertain: 1,
-    local_structural_ignore: 0,
     completed_total: 3,
-    action: 1,
-    ignore: 2,
-    background: 0,
+    semantic_pass: 1,
+    semantic_ignore: 2,
     error: 0,
   });
   assert.doesNotThrow(() => assertCompleteSummary(summary));
-  assert.throws(
-    () => assertCompleteSummary({ ...summary, background: 1 }),
-    /background/,
-  );
 });

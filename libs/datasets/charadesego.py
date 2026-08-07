@@ -22,12 +22,16 @@ class CharadesEgo(Dataset):
                  default_fps,
                  trunc_thresh,
                  crop_ratio,
-                 max_seq_len):
+                 max_seq_len,
+                 crop_alignment=1):
         self.fps = 24
         self.is_training = is_training
         self.trunc_thresh = trunc_thresh
         self.crop_ratio = crop_ratio
         self.max_seq_len = max_seq_len
+        self.crop_alignment = int(crop_alignment)
+        if self.crop_alignment <= 0:
+            raise ValueError("crop_alignment must be a positive integer")
         self.deltaneg = 10 * self.fps
         mapping_path = os.path.join(mapping_path, 'Charades_v1_mapping.txt')
         
@@ -215,7 +219,11 @@ class CharadesEgo(Dataset):
         # truncate the features during training
         if self.is_training and (segments is not None):
             data_dict = truncate_feats(
-                data_dict, self.max_seq_len, self.trunc_thresh, self.crop_ratio
+                data_dict,
+                self.max_seq_len,
+                self.trunc_thresh,
+                self.crop_ratio,
+                crop_alignment=self.crop_alignment,
             )
         
         return data_dict

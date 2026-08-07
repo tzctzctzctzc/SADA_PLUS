@@ -7,25 +7,22 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 /**
- * Candidate-blind, exact-anchor foreground gate for SADA Stage 1.
+ * Candidate-blind semantic evidence exporter for SADA training.
  *
  * This runner intentionally has one task only:
- *   1. Read one exact low-confidence SADA anchor from the manifest.
- *   2. Extract nine dense frames centered on that exact anchor.
- *   3. Hide SADA's top-1 class from the VLM.
- *   4. Ask whether Frame 5 belongs to an event in the ten-action ontology.
- *   5. Combine the semantic result with a source-supervised structure probe.
+ *   1. Read one absolute feature position from the manifest.
+ *   2. Extract nine dense frames centered on that position.
+ *   3. Ask whether Frame 5 belongs to an event in the ten-action ontology.
  *
- * The VLM never changes the class. A rescued anchor keeps the frozen teacher's
- * top-1 class. Valid non-confirmed responses are routed to IGNORE. Malformed or
- * internally inconsistent responses are protocol errors and stop the run.
+ * Teacher class, regression, FPN features, and structural validity are absent
+ * from this artifact. They are computed online from the current training crop.
  */
 
 const FRAME_OFFSETS_SEC = Object.freeze([
   -0.8, -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8,
 ]);
 const PROMPT_VERSION = 'candidate-blind-epic-semantic-gate-v3';
-const ROUTING_SCHEMA_VERSION = 'semantic-structural-exact-anchor-routing-v3';
+const SEMANTIC_CACHE_SCHEMA_VERSION = 'offline-vlm-semantic-evidence-v1';
 
 const ALLOWED_ARGS = new Set([
   'manifest',
@@ -751,92 +748,23 @@ function parseGateResponse(text) {
   };
 }
 
-function teacherTop1Class(row) {
-  const top1 = Number(row.teacher_top1_class);
-
-  if (!Number.isInteger(top1) || top1 < 0 || top1 >= 10) {
+function absoluteFeatureIndex(row) {
+  const value = Number(row.absolute_feature_index);
+  if (!Number.isInteger(value) || value < 0) {
     throw new Error(
-      `invalid teacher_top1_class for ${row.candidate_id}`,
+      `invalid absolute_feature_index for ${row.candidate_id}`,
     );
   }
-
-  return top1;
+  return value;
 }
 
-const SOURCE_STRUCTURE_FIELDS = Object.freeze([
-  'structure_probe_schema_version',
-  'structure_probe_sha256',
-  'structure_score',
-  'structure_threshold',
-  'structural_pass',
-  'structure_feature_values',
-]);
-
-function sourceSupervisedStructure(row) {
-  for (const field of SOURCE_STRUCTURE_FIELDS) {
-    if (!(field in row)) {
-      throw new Error(
-        `manifest row ${row.candidate_id} is missing ${field}`,
-      );
-    }
-  }
-  if (
-    row.structure_probe_schema_version
-      !== 'source-supervised-anchor-validity-v1'
-    || !/^[0-9a-f]{64}$/.test(row.structure_probe_sha256)
-    || !Array.isArray(row.structure_feature_values)
-    || row.structure_feature_values.length !== 13
-    || row.structure_feature_values.some(value => !Number.isFinite(Number(value)))
-  ) {
-    throw new Error(`invalid source-supervised structure provenance for ${row.candidate_id}`);
-  }
-  const score = Number(row.structure_score);
-  const threshold = Number(row.structure_threshold);
-  if (
-    !Number.isFinite(score)
-    || !Number.isFinite(threshold)
-    || score < 0
-    || score > 1
-    || threshold < 0
-    || threshold > 1
-  ) {
-    throw new Error(`invalid source-supervised structure score for ${row.candidate_id}`);
-  }
-  const pass = score >= threshold;
-  if (row.structural_pass !== pass) {
-    throw new Error(`source-supervised structure decision disagrees for ${row.candidate_id}`);
-  }
-  return { score, threshold, pass };
-}
-
-function exactAnchorKey(row) {
-  const top1 = teacherTop1Class(row);
-  const center = absoluteCenterTime(row);
-
-  if (
-    row.fpn_level == null
-    || row.global_anchor_index == null
-    || row.teacher_top1_class == null
-  ) {
-    throw new Error(
-      `manifest row ${row.candidate_id} must include `
-      + 'fpn_level, global_anchor_index, and '
-      + 'teacher_top1_class/sada_top1_class',
-    );
-  }
-
-  return [
-    row.video_id,
-    Number(row.fpn_level),
-    Number(row.global_anchor_index),
-    center.toFixed(6),
-    top1,
-  ].join('|');
+function semanticKey(row) {
+  return [row.video_id, absoluteFeatureIndex(row)].join('|');
 }
 
 function validateManifestRows(rows) {
   const candidateIds = new Set();
-  const anchorKeys = new Set();
+  const semanticKeys = new Set();
 
   for (const row of rows) {
     if (
@@ -844,13 +772,12 @@ function validateManifestRows(rows) {
       || !row.video_id
       || row.center_sec == null
       || row.absolute_center_time == null
-      || row.anchor_index == null
-      || row.teacher_top1_class == null
+      || row.absolute_feature_index == null
     ) {
       throw new Error(
         'each manifest row requires '
-        + 'candidate_id, video_id, anchor_index, '
-        + 'center_sec, absolute_center_time, and teacher_top1_class',
+        + 'candidate_id, video_id, absolute_feature_index, '
+        + 'center_sec, and absolute_center_time',
       );
     }
 
@@ -863,48 +790,15 @@ function validateManifestRows(rows) {
 
     candidateIds.add(row.candidate_id);
 
-    const key = exactAnchorKey(row);
-    const members = row.member_anchors;
-
-    if (!Array.isArray(members) || members.length !== 1) {
+    absoluteCenterTime(row);
+    const key = semanticKey(row);
+    if (semanticKeys.has(key)) {
       throw new Error(
-        `manifest row ${row.candidate_id} must contain exactly one member anchor`,
-      );
-    }
-
-    const member = members[0];
-    sourceSupervisedStructure(row);
-    sourceSupervisedStructure({ ...member, candidate_id: row.candidate_id });
-    const memberMatches = (
-      Number(member.fpn_level) === Number(row.fpn_level)
-      && Number(member.anchor_index) === Number(row.anchor_index)
-      && Number(member.global_anchor_index)
-        === Number(row.global_anchor_index)
-      && Math.abs(
-        Number(member.absolute_center_time)
-        - absoluteCenterTime(row)
-      ) <= 1e-6
-      && Number(member.teacher_top1_class)
-        === teacherTop1Class(row)
-      && SOURCE_STRUCTURE_FIELDS.every(
-        field => member[field] === row[field],
-      )
-    );
-
-    if (!memberMatches) {
-      throw new Error(
-        `member anchor differs from exact query fields for ${row.candidate_id}`,
-      );
-    }
-
-    if (anchorKeys.has(key)) {
-      throw new Error(
-        `duplicate exact-anchor five-tuple `
+        `duplicate exact semantic key `
         + `in manifest: ${key}`,
       );
     }
-
-    anchorKeys.add(key);
+    semanticKeys.add(key);
   }
 }
 
@@ -914,18 +808,11 @@ function requestFingerprint(row, model, wireApi) {
       candidate_id: row.candidate_id,
       anchor_id: row.anchor_id ?? null,
       video_id: row.video_id,
+      absolute_feature_index: absoluteFeatureIndex(row),
       absolute_center_time: absoluteCenterTime(row),
-      fpn_level: row.fpn_level ?? null,
-      global_anchor_index:
-        row.global_anchor_index ?? null,
-      teacher_top1_class:
-        teacherTop1Class(row),
-      source_supervised_structure: Object.fromEntries(
-        SOURCE_STRUCTURE_FIELDS.map(field => [field, row[field]]),
-      ),
       frame_offsets_sec: FRAME_OFFSETS_SEC,
       prompt_sha256: PROMPT_SHA256,
-      routing_schema_version: ROUTING_SCHEMA_VERSION,
+      semantic_cache_schema_version: SEMANTIC_CACHE_SCHEMA_VERSION,
       model,
       wire_api: wireApi,
     }),
@@ -946,16 +833,7 @@ function localUncertainResult(
     request_fingerprint: fingerprint,
     status: 'ok',
     prediction: 'UNCERTAIN',
-    route: 'ignore',
     semantic_pass: false,
-    structural_pass: sourceSupervisedStructure(row).pass,
-    ablation_routes: {
-      semantic_only: 'ignore',
-      structure_only: sourceSupervisedStructure(row).pass ? 'action' : 'ignore',
-      semantic_and_structure: 'ignore',
-    },
-    action_rescue: false,
-    pseudo_label: null,
     model_reported_label: null,
     parse_error: false,
     protocol_error: false,
@@ -967,7 +845,7 @@ function localUncertainResult(
     wire_api: wireApi,
     prompt_version: PROMPT_VERSION,
     prompt_sha256: PROMPT_SHA256,
-    routing_schema_version: ROUTING_SCHEMA_VERSION,
+    semantic_cache_schema_version: SEMANTIC_CACHE_SCHEMA_VERSION,
     frame_offsets_sec: [...FRAME_OFFSETS_SEC],
     frame_timestamps_sec:
       frameInfo.frames.map(frame => frame.timestamp_sec),
@@ -976,23 +854,9 @@ function localUncertainResult(
     unique_timestamp_count:
       frameInfo.unique_timestamp_count,
     video_id: row.video_id,
-    anchor_index: Number(row.anchor_index),
+    absolute_feature_index: absoluteFeatureIndex(row),
     absolute_center_time: absoluteCenterTime(row),
     center_sec: absoluteCenterTime(row),
-    fpn_level: row.fpn_level ?? null,
-    global_anchor_index:
-      row.global_anchor_index ?? null,
-    teacher_top1_class:
-      teacherTop1Class(row),
-    teacher_top1_score:
-      row.teacher_top1_score
-      ?? row.sada_top1_score
-      ?? null,
-    structure_probe_schema_version: row.structure_probe_schema_version,
-    structure_probe_sha256: row.structure_probe_sha256,
-    structure_score: Number(row.structure_score),
-    structure_threshold: Number(row.structure_threshold),
-    structure_feature_values: [...row.structure_feature_values],
   };
 }
 
@@ -1016,8 +880,11 @@ function validatePriorRows(priorRows, manifestRows, model, wireApi) {
         `output contains candidate not present in manifest: ${prior.candidate_id}`,
       );
     }
-    if (prior.routing_schema_version !== ROUTING_SCHEMA_VERSION) {
-      throw new Error('output routing_schema_version does not match this runner');
+    if (
+      prior.semantic_cache_schema_version
+      !== SEMANTIC_CACHE_SCHEMA_VERSION
+    ) {
+      throw new Error('output semantic cache schema does not match this runner');
     }
     if (prior.prompt_sha256 !== PROMPT_SHA256) {
       throw new Error('output prompt_sha256 does not match this runner');
@@ -1047,16 +914,14 @@ function completionSummary(
     apiAttempted = 0,
     apiSuccess = 0,
     localUncertain = 0,
-    localStructuralIgnore = 0,
   } = {},
 ) {
   const current = activeRows
     .map(row => latestRows.get(row.candidate_id))
     .filter(Boolean);
   const completed = current.filter(row => row.status === 'ok');
-  const action = completed.filter(row => row.route === 'action').length;
-  const ignore = completed.filter(row => row.route === 'ignore').length;
-  const background = completed.filter(row => row.route === 'background').length;
+  const semanticPass = completed.filter(row => row.semantic_pass === true).length;
+  const semanticIgnore = completed.filter(row => row.semantic_pass === false).length;
   const error = current.filter(row => row.status === 'error').length;
 
   return {
@@ -1065,11 +930,9 @@ function completionSummary(
     api_attempted: apiAttempted,
     api_success: apiSuccess,
     local_uncertain: localUncertain,
-    local_structural_ignore: localStructuralIgnore,
     completed_total: completed.length,
-    action,
-    ignore,
-    background,
+    semantic_pass: semanticPass,
+    semantic_ignore: semanticIgnore,
     error,
   };
 }
@@ -1078,14 +941,14 @@ function assertCompleteSummary(summary) {
   if (summary.completed_total !== summary.manifest_total) {
     throw new Error('completed_total differs from manifest_total');
   }
-  if (summary.action + summary.ignore !== summary.manifest_total) {
-    throw new Error('action + ignore differs from manifest_total');
+  if (
+    summary.semantic_pass + summary.semantic_ignore
+    !== summary.manifest_total
+  ) {
+    throw new Error('semantic pass + ignore differs from manifest_total');
   }
   if (summary.error !== 0) {
     throw new Error('run contains error rows');
-  }
-  if (summary.background !== 0) {
-    throw new Error('candidate-blind rescue must never route background');
   }
 }
 
@@ -1195,7 +1058,6 @@ async function main() {
     apiAttempted: 0,
     apiSuccess: 0,
     localUncertain: 0,
-    localStructuralIgnore: 0,
   };
 
   const numericOptions = {
@@ -1265,26 +1127,11 @@ async function main() {
       wire_api: wireApi,
       prompt_version: PROMPT_VERSION,
       prompt_sha256: PROMPT_SHA256,
-      routing_schema_version: ROUTING_SCHEMA_VERSION,
+      semantic_cache_schema_version: SEMANTIC_CACHE_SCHEMA_VERSION,
       video_id: row.video_id,
-      anchor_index: Number(row.anchor_index),
+      absolute_feature_index: absoluteFeatureIndex(row),
       absolute_center_time: center,
       center_sec: center,
-      fpn_level: row.fpn_level ?? null,
-      global_anchor_index:
-        row.global_anchor_index ?? null,
-      teacher_top1_class:
-        teacherTop1Class(row),
-      teacher_top1_score:
-        row.teacher_top1_score
-        ?? row.sada_top1_score
-        ?? null,
-      structure_probe_schema_version: row.structure_probe_schema_version,
-      structure_probe_sha256: row.structure_probe_sha256,
-      structure_score: Number(row.structure_score),
-      structure_threshold: Number(row.structure_threshold),
-      structural_pass: sourceSupervisedStructure(row).pass,
-      structure_feature_values: [...row.structure_feature_values],
     };
 
     try {
@@ -1355,28 +1202,11 @@ async function main() {
 
       counters.apiSuccess += 1;
 
-      const top1 = teacherTop1Class(row);
-
-      const structure = sourceSupervisedStructure(row);
       const semanticPass = parsed.semantic_pass;
-      const jointPass = semanticPass && structure.pass;
       Object.assign(result, {
         status: 'ok',
         prediction: parsed.prediction,
         semantic_pass: semanticPass,
-        structural_pass: structure.pass,
-        ablation_routes: {
-          semantic_only: semanticPass ? 'action' : 'ignore',
-          structure_only: structure.pass ? 'action' : 'ignore',
-          semantic_and_structure: jointPass ? 'action' : 'ignore',
-        },
-        route: jointPass ? 'action' : 'ignore',
-        action_rescue: jointPass,
-        pseudo_label: (
-          jointPass
-            ? top1
-            : null
-        ),
         model_reported_label:
           parsed.model_label,
         parse_error:
@@ -1409,8 +1239,7 @@ async function main() {
         unique_timestamp_count:
           frameInfo.unique_timestamp_count,
         gate_rule:
-          'candidate_blind_epic_semantics'
-          + '_and_source_supervised_structure_and_exact_anchor',
+          'candidate_blind_epic_semantics_only',
       });
     } catch (error) {
       result.error = String(
@@ -1464,15 +1293,16 @@ export {
   FRAME_OFFSETS_SEC,
   PROMPT_SHA256,
   PROMPT_VERSION,
-  ROUTING_SCHEMA_VERSION,
+  SEMANTIC_CACHE_SCHEMA_VERSION,
   HttpStatusError,
   ProtocolError,
   RequestTimeoutError,
   absoluteCenterTime,
+  absoluteFeatureIndex,
   argsOf,
   assertCompleteSummary,
   completionSummary,
-  exactAnchorKey,
+  semanticKey,
   fetchCompat,
   parseGateResponse,
   requestFingerprint,

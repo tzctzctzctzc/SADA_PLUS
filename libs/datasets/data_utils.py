@@ -30,6 +30,7 @@ def truncate_feats(
     has_action=True,
     no_trunc=False,
     rng=None,
+    crop_alignment=1,
 ):
     """
     Truncate feats and time stamps in a dict item
@@ -44,6 +45,9 @@ def truncate_feats(
 
     """
     rng = random if rng is None else rng
+    crop_alignment = int(crop_alignment)
+    if crop_alignment <= 0:
+        raise ValueError("crop_alignment must be a positive integer")
     # get the meta info
     feat_len = data_dict['feats'].shape[1]
     data_dict['metadata']['original_feat_len'] = feat_len
@@ -72,7 +76,9 @@ def truncate_feats(
     for _ in range(max_num_trials):
 
         # sample a random truncation of the video feats
-        st = rng.randint(0, feat_len - max_seq_len)
+        max_start = feat_len - max_seq_len
+        aligned_index = rng.randint(0, max_start // crop_alignment)
+        st = aligned_index * crop_alignment
         ed = st + max_seq_len
         window = torch.as_tensor([st, ed], dtype=torch.float32)
 
