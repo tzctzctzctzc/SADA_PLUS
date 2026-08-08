@@ -229,6 +229,51 @@ def partition_source_validation_videos(data_list, calibration_fraction, seed):
     return calibration_rows, report_rows, protocol
 
 
+def partition_frozen_head_source_videos(
+    data_list,
+    selection_videos,
+    calibration_videos,
+    report_videos,
+    seed,
+):
+    """Create deterministic train/selection/calibration/report video splits."""
+    rows = tuple(sorted(data_list, key=lambda item: str(item["id"])))
+    holdout_count = (
+        int(selection_videos) + int(calibration_videos) + int(report_videos)
+    )
+    if min(selection_videos, calibration_videos, report_videos) <= 0:
+        raise ValueError("frozen-head holdout counts must be positive")
+    if holdout_count >= len(rows):
+        raise ValueError("frozen-head holdouts leave no training videos")
+    shuffled_ids = [str(item["id"]) for item in rows]
+    random.Random(int(seed)).shuffle(shuffled_ids)
+    selection_ids = set(shuffled_ids[:selection_videos])
+    calibration_start = selection_videos
+    calibration_end = calibration_start + calibration_videos
+    calibration_ids = set(shuffled_ids[calibration_start:calibration_end])
+    report_ids = set(shuffled_ids[calibration_end:holdout_count])
+    train_ids = set(shuffled_ids[holdout_count:])
+
+    def select(ids):
+        return tuple(item for item in rows if str(item["id"]) in ids)
+
+    groups = (
+        select(train_ids),
+        select(selection_ids),
+        select(calibration_ids),
+        select(report_ids),
+    )
+    protocol = {
+        "policy": "deterministic_video_disjoint_four_way_holdout",
+        "seed": int(seed),
+        "train_video_ids": [str(item["id"]) for item in groups[0]],
+        "selection_video_ids": [str(item["id"]) for item in groups[1]],
+        "calibration_video_ids": [str(item["id"]) for item in groups[2]],
+        "report_video_ids": [str(item["id"]) for item in groups[3]],
+    }
+    return (*groups, protocol)
+
+
 def anchor_validity_features(
     probabilities,
     left_offset,
@@ -346,6 +391,27 @@ class FPNValidityHead(nn.Module):
             level_mask = mask.squeeze(1).bool() if mask.ndim == 3 else mask.bool()
             logits.append(level_logits.masked_fill(~level_mask, 0.0))
         return tuple(logits)
+
+
+def freeze_sada_except_validity_head(model):
+    """Freeze the complete SADA model and leave only its Validity Head trainable."""
+    validity_head = getattr(model, "validity_head", None)
+    if validity_head is None:
+        raise ValueError("frozen-SADA training requires an enabled Validity Head")
+    for parameter in model.parameters():
+        parameter.requires_grad_(False)
+    for parameter in validity_head.parameters():
+        parameter.requires_grad_(True)
+    return {
+        "frozen_parameters": sum(
+            parameter.numel()
+            for parameter in model.parameters()
+            if not parameter.requires_grad
+        ),
+        "trainable_head_parameters": sum(
+            parameter.numel() for parameter in validity_head.parameters()
+        ),
+    }
 
 
 def clip_grad_norm_with_isolated_validity_head(model, max_norm):

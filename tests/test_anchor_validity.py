@@ -154,6 +154,35 @@ def test_integrated_fpn_validity_head_uses_current_features_and_geometry():
     assert offsets[0].grad is None
 
 
+def test_frozen_sada_leaves_only_validity_head_trainable():
+    class ToyModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.base = torch.nn.Linear(2, 2)
+            self.validity_head = torch.nn.Linear(2, 1)
+
+    model = ToyModel()
+    stats = anchor_validity.freeze_sada_except_validity_head(model)
+    assert all(not value.requires_grad for value in model.base.parameters())
+    assert all(value.requires_grad for value in model.validity_head.parameters())
+    assert stats["trainable_head_parameters"] == 3
+
+
+def test_frozen_head_source_partition_is_reproducible_and_disjoint():
+    rows = tuple({"id": "v{:02d}".format(index)} for index in range(20))
+    first = anchor_validity.partition_frozen_head_source_videos(
+        rows, selection_videos=3, calibration_videos=4, report_videos=5, seed=17
+    )
+    second = anchor_validity.partition_frozen_head_source_videos(
+        rows, selection_videos=3, calibration_videos=4, report_videos=5, seed=17
+    )
+    assert first == second
+    groups = [{item["id"] for item in group} for group in first[:4]]
+    assert [len(group) for group in groups] == [8, 3, 4, 5]
+    assert sum(len(group) for group in groups) == len(set().union(*groups))
+    assert set().union(*groups) == {item["id"] for item in rows}
+
+
 def test_validity_head_gradient_does_not_change_base_gradient_clipping():
     class ToyModel(torch.nn.Module):
         def __init__(self):
