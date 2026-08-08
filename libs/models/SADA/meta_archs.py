@@ -16,7 +16,12 @@ from .stage1_utils import (
     shift_features,
     source_action_eligible,
 )
-from .anchor_validity import load_validity_model, validity_model_to
+from .anchor_validity import (
+    FPNValidityHead,
+    load_validity_model,
+    source_validity_loss,
+    validity_model_to,
+)
 from .vlm_routing import (
     ROUTING_MODES,
     build_full_vlm_routing,
@@ -612,6 +617,52 @@ class SADA(nn.Module):
         self.cls_head_target = self.cls_head
         self.reg_head_target = self.reg_head
 
+        validity_head_cfg = cfg.get('validity_head', {})
+        self.validity_head_enabled = bool(
+            validity_head_cfg.get('enabled', False)
+        )
+        self.validity_head_loss_weight = float(
+            validity_head_cfg.get('loss_weight', 1.0)
+        )
+        self.validity_head_beta = float(
+            validity_head_cfg.get('beta', 0.1)
+        )
+        self.validity_head_alpha = float(
+            validity_head_cfg.get(
+                'alpha', cfg['model'].get('pl_threshold', 0.7)
+            )
+        )
+        if self.validity_head_loss_weight < 0.0:
+            raise ValueError('validity head loss weight must be non-negative')
+        if not (
+            0.0
+            <= self.validity_head_beta
+            < self.validity_head_alpha
+            <= 1.0
+        ):
+            raise ValueError(
+                'validity head thresholds must satisfy 0 <= beta < alpha <= 1'
+            )
+        self.validity_head = None
+        if self.validity_head_enabled:
+            if use_trident_head:
+                raise ValueError(
+                    'integrated Validity Head currently requires direct offsets'
+                )
+            self.validity_head = FPNValidityHead(
+                fpn_dim=fpn_dim,
+                n_levels=self.n_levels,
+                hidden_dim=validity_head_cfg.get('hidden_dim', 128),
+                fusion_dim=validity_head_cfg.get('fusion_dim', 64),
+                level_embedding_dim=validity_head_cfg.get(
+                    'level_embedding_dim', 8
+                ),
+                detach_fpn=validity_head_cfg.get('detach_fpn', False),
+                detach_geometry=validity_head_cfg.get(
+                    'detach_geometry', True
+                ),
+            )
+
         # maintain an EMA of #foreground to stabilize the loss normalizer
         # useful for small mini-batch training
         self.loss_normalizer = self.train_init_loss_norm
@@ -1094,6 +1145,38 @@ class SADA(nn.Module):
             self.vlm_beta,
             self.stage1_alpha,
         )
+
+    @torch.no_grad()
+    def _source_validity_cohorts(
+        self,
+        points,
+        source_segments,
+        source_logits,
+        source_masks,
+    ):
+        """Select current-crop source anchors used by the validity objective."""
+        cohorts = []
+        for point_grid, logits, mask in zip(
+            points, source_logits, source_masks
+        ):
+            valid = mask.squeeze(1).bool()
+            score = logits.detach().sigmoid().amax(dim=1)
+            low_confidence = (
+                valid
+                & (score > self.validity_head_beta)
+                & (score < self.validity_head_alpha)
+            )
+            centers = point_grid[:, 0]
+            inside_event = torch.zeros_like(valid)
+            for batch_index, segments in enumerate(source_segments):
+                if segments.numel() == 0:
+                    continue
+                inside_event[batch_index] = (
+                    (centers[:, None] > segments[None, :, 0])
+                    & (centers[:, None] < segments[None, :, 1])
+                ).any(dim=1)
+            cohorts.append(low_confidence & inside_event)
+        return tuple(cohorts)
     
     
 
@@ -1218,6 +1301,15 @@ class SADA(nn.Module):
         # out_offset: List[B, 2, T_i]
         out_offsets_src, out_actionness_src = self.reg_head(fpn_feats_src, fpn_masks_src)
         out_offsets_tgt, out_actionness_tgt= self.reg_head_target(fpn_feats_tgt, fpn_masks_tgt)
+
+        out_validity_logits_src = None
+        if self.validity_head_enabled:
+            out_validity_logits_src = self.validity_head(
+                fpn_feats_src,
+                out_offsets_src,
+                fpn_masks_src,
+                self.fpn_strides,
+            )
         
         out_offsets = [torch.cat((out_offsets_src[i], out_offsets_tgt[i]), dim=0) for i in range(len(out_offsets_src))]
         out_actionness = [torch.cat((out_actionness_src[i], out_actionness_tgt[i]), dim=0) for i in range(len(out_offsets_src))]
@@ -1278,6 +1370,14 @@ class SADA(nn.Module):
             gt_cls_labels_tgt = gt_cls_labels[bs:]  # list of B elements, each of shape (T_1 + ... + T_L) x C
             gt_offsets_src = gt_offsets[:bs]    # list of B elements, each of shape (T_1 + ... + T_L) x 2
             gt_offsets_tgt = gt_offsets[bs:]    # list of B elements, each of shape (T_1 + ... + T_L) x 2
+            source_validity_cohorts = None
+            if self.validity_head_enabled:
+                source_validity_cohorts = self._source_validity_cohorts(
+                    points,
+                    gt_segments[:bs],
+                    out_cls_logits_src,
+                    fpn_masks_src,
+                )
             start_idx = 0
 
             gts_cls_per_level_src, gts_cls_per_level_tgt, gts_offset_per_level_src, gts_offset_per_level_tgt = [], [], [], []
@@ -1321,6 +1421,8 @@ class SADA(nn.Module):
                 curr_epoch=curr_epoch,
                 stage1_routes=stage1_routes,
                 vlm_routes=vlm_routes,
+                out_validity_logits_src=out_validity_logits_src,
+                source_validity_cohorts=source_validity_cohorts,
             )
             
             # Return the GTs of the target domain as well, to be used to compute the anchors
@@ -1563,7 +1665,10 @@ class SADA(nn.Module):
             domain, 
             curr_epoch,
             stage1_routes=None,
-            vlm_routes=None,):
+            vlm_routes=None,
+            out_validity_logits_src=None,
+            source_validity_cohorts=None,
+    ):
         bs = int(fpn_masks[0].shape[0] / 2)
         
         # gt_cls_labels is a list of 2B elements, each of shape FT x C
@@ -1739,7 +1844,31 @@ class SADA(nn.Module):
         else:
             loss_reg_weight = cls_loss.detach() / max(reg_loss.item(), 0.01)
 
-        downstream_loss = cls_loss + reg_loss * loss_reg_weight 
+        validity_loss = cls_loss * 0.0
+        validity_stats = {"count": 0, "positive": 0, "negative": 0}
+        if self.validity_head_enabled:
+            if (
+                out_validity_logits_src is None
+                or source_validity_cohorts is None
+            ):
+                raise ValueError(
+                    'enabled validity head requires source logits and cohorts'
+                )
+            validity_labels = [
+                labels.sum(dim=-1) > 0 for labels in gts_per_level_src
+            ]
+            validity_loss, validity_stats = source_validity_loss(
+                out_validity_logits_src,
+                validity_labels,
+                source_validity_cohorts,
+                fpn_masks_src,
+            )
+
+        downstream_loss = (
+            cls_loss
+            + reg_loss * loss_reg_weight
+            + self.validity_head_loss_weight * validity_loss
+        )
 
         target_reg_loss = 0 * decoded_offsets.sum()
         target_reg_positive = 0 * decoded_offsets.sum()
@@ -1783,6 +1912,16 @@ class SADA(nn.Module):
         
         losses =  {'cls_loss': cls_loss,
                    'reg_loss': reg_loss,
+                   'validity_loss': validity_loss,
+                   'validity_count': torch.tensor(
+                       float(validity_stats['count']), device=self.device
+                   ),
+                   'validity_positive': torch.tensor(
+                       float(validity_stats['positive']), device=self.device
+                   ),
+                   'validity_negative': torch.tensor(
+                       float(validity_stats['negative']), device=self.device
+                   ),
                    'oracle_target_reg_loss': target_reg_loss,
                    'oracle_target_reg_positive': target_reg_positive,
                    'downstream_loss': downstream_loss}

@@ -321,6 +321,73 @@ def main(cfg, resume, project_name='sada', debug=False):
         
 
     """4. Resume from model / Misc"""
+    if args.validity_head_init_from_sada:
+        initialization_path = args.validity_head_init_from_sada
+        if not os.path.isfile(initialization_path):
+            raise ValueError(
+                'SADA validity-head initialization checkpoint not found: {}'.format(
+                    initialization_path
+                )
+            )
+        checkpoint = torch.load(initialization_path, map_location=device)
+        initialization_state_key = (
+            'ema_state_dict'
+            if args.validity_head_init_weights == 'ema'
+            else 'state_dict'
+        )
+        if initialization_state_key not in checkpoint:
+            raise ValueError(
+                'SADA checkpoint has no {}'.format(initialization_state_key)
+            )
+        incompatible = model.load_state_dict(
+            checkpoint[initialization_state_key], strict=False
+        )
+        invalid_missing = [
+            key for key in incompatible.missing_keys
+            if not key.startswith('validity_head.')
+        ]
+        if invalid_missing or incompatible.unexpected_keys:
+            raise ValueError(
+                'validity-head initialization state differs outside the new head: '
+                'missing={} unexpected={}'.format(
+                    invalid_missing, incompatible.unexpected_keys
+                )
+            )
+        if not incompatible.missing_keys:
+            raise ValueError(
+                'initialization checkpoint already contains a Validity Head; '
+                'use --resume instead'
+            )
+        if use_ema:
+            ema_incompatible = model_ema.module.load_state_dict(
+                checkpoint[initialization_state_key], strict=False
+            )
+            ema_invalid_missing = [
+                key for key in ema_incompatible.missing_keys
+                if not key.startswith('validity_head.')
+            ]
+            if ema_invalid_missing or ema_incompatible.unexpected_keys:
+                raise ValueError(
+                    'EMA validity-head initialization state differs outside the new head'
+                )
+            model_ema.module.validity_head.load_state_dict(
+                model.validity_head.state_dict()
+            )
+        cfg.config['validity_head']['initialization'] = {
+            'checkpoint': initialization_path,
+            'checkpoint_sha256': file_sha256(initialization_path),
+            'checkpoint_epoch': int(checkpoint.get('epoch', -1)),
+            'weights': args.validity_head_init_weights,
+            'trajectory': 'new_optimizer_and_scheduler_from_pretrained_weights',
+        }
+        args.start_epoch = 1
+        print(
+            "=> initialized new Validity Head from '{}' {} weights".format(
+                initialization_path, args.validity_head_init_weights
+            )
+        )
+        del checkpoint
+
     # First transition: continue the exact ordinary-SADA trajectory while
     # changing only subsequent target routing.
     if args.vlm_continue_from_sada:
@@ -611,6 +678,13 @@ def create_argparser():
             'optimizers, scheduler phase, and epoch before enabling VLM routing'
         ),
     )
+    start_group.add_argument(
+        '--validity-head-init-from-sada', default=None, type=str,
+        help=(
+            'initialize a new integrated Validity Head from SADA weights; '
+            'optimizer and scheduler start a new controlled fine-tuning run'
+        ),
+    )
     parser.add_argument('-s', '--seed', default=DEFAULT_SEED, type=int,
                         help='random seed')
     parser.add_argument('-i', '--gpu', default=GPU, type=int,
@@ -624,6 +698,26 @@ def create_argparser():
     parser.add_argument(
         '--stage1-seed', type=int, default=100003,
         help='independent perturbation RNG seed',
+    )
+    parser.add_argument(
+        '--validity-head', choices=['off', 'train'], default='off',
+        help='attach and source-supervise the integrated SADA FPN Validity Head',
+    )
+    parser.add_argument(
+        '--validity-head-loss-weight', type=float, default=1.0,
+    )
+    parser.add_argument(
+        '--validity-head-beta', type=float, default=0.1,
+        help='lower bound of the source low-confidence training cohort',
+    )
+    parser.add_argument(
+        '--validity-head-detach-fpn', action='store_true',
+        help='train only the head without sending validity gradients into the FPN',
+    )
+    parser.add_argument(
+        '--validity-head-init-weights',
+        choices=['student', 'ema'],
+        default='ema',
     )
     parser.add_argument(
         '--vlm-semantic-cache', default=None,
@@ -757,6 +851,45 @@ if __name__ == '__main__':
         'teacher_checkpoint': args.vlm_routing_teacher_checkpoint,
         'teacher_weights': args.vlm_routing_teacher_weights,
         'load_evidence': False,
+    }
+    validity_head_enabled = args.validity_head == 'train'
+    validity_head_alpha = float(
+        config_dict['model'].get('pl_threshold', 0.7)
+    )
+    if args.validity_head_loss_weight < 0.0:
+        raise ValueError('validity head loss weight must be non-negative')
+    if not (
+        0.0
+        <= args.validity_head_beta
+        < validity_head_alpha
+        <= 1.0
+    ):
+        raise ValueError(
+            'validity head thresholds must satisfy 0 <= beta < alpha <= 1'
+        )
+    if args.validity_head_init_from_sada and not validity_head_enabled:
+        raise ValueError(
+            '--validity-head-init-from-sada requires --validity-head train'
+        )
+    if validity_head_enabled and vlm_enabled:
+        raise ValueError(
+            'train the integrated Validity Head before enabling frozen VLM routing'
+        )
+    config_dict['validity_head'] = {
+        'enabled': validity_head_enabled,
+        'loss_weight': args.validity_head_loss_weight,
+        'beta': args.validity_head_beta,
+        'alpha': validity_head_alpha,
+        'hidden_dim': 128,
+        'fusion_dim': 64,
+        'level_embedding_dim': 8,
+        'detach_fpn': args.validity_head_detach_fpn,
+        'detach_geometry': True,
+        'supervision': (
+            'source_gt_official_label_points_conditioned_on_current_crop_'
+            'target_event_and_low_confidence'
+        ),
+        'target_gt_usage': 'forbidden',
     }
     if vlm_enabled and args.stage1 != 'off':
         raise ValueError('VLM routing and Stage 1 stability cannot both be enabled')

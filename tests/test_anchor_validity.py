@@ -126,6 +126,48 @@ def test_anchor_features_exclude_actionness_and_keep_geometry_and_level():
     assert features[0, 6:12].sum().item() == 1.0
 
 
+def test_integrated_fpn_validity_head_uses_current_features_and_geometry():
+    torch.manual_seed(3)
+    head = anchor_validity.FPNValidityHead(
+        fpn_dim=16,
+        n_levels=2,
+        hidden_dim=12,
+        fusion_dim=7,
+        level_embedding_dim=4,
+    )
+    features = (
+        torch.randn(2, 16, 8, requires_grad=True),
+        torch.randn(2, 16, 4, requires_grad=True),
+    )
+    offsets = (
+        torch.rand(2, 2, 8, requires_grad=True),
+        torch.rand(2, 2, 4, requires_grad=True),
+    )
+    masks = (
+        torch.ones(2, 1, 8, dtype=torch.bool),
+        torch.ones(2, 1, 4, dtype=torch.bool),
+    )
+    logits = head(features, offsets, masks, strides=(1, 2))
+    assert [tuple(value.shape) for value in logits] == [(2, 8), (2, 4)]
+    sum(value.sum() for value in logits).backward()
+    assert features[0].grad is not None
+    assert offsets[0].grad is None
+
+
+def test_source_validity_loss_uses_only_cohort_and_official_labels():
+    logits = (torch.tensor([[2.0, -2.0, 9.0]], requires_grad=True),)
+    labels = (torch.tensor([[1, 0, 1]], dtype=torch.bool),)
+    cohorts = (torch.tensor([[1, 1, 0]], dtype=torch.bool),)
+    masks = (torch.ones(1, 3, dtype=torch.bool),)
+    loss, stats = anchor_validity.source_validity_loss(
+        logits, labels, cohorts, masks
+    )
+    assert torch.isfinite(loss)
+    assert stats == {"count": 2, "positive": 1, "negative": 1}
+    loss.backward()
+    assert logits[0].grad[0, 2].item() == 0.0
+
+
 def test_feature_groups_are_the_declared_three_way_ablation():
     assert len(anchor_validity.FEATURE_GROUPS["confidence_only"]) == 3
     assert len(anchor_validity.FEATURE_GROUPS["structure_pure"]) == 9
