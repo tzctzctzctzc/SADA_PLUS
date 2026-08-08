@@ -348,6 +348,23 @@ class FPNValidityHead(nn.Module):
         return tuple(logits)
 
 
+def clip_grad_norm_with_isolated_validity_head(model, max_norm):
+    """Clip base-model and Validity Head gradients without norm coupling."""
+    validity_head = getattr(model, "validity_head", None)
+    if validity_head is None:
+        return torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm), None
+    head_parameters = tuple(validity_head.parameters())
+    head_parameter_ids = {id(parameter) for parameter in head_parameters}
+    base_parameters = tuple(
+        parameter
+        for parameter in model.parameters()
+        if id(parameter) not in head_parameter_ids
+    )
+    base_norm = torch.nn.utils.clip_grad_norm_(base_parameters, max_norm)
+    head_norm = torch.nn.utils.clip_grad_norm_(head_parameters, max_norm)
+    return base_norm, head_norm
+
+
 def source_validity_loss(logits, labels, cohorts, masks):
     """Balanced source-only BCE over anchors centered inside source events."""
     selected_logits = []

@@ -154,6 +154,27 @@ def test_integrated_fpn_validity_head_uses_current_features_and_geometry():
     assert offsets[0].grad is None
 
 
+def test_validity_head_gradient_does_not_change_base_gradient_clipping():
+    class ToyModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.base = torch.nn.Linear(2, 1, bias=False)
+            self.validity_head = torch.nn.Linear(1, 1, bias=False)
+
+    clipped_base_gradients = []
+    for head_gradient in (0.0, 1000.0):
+        model = ToyModel()
+        model.base.weight.grad = torch.tensor([[3.0, 4.0]])
+        model.validity_head.weight.grad = torch.tensor([[head_gradient]])
+        anchor_validity.clip_grad_norm_with_isolated_validity_head(model, 1.0)
+        clipped_base_gradients.append(model.base.weight.grad.clone())
+        assert model.validity_head.weight.grad.norm() <= 1.0
+    assert torch.allclose(clipped_base_gradients[0], clipped_base_gradients[1])
+    assert torch.allclose(
+        clipped_base_gradients[0], torch.tensor([[0.6, 0.8]]), atol=1e-6
+    )
+
+
 def test_source_validity_loss_uses_only_cohort_and_official_labels():
     logits = (torch.tensor([[2.0, -2.0, 9.0]], requires_grad=True),)
     labels = (torch.tensor([[1, 0, 1]], dtype=torch.bool),)

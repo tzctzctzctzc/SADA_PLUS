@@ -16,6 +16,9 @@ from libs.models.SADA.stage1_calibration import (
     model_state_sha256,
     save_calibration_artifact,
 )
+from libs.models.SADA.anchor_validity import (
+    clip_grad_norm_with_isolated_validity_head,
+)
 
 def move_to_device(video_list, device):
     for i, video in enumerate(video_list):
@@ -383,9 +386,10 @@ class Trainer(BaseTrainerDA):
                         
             # gradient cliping (to stabilize training if necessary)
             if self.cfg['train_cfg']['clip_grad_l2norm'] > 0.0:
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(),
-                    self.cfg['train_cfg']['clip_grad_l2norm'])
+                clip_grad_norm_with_isolated_validity_head(
+                    self.model,
+                    self.cfg['train_cfg']['clip_grad_l2norm'],
+                )
             
             if curr_epoch < warmup_adv:
                 self.optimizer_gen_source.step()
