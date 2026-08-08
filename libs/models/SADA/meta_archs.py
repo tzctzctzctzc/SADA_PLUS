@@ -624,25 +624,8 @@ class SADA(nn.Module):
         self.validity_head_loss_weight = float(
             validity_head_cfg.get('loss_weight', 1.0)
         )
-        self.validity_head_beta = float(
-            validity_head_cfg.get('beta', 0.1)
-        )
-        self.validity_head_alpha = float(
-            validity_head_cfg.get(
-                'alpha', cfg['model'].get('pl_threshold', 0.7)
-            )
-        )
         if self.validity_head_loss_weight < 0.0:
             raise ValueError('validity head loss weight must be non-negative')
-        if not (
-            0.0
-            <= self.validity_head_beta
-            < self.validity_head_alpha
-            <= 1.0
-        ):
-            raise ValueError(
-                'validity head thresholds must satisfy 0 <= beta < alpha <= 1'
-            )
         self.validity_head = None
         if self.validity_head_enabled:
             if use_trident_head:
@@ -1151,21 +1134,12 @@ class SADA(nn.Module):
         self,
         points,
         source_segments,
-        source_logits,
         source_masks,
     ):
         """Select current-crop source anchors used by the validity objective."""
         cohorts = []
-        for point_grid, logits, mask in zip(
-            points, source_logits, source_masks
-        ):
+        for point_grid, mask in zip(points, source_masks):
             valid = mask.squeeze(1).bool()
-            score = logits.detach().sigmoid().amax(dim=1)
-            low_confidence = (
-                valid
-                & (score > self.validity_head_beta)
-                & (score < self.validity_head_alpha)
-            )
             centers = point_grid[:, 0]
             inside_event = torch.zeros_like(valid)
             for batch_index, segments in enumerate(source_segments):
@@ -1175,7 +1149,7 @@ class SADA(nn.Module):
                     (centers[:, None] > segments[None, :, 0])
                     & (centers[:, None] < segments[None, :, 1])
                 ).any(dim=1)
-            cohorts.append(low_confidence & inside_event)
+            cohorts.append(valid & inside_event)
         return tuple(cohorts)
     
     
@@ -1375,7 +1349,6 @@ class SADA(nn.Module):
                 source_validity_cohorts = self._source_validity_cohorts(
                     points,
                     gt_segments[:bs],
-                    out_cls_logits_src,
                     fpn_masks_src,
                 )
             start_idx = 0

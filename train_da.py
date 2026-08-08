@@ -707,10 +707,6 @@ def create_argparser():
         '--validity-head-loss-weight', type=float, default=1.0,
     )
     parser.add_argument(
-        '--validity-head-beta', type=float, default=0.1,
-        help='lower bound of the source low-confidence training cohort',
-    )
-    parser.add_argument(
         '--validity-head-detach-fpn', action='store_true',
         help='train only the head without sending validity gradients into the FPN',
     )
@@ -853,20 +849,8 @@ if __name__ == '__main__':
         'load_evidence': False,
     }
     validity_head_enabled = args.validity_head == 'train'
-    validity_head_alpha = float(
-        config_dict['model'].get('pl_threshold', 0.7)
-    )
     if args.validity_head_loss_weight < 0.0:
         raise ValueError('validity head loss weight must be non-negative')
-    if not (
-        0.0
-        <= args.validity_head_beta
-        < validity_head_alpha
-        <= 1.0
-    ):
-        raise ValueError(
-            'validity head thresholds must satisfy 0 <= beta < alpha <= 1'
-        )
     if args.validity_head_init_from_sada and not validity_head_enabled:
         raise ValueError(
             '--validity-head-init-from-sada requires --validity-head train'
@@ -878,8 +862,6 @@ if __name__ == '__main__':
     config_dict['validity_head'] = {
         'enabled': validity_head_enabled,
         'loss_weight': args.validity_head_loss_weight,
-        'beta': args.validity_head_beta,
-        'alpha': validity_head_alpha,
         'hidden_dim': 128,
         'fusion_dim': 64,
         'level_embedding_dim': 8,
@@ -887,7 +869,7 @@ if __name__ == '__main__':
         'detach_geometry': True,
         'supervision': (
             'source_gt_official_label_points_conditioned_on_current_crop_'
-            'target_event_and_low_confidence'
+            'target_event_center'
         ),
         'target_gt_usage': 'forbidden',
     }

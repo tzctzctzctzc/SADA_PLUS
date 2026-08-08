@@ -349,7 +349,7 @@ class FPNValidityHead(nn.Module):
 
 
 def source_validity_loss(logits, labels, cohorts, masks):
-    """Balanced source-only BCE over semantic low-confidence anchors."""
+    """Balanced source-only BCE over anchors centered inside source events."""
     selected_logits = []
     selected_labels = []
     for level_logits, level_labels, cohort, mask in zip(
