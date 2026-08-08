@@ -57,6 +57,12 @@ HEAD_VARIANTS = {
         "per_level_output_heads": True,
         "level_balanced_loss": True,
     },
+    "E": {
+        "description": "shared head without level embedding and level-balanced loss",
+        "use_level_embedding": False,
+        "per_level_output_heads": False,
+        "level_balanced_loss": True,
+    },
 }
 
 
