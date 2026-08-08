@@ -314,7 +314,12 @@ def anchor_validity_features(
     )
 
 
-def predicted_geometry_scalars(offsets, stride):
+def predicted_geometry_scalars(
+    offsets,
+    stride,
+    regression_range=None,
+    center_sample_radius=None,
+):
     """Return log-duration, log-max-distance and center asymmetry."""
     if offsets.ndim != 3 or offsets.shape[1] != 2:
         raise ValueError("validity offsets must have shape [B, 2, T]")
@@ -323,10 +328,22 @@ def predicted_geometry_scalars(offsets, stride):
     duration = left + right
     max_distance = torch.maximum(left, right)
     asymmetry = (left - right).abs() / duration.clamp_min(1e-6)
-    return torch.stack(
-        (torch.log1p(duration), torch.log1p(max_distance), asymmetry),
-        dim=1,
-    )
+    scalars = [torch.log1p(duration), torch.log1p(max_distance), asymmetry]
+    if regression_range is not None or center_sample_radius is not None:
+        if regression_range is None or center_sample_radius is None:
+            raise ValueError("assignment geometry requires range and center radius")
+        lower, upper = (float(value) for value in regression_range)
+        if lower < 0.0 or upper <= lower or float(center_sample_radius) <= 0.0:
+            raise ValueError("invalid assignment geometry protocol")
+        center_distance = 0.5 * (left - right).abs()
+        scalars.extend((
+            torch.log1p(lower / max_distance.clamp_min(1e-6)),
+            torch.log1p(max_distance / upper),
+            torch.log1p(
+                center_distance / (float(stride) * float(center_sample_radius))
+            ),
+        ))
+    return torch.stack(scalars, dim=1)
 
 
 class FPNValidityHead(nn.Module):
@@ -341,6 +358,9 @@ class FPNValidityHead(nn.Module):
         level_embedding_dim=8,
         use_level_embedding=True,
         per_level_output_heads=False,
+        assignment_aware_geometry=False,
+        regression_ranges=None,
+        center_sample_radius=None,
         detach_fpn=False,
         detach_geometry=True,
     ):
@@ -348,8 +368,24 @@ class FPNValidityHead(nn.Module):
         self.n_levels = int(n_levels)
         self.use_level_embedding = bool(use_level_embedding)
         self.per_level_output_heads = bool(per_level_output_heads)
+        self.assignment_aware_geometry = bool(assignment_aware_geometry)
         self.detach_fpn = bool(detach_fpn)
         self.detach_geometry = bool(detach_geometry)
+        if self.assignment_aware_geometry:
+            if regression_ranges is None or len(regression_ranges) != self.n_levels:
+                raise ValueError("assignment geometry requires one range per level")
+            if center_sample_radius is None or float(center_sample_radius) <= 0.0:
+                raise ValueError("assignment geometry requires a positive center radius")
+            self.regression_ranges = tuple(
+                tuple(float(value) for value in bounds)
+                for bounds in regression_ranges
+            )
+            self.center_sample_radius = float(center_sample_radius)
+            geometry_dim = 6
+        else:
+            self.regression_ranges = None
+            self.center_sample_radius = None
+            geometry_dim = 3
         self.fpn_projection = nn.Sequential(
             nn.Conv1d(int(fpn_dim), int(hidden_dim), kernel_size=1),
             nn.GELU(),
@@ -358,10 +394,10 @@ class FPNValidityHead(nn.Module):
             self.level_embedding = nn.Embedding(
                 self.n_levels, int(level_embedding_dim)
             )
-            output_dim = int(hidden_dim) + 3 + int(level_embedding_dim)
+            output_dim = int(hidden_dim) + geometry_dim + int(level_embedding_dim)
         else:
             self.level_embedding = None
-            output_dim = int(hidden_dim) + 3
+            output_dim = int(hidden_dim) + geometry_dim
 
         def make_output():
             return nn.Sequential(
@@ -398,6 +434,9 @@ class FPNValidityHead(nn.Module):
             geometry = predicted_geometry_scalars(
                 level_offsets.detach() if self.detach_geometry else level_offsets,
                 stride,
+                self.regression_ranges[level]
+                if self.assignment_aware_geometry else None,
+                self.center_sample_radius,
             )
             inputs = [projected, geometry]
             if self.level_embedding is not None:

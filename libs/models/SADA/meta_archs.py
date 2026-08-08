@@ -649,6 +649,11 @@ class SADA(nn.Module):
                 per_level_output_heads=validity_head_cfg.get(
                     'per_level_output_heads', False
                 ),
+                assignment_aware_geometry=validity_head_cfg.get(
+                    'assignment_aware_geometry', False
+                ),
+                regression_ranges=self.reg_range,
+                center_sample_radius=self.train_center_sample_radius,
                 detach_fpn=validity_head_cfg.get('detach_fpn', False),
                 detach_geometry=validity_head_cfg.get(
                     'detach_geometry', True

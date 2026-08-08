@@ -63,6 +63,13 @@ HEAD_VARIANTS = {
         "per_level_output_heads": False,
         "level_balanced_loss": True,
     },
+    "F": {
+        "description": "shared head with assignment-normalized geometry",
+        "use_level_embedding": False,
+        "per_level_output_heads": False,
+        "level_balanced_loss": True,
+        "assignment_aware_geometry": True,
+    },
 }
 
 
@@ -260,6 +267,9 @@ def main():
         "use_level_embedding": head_design["use_level_embedding"],
         "per_level_output_heads": head_design["per_level_output_heads"],
         "level_balanced_loss": head_design["level_balanced_loss"],
+        "assignment_aware_geometry": head_design.get(
+            "assignment_aware_geometry", False
+        ),
         "detach_fpn": True,
         "detach_geometry": True,
     }

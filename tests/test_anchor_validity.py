@@ -279,6 +279,46 @@ def test_level_balanced_selection_loss_is_invariant_to_level_size():
     assert enlarged == pytest.approx(baseline)
 
 
+def test_assignment_aware_geometry_uses_tal_relative_coordinates():
+    offsets = torch.tensor([[[2.0], [6.0]]])
+    scalars = anchor_validity.predicted_geometry_scalars(
+        offsets,
+        stride=4,
+        regression_range=(16, 64),
+        center_sample_radius=1.5,
+    )
+    expected = torch.tensor([[
+        torch.log1p(torch.tensor(32.0)),
+        torch.log1p(torch.tensor(24.0)),
+        torch.tensor(0.5),
+        torch.log1p(torch.tensor(16.0 / 24.0)),
+        torch.log1p(torch.tensor(24.0 / 64.0)),
+        torch.log1p(torch.tensor(8.0 / 6.0)),
+    ]]).unsqueeze(-1)
+    assert torch.allclose(scalars, expected)
+
+
+def test_validity_head_supports_assignment_aware_geometry():
+    head = anchor_validity.FPNValidityHead(
+        fpn_dim=8,
+        n_levels=2,
+        hidden_dim=6,
+        fusion_dim=5,
+        use_level_embedding=False,
+        assignment_aware_geometry=True,
+        regression_ranges=((0, 4), (2, 8)),
+        center_sample_radius=1.5,
+    )
+    logits = head(
+        (torch.randn(1, 8, 4), torch.randn(1, 8, 2)),
+        (torch.rand(1, 2, 4), torch.rand(1, 2, 2)),
+        (torch.ones(1, 1, 4, dtype=torch.bool),
+         torch.ones(1, 1, 2, dtype=torch.bool)),
+        (1, 2),
+    )
+    assert [value.shape for value in logits] == [(1, 4), (1, 2)]
+
+
 @pytest.mark.parametrize(
     "use_embedding,per_level_outputs",
     ((False, False), (False, True)),

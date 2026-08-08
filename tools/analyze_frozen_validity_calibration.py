@@ -171,6 +171,7 @@ def main():
         "use_level_embedding": True,
         "per_level_output_heads": False,
         "level_balanced_loss": False,
+        "assignment_aware_geometry": False,
     })
     cfg["stage1"] = {"enabled": False, "perturbation": "shift"}
     cfg["dataset"]["crop_alignment"] = artifact["training_protocol"][
@@ -185,6 +186,9 @@ def main():
         "use_level_embedding": head_design["use_level_embedding"],
         "per_level_output_heads": head_design["per_level_output_heads"],
         "level_balanced_loss": head_design["level_balanced_loss"],
+        "assignment_aware_geometry": head_design.get(
+            "assignment_aware_geometry", False
+        ),
         "detach_fpn": True,
         "detach_geometry": True,
     }
