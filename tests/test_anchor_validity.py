@@ -213,9 +213,86 @@ def test_source_validity_loss_uses_only_cohort_and_official_labels():
         logits, labels, cohorts, masks
     )
     assert torch.isfinite(loss)
-    assert stats == {"count": 2, "positive": 1, "negative": 1}
+    assert stats["count"] == 2
+    assert stats["positive"] == 1
+    assert stats["negative"] == 1
+    assert stats["per_level"] == [
+        {"count": 2, "positive": 1, "negative": 1}
+    ]
     loss.backward()
     assert logits[0].grad[0, 2].item() == 0.0
+
+
+def test_level_balanced_validity_loss_is_invariant_to_level_size():
+    first = anchor_validity.source_validity_loss(
+        (
+            torch.tensor([[0.0, 0.0]], requires_grad=True),
+            torch.tensor([[2.0, -2.0]], requires_grad=True),
+        ),
+        (
+            torch.tensor([[1, 0]], dtype=torch.bool),
+            torch.tensor([[1, 0]], dtype=torch.bool),
+        ),
+        (
+            torch.ones(1, 2, dtype=torch.bool),
+            torch.ones(1, 2, dtype=torch.bool),
+        ),
+        (
+            torch.ones(1, 2, dtype=torch.bool),
+            torch.ones(1, 2, dtype=torch.bool),
+        ),
+        level_balanced=True,
+    )[0]
+    second = anchor_validity.source_validity_loss(
+        (
+            torch.tensor([[0.0, 0.0, 0.0, 0.0]], requires_grad=True),
+            torch.tensor([[2.0, -2.0]], requires_grad=True),
+        ),
+        (
+            torch.tensor([[1, 0, 1, 0]], dtype=torch.bool),
+            torch.tensor([[1, 0]], dtype=torch.bool),
+        ),
+        (
+            torch.ones(1, 4, dtype=torch.bool),
+            torch.ones(1, 2, dtype=torch.bool),
+        ),
+        (
+            torch.ones(1, 4, dtype=torch.bool),
+            torch.ones(1, 2, dtype=torch.bool),
+        ),
+        level_balanced=True,
+    )[0]
+    assert torch.allclose(first, second)
+
+
+@pytest.mark.parametrize(
+    "use_embedding,per_level_outputs",
+    ((False, False), (False, True)),
+)
+def test_validity_head_supports_level_collapse_ablations(
+    use_embedding, per_level_outputs
+):
+    head = anchor_validity.FPNValidityHead(
+        fpn_dim=8,
+        n_levels=2,
+        hidden_dim=6,
+        fusion_dim=5,
+        level_embedding_dim=3,
+        use_level_embedding=use_embedding,
+        per_level_output_heads=per_level_outputs,
+    )
+    logits = head(
+        (torch.randn(1, 8, 4), torch.randn(1, 8, 2)),
+        (torch.rand(1, 2, 4), torch.rand(1, 2, 2)),
+        (
+            torch.ones(1, 1, 4, dtype=torch.bool),
+            torch.ones(1, 1, 2, dtype=torch.bool),
+        ),
+        strides=(1, 2),
+    )
+    assert [tuple(value.shape) for value in logits] == [(1, 4), (1, 2)]
+    assert head.level_embedding is None
+    assert (head.output_heads is not None) == per_level_outputs
 
 
 def test_feature_groups_are_the_declared_three_way_ablation():

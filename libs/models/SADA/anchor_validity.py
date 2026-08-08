@@ -339,29 +339,45 @@ class FPNValidityHead(nn.Module):
         hidden_dim=128,
         fusion_dim=64,
         level_embedding_dim=8,
+        use_level_embedding=True,
+        per_level_output_heads=False,
         detach_fpn=False,
         detach_geometry=True,
     ):
         super().__init__()
         self.n_levels = int(n_levels)
+        self.use_level_embedding = bool(use_level_embedding)
+        self.per_level_output_heads = bool(per_level_output_heads)
         self.detach_fpn = bool(detach_fpn)
         self.detach_geometry = bool(detach_geometry)
         self.fpn_projection = nn.Sequential(
             nn.Conv1d(int(fpn_dim), int(hidden_dim), kernel_size=1),
             nn.GELU(),
         )
-        self.level_embedding = nn.Embedding(
-            self.n_levels, int(level_embedding_dim)
-        )
-        self.output = nn.Sequential(
-            nn.Conv1d(
-                int(hidden_dim) + 3 + int(level_embedding_dim),
-                int(fusion_dim),
-                kernel_size=1,
-            ),
-            nn.GELU(),
-            nn.Conv1d(int(fusion_dim), 1, kernel_size=1),
-        )
+        if self.use_level_embedding:
+            self.level_embedding = nn.Embedding(
+                self.n_levels, int(level_embedding_dim)
+            )
+            output_dim = int(hidden_dim) + 3 + int(level_embedding_dim)
+        else:
+            self.level_embedding = None
+            output_dim = int(hidden_dim) + 3
+
+        def make_output():
+            return nn.Sequential(
+                nn.Conv1d(output_dim, int(fusion_dim), kernel_size=1),
+                nn.GELU(),
+                nn.Conv1d(int(fusion_dim), 1, kernel_size=1),
+            )
+
+        if self.per_level_output_heads:
+            self.output_heads = nn.ModuleList(
+                make_output() for _ in range(self.n_levels)
+            )
+            self.output = None
+        else:
+            self.output_heads = None
+            self.output = make_output()
 
     def forward(self, fpn_features, offsets, masks, strides):
         if not (
@@ -383,11 +399,19 @@ class FPNValidityHead(nn.Module):
                 level_offsets.detach() if self.detach_geometry else level_offsets,
                 stride,
             )
-            embedding = self.level_embedding.weight[level].view(1, -1, 1)
-            embedding = embedding.expand(features.shape[0], -1, features.shape[-1])
-            level_logits = self.output(
-                torch.cat((projected, geometry, embedding), dim=1)
-            ).squeeze(1)
+            inputs = [projected, geometry]
+            if self.level_embedding is not None:
+                embedding = self.level_embedding.weight[level].view(1, -1, 1)
+                embedding = embedding.expand(
+                    features.shape[0], -1, features.shape[-1]
+                )
+                inputs.append(embedding)
+            output = (
+                self.output_heads[level]
+                if self.output_heads is not None
+                else self.output
+            )
+            level_logits = output(torch.cat(inputs, dim=1)).squeeze(1)
             level_mask = mask.squeeze(1).bool() if mask.ndim == 3 else mask.bool()
             logits.append(level_logits.masked_fill(~level_mask, 0.0))
         return tuple(logits)
@@ -431,37 +455,81 @@ def clip_grad_norm_with_isolated_validity_head(model, max_norm):
     return base_norm, head_norm
 
 
-def source_validity_loss(logits, labels, cohorts, masks):
+def source_validity_loss(
+    logits,
+    labels,
+    cohorts,
+    masks,
+    level_balanced=False,
+):
     """Balanced source-only BCE over anchors centered inside source events."""
     selected_logits = []
     selected_labels = []
+    per_level = []
+    level_losses = []
     for level_logits, level_labels, cohort, mask in zip(
         logits, labels, cohorts, masks
     ):
         level_mask = mask.squeeze(1).bool() if mask.ndim == 3 else mask.bool()
         selected = cohort.bool() & level_mask
         if selected.any():
-            selected_logits.append(level_logits[selected])
-            selected_labels.append(level_labels[selected].float())
+            current_logits = level_logits[selected]
+            current_labels = level_labels[selected].float()
+            selected_logits.append(current_logits)
+            selected_labels.append(current_labels)
+            positive = int(current_labels.sum().item())
+            negative = int(current_labels.numel() - positive)
+            if level_balanced and positive > 0 and negative > 0:
+                positive_loss = F.softplus(
+                    -current_logits[current_labels.bool()]
+                ).mean()
+                negative_loss = F.softplus(
+                    current_logits[~current_labels.bool()]
+                ).mean()
+                level_losses.append(0.5 * (positive_loss + negative_loss))
+        else:
+            positive = 0
+            negative = 0
+        per_level.append({
+            "count": positive + negative,
+            "positive": positive,
+            "negative": negative,
+        })
     if not selected_logits:
         zero = sum(value.sum() for value in logits) * 0.0
-        return zero, {"count": 0, "positive": 0, "negative": 0}
+        return zero, {
+            "count": 0,
+            "positive": 0,
+            "negative": 0,
+            "active_levels": 0,
+            "per_level": per_level,
+        }
 
     flat_logits = torch.cat(selected_logits)
     flat_labels = torch.cat(selected_labels)
     positive = int(flat_labels.sum().item())
     negative = int(flat_labels.numel() - positive)
-    if positive > 0 and negative > 0:
-        pos_weight = flat_labels.new_tensor(float(negative) / float(positive))
+    if level_balanced:
+        if level_losses:
+            loss = torch.stack(level_losses).mean()
+        else:
+            loss = sum(value.sum() for value in logits) * 0.0
     else:
-        pos_weight = flat_labels.new_tensor(1.0)
-    loss = F.binary_cross_entropy_with_logits(
-        flat_logits, flat_labels, pos_weight=pos_weight
-    )
+        if positive > 0 and negative > 0:
+            pos_weight = flat_labels.new_tensor(
+                float(negative) / float(positive)
+            )
+        else:
+            pos_weight = flat_labels.new_tensor(1.0)
+        loss = F.binary_cross_entropy_with_logits(
+            flat_logits, flat_labels, pos_weight=pos_weight
+        )
     return loss, {
         "count": int(flat_labels.numel()),
         "positive": positive,
         "negative": negative,
+        "active_levels": len(level_losses) if level_balanced else len(selected_logits),
+        "per_level": per_level,
     }
 
 

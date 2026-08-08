@@ -32,6 +32,32 @@ from tools.evaluate_integrated_validity_head import (
 
 
 SCHEMA_VERSION = "frozen-sada-validity-head-v1"
+HEAD_VARIANTS = {
+    "A": {
+        "description": "shared head with level embedding and global loss",
+        "use_level_embedding": True,
+        "per_level_output_heads": False,
+        "level_balanced_loss": False,
+    },
+    "B": {
+        "description": "shared head without explicit level embedding",
+        "use_level_embedding": False,
+        "per_level_output_heads": False,
+        "level_balanced_loss": False,
+    },
+    "C": {
+        "description": "shared head with level embedding and level-balanced loss",
+        "use_level_embedding": True,
+        "per_level_output_heads": False,
+        "level_balanced_loss": True,
+    },
+    "D": {
+        "description": "shared projection with level-balanced per-level outputs",
+        "use_level_embedding": False,
+        "per_level_output_heads": True,
+        "level_balanced_loss": True,
+    },
+}
 
 
 def parse_args():
@@ -60,6 +86,9 @@ def parse_args():
     parser.add_argument("--minimum-precision", type=float, default=0.9)
     parser.add_argument("--crop-alignment", type=int, default=1)
     parser.add_argument("--clip-grad-norm", type=float, default=1.0)
+    parser.add_argument(
+        "--head-variant", choices=tuple(HEAD_VARIANTS), default="A"
+    )
     return parser.parse_args()
 
 
@@ -142,7 +171,13 @@ def frozen_source_batch(model, raw_videos, device):
             )
             start = end
     logits = model.validity_head(fpn, offsets, fpn_masks, model.fpn_strides)
-    return source_validity_loss(logits, labels, cohorts, fpn_masks)
+    return source_validity_loss(
+        logits,
+        labels,
+        cohorts,
+        fpn_masks,
+        level_balanced=model.validity_head_level_balanced_loss,
+    )
 
 
 def balanced_probability_loss(scores, labels):
@@ -218,6 +253,7 @@ def main():
         torch.cuda.manual_seed_all(args.seed)
 
     cfg = read_yaml(args.config)
+    head_design = dict(HEAD_VARIANTS[args.head_variant])
     cfg["stage1"] = {"enabled": False, "perturbation": "shift"}
     cfg["dataset"]["crop_alignment"] = args.crop_alignment
     cfg["validity_head"] = {
@@ -226,6 +262,9 @@ def main():
         "hidden_dim": 128,
         "fusion_dim": 64,
         "level_embedding_dim": 8,
+        "use_level_embedding": head_design["use_level_embedding"],
+        "per_level_output_heads": head_design["per_level_output_heads"],
+        "level_balanced_loss": head_design["level_balanced_loss"],
         "detach_fpn": True,
         "detach_geometry": True,
     }
@@ -302,6 +341,10 @@ def main():
         epoch_anchors = 0
         epoch_positive = 0
         epoch_negative = 0
+        epoch_by_level = [
+            {"count": 0, "positive": 0, "negative": 0}
+            for _ in range(model.n_levels)
+        ]
         for raw_videos in train_loader:
             optimizer.zero_grad(set_to_none=True)
             loss, stats = frozen_source_batch(model, raw_videos, args.device)
@@ -315,6 +358,11 @@ def main():
             epoch_anchors += count
             epoch_positive += int(stats["positive"])
             epoch_negative += int(stats["negative"])
+            for total, current in zip(
+                epoch_by_level, stats["per_level"]
+            ):
+                for key in ("count", "positive", "negative"):
+                    total[key] += int(current[key])
         if epoch_anchors == 0:
             raise RuntimeError("frozen-head epoch produced no supervised anchors")
         total_supervised_anchors += epoch_anchors
@@ -324,6 +372,7 @@ def main():
             "train_anchors": epoch_anchors,
             "train_positive": epoch_positive,
             "train_negative": epoch_negative,
+            "train_by_level": epoch_by_level,
         }
         if epoch % args.selection_frequency == 0 or epoch == args.epochs:
             current_selection_loss, selection_stats = selection_loss(
@@ -397,6 +446,8 @@ def main():
         "clip_grad_norm": args.clip_grad_norm,
         "optimizer": "AdamW",
         "frozen_sada": True,
+        "head_variant": args.head_variant,
+        "head_design": head_design,
     }
     payload = {
         "schema_version": SCHEMA_VERSION,
@@ -416,6 +467,9 @@ def main():
         "training_protocol": training_protocol,
         "training_protocol_sha256": protocol_sha256(training_protocol),
         "total_supervised_anchors": total_supervised_anchors,
+        "head_variant": args.head_variant,
+        "head_design": head_design,
+        "head_design_sha256": protocol_sha256(head_design),
         "best_epoch": best_epoch,
         "best_selection_loss": best_selection_loss,
         "history": history,

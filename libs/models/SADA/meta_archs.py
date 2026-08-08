@@ -624,6 +624,9 @@ class SADA(nn.Module):
         self.validity_head_loss_weight = float(
             validity_head_cfg.get('loss_weight', 1.0)
         )
+        self.validity_head_level_balanced_loss = bool(
+            validity_head_cfg.get('level_balanced_loss', False)
+        )
         if self.validity_head_loss_weight < 0.0:
             raise ValueError('validity head loss weight must be non-negative')
         self.validity_head = None
@@ -639,6 +642,12 @@ class SADA(nn.Module):
                 fusion_dim=validity_head_cfg.get('fusion_dim', 64),
                 level_embedding_dim=validity_head_cfg.get(
                     'level_embedding_dim', 8
+                ),
+                use_level_embedding=validity_head_cfg.get(
+                    'use_level_embedding', True
+                ),
+                per_level_output_heads=validity_head_cfg.get(
+                    'per_level_output_heads', False
                 ),
                 detach_fpn=validity_head_cfg.get('detach_fpn', False),
                 detach_geometry=validity_head_cfg.get(
@@ -1835,6 +1844,7 @@ class SADA(nn.Module):
                 validity_labels,
                 source_validity_cohorts,
                 fpn_masks_src,
+                level_balanced=self.validity_head_level_balanced_loss,
             )
 
         downstream_loss = (

@@ -167,6 +167,11 @@ def main():
         raise ValueError("unsupported frozen-head artifact")
 
     cfg = read_yaml(args.config)
+    head_design = artifact.get("head_design", {
+        "use_level_embedding": True,
+        "per_level_output_heads": False,
+        "level_balanced_loss": False,
+    })
     cfg["stage1"] = {"enabled": False, "perturbation": "shift"}
     cfg["dataset"]["crop_alignment"] = artifact["training_protocol"][
         "crop_alignment"
@@ -177,6 +182,9 @@ def main():
         "hidden_dim": 128,
         "fusion_dim": 64,
         "level_embedding_dim": 8,
+        "use_level_embedding": head_design["use_level_embedding"],
+        "per_level_output_heads": head_design["per_level_output_heads"],
+        "level_balanced_loss": head_design["level_balanced_loss"],
         "detach_fpn": True,
         "detach_geometry": True,
     }
