@@ -859,6 +859,113 @@ def high_precision_threshold(scores, labels, minimum_precision):
     }
 
 
+def video_robust_high_precision_threshold(
+    scores,
+    labels,
+    video_ids,
+    minimum_precision,
+    minimum_selected_per_video,
+):
+    """Calibrate one threshold that satisfies every source calibration video."""
+    if not 0.0 < minimum_precision <= 1.0:
+        raise ValueError("minimum_precision must be in (0, 1]")
+    if minimum_selected_per_video <= 0:
+        raise ValueError("minimum_selected_per_video must be positive")
+    if len(scores) != len(labels) or len(scores) != len(video_ids):
+        raise ValueError("scores, labels, and video_ids must have equal length")
+    scores = scores.detach().cpu()
+    labels = labels.detach().cpu().bool()
+    ordered_videos = tuple(sorted(set(str(value) for value in video_ids)))
+    if not ordered_videos:
+        raise ValueError("video-robust calibration requires at least one video")
+    video_index = {video_id: index for index, video_id in enumerate(ordered_videos)}
+    encoded_videos = torch.tensor(
+        [video_index[str(value)] for value in video_ids], dtype=torch.long
+    )
+    order = scores.argsort(descending=True, stable=True)
+    sorted_scores = scores[order]
+    sorted_labels = labels[order]
+    sorted_videos = encoded_videos[order]
+    boundary_mask = torch.ones(len(scores), dtype=torch.bool)
+    boundary_mask[:-1] = sorted_scores[:-1] != sorted_scores[1:]
+    boundaries = boundary_mask.nonzero(as_tuple=False).squeeze(1)
+    cumulative_selected = []
+    cumulative_true_positive = []
+    for index in range(len(ordered_videos)):
+        video_mask = sorted_videos == index
+        cumulative_selected.append(video_mask.cumsum(0))
+        cumulative_true_positive.append(
+            (video_mask & sorted_labels).cumsum(0)
+        )
+    cumulative_selected = torch.stack(cumulative_selected)
+    cumulative_true_positive = torch.stack(cumulative_true_positive)
+    total_true_positive = sorted_labels.cumsum(0)
+    positives = int(labels.sum())
+    best = None
+    observed = None
+    for boundary in boundaries.tolist():
+        selected_per_video = cumulative_selected[:, boundary]
+        if int(selected_per_video.min()) < minimum_selected_per_video:
+            continue
+        true_positive_per_video = cumulative_true_positive[:, boundary]
+        precision_per_video = (
+            true_positive_per_video.float() / selected_per_video.float()
+        )
+        per_video = {
+            video_id: {
+                "selected": int(selected_per_video[index]),
+                "precision": float(precision_per_video[index]),
+            }
+            for index, video_id in enumerate(ordered_videos)
+        }
+        total_selected = boundary + 1
+        true_positive = int(total_true_positive[boundary])
+        recall = true_positive / max(positives, 1)
+        worst_precision = float(precision_per_video.min())
+        threshold = float(sorted_scores[boundary])
+        observation = (
+            worst_precision,
+            recall,
+            total_selected,
+            float(threshold),
+            per_video,
+        )
+        if observed is None or observation[:3] > observed[:3]:
+            observed = observation
+        if worst_precision + 1e-12 < minimum_precision:
+            continue
+        candidate = (
+            recall,
+            total_selected,
+            float(threshold),
+            worst_precision,
+            per_video,
+        )
+        if best is None or candidate[:2] > best[:2]:
+            best = candidate
+    if observed is None:
+        raise ValueError(
+            "no threshold selects the minimum number of anchors for every video"
+        )
+    if best is None:
+        worst_precision, recall, count, threshold, per_video = observed
+        return False, {
+            "threshold": threshold,
+            "worst_video_precision": worst_precision,
+            "recall": recall,
+            "selected": count,
+            "per_video": per_video,
+        }
+    recall, count, threshold, worst_precision, per_video = best
+    return True, {
+        "threshold": threshold,
+        "worst_video_precision": worst_precision,
+        "recall": recall,
+        "selected": count,
+        "per_video": per_video,
+    }
+
+
 def _json_value(value):
     if isinstance(value, torch.Tensor):
         return value.detach().cpu().tolist()

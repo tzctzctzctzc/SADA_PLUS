@@ -90,9 +90,19 @@ def calibrate(scores, labels, minimum_precision):
         return False, best_observed_threshold(scores, labels)
 
 
-def collect_split(model, dataset, alpha, beta, device, crops_per_video):
+def collect_split(
+    model,
+    dataset,
+    alpha,
+    beta,
+    device,
+    crops_per_video,
+    return_groups=False,
+):
     scores = []
     labels = []
+    level_rows = []
+    video_rows = []
     sampled_crops = 0
     duplicate_draws = 0
     valid_anchors = 0
@@ -108,6 +118,7 @@ def collect_split(model, dataset, alpha, beta, device, crops_per_video):
                 attempts += 1
                 raw_video = dataset[index]
                 metadata = raw_video["metadata"]
+                video_id = str(metadata["video_id"])
                 crop_key = (
                     int(metadata.get("crop_start", 0)),
                     int(metadata.get("crop_feat_len", raw_video["feats"].shape[-1])),
@@ -132,9 +143,12 @@ def collect_split(model, dataset, alpha, beta, device, crops_per_video):
                 )
                 gt_cls = gt_cls[0].sum(-1) > 0
                 concat_start = 0
-                for point_grid, level_logits, level_mask, level_validity in zip(
-                    points, logits, fpn_masks, validity_logits
-                ):
+                for level, (
+                    point_grid,
+                    level_logits,
+                    level_mask,
+                    level_validity,
+                ) in enumerate(zip(points, logits, fpn_masks, validity_logits)):
                     length = point_grid.shape[0]
                     probabilities = level_logits[0].transpose(0, 1).sigmoid()
                     top_score = probabilities.max(dim=-1).values
@@ -151,12 +165,18 @@ def collect_split(model, dataset, alpha, beta, device, crops_per_video):
                     if cohort.any():
                         scores.append(level_validity[0, cohort].sigmoid().cpu())
                         labels.append(level_labels[cohort].cpu())
+                        selected_count = int(cohort.sum())
+                        level_rows.append(
+                            torch.full(
+                                (selected_count,), level, dtype=torch.long
+                            )
+                        )
+                        video_rows.extend([video_id] * selected_count)
                     concat_start += length
-            video_id = str(raw_video["metadata"]["video_id"])
             crops_by_video[video_id] = len(seen_crops)
     if not scores:
         raise RuntimeError("source split produced no event-center mid-confidence anchors")
-    return torch.cat(scores), torch.cat(labels), {
+    result = (torch.cat(scores), torch.cat(labels), {
         "videos": len(dataset),
         "requested_crops_per_video": crops_per_video,
         "sampled_crops": sampled_crops,
@@ -167,7 +187,13 @@ def collect_split(model, dataset, alpha, beta, device, crops_per_video):
         "event_center_anchor_count": event_center_anchors,
         "mid_confidence_anchor_count": mid_confidence_anchors,
         "operating_cohort_count": sum(len(row) for row in labels),
-    }
+    })
+    if not return_groups:
+        return result
+    return (*result, {
+        "levels": torch.cat(level_rows),
+        "video_ids": tuple(video_rows),
+    })
 
 
 def main():

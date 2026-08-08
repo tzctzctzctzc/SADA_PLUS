@@ -264,6 +264,33 @@ def test_high_precision_calibration_uses_source_val_labels_only():
     assert result["recall"] == pytest.approx(2 / 3)
 
 
+def test_video_robust_threshold_requires_every_video_to_pass():
+    scores = torch.tensor([0.90, 0.80, 0.70, 0.95, 0.85, 0.75])
+    labels = torch.tensor([1, 0, 1, 1, 1, 0], dtype=torch.bool)
+    video_ids = ("a", "a", "a", "b", "b", "b")
+    met, result = anchor_validity.video_robust_high_precision_threshold(
+        scores,
+        labels,
+        video_ids,
+        minimum_precision=1.0,
+        minimum_selected_per_video=1,
+    )
+    assert met
+    assert result["threshold"] == pytest.approx(0.85)
+    assert result["per_video"]["a"]["precision"] == 1.0
+    assert result["per_video"]["b"]["precision"] == 1.0
+
+    met, result = anchor_validity.video_robust_high_precision_threshold(
+        scores,
+        labels,
+        video_ids,
+        minimum_precision=1.0,
+        minimum_selected_per_video=2,
+    )
+    assert not met
+    assert result["worst_video_precision"] < 1.0
+
+
 def test_high_precision_failure_reports_observed_ceiling():
     with pytest.raises(ValueError, match="maximum observed precision=0.500000"):
         anchor_validity.high_precision_threshold(
