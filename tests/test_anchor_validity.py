@@ -265,6 +265,20 @@ def test_level_balanced_validity_loss_is_invariant_to_level_size():
     assert torch.allclose(first, second)
 
 
+def test_level_balanced_selection_loss_is_invariant_to_level_size():
+    scores = torch.tensor([0.8, 0.6, 0.9, 0.2])
+    labels = torch.tensor([True, False, True, False])
+    levels = torch.tensor([0, 0, 1, 1])
+    baseline = anchor_validity.balanced_probability_loss(scores, labels, levels)
+
+    repeated = torch.tensor([0, 1] * 20 + [2, 3])
+    enlarged = anchor_validity.balanced_probability_loss(
+        scores[repeated], labels[repeated], levels[repeated]
+    )
+
+    assert enlarged == pytest.approx(baseline)
+
+
 @pytest.mark.parametrize(
     "use_embedding,per_level_outputs",
     ((False, False), (False, True)),

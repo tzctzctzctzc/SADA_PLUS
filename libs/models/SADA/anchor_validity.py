@@ -533,6 +533,31 @@ def source_validity_loss(
     }
 
 
+def balanced_probability_loss(scores, labels, levels=None):
+    if levels is not None:
+        level_losses = []
+        for level in sorted(levels.unique().tolist()):
+            mask = levels == level
+            level_labels = labels[mask]
+            if level_labels.any() and (~level_labels.bool()).any():
+                level_losses.append(
+                    balanced_probability_loss(scores[mask], level_labels)
+                )
+        if not level_losses:
+            raise ValueError("selection split has no level with both label classes")
+        return sum(level_losses) / len(level_losses)
+    labels = labels.float()
+    positives = labels.sum().clamp_min(1.0)
+    negatives = (1.0 - labels).sum().clamp_min(1.0)
+    positive_weight = negatives / positives
+    scores = scores.clamp(1e-6, 1.0 - 1e-6)
+    return F.binary_cross_entropy(
+        scores,
+        labels,
+        weight=torch.where(labels.bool(), positive_weight, 1.0),
+    ).item()
+
+
 def feature_indices(feature_group):
     if feature_group not in FEATURE_GROUPS:
         raise ValueError("unsupported validity feature group: {}".format(feature_group))

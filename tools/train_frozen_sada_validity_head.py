@@ -8,13 +8,13 @@ import sys
 from pathlib import Path
 
 import torch
-import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from libs.datasets import make_data_loader, make_dataset
 from libs.models.SADA import make_meta_arch
 from libs.models.SADA.anchor_validity import (
+    balanced_probability_loss,
     freeze_sada_except_validity_head,
     partition_frozen_head_source_videos,
     protocol_sha256,
@@ -180,32 +180,21 @@ def frozen_source_batch(model, raw_videos, device):
     )
 
 
-def balanced_probability_loss(scores, labels):
-    labels = labels.float()
-    positives = labels.sum().clamp_min(1.0)
-    negatives = (1.0 - labels).sum().clamp_min(1.0)
-    positive_weight = negatives / positives
-    scores = scores.clamp(1e-6, 1.0 - 1e-6)
-    return F.binary_cross_entropy(
-        scores,
-        labels,
-        weight=torch.where(labels.bool(), positive_weight, 1.0),
-    ).item()
-
-
 def selection_loss(model, dataset, alpha, args):
     random.seed(args.evaluation_seed)
     torch.manual_seed(args.evaluation_seed)
     model.eval()
-    scores, labels, stats = collect_split(
+    scores, labels, stats, groups = collect_split(
         model,
         dataset,
         alpha,
         args.beta,
         args.device,
         args.selection_crops_per_video,
+        return_groups=True,
     )
-    return balanced_probability_loss(scores, labels), stats
+    levels = groups["levels"] if model.validity_head_level_balanced_loss else None
+    return balanced_probability_loss(scores, labels, levels), stats
 
 
 def collect_operating_report(model, dataset, alpha, args, seed):

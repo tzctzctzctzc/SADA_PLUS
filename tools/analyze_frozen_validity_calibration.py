@@ -213,11 +213,15 @@ def main():
     calibration_dataset = clone_by_ids(
         source_train, partition["calibration_video_ids"]
     )
+    train_dataset = clone_by_ids(source_train, partition["train_video_ids"])
     internal_dataset = clone_by_ids(source_train, partition["report_video_ids"])
     external_dataset = clone_by_ids(
         source_val, partition["external_report_video_ids"]
     )
     evaluation_seed = artifact["training_protocol"]["evaluation_seed"]
+    train = collect_records(
+        model, train_dataset, artifact, args.device, evaluation_seed
+    )
     calibration = collect_records(
         model, calibration_dataset, artifact, args.device, evaluation_seed + 1
     )
@@ -264,6 +268,7 @@ def main():
     }
     for policy in policies.values():
         policy["metrics"] = {
+            "train": evaluate_policy(policy, train),
             "calibration": evaluate_policy(policy, calibration),
             "internal_report": evaluate_policy(policy, internal),
             "external_report": evaluate_policy(policy, external),
@@ -289,6 +294,7 @@ def main():
         "vlm_usage": "none",
         "minimum_precision": minimum_precision,
         "score_diagnostics_by_level": {
+            "train": score_diagnostics(train[0], train[1], train[3]),
             "calibration": score_diagnostics(
                 calibration[0], calibration[1], calibration[3]
             ),
