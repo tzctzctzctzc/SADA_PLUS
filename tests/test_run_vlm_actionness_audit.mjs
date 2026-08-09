@@ -97,18 +97,34 @@ test('teacher score region selects the independent prompt role', () => {
 });
 
 
-test('high veto prompt is independent and candidate-blind', () => {
+test('high veto prompt uses exact-frame official EPIC verb boundaries', () => {
   const high = promptProtocol({ ...manifestRow(), prompt_role: HIGH_PROMPT_ROLE });
   assert.equal(high.version, HIGH_PROMPT_PROTOCOL_VERSION);
   assert.equal(high.sha256, HIGH_PROMPT_SHA256);
   assert.equal(high.text, HIGH_PROMPT_TEXT);
   assert.notEqual(HIGH_PROMPT_SHA256, LOW_PROMPT_SHA256);
-  assert.equal(HIGH_PROMPT_PROTOCOL_VERSION, 'candidate-blind-epic-semantic-veto-v2');
+  assert.equal(
+    HIGH_PROMPT_PROTOCOL_VERSION,
+    'candidate-blind-epic-official-verb-veto-v3',
+  );
   assert.equal(HIGH_PROMPT_TEXT.toLowerCase().includes('false positive'), false);
   assert.match(
     HIGH_PROMPT_TEXT,
     /strictly distinguish genuine target-action events from clear\nnon-target activity or background/,
   );
+  assert.match(
+    HIGH_PROMPT_TEXT,
+    /Classify the action interval, if\nany, that contains the exact time of Frame 5/,
+  );
+  assert.match(HIGH_PROMPT_TEXT, /other frames only as\ntemporal evidence/);
+  assert.match(HIGH_PROMPT_TEXT, /official EPIC-KITCHENS-100 verb-class boundaries/);
+  assert.match(HIGH_PROMPT_TEXT, /exactly official verb classes 0-9/);
+  assert.match(HIGH_PROMPT_TEXT, /PUT includes LEAVE and REPOSITION/);
+  assert.match(HIGH_PROMPT_TEXT, /WASH includes CLEAN, RINSE, LATHER, and WIPE/);
+  assert.match(HIGH_PROMPT_TEXT, /It is not DRY, SCRAPE, SCRUB/);
+  assert.match(HIGH_PROMPT_TEXT, /PULL-OFF is TAKE, but\n  PULL by itself is not/);
+  assert.equal(HIGH_PROMPT_TEXT.includes('moving or\nrepositioning an object'), false);
+  assert.equal(HIGH_PROMPT_TEXT.includes('temporal neighborhood around Frame 5'), false);
   for (const forbidden of [
     'teacher score', 'model confidence', 'target gt', 'ground truth',
     'fpn level', 'assignment validity', 'regression range', 'cohort',
