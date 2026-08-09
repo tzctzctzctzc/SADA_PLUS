@@ -241,6 +241,9 @@ def main():
                             )
                         )
                     center_sec = min(max(float(centers[index]), 0.0), duration)
+                    absolute_feature_index = int(
+                        round(float(point_grid[index, 0]) + crop_start)
+                    )
                     gt_vector = labels[index]
                     gt_action = bool(gt_vector.sum() > 0)
                     predicted_class = int(pseudo_class[index])
@@ -284,6 +287,8 @@ def main():
                             ),
                             "video_id": video_id,
                             "center_sec": center_sec,
+                            "absolute_center_time": center_sec,
+                            "absolute_feature_index": absolute_feature_index,
                             "fpn_level": level,
                             "anchor_index": int(index),
                             "sada_score": float(scores[index]),

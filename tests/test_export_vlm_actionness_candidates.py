@@ -54,13 +54,24 @@ def test_hard_case_groups_have_distinct_semantics():
 
 def test_balanced_sample_and_interleave_do_not_start_from_one_cell_or_group():
     rows = [
-        {"video_id": video, "fpn_level": level, "value": value}
+        {
+            "video_id": video,
+            "fpn_level": level,
+            "absolute_feature_index": level * 10 + value,
+            "value": value,
+        }
         for video in ("a", "b")
         for level in (0, 1)
         for value in range(3)
     ]
     sampled = balanced_sample(rows, 4, seed=7)
     assert len({(row["video_id"], row["fpn_level"]) for row in sampled}) == 4
+
+    duplicate_time = [
+        {"video_id": "a", "fpn_level": level, "absolute_feature_index": 8}
+        for level in (0, 1)
+    ]
+    assert len(balanced_sample(duplicate_time, 2, seed=7)) == 1
 
     groups = {name: [{"group": name}] for name in (
         "low_valid_correct",

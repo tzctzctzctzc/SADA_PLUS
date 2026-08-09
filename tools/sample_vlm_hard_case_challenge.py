@@ -46,11 +46,18 @@ def classify(row):
     return None
 
 
-def balanced_sample(rows, count, seed):
+def semantic_key(row):
+    return row["video_id"], int(row["absolute_feature_index"])
+
+
+def balanced_sample(rows, count, seed, used_semantic_keys=None):
     """Round-robin over video×level cells to avoid a few videos dominating."""
     rng = random.Random(seed)
+    used_semantic_keys = used_semantic_keys if used_semantic_keys is not None else set()
     cells = collections.defaultdict(list)
     for row in rows:
+        if semantic_key(row) in used_semantic_keys:
+            continue
         cells[(row["video_id"], int(row["fpn_level"]))].append(row)
     keys = list(cells)
     rng.shuffle(keys)
@@ -61,7 +68,13 @@ def balanced_sample(rows, count, seed):
     while keys and len(selected) < count:
         next_keys = []
         for key in keys:
-            selected.append(cells[key].pop())
+            while cells[key] and semantic_key(cells[key][-1]) in used_semantic_keys:
+                cells[key].pop()
+            if not cells[key]:
+                continue
+            row = cells[key].pop()
+            selected.append(row)
+            used_semantic_keys.add(semantic_key(row))
             if cells[key]:
                 next_keys.append(key)
             if len(selected) == count:
@@ -109,11 +122,13 @@ def main():
             pools[group].append(row)
 
     selected = {}
+    used_semantic_keys = set()
     for offset, name in enumerate(GROUPS):
         chosen = balanced_sample(
             pools[name],
             requested[name],
             args.seed + offset,
+            used_semantic_keys,
         )
         selected[name] = []
         for row in chosen:
