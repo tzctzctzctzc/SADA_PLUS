@@ -21,6 +21,18 @@ def video_ids_in(root):
     }
 
 
+def named_paths(values):
+    result = {}
+    for value in values or ():
+        name, separator, path = value.partition("=")
+        if not separator or not name or not path:
+            raise ValueError("validity models must use NAME=PATH")
+        if name in result:
+            raise ValueError("duplicate validity model name: {}".format(name))
+        result[name] = path
+    return result
+
+
 def choose_indices(
     scores,
     centers,
@@ -84,12 +96,29 @@ def main():
         "--reuse-manifest",
         help="Reuse these exact candidate anchors and only refresh their logits/GT.",
     )
+    parser.add_argument(
+        "--validity-model",
+        action="append",
+        default=[],
+        metavar="NAME=PATH",
+        help="Score each exact anchor with a pre-calibrated source-only model.",
+    )
     args = parser.parse_args()
 
     import torch
 
     from libs.datasets import make_dataset
     from libs.models.SADA import make_meta_arch
+    from libs.models.SADA.anchor_validity import (
+        anchor_validity_features,
+        assignment_protocol_from_model,
+        cohort_protocol_from_config,
+        load_validity_model,
+        probe_probabilities,
+        validate_validity_provenance,
+        validity_model_to,
+    )
+    from libs.models.SADA.stage1_calibration import state_dict_sha256
     from libs.utils.utils import _update_config, read_yaml
     from tools.audit_original_sada_pseudolabels import (
         crop_targets,
@@ -154,6 +183,29 @@ def main():
     model.eval()
 
     alpha = float(cfg["model"].get("pl_threshold", 0.7))
+    teacher_state_sha256 = state_dict_sha256(checkpoint[state_key])
+    validity_models = {}
+    for name, path in named_paths(args.validity_model).items():
+        payload, validity_model, artifact_sha256 = load_validity_model(path)
+        expected_state = payload["teacher_provenance"][
+            "routing_teacher_state_sha256"
+        ]
+        if teacher_state_sha256 != expected_state:
+            raise ValueError(
+                "validity model {} belongs to a different teacher state".format(name)
+            )
+        validate_validity_provenance(
+            payload,
+            payload["teacher_provenance"],
+            assignment_protocol_from_model(model),
+            cohort_protocol_from_config(cfg, model, args.beta, alpha),
+        )
+        validity_models[name] = {
+            "model": validity_model_to(validity_model, args.device),
+            "threshold": float(payload["threshold"]),
+            "artifact_sha256": artifact_sha256,
+            "path": path,
+        }
     rows = []
     totals = {
         "gt_foreground_anchors": 0,
@@ -167,6 +219,9 @@ def main():
             backbone_feats, backbone_masks, _ = model.backbone_target(inputs, masks)
             fpn_feats, fpn_masks = model.neck_target(backbone_feats, backbone_masks)
             logits, _ = model.cls_head_target(fpn_feats, fpn_masks)
+            offsets = None
+            if validity_models:
+                offsets, _ = model.reg_head_target(fpn_feats, fpn_masks)
             points = model.point_generator(fpn_feats)
 
             metadata = raw_video["metadata"]
@@ -197,6 +252,23 @@ def main():
                     continue
 
                 probabilities = level_logits[0].transpose(0, 1).sigmoid()
+                level_validity = {}
+                if validity_models:
+                    level_offsets = offsets[level][0].transpose(0, 1)
+                    validity_features = anchor_validity_features(
+                        probabilities,
+                        level_offsets[:, 0],
+                        level_offsets[:, 1],
+                        float(point_grid[0, 3]),
+                        level,
+                    )
+                    fpn_rows = fpn_feats[level][0].transpose(0, 1)
+                    for name, validity in validity_models.items():
+                        level_validity[name] = probe_probabilities(
+                            validity_features,
+                            validity["model"],
+                            fpn_features=fpn_rows,
+                        )
                 top_scores, top_classes = probabilities.topk(k=2, dim=-1)
                 scores = top_scores[:, 0]
                 pseudo_class = top_classes[:, 0]
@@ -278,8 +350,7 @@ def main():
                                 predicted_class,
                             )
                         )
-                    rows.append(
-                        {
+                    row = {
                             **reused,
                             "candidate_id": reused.get(
                                 "candidate_id",
@@ -311,7 +382,19 @@ def main():
                                 predicted_class in center_gt_class_ids
                             ),
                         }
-                    )
+                    if validity_models:
+                        row["structure_scores"] = {
+                            name: float(level_validity[name][index])
+                            for name in validity_models
+                        }
+                        row["structural_passes"] = {
+                            name: (
+                                row["structure_scores"][name]
+                                >= validity_models[name]["threshold"]
+                            )
+                            for name in validity_models
+                        }
+                    rows.append(row)
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -340,6 +423,15 @@ def main():
             else "frozen SADA {}-confidence top-k".format(args.score_band)
         ),
         "reuse_manifest": args.reuse_manifest,
+        "teacher_state_sha256": teacher_state_sha256,
+        "validity_models": {
+            name: {
+                "path": validity["path"],
+                "artifact_sha256": validity["artifact_sha256"],
+                "threshold": validity["threshold"],
+            }
+            for name, validity in validity_models.items()
+        },
         "candidate_gt_foreground_anchors": foreground,
         "candidate_center_in_target_action": center_foreground,
         **totals,

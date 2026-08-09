@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from tools.export_vlm_actionness_candidates import choose_indices
+from tools.export_vlm_actionness_candidates import choose_indices, named_paths
 from tools.sample_vlm_hard_case_challenge import balanced_sample, classify, interleave
 
 
@@ -29,6 +29,17 @@ def test_choose_indices_rejects_unknown_score_band():
             0,
             "all",
         )
+
+
+def test_named_validity_models_are_unique_and_explicit():
+    assert named_paths(["a=/tmp/a.json", "b=/tmp/b.json"]) == {
+        "a": "/tmp/a.json",
+        "b": "/tmp/b.json",
+    }
+    with pytest.raises(ValueError, match="NAME=PATH"):
+        named_paths(["missing-name-separator"])
+    with pytest.raises(ValueError, match="duplicate"):
+        named_paths(["a=/tmp/a.json", "a=/tmp/b.json"])
 
 
 def test_hard_case_groups_have_distinct_semantics():
