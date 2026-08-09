@@ -103,6 +103,12 @@ test('high veto prompt is independent and candidate-blind', () => {
   assert.equal(high.sha256, HIGH_PROMPT_SHA256);
   assert.equal(high.text, HIGH_PROMPT_TEXT);
   assert.notEqual(HIGH_PROMPT_SHA256, LOW_PROMPT_SHA256);
+  assert.equal(HIGH_PROMPT_PROTOCOL_VERSION, 'candidate-blind-epic-semantic-veto-v2');
+  assert.equal(HIGH_PROMPT_TEXT.toLowerCase().includes('false positive'), false);
+  assert.match(
+    HIGH_PROMPT_TEXT,
+    /strictly distinguish genuine target-action events from clear\nnon-target activity or background/,
+  );
   for (const forbidden of [
     'teacher score', 'model confidence', 'target gt', 'ground truth',
     'fpn level', 'assignment validity', 'regression range', 'cohort',

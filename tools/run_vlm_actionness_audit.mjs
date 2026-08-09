@@ -25,7 +25,7 @@ const LOW_PROMPT_ROLE = 'low_rescue';
 const HIGH_PROMPT_ROLE = 'high_veto';
 const PROMPT_ROLES = new Set([LOW_PROMPT_ROLE, HIGH_PROMPT_ROLE]);
 const LOW_PROMPT_PROTOCOL_VERSION = 'candidate-blind-epic-semantic-gate-v3';
-const HIGH_PROMPT_PROTOCOL_VERSION = 'candidate-blind-epic-semantic-veto-v1';
+const HIGH_PROMPT_PROTOCOL_VERSION = 'candidate-blind-epic-semantic-veto-v2';
 const SEMANTIC_CACHE_SCHEMA_VERSION = 'offline-vlm-semantic-evidence-v1';
 const RESPONSE_CONTRACT_VERSION = 'vlm-actionness-label-json-schema-v1';
 
@@ -431,7 +431,8 @@ repositioning an object, removing from a constrained location, reaching,
 walking, adjusting, setting without the target state transition, emptying,
 scraping, filling, scrubbing, pulling, pressing, wrapping, or unrelated motion.
 
-Your primary responsibility is to identify clear semantic false positives.
+Your task is to strictly distinguish genuine target-action events from clear
+non-target activity or background.
 Before deciding, ask: "What observable action or meaningful state transition is
 actually happening around Frame 5?"
 
