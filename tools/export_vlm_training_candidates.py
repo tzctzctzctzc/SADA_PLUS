@@ -8,6 +8,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+LOW_PROMPT_ROLE = "low_rescue"
+HIGH_PROMPT_ROLE = "high_veto"
+
+
+def prompt_role_for_score(score, beta, alpha):
+    score = float(score)
+    if score >= float(alpha):
+        return HIGH_PROMPT_ROLE
+    if score > float(beta):
+        return LOW_PROMPT_ROLE
+    return None
+
 
 def video_ids_in(root):
     return {
@@ -22,7 +34,7 @@ def limit_queries(rows, max_per_video, min_gap_sec):
         return rows
     by_video = defaultdict(list)
     for row in rows:
-        by_video[row["video_id"]].append(row)
+        by_video[(row["video_id"], row.get("prompt_role"))].append(row)
     selected = []
     for video_rows in by_video.values():
         chosen = []
@@ -91,6 +103,12 @@ def main():
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--weights", choices=("student", "ema"), default="ema")
     parser.add_argument("--beta", type=float, default=0.1)
+    parser.add_argument(
+        "--prompt-branches",
+        choices=("low", "both"),
+        default="both",
+        help="export only low rescue queries or both low rescue and high veto queries",
+    )
     parser.add_argument("--max-queries-per-video", type=int, default=0)
     parser.add_argument("--min-query-gap-sec", type=float, default=1.0)
     parser.add_argument("--levels", type=int, nargs="+", default=range(6))
@@ -141,9 +159,9 @@ def main():
 
     alpha = float(cfg["model"].get("pl_threshold", 0.7))
     grouped = defaultdict(list)
-    level_counts = Counter()
+    branch_level_counts = Counter()
     valid_anchors = 0
-    low_confidence_anchors = 0
+    branch_anchor_counts = Counter()
     with torch.no_grad():
         for raw_video in dataset:
             video = move_video(raw_video, args.device)
@@ -168,13 +186,20 @@ def main():
                 probabilities = level_logits[0].transpose(0, 1).sigmoid()
                 top_scores = probabilities.topk(k=2, dim=-1).values
                 valid = level_mask[0, 0].bool()
-                eligible = valid & (top_scores[:, 0] > args.beta) & (
-                    top_scores[:, 0] < alpha
-                )
+                eligible = valid & (top_scores[:, 0] > args.beta)
+                if args.prompt_branches == "low":
+                    eligible &= top_scores[:, 0] < alpha
                 valid_anchors += int(valid.sum())
-                low_confidence_anchors += int(eligible.sum())
-                level_counts[level] += int(eligible.sum())
+                mid = eligible & (top_scores[:, 0] < alpha)
+                high = eligible & (top_scores[:, 0] >= alpha)
+                branch_anchor_counts[LOW_PROMPT_ROLE] += int(mid.sum())
+                branch_anchor_counts[HIGH_PROMPT_ROLE] += int(high.sum())
+                branch_level_counts[(LOW_PROMPT_ROLE, level)] += int(mid.sum())
+                branch_level_counts[(HIGH_PROMPT_ROLE, level)] += int(high.sum())
                 for index in torch.nonzero(eligible).flatten().tolist():
+                    prompt_role = prompt_role_for_score(
+                        top_scores[index, 0], args.beta, alpha
+                    )
                     local_coordinate = float(point_grid[index, 0])
                     rounded = int(round(local_coordinate))
                     if abs(local_coordinate - rounded) > 1e-6:
@@ -184,7 +209,7 @@ def main():
                         absolute_index * feat_stride + frame_offset
                     ) / fps
                     center_sec = min(max(float(center_sec), 0.0), duration)
-                    grouped[(video_id, absolute_index)].append(
+                    grouped[(prompt_role, video_id, absolute_index)].append(
                         {
                             "center_sec": center_sec,
                             "fpn_level": level,
@@ -193,13 +218,13 @@ def main():
                     )
 
     rows = []
-    for (video_id, absolute_index), members in sorted(grouped.items()):
+    for (prompt_role, video_id, absolute_index), members in sorted(grouped.items()):
         center_sec = members[0]["center_sec"]
         if any(abs(member["center_sec"] - center_sec) > 1e-6 for member in members):
             raise ValueError("one absolute feature index has inconsistent timestamps")
         time_us = int(round(center_sec * 1000000.0))
-        candidate_id = "{}-p{:07d}-t{:012d}".format(
-            video_id, absolute_index, time_us
+        candidate_id = "{}-{}-p{:07d}-t{:012d}".format(
+            video_id, prompt_role, absolute_index, time_us
         )
         scores = [member["sada_score"] for member in members]
         rows.append(
@@ -207,6 +232,7 @@ def main():
                 "candidate_id": candidate_id,
                 "anchor_id": candidate_id,
                 "frame_cache_id": candidate_id,
+                "prompt_role": prompt_role,
                 "video_id": video_id,
                 "absolute_feature_index": absolute_index,
                 "absolute_center_time": center_sec,
@@ -233,6 +259,12 @@ def main():
         "selection_uses_target_gt": False,
         "source": "frozen SADA target prediction; VLM input remains candidate-blind",
         "semantic_key_fields": ["video_id", "absolute_feature_index"],
+        "cache_key_fields": [
+            "prompt_role",
+            "video_id",
+            "absolute_feature_index",
+        ],
+        "prompt_branches": args.prompt_branches,
         "target_split": list(cfg["tgt_train_split"]),
         "expected_target_videos": expected_videos,
         "available_target_videos": len(dataset),
@@ -245,11 +277,18 @@ def main():
         "beta": args.beta,
         "alpha": alpha,
         "valid_anchors": valid_anchors,
-        "low_confidence_anchors": low_confidence_anchors,
-        "low_confidence_by_level": dict(sorted(level_counts.items())),
+        "low_confidence_anchors": branch_anchor_counts[LOW_PROMPT_ROLE],
+        "high_confidence_anchors": branch_anchor_counts[HIGH_PROMPT_ROLE],
+        "anchors_by_prompt_role_and_level": {
+            role: {
+                str(level): branch_level_counts[(role, level)]
+                for level in args.levels
+            }
+            for role in (LOW_PROMPT_ROLE, HIGH_PROMPT_ROLE)
+        },
         "absolute_semantic_queries_before_budget": query_count_before_budget,
         "deduplication_ratio": (
-            low_confidence_anchors / query_count_before_budget
+            sum(branch_anchor_counts.values()) / query_count_before_budget
             if query_count_before_budget
             else None
         ),

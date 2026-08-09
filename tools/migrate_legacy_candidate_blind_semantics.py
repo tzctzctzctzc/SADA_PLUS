@@ -137,7 +137,12 @@ def normalize_legacy_rows(manifest_rows, prediction_rows):
             {
                 **manifest,
                 "semantic_cache_schema_version": SEMANTIC_CACHE_SCHEMA_VERSION,
+                "prompt_role": "low_rescue",
+                "prompt_version": prediction.get(
+                    "prompt_version", LEGACY_PROMPT_VERSION
+                ),
                 "prompt_sha256": prompt_sha256,
+                "response_contract_version": "legacy-candidate-blind-migration-v1",
                 "model": model,
                 "wire_api": wire_api,
                 "status": "ok",

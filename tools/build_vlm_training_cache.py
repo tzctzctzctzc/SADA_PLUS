@@ -9,7 +9,11 @@ from collections import Counter
 from pathlib import Path
 
 
-SEMANTIC_CACHE_SCHEMA_VERSION = "offline-vlm-semantic-evidence-v1"
+LEGACY_PREDICTION_SCHEMA_VERSION = "offline-vlm-semantic-evidence-v1"
+SEMANTIC_CACHE_SCHEMA_VERSION = "offline-vlm-bidirectional-semantic-evidence-v2"
+LOW_PROMPT_ROLE = "low_rescue"
+HIGH_PROMPT_ROLE = "high_veto"
+PROMPT_ROLES = {LOW_PROMPT_ROLE, HIGH_PROMPT_ROLE}
 ACTION_PREDICTION = "TARGET_ACTION"
 VALID_PREDICTIONS = {
     ACTION_PREDICTION,
@@ -56,7 +60,14 @@ def _absolute_time(row):
 
 
 def _semantic_key(row):
-    return str(row["video_id"]), _absolute_index(row)
+    return _prompt_role(row), str(row["video_id"]), _absolute_index(row)
+
+
+def _prompt_role(row):
+    role = row.get("prompt_role", LOW_PROMPT_ROLE)
+    if role not in PROMPT_ROLES:
+        raise ValueError("invalid semantic prompt role")
+    return role
 
 
 def _validate_manifest(rows):
@@ -87,10 +98,17 @@ def _validate_manifest(rows):
 
 
 def _validate_provenance(rows):
-    signatures = set()
+    signatures = {}
     for row in rows:
-        if row.get("semantic_cache_schema_version") != SEMANTIC_CACHE_SCHEMA_VERSION:
+        if row.get("semantic_cache_schema_version") not in {
+            LEGACY_PREDICTION_SCHEMA_VERSION,
+            SEMANTIC_CACHE_SCHEMA_VERSION,
+        }:
             raise ValueError("unsupported semantic prediction schema")
+        role = _prompt_role(row)
+        prompt_version = row.get("prompt_version")
+        if not isinstance(prompt_version, str) or not prompt_version:
+            raise ValueError("invalid prompt_version")
         prompt_sha256 = row.get("prompt_sha256")
         if not isinstance(prompt_sha256, str) or not re.fullmatch(
             r"[0-9a-f]{64}", prompt_sha256
@@ -103,15 +121,20 @@ def _validate_provenance(rows):
             "responses",
         }:
             raise ValueError("invalid VLM provenance")
-        signatures.add((prompt_sha256, model, wire_api))
-    if len(signatures) != 1:
-        raise ValueError("prediction file mixes prompt, model, or wire API")
-    prompt_sha256, model, wire_api = signatures.pop()
-    return {
-        "prompt_sha256": prompt_sha256,
-        "model": model,
-        "wire_api": wire_api,
-    }
+        response_contract_version = row.get("response_contract_version")
+        signature = {
+            "prompt_version": prompt_version,
+            "prompt_sha256": prompt_sha256,
+            "response_contract_version": response_contract_version,
+            "model": model,
+            "wire_api": wire_api,
+        }
+        old = signatures.setdefault(role, signature)
+        if old != signature:
+            raise ValueError(
+                "prediction file mixes protocol, model, or wire API within one role"
+            )
+    return dict(sorted(signatures.items()))
 
 
 def _validate_prediction(prediction, manifest):
@@ -134,6 +157,8 @@ def _validate_prediction(prediction, manifest):
         raise ValueError("latest prediction row is not successful")
     if str(prediction["candidate_id"]) != str(manifest["candidate_id"]):
         raise ValueError("prediction candidate_id differs from manifest")
+    if _prompt_role(prediction) != _prompt_role(manifest):
+        raise ValueError("prediction prompt role differs from manifest")
     _absolute_time(prediction)
     if _semantic_key(prediction) != _semantic_key(manifest):
         raise ValueError("prediction exact semantic key differs from manifest")
@@ -148,7 +173,7 @@ def _validate_prediction(prediction, manifest):
     semantic_pass = label == ACTION_PREDICTION
     if prediction["semantic_pass"] is not semantic_pass:
         raise ValueError("semantic_pass disagrees with VLM prediction")
-    return label, semantic_pass
+    return label, semantic_pass, _prompt_role(manifest)
 
 
 def build_entries(manifest_rows, prediction_rows):
@@ -165,9 +190,12 @@ def build_entries(manifest_rows, prediction_rows):
 
     entries = []
     for candidate_id, manifest in manifest_by_id.items():
-        label, semantic_pass = _validate_prediction(latest[candidate_id], manifest)
+        label, semantic_pass, role = _validate_prediction(
+            latest[candidate_id], manifest
+        )
         entries.append(
             {
+                "prompt_role": role,
                 "video_id": str(manifest["video_id"]),
                 "absolute_feature_index": _absolute_index(manifest),
                 "absolute_center_time": _absolute_time(manifest),
@@ -203,19 +231,28 @@ def validate_selection_provenance(provenance):
 
 
 def build_payload(manifest_rows, prediction_rows, selection_teacher_provenance):
-    provenance = _validate_provenance(prediction_rows)
+    prompt_protocols = _validate_provenance(prediction_rows)
     entries = build_entries(manifest_rows, prediction_rows)
-    counts = Counter(entry["semantic_label"] for entry in entries)
+    counts = Counter(
+        (entry["prompt_role"], entry["semantic_label"]) for entry in entries
+    )
     return {
-        "version": 6,
+        "version": 7,
         "semantic_cache_schema_version": SEMANTIC_CACHE_SCHEMA_VERSION,
-        "source": "offline_vlm_candidate_blind_semantics",
-        "key_fields": ["video_id", "absolute_feature_index"],
+        "source": "offline_vlm_candidate_blind_bidirectional_semantics",
+        "key_fields": ["prompt_role", "video_id", "absolute_feature_index"],
         "selection_teacher_provenance": validate_selection_provenance(
             selection_teacher_provenance
         ),
-        **provenance,
-        "counts": dict(sorted(counts.items())),
+        "prompt_protocols": prompt_protocols,
+        "counts": {
+            role: {
+                label: count
+                for (entry_role, label), count in sorted(counts.items())
+                if entry_role == role
+            }
+            for role in sorted({role for role, _ in counts})
+        },
         "entries": entries,
     }
 

@@ -1,6 +1,6 @@
-"""Export low-confidence target anchors for an offline VLM actionness audit.
+"""Export confidence-conditioned source/target anchors for a VLM semantic audit.
 
-Candidate selection only uses frozen SADA predictions. Target GT is attached
+Candidate selection only uses frozen SADA predictions. Domain GT is attached
 after selection and is consumed solely by the separate scoring script.
 """
 
@@ -10,6 +10,30 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+LOW_PROMPT_ROLE = "low_rescue"
+HIGH_PROMPT_ROLE = "high_veto"
+
+
+def prompt_role_for_score(score, beta, alpha):
+    score = float(score)
+    if score >= float(alpha):
+        return HIGH_PROMPT_ROLE
+    if score > float(beta):
+        return LOW_PROMPT_ROLE
+    return None
+
+
+def prompt_role_for_row(row):
+    role = row.get("prompt_role")
+    if role in {LOW_PROMPT_ROLE, HIGH_PROMPT_ROLE}:
+        return role
+    band = row.get("score_band", "low")
+    if band == "high":
+        return HIGH_PROMPT_ROLE
+    if band == "low":
+        return LOW_PROMPT_ROLE
+    raise ValueError("cannot infer prompt role from reused row")
 
 
 def video_ids_in(root):
@@ -74,24 +98,31 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--weights", choices=("student", "ema"), default="ema")
+    parser.add_argument("--domain", choices=("source", "target"), default="target")
     parser.add_argument("--split", choices=("train", "val"), default="train")
     parser.add_argument("--dataset-json")
     parser.add_argument("--feature-dir")
     parser.add_argument(
         "--subset",
         action="append",
-        help="Override configured target split; may be repeated.",
+        help="Override the configured domain split; may be repeated.",
     )
     parser.add_argument("--beta", type=float, default=0.1)
     parser.add_argument(
         "--score-band",
-        choices=("low", "high"),
+        choices=("low", "high", "both"),
         default="low",
-        help="Export beta<score<alpha or score>=alpha anchors.",
+        help="Export beta<score<alpha, score>=alpha, or both branches.",
     )
     parser.add_argument("--top-k-per-video-level", type=int, default=5)
     parser.add_argument("--min-gap-sec", type=float, default=0.75)
     parser.add_argument("--levels", type=int, nargs="+", default=(0, 1, 2))
+    parser.add_argument(
+        "--max-videos",
+        type=int,
+        default=0,
+        help="deterministically limit available videos for a source-only smoke audit",
+    )
     parser.add_argument(
         "--reuse-manifest",
         help="Reuse these exact candidate anchors and only refresh their logits/GT.",
@@ -119,6 +150,7 @@ def main():
         validity_model_to,
     )
     from libs.models.SADA.stage1_calibration import state_dict_sha256
+    from libs.models.SADA.vlm_routing import file_sha256
     from libs.utils.utils import _update_config, read_yaml
     from tools.audit_original_sada_pseudolabels import (
         crop_targets,
@@ -149,6 +181,7 @@ def main():
                 row["video_id"],
                 int(row["fpn_level"]),
                 int(row["anchor_index"]),
+                prompt_role_for_row(row),
             ): row
             for row in reuse_rows
         }
@@ -157,7 +190,10 @@ def main():
 
     split = args.subset
     if split is None:
-        split = cfg["tgt_train_split"] if args.split == "train" else cfg["tgt_val_split"]
+        split_prefix = "src" if args.domain == "source" else "tgt"
+        split = cfg[
+            "{}_{}_split".format(split_prefix, "train" if args.split == "train" else "val")
+        ]
     # Full-video deterministic inference makes the cached absolute timestamps
     # reusable across later training crops.
     dataset = make_dataset(cfg["dataset_name"], False, split, **cfg["dataset"])
@@ -168,6 +204,8 @@ def main():
         if item["id"] in available_videos
         and (reuse_rows is None or item["id"] in {row["video_id"] for row in reuse_rows})
     )
+    if args.max_videos > 0:
+        dataset.data_list = tuple(dataset.data_list[: args.max_videos])
     if not dataset.data_list:
         raise RuntimeError("No dataset videos have a matching MP4 in --video-root")
 
@@ -181,9 +219,26 @@ def main():
         raise ValueError("checkpoint has no {}".format(state_key))
     model.load_state_dict(checkpoint[state_key])
     model.eval()
+    if args.domain == "source":
+        backbone_module = model.backbone_source
+        neck_module = model.neck_source
+        cls_module = model.cls_head
+        reg_module = model.reg_head
+    else:
+        backbone_module = model.backbone_target
+        neck_module = model.neck_target
+        cls_module = model.cls_head_target
+        reg_module = model.reg_head_target
 
     alpha = float(cfg["model"].get("pl_threshold", 0.7))
     teacher_state_sha256 = state_dict_sha256(checkpoint[state_key])
+    selection_teacher_provenance = {
+        "selection_teacher_checkpoint_sha256": file_sha256(args.checkpoint),
+        "selection_teacher_state_sha256": teacher_state_sha256,
+        "selection_teacher_weights": args.weights,
+        "selection_beta": float(args.beta),
+        "selection_alpha": alpha,
+    }
     validity_models = {}
     for name, path in named_paths(args.validity_model).items():
         payload, validity_model, artifact_sha256 = load_validity_model(path)
@@ -216,12 +271,12 @@ def main():
         for raw_video in dataset:
             video = move_video(raw_video, args.device)
             inputs, masks = model.preprocessing([video], mode="eval")
-            backbone_feats, backbone_masks, _ = model.backbone_target(inputs, masks)
-            fpn_feats, fpn_masks = model.neck_target(backbone_feats, backbone_masks)
-            logits, _ = model.cls_head_target(fpn_feats, fpn_masks)
+            backbone_feats, backbone_masks, _ = backbone_module(inputs, masks)
+            fpn_feats, fpn_masks = neck_module(backbone_feats, backbone_masks)
+            logits, _ = cls_module(fpn_feats, fpn_masks)
             offsets = None
             if validity_models:
-                offsets, _ = model.reg_head_target(fpn_feats, fpn_masks)
+                offsets, _ = reg_module(fpn_feats, fpn_masks)
             points = model.point_generator(fpn_feats)
 
             metadata = raw_video["metadata"]
@@ -289,23 +344,35 @@ def main():
                     (point_grid[:, 0] + crop_start) * feat_stride + frame_offset
                 ) / fps
                 if reuse_rows is None:
-                    chosen = choose_indices(
-                        scores,
-                        centers,
-                        valid,
-                        args.beta,
-                        alpha,
-                        args.top_k_per_video_level,
-                        args.min_gap_sec,
-                        args.score_band,
+                    bands = (
+                        ("low", "high")
+                        if args.score_band == "both"
+                        else (args.score_band,)
                     )
+                    chosen = [
+                        (
+                            LOW_PROMPT_ROLE if band == "low" else HIGH_PROMPT_ROLE,
+                            index,
+                        )
+                        for band in bands
+                        for index in choose_indices(
+                            scores,
+                            centers,
+                            valid,
+                            args.beta,
+                            alpha,
+                            args.top_k_per_video_level,
+                            args.min_gap_sec,
+                            band,
+                        )
+                    ]
                 else:
                     chosen = sorted(
-                        index
-                        for candidate_video, candidate_level, index in reuse_by_key
+                        (role, index)
+                        for candidate_video, candidate_level, index, role in reuse_by_key
                         if candidate_video == video_id and candidate_level == level
                     )
-                for index in chosen:
+                for prompt_role, index in chosen:
                     if index >= probabilities.shape[0] or not bool(valid[index]):
                         raise ValueError(
                             "reused anchor is invalid: {} level {} index {}".format(
@@ -341,7 +408,14 @@ def main():
                             <= float(action["segment"][1])
                         }
                     )
-                    reused = reuse_by_key.get((video_id, level, int(index)), {})
+                    expected_role = prompt_role_for_score(
+                        scores[index], args.beta, alpha
+                    )
+                    if expected_role != prompt_role:
+                        raise ValueError("prompt role differs from frozen teacher score")
+                    reused = reuse_by_key.get(
+                        (video_id, level, int(index), prompt_role), {}
+                    )
                     if reused and int(reused["sada_top1_class"]) != predicted_class:
                         raise ValueError(
                             "reused top-1 changed for {}: {} -> {}".format(
@@ -354,8 +428,11 @@ def main():
                             **reused,
                             "candidate_id": reused.get(
                                 "candidate_id",
-                                "{}-l{}-{:06d}".format(video_id, level, int(index)),
+                                "{}-{}-l{}-{:06d}".format(
+                                    video_id, prompt_role, level, int(index)
+                                ),
                             ),
+                            "prompt_role": prompt_role,
                             "video_id": video_id,
                             "center_sec": center_sec,
                             "absolute_center_time": center_sec,
@@ -366,7 +443,11 @@ def main():
                             "sada_top1_class": predicted_class,
                             "sada_top2_score": float(top_scores[index, 1]),
                             "sada_top2_class": second_class,
-                            "score_band": reused.get("score_band", args.score_band),
+                            "score_band": (
+                                "low"
+                                if prompt_role == LOW_PROMPT_ROLE
+                                else "high"
+                            ),
                             "alpha": alpha,
                             "beta": args.beta,
                             "gt_is_foreground": gt_action,
@@ -405,7 +486,14 @@ def main():
     center_foreground = sum(row["center_in_target_action"] for row in rows)
     metadata = {
         "selection_uses_target_gt": False,
-        "target_gt_use": "attached after candidate selection for offline scoring only",
+        "domain": args.domain,
+        "dataset_split": list(split),
+        "gt_use": "attached after confidence-only selection for offline scoring only",
+        "prompt_role_rule": (
+            "beta < frozen_teacher_score < alpha => low_rescue; "
+            "frozen_teacher_score >= alpha => high_veto"
+        ),
+        "prompt_input_fields": ["chronological_frames", "frame_order_labels"],
         "videos": len(dataset),
         "checkpoint": args.checkpoint,
         "checkpoint_epoch": checkpoint.get("epoch"),
@@ -424,10 +512,13 @@ def main():
         "candidate_selection": (
             "reused exact manifest anchors"
             if reuse_rows is not None
-            else "frozen SADA {}-confidence top-k".format(args.score_band)
+            else "frozen SADA confidence-conditioned {} top-k".format(
+                args.score_band
+            )
         ),
         "reuse_manifest": args.reuse_manifest,
         "teacher_state_sha256": teacher_state_sha256,
+        "selection_teacher_provenance": selection_teacher_provenance,
         "validity_models": {
             name: {
                 "path": validity["path"],

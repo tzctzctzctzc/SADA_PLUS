@@ -26,6 +26,7 @@ from .vlm_routing import (
     ROUTING_MODES,
     build_full_vlm_routing,
     load_semantic_cache,
+    semantic_prompt_protocols,
     target_labels_from_full_routing,
 )
 from libs.utils import batched_nms
@@ -373,6 +374,7 @@ class SADA(nn.Module):
         self.vlm_semantic_entry_count = 0
         self.vlm_semantic_cache_sha256 = None
         self.vlm_semantic_payload = None
+        self.vlm_semantic_prompt_protocols = {}
         self.vlm_validity_model = None
         self.vlm_validity_payload = None
         self.vlm_validity_sha256 = None
@@ -393,7 +395,7 @@ class SADA(nn.Module):
                 )
             semantic_cache_path = vlm_cfg.get('semantic_cache_path')
             if self.vlm_routing_mode in (
-                'semantic_only', 'semantic_and_validity'
+                'semantic_only', 'semantic_and_validity', 'bidirectional_semantic'
             ):
                 if not semantic_cache_path:
                     raise ValueError('semantic VLM routing requires a semantic cache')
@@ -403,6 +405,18 @@ class SADA(nn.Module):
                     self.vlm_semantic_cache_sha256,
                     self.vlm_semantic_payload,
                 ) = load_semantic_cache(semantic_cache_path)
+                self.vlm_semantic_prompt_protocols = semantic_prompt_protocols(
+                    self.vlm_semantic_payload
+                )
+                if (
+                    self.vlm_routing_mode == 'bidirectional_semantic'
+                    and set(self.vlm_semantic_prompt_protocols)
+                    != {'low_rescue', 'high_veto'}
+                ):
+                    raise ValueError(
+                        'bidirectional semantic routing requires isolated '
+                        'low_rescue and high_veto prompt protocols'
+                    )
             validity_model_path = vlm_cfg.get('validity_model_path')
             if self.vlm_routing_mode in (
                 'validity_only', 'semantic_and_validity'
@@ -2046,6 +2060,10 @@ class SADA(nn.Module):
                             'background',
                             'ignore',
                             'high_confidence',
+                            'high_action',
+                            'high_veto',
+                            'high_semantic_known',
+                            'high_semantic_veto',
                             'mid_confidence',
                             'mid_action',
                             'low_confidence',
@@ -2061,6 +2079,13 @@ class SADA(nn.Module):
                             ):
                                 metric_mask = (
                                     metric_mask & route_l['mid_confidence']
+                                )
+                            elif metric_name in (
+                                'high_semantic_known',
+                                'high_semantic_veto',
+                            ):
+                                metric_mask = (
+                                    metric_mask & route_l['high_confidence']
                                 )
                             losses[metric_prefix + metric_name] = (
                                 metric_mask.sum().float()

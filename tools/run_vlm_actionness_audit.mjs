@@ -21,7 +21,11 @@ import { fileURLToPath } from 'node:url';
 const FRAME_OFFSETS_SEC = Object.freeze([
   -0.8, -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8,
 ]);
-const PROMPT_VERSION = 'candidate-blind-epic-semantic-gate-v3';
+const LOW_PROMPT_ROLE = 'low_rescue';
+const HIGH_PROMPT_ROLE = 'high_veto';
+const PROMPT_ROLES = new Set([LOW_PROMPT_ROLE, HIGH_PROMPT_ROLE]);
+const LOW_PROMPT_PROTOCOL_VERSION = 'candidate-blind-epic-semantic-gate-v3';
+const HIGH_PROMPT_PROTOCOL_VERSION = 'candidate-blind-epic-semantic-veto-v1';
 const SEMANTIC_CACHE_SCHEMA_VERSION = 'offline-vlm-semantic-evidence-v1';
 const RESPONSE_CONTRACT_VERSION = 'vlm-actionness-label-json-schema-v1';
 
@@ -395,8 +399,127 @@ Return exactly one JSON object with exactly one key and no other text:
 {"label":"TARGET_ACTION|OTHER_ACTIVITY|TRUE_BACKGROUND|UNCERTAIN"}`;
 }
 
-const PROMPT_TEXT = foregroundGatePrompt();
-const PROMPT_SHA256 = sha256(PROMPT_TEXT);
+function highConfidenceVetoPrompt() {
+  return `You are a strict semantic verifier for temporal action localization in
+an egocentric kitchen video.
+
+You are given nine chronologically ordered frames sampled every 0.2 seconds.
+Frame 5 is the exact temporal location being evaluated. Frames 1-4 are preceding
+context and Frames 6-9 are following context.
+
+Determine whether the temporal neighborhood around Frame 5 genuinely contains
+one event from the ten-action target ontology below, or whether the visible
+evidence clearly shows non-target activity or true background. Judge only from
+the visual-temporal evidence. No upstream prediction or candidate label is
+provided and none should be assumed.
+
+Target ontology:
+- TAKE: gaining possession or stable control of an object.
+- PUT: placing an object at a destination and relinquishing stable control.
+- WASH: cleaning using water, rubbing, rinsing, or another cleaning medium.
+- OPEN: changing a closure from closed to open or more accessible.
+- CLOSE: changing a closure from open to closed or secured.
+- INSERT: moving an object from outside to inside a container or opening.
+- TURN-ON: operating a control so a device, light, flame, or flow becomes active.
+- CUT: visibly slicing, dividing, or severing material with a cutting tool.
+- TURN-OFF: operating a control so an active device, light, flame, or flow stops.
+- POUR: controlling a source container so contents visibly transfer to a destination.
+
+Related non-target activities must not be broadened into a target action. These
+include merely holding or carrying an already controlled object, moving or
+repositioning an object, removing from a constrained location, reaching,
+walking, adjusting, setting without the target state transition, emptying,
+scraping, filling, scrubbing, pulling, pressing, wrapping, or unrelated motion.
+
+Your primary responsibility is to identify clear semantic false positives.
+Before deciding, ask: "What observable action or meaningful state transition is
+actually happening around Frame 5?"
+
+Do not choose TARGET_ACTION merely because:
+- a relevant object is visible;
+- a hand approaches, touches, holds, or carries an object;
+- generic manipulation or object repositioning occurs;
+- the scene makes a target action plausible;
+- the person appears to be preparing for a target action;
+- the target event may have occurred before Frame 5 and only its result remains;
+- motion in the outer context resembles part of a target event but the event does
+  not genuinely include the central neighborhood.
+
+Object presence is not action evidence. Hand-object contact alone is not
+sufficient. Generic manipulation is not automatically a target action. A
+plausible scene is not evidence that the action actually occurs.
+
+Labels:
+- TARGET_ACTION: meaningful visual-temporal evidence supports that Frame 5's
+  neighborhood genuinely belongs to one continuous event in the target ontology.
+  The complete transition need not be visible, and an ongoing target event must
+  not be rejected only because its beginning or ending lies outside the frames.
+- OTHER_ACTIVITY: use only when a meaningful activity is clearly occurring but
+  is better explained by a non-target action. This requires observable positive
+  evidence for the non-target activity, not merely absence of target evidence.
+- TRUE_BACKGROUND: use only when the central neighborhood clearly contains no
+  meaningful target event, such as idle behavior, passive holding, static
+  context, irrelevant activity, or another clear background state.
+- UNCERTAIN: use when the evidence cannot confidently distinguish a target event
+  from a non-target or background interpretation. Occlusion, subtle state change,
+  incomplete evidence, or genuine ambiguity should prefer UNCERTAIN over an
+  unsupported negative judgment.
+
+Return exactly one JSON object with exactly one key and no other text:
+{"label":"TARGET_ACTION|OTHER_ACTIVITY|TRUE_BACKGROUND|UNCERTAIN"}`;
+}
+
+const LOW_PROMPT_TEXT = foregroundGatePrompt();
+const HIGH_PROMPT_TEXT = highConfidenceVetoPrompt();
+const LOW_PROMPT_SHA256 = sha256(LOW_PROMPT_TEXT);
+const HIGH_PROMPT_SHA256 = sha256(HIGH_PROMPT_TEXT);
+
+// Historical aliases keep the frozen low-prompt audit API stable.
+const PROMPT_VERSION = LOW_PROMPT_PROTOCOL_VERSION;
+const PROMPT_SHA256 = LOW_PROMPT_SHA256;
+
+function promptRole(row) {
+  const role = row.prompt_role ?? LOW_PROMPT_ROLE;
+  if (!PROMPT_ROLES.has(role)) {
+    throw new Error(`invalid prompt_role for ${row.candidate_id}: ${role}`);
+  }
+  return role;
+}
+
+function promptProtocol(row) {
+  const role = promptRole(row);
+  if (role === HIGH_PROMPT_ROLE) {
+    return {
+      role,
+      version: HIGH_PROMPT_PROTOCOL_VERSION,
+      sha256: HIGH_PROMPT_SHA256,
+      text: HIGH_PROMPT_TEXT,
+    };
+  }
+  return {
+    role,
+    version: LOW_PROMPT_PROTOCOL_VERSION,
+    sha256: LOW_PROMPT_SHA256,
+    text: LOW_PROMPT_TEXT,
+  };
+}
+
+function promptRoleForScore(score, beta, alpha) {
+  const value = Number(score);
+  const lower = Number(beta);
+  const upper = Number(alpha);
+  if (
+    !Number.isFinite(value)
+    || !Number.isFinite(lower)
+    || !Number.isFinite(upper)
+    || !(0 <= lower && lower < upper && upper <= 1)
+  ) {
+    throw new Error('invalid score or routing thresholds');
+  }
+  if (value >= upper) return HIGH_PROMPT_ROLE;
+  if (value > lower) return LOW_PROMPT_ROLE;
+  return null;
+}
 
 function frameLabel(frame) {
   const offset = Number(frame.offset_sec);
@@ -413,7 +536,7 @@ function frameLabel(frame) {
   );
 }
 
-function buildMultimodalContent(frames, apiStyle) {
+function buildMultimodalContent(frames, apiStyle, promptText) {
   const textType = (
     apiStyle === 'responses'
       ? 'input_text'
@@ -429,7 +552,7 @@ function buildMultimodalContent(frames, apiStyle) {
   const content = [
     {
       type: textType,
-      text: PROMPT_TEXT,
+      text: promptText,
     },
   ];
 
@@ -582,6 +705,7 @@ async function requestOnce({
   reasoningEffort,
   maxOutputTokens,
   requestTimeoutMs,
+  promptText,
 }) {
   const apiStyle = (
     wireApi === 'chat'
@@ -592,6 +716,7 @@ async function requestOnce({
   const content = buildMultimodalContent(
     frames,
     apiStyle,
+    promptText,
   );
 
   let endpoint;
@@ -781,7 +906,7 @@ function absoluteFeatureIndex(row) {
 }
 
 function semanticKey(row) {
-  return [row.video_id, absoluteFeatureIndex(row)].join('|');
+  return [promptRole(row), row.video_id, absoluteFeatureIndex(row)].join('|');
 }
 
 function validateManifestRows(rows) {
@@ -825,6 +950,7 @@ function validateManifestRows(rows) {
 }
 
 function requestFingerprint(row, model, wireApi) {
+  const protocol = promptProtocol(row);
   return sha256(
     JSON.stringify({
       candidate_id: row.candidate_id,
@@ -833,7 +959,27 @@ function requestFingerprint(row, model, wireApi) {
       absolute_feature_index: absoluteFeatureIndex(row),
       absolute_center_time: absoluteCenterTime(row),
       frame_offsets_sec: FRAME_OFFSETS_SEC,
-      prompt_sha256: PROMPT_SHA256,
+      prompt_role: protocol.role,
+      prompt_version: protocol.version,
+      prompt_sha256: protocol.sha256,
+      semantic_cache_schema_version: SEMANTIC_CACHE_SCHEMA_VERSION,
+      response_contract_version: RESPONSE_CONTRACT_VERSION,
+      model,
+      wire_api: wireApi,
+    }),
+  );
+}
+
+function legacyLowRequestFingerprint(row, model, wireApi) {
+  return sha256(
+    JSON.stringify({
+      candidate_id: row.candidate_id,
+      anchor_id: row.anchor_id ?? null,
+      video_id: row.video_id,
+      absolute_feature_index: absoluteFeatureIndex(row),
+      absolute_center_time: absoluteCenterTime(row),
+      frame_offsets_sec: FRAME_OFFSETS_SEC,
+      prompt_sha256: LOW_PROMPT_SHA256,
       semantic_cache_schema_version: SEMANTIC_CACHE_SCHEMA_VERSION,
       response_contract_version: RESPONSE_CONTRACT_VERSION,
       model,
@@ -850,6 +996,7 @@ function localUncertainResult(
   wireApi,
   reason,
 ) {
+  const protocol = promptProtocol(row);
   return {
     candidate_id: row.candidate_id,
     anchor_id: row.anchor_id ?? row.candidate_id,
@@ -866,8 +1013,9 @@ function localUncertainResult(
     usage: null,
     model,
     wire_api: wireApi,
-    prompt_version: PROMPT_VERSION,
-    prompt_sha256: PROMPT_SHA256,
+    prompt_role: protocol.role,
+    prompt_version: protocol.version,
+    prompt_sha256: protocol.sha256,
     semantic_cache_schema_version: SEMANTIC_CACHE_SCHEMA_VERSION,
     response_contract_version: RESPONSE_CONTRACT_VERSION,
     frame_offsets_sec: [...FRAME_OFFSETS_SEC],
@@ -913,19 +1061,33 @@ function validatePriorRows(priorRows, manifestRows, model, wireApi) {
     if (prior.response_contract_version !== RESPONSE_CONTRACT_VERSION) {
       throw new Error('output response contract does not match this runner');
     }
-    if (prior.prompt_sha256 !== PROMPT_SHA256) {
+    const protocol = promptProtocol(manifest);
+    const priorRole = prior.prompt_role ?? LOW_PROMPT_ROLE;
+    if (priorRole !== protocol.role) {
+      throw new Error('output prompt_role does not match this runner');
+    }
+    if (
+      prior.prompt_version != null
+      && prior.prompt_version !== protocol.version
+    ) {
+      throw new Error('output prompt_version does not match this runner');
+    }
+    if (prior.prompt_sha256 !== protocol.sha256) {
       throw new Error('output prompt_sha256 does not match this runner');
     }
     if (prior.model !== model || prior.wire_api !== wireApi) {
       throw new Error('output model or wire_api differs from this run');
     }
 
-    const expectedFingerprint = requestFingerprint(
+    const expectedFingerprints = new Set([requestFingerprint(
       manifest,
       model,
       wireApi,
-    );
-    if (prior.request_fingerprint !== expectedFingerprint) {
+    )]);
+    if (manifest.prompt_role == null && prior.prompt_role == null) {
+      expectedFingerprints.add(legacyLowRequestFingerprint(manifest, model, wireApi));
+    }
+    if (!expectedFingerprints.has(prior.request_fingerprint)) {
       throw new Error(
         `output request fingerprint differs for ${prior.candidate_id}`,
       );
@@ -1143,6 +1305,7 @@ async function main() {
 
     processed += 1;
     const center = absoluteCenterTime(row);
+    const protocol = promptProtocol(row);
 
     const result = {
       candidate_id: row.candidate_id,
@@ -1152,8 +1315,9 @@ async function main() {
       status: 'error',
       model,
       wire_api: wireApi,
-      prompt_version: PROMPT_VERSION,
-      prompt_sha256: PROMPT_SHA256,
+      prompt_role: protocol.role,
+      prompt_version: protocol.version,
+      prompt_sha256: protocol.sha256,
       semantic_cache_schema_version: SEMANTIC_CACHE_SCHEMA_VERSION,
       response_contract_version: RESPONSE_CONTRACT_VERSION,
       video_id: row.video_id,
@@ -1209,6 +1373,7 @@ async function main() {
           reasoningEffort,
           maxOutputTokens,
           requestTimeoutMs,
+          promptText: protocol.text,
         },
         maxRetries,
         retryBaseMs,
@@ -1319,6 +1484,14 @@ if (isDirectRun) {
 
 export {
   FRAME_OFFSETS_SEC,
+  HIGH_PROMPT_PROTOCOL_VERSION,
+  HIGH_PROMPT_ROLE,
+  HIGH_PROMPT_SHA256,
+  HIGH_PROMPT_TEXT,
+  LOW_PROMPT_PROTOCOL_VERSION,
+  LOW_PROMPT_ROLE,
+  LOW_PROMPT_SHA256,
+  LOW_PROMPT_TEXT,
   PROMPT_SHA256,
   PROMPT_VERSION,
   RESPONSE_CONTRACT_VERSION,
@@ -1335,6 +1508,9 @@ export {
   semanticKey,
   fetchCompat,
   parseGateResponse,
+  promptProtocol,
+  promptRole,
+  promptRoleForScore,
   requestFingerprint,
   requestWithRetry,
   validateManifestRows,

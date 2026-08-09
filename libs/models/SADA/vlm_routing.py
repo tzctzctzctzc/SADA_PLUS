@@ -11,11 +11,17 @@ from torch.nn import functional as F
 from .anchor_validity import anchor_validity_features, probe_probabilities
 
 
-SEMANTIC_CACHE_SCHEMA_VERSION = "offline-vlm-semantic-evidence-v1"
-VLM_RESUME_SCHEMA_VERSION = "frozen-routing-teacher-v3"
+LEGACY_SEMANTIC_CACHE_SCHEMA_VERSION = "offline-vlm-semantic-evidence-v1"
+SEMANTIC_CACHE_SCHEMA_VERSION = "offline-vlm-bidirectional-semantic-evidence-v2"
+VLM_RESUME_SCHEMA_VERSION = "frozen-routing-teacher-v4"
 VLM_TRANSITION_SCHEMA_VERSION = "sada-to-vlm-continuation-v2"
+LOW_PROMPT_ROLE = "low_rescue"
+HIGH_PROMPT_ROLE = "high_veto"
+PROMPT_ROLES = {LOW_PROMPT_ROLE, HIGH_PROMPT_ROLE}
+CLEAR_NEGATIVE_LABELS = {"OTHER_ACTIVITY", "TRUE_BACKGROUND"}
 ROUTING_MODES = {
     "semantic_only",
+    "bidirectional_semantic",
     "validity_only",
     "semantic_and_validity",
     "mid_confidence_ignore",
@@ -240,6 +246,7 @@ def build_vlm_signature(
     crop_alignment,
     routing_teacher_state_sha256,
     routing_teacher_weights,
+    semantic_prompt_protocols=None,
 ):
     signature = {
         "schema_version": VLM_RESUME_SCHEMA_VERSION,
@@ -251,6 +258,7 @@ def build_vlm_signature(
         "crop_alignment": int(crop_alignment),
         "routing_teacher_state_sha256": routing_teacher_state_sha256,
         "routing_teacher_weights": routing_teacher_weights,
+        "semantic_prompt_protocols": semantic_prompt_protocols or {},
         "evaluation_weights": "student_ema",
     }
     signature["signature_sha256"] = _canonical_sha256(signature)
@@ -313,17 +321,63 @@ def validate_semantic_selection_provenance(
     return actual
 
 
+def semantic_prompt_protocols(payload):
+    schema = payload.get("semantic_cache_schema_version")
+    if schema == LEGACY_SEMANTIC_CACHE_SCHEMA_VERSION:
+        prompt_sha256 = payload.get("prompt_sha256")
+        if not isinstance(prompt_sha256, str) or len(prompt_sha256) != 64:
+            raise ValueError("legacy semantic cache has no valid prompt hash")
+        return {
+            LOW_PROMPT_ROLE: {
+                "prompt_version": payload.get("prompt_version"),
+                "prompt_sha256": prompt_sha256,
+                "model": payload.get("model"),
+                "wire_api": payload.get("wire_api"),
+            }
+        }
+    protocols = payload.get("prompt_protocols")
+    if not isinstance(protocols, dict) or not protocols:
+        raise ValueError("bidirectional semantic cache has no prompt protocols")
+    if not set(protocols).issubset(PROMPT_ROLES):
+        raise ValueError("semantic cache has an invalid prompt role")
+    normalized = {}
+    for role, protocol in protocols.items():
+        if not isinstance(protocol, dict):
+            raise ValueError("semantic prompt protocol must be an object")
+        prompt_sha256 = protocol.get("prompt_sha256")
+        if not isinstance(prompt_sha256, str) or len(prompt_sha256) != 64:
+            raise ValueError("semantic prompt protocol has an invalid hash")
+        normalized[role] = dict(protocol)
+    return normalized
+
+
 def load_semantic_cache(path):
-    """Load candidate-blind VLM evidence keyed only by absolute feature index."""
+    """Load role-isolated candidate-blind VLM evidence at exact absolute indices."""
     raw = Path(path).read_bytes()
     payload = json.loads(raw.decode("utf-8"))
-    if payload.get("semantic_cache_schema_version") != SEMANTIC_CACHE_SCHEMA_VERSION:
+    schema = payload.get("semantic_cache_schema_version")
+    if schema not in {
+        LEGACY_SEMANTIC_CACHE_SCHEMA_VERSION,
+        SEMANTIC_CACHE_SCHEMA_VERSION,
+    }:
         raise ValueError("unsupported VLM semantic cache schema")
-    if payload.get("source") != "offline_vlm_candidate_blind_semantics":
+    legacy = schema == LEGACY_SEMANTIC_CACHE_SCHEMA_VERSION
+    expected_source = (
+        "offline_vlm_candidate_blind_semantics"
+        if legacy
+        else "offline_vlm_candidate_blind_bidirectional_semantics"
+    )
+    if payload.get("source") != expected_source:
         raise ValueError("VLM cache is not candidate-blind semantic evidence")
-    if payload.get("key_fields") != ["video_id", "absolute_feature_index"]:
-        raise ValueError("VLM semantic cache must use the exact absolute-index key")
+    expected_keys = (
+        ["video_id", "absolute_feature_index"]
+        if legacy
+        else ["prompt_role", "video_id", "absolute_feature_index"]
+    )
+    if payload.get("key_fields") != expected_keys:
+        raise ValueError("VLM semantic cache must use the exact role/index key")
     semantic_selection_provenance(payload)
+    protocols = semantic_prompt_protocols(payload)
 
     cache = {}
     for entry in payload.get("entries", []):
@@ -339,6 +393,9 @@ def load_semantic_cache(path):
             )
         ):
             raise ValueError("VLM semantic cache contains online routing evidence")
+        role = LOW_PROMPT_ROLE if legacy else entry.get("prompt_role")
+        if role not in protocols:
+            raise ValueError("semantic cache entry has no matching prompt protocol")
         video_id = str(entry["video_id"])
         absolute_index = entry["absolute_feature_index"]
         if isinstance(absolute_index, bool) or int(absolute_index) != absolute_index:
@@ -357,10 +414,11 @@ def load_semantic_cache(path):
         absolute_time = float(entry["absolute_center_time"])
         if not math.isfinite(absolute_time) or absolute_time < 0:
             raise ValueError("invalid absolute_center_time")
-        key = (video_id, absolute_index)
+        key = (role, video_id, absolute_index)
         if key in cache:
             raise ValueError("duplicate VLM semantic cache entry: {}".format(key))
         cache[key] = {
+            "prompt_role": role,
             "semantic_pass": semantic_pass,
             "semantic_label": semantic_label,
             "absolute_center_time": absolute_time,
@@ -427,18 +485,17 @@ def build_full_vlm_routing(
             & (teacher_score < float(alpha))
         )
         low_confidence = valid & (teacher_score <= float(beta))
-        validity_features = anchor_validity_features(
-            probabilities,
-            offsets.detach()[..., 0],
-            offsets.detach()[..., 1],
-            float(point_grid[0, 3]),
-            level,
-        )
-
         if routing_mode not in {"validity_only", "semantic_and_validity"}:
             structure_score = torch.zeros_like(teacher_score)
             structural_pass = torch.zeros_like(valid)
         else:
+            validity_features = anchor_validity_features(
+                probabilities,
+                offsets.detach()[..., 0],
+                offsets.detach()[..., 1],
+                float(point_grid[0, 3]),
+                level,
+            )
             fpn_rows = features.detach().transpose(1, 2)
             structure_score = probe_probabilities(
                 validity_features, validity_model, fpn_features=fpn_rows
@@ -447,7 +504,13 @@ def build_full_vlm_routing(
 
         semantic_known = torch.zeros_like(valid)
         semantic_pass = torch.zeros_like(valid)
-        if routing_mode in {"semantic_only", "semantic_and_validity"}:
+        high_semantic_known = torch.zeros_like(valid)
+        high_semantic_veto = torch.zeros_like(valid)
+        if routing_mode in {
+            "semantic_only",
+            "semantic_and_validity",
+            "bidirectional_semantic",
+        }:
             for batch_index, video in enumerate(video_list):
                 metadata = video["metadata"]
                 video_id = str(metadata["video_id"])
@@ -458,32 +521,58 @@ def build_full_vlm_routing(
                 ):
                     raise ValueError("crop_start must be an integer feature index")
                 crop_start = int(raw_crop_start)
-                for local_index in torch.nonzero(
-                    mid_confidence[batch_index], as_tuple=False
-                ).flatten().tolist():
-                    absolute_index = _exact_absolute_index(
-                        point_grid[local_index, 0], crop_start
+                bands = [
+                    (
+                        LOW_PROMPT_ROLE,
+                        mid_confidence[batch_index],
+                        semantic_known,
                     )
-                    evidence = semantic_cache.get((video_id, absolute_index))
-                    if evidence is None:
-                        continue
-                    expected_time = _expected_center_time(
-                        metadata, absolute_index
-                    )
-                    if abs(
-                        evidence["absolute_center_time"] - expected_time
-                    ) > SEMANTIC_TIMESTAMP_TOLERANCE_SEC:
-                        raise ValueError(
-                            "semantic cache timestamp differs from current "
-                            "feature configuration for {} index {}".format(
-                                video_id, absolute_index
-                            )
+                ]
+                if routing_mode == "bidirectional_semantic":
+                    bands.append(
+                        (
+                            HIGH_PROMPT_ROLE,
+                            high_confidence[batch_index],
+                            high_semantic_known,
                         )
-                    semantic_known[batch_index, local_index] = True
-                    semantic_pass[batch_index, local_index] = evidence[
-                        "semantic_pass"
-                    ]
-        if routing_mode == "semantic_only":
+                    )
+                for role, band, known_mask in bands:
+                    for local_index in torch.nonzero(
+                        band, as_tuple=False
+                    ).flatten().tolist():
+                        absolute_index = _exact_absolute_index(
+                            point_grid[local_index, 0], crop_start
+                        )
+                        evidence = semantic_cache.get(
+                            (role, video_id, absolute_index)
+                        )
+                        if evidence is None and role == LOW_PROMPT_ROLE:
+                            # Compatibility for in-memory legacy tests/callers.
+                            evidence = semantic_cache.get((video_id, absolute_index))
+                        if evidence is None:
+                            continue
+                        expected_time = _expected_center_time(
+                            metadata, absolute_index
+                        )
+                        if abs(
+                            evidence["absolute_center_time"] - expected_time
+                        ) > SEMANTIC_TIMESTAMP_TOLERANCE_SEC:
+                            raise ValueError(
+                                "semantic cache timestamp differs from current "
+                                "feature configuration for {} role {} index {}".format(
+                                    video_id, role, absolute_index
+                                )
+                            )
+                        known_mask[batch_index, local_index] = True
+                        if role == LOW_PROMPT_ROLE:
+                            semantic_pass[batch_index, local_index] = evidence[
+                                "semantic_pass"
+                            ]
+                        else:
+                            high_semantic_veto[batch_index, local_index] = (
+                                evidence["semantic_label"] in CLEAR_NEGATIVE_LABELS
+                            )
+        if routing_mode in {"semantic_only", "bidirectional_semantic"}:
             mid_action = mid_confidence & semantic_known & semantic_pass
         elif routing_mode == "validity_only":
             mid_action = mid_confidence & structural_pass
@@ -496,8 +585,10 @@ def build_full_vlm_routing(
             )
         else:
             mid_action = torch.zeros_like(valid)
-        action = high_confidence | mid_action
-        ignore = mid_confidence & ~mid_action
+        high_veto = high_confidence & high_semantic_known & high_semantic_veto
+        high_action = high_confidence & ~high_veto
+        action = high_action | mid_action
+        ignore = (mid_confidence & ~mid_action) | high_veto
         background = low_confidence
         partition = action.to(torch.int8) + ignore.to(torch.int8) + background.to(torch.int8)
         if not torch.equal(partition, valid.to(torch.int8)):
@@ -513,6 +604,10 @@ def build_full_vlm_routing(
                 "pseudo_class": teacher_class,
                 "teacher_score": teacher_score,
                 "high_confidence": high_confidence,
+                "high_action": high_action,
+                "high_veto": high_veto,
+                "high_semantic_known": high_semantic_known,
+                "high_semantic_veto": high_semantic_veto,
                 "mid_confidence": mid_confidence,
                 "mid_action": mid_action,
                 "low_confidence": low_confidence,

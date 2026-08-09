@@ -1,7 +1,11 @@
 import pytest
 import torch
 
-from tools.export_vlm_actionness_candidates import choose_indices, named_paths
+from tools.export_vlm_actionness_candidates import (
+    choose_indices,
+    named_paths,
+    prompt_role_for_score,
+)
 from tools.sample_vlm_hard_case_challenge import balanced_sample, classify, interleave
 
 
@@ -15,6 +19,8 @@ def test_choose_indices_supports_low_and_high_score_bands():
 
     assert low == [2, 1]
     assert high == [4, 3]
+    assert prompt_role_for_score(0.49, 0.1, 0.5) == "low_rescue"
+    assert prompt_role_for_score(0.5, 0.1, 0.5) == "high_veto"
 
 
 def test_choose_indices_rejects_unknown_score_band():

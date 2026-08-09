@@ -49,12 +49,44 @@ def semantic_payload(entries):
         "semantic_cache_schema_version": "offline-vlm-semantic-evidence-v1",
         "source": "offline_vlm_candidate_blind_semantics",
         "key_fields": ["video_id", "absolute_feature_index"],
+        "prompt_sha256": "f" * 64,
+        "prompt_version": "candidate-blind-epic-semantic-gate-v3",
+        "model": "test-vlm",
+        "wire_api": "responses",
         "selection_teacher_provenance": {
             "selection_teacher_checkpoint_sha256": "a" * 64,
             "selection_teacher_state_sha256": "b" * 64,
             "selection_teacher_weights": "ema",
             "selection_beta": 0.1,
             "selection_alpha": 0.7,
+        },
+        "entries": entries,
+    }
+
+
+def bidirectional_payload(entries):
+    return {
+        "semantic_cache_schema_version": (
+            "offline-vlm-bidirectional-semantic-evidence-v2"
+        ),
+        "source": "offline_vlm_candidate_blind_bidirectional_semantics",
+        "key_fields": ["prompt_role", "video_id", "absolute_feature_index"],
+        "selection_teacher_provenance": semantic_payload([])[
+            "selection_teacher_provenance"
+        ],
+        "prompt_protocols": {
+            "low_rescue": {
+                "prompt_version": "candidate-blind-epic-semantic-gate-v3",
+                "prompt_sha256": "a" * 64,
+                "model": "test-vlm",
+                "wire_api": "responses",
+            },
+            "high_veto": {
+                "prompt_version": "candidate-blind-epic-semantic-veto-v1",
+                "prompt_sha256": "b" * 64,
+                "model": "test-vlm",
+                "wire_api": "responses",
+            },
         },
         "entries": entries,
     }
@@ -81,8 +113,16 @@ def inputs(crop_start=7):
     return videos, points, masks, logits, offsets, fpn
 
 
-def route(cache, mode="semantic_only", validity_model=None, threshold=None):
+def route(
+    cache,
+    mode="semantic_only",
+    validity_model=None,
+    threshold=None,
+    teacher_logits=None,
+):
     videos, points, masks, logits, offsets, fpn = inputs()
+    if teacher_logits is not None:
+        logits = teacher_logits
     return build_online_vlm_routing(
         cache,
         validity_model,
@@ -165,6 +205,40 @@ def test_absolute_index_lookup_never_projects_to_nearest_crop_anchor(tmp_path):
     assert routes["ignore"].tolist() == [[True, True, False]]
 
 
+def test_bidirectional_cache_isolates_low_and_high_at_same_absolute_key(tmp_path):
+    path = tmp_path / "bidirectional.json"
+    common = {
+        "video_id": "video",
+        "absolute_feature_index": 11,
+        "absolute_center_time": 1.1,
+    }
+    path.write_text(
+        json.dumps(
+            bidirectional_payload(
+                [
+                    {
+                        **common,
+                        "prompt_role": "low_rescue",
+                        "semantic_label": "TARGET_ACTION",
+                        "semantic_pass": True,
+                    },
+                    {
+                        **common,
+                        "prompt_role": "high_veto",
+                        "semantic_label": "TRUE_BACKGROUND",
+                        "semantic_pass": False,
+                    },
+                ]
+            )
+        ),
+        encoding="utf-8",
+    )
+    cache, count, _, _ = load_semantic_cache(path)
+    assert count == 2
+    assert cache[("low_rescue", "video", 11)]["semantic_pass"] is True
+    assert cache[("high_veto", "video", 11)]["semantic_label"] == "TRUE_BACKGROUND"
+
+
 def test_semantic_cache_selection_teacher_must_match_routing_teacher(tmp_path):
     path = tmp_path / "semantic.json"
     path.write_text(json.dumps(semantic_payload([])), encoding="utf-8")
@@ -192,6 +266,70 @@ def test_online_route_uses_current_teacher_top1_not_cached_class():
     }
     routes = route(cache)
     assert routes["pseudo_class"].tolist() == [[1, 1, 1]]
+
+
+@pytest.mark.parametrize(
+    "label, keep",
+    [
+        ("TARGET_ACTION", True),
+        ("UNCERTAIN", True),
+        ("OTHER_ACTIVITY", False),
+        ("TRUE_BACKGROUND", False),
+    ],
+)
+def test_high_veto_is_conservative_and_routes_clear_negatives_to_ignore(label, keep):
+    cache = {
+        ("high_veto", "video", 7): {
+            "prompt_role": "high_veto",
+            "semantic_pass": label == "TARGET_ACTION",
+            "semantic_label": label,
+            "absolute_center_time": 0.7,
+        }
+    }
+    logits = [torch.tensor([[[2.0, 0.0], [-1.0, 0.0], [-1.0, 0.0]]])]
+    result = route(cache, "bidirectional_semantic", teacher_logits=logits)
+    assert bool(result["high_confidence"][0, 0]) is True
+    assert bool(result["action"][0, 0]) is keep
+    assert bool(result["ignore"][0, 0]) is (not keep)
+    assert bool(result["background"][0, 0]) is False
+    assert int(result["pseudo_class"][0, 0]) == 0
+
+
+def test_missing_high_veto_evidence_keeps_frozen_teacher_action():
+    logits = [torch.tensor([[[2.0, 0.0], [-1.0, 0.0], [-1.0, 0.0]]])]
+    result = route({}, "bidirectional_semantic", teacher_logits=logits)
+    assert bool(result["high_semantic_known"][0, 0]) is False
+    assert bool(result["high_action"][0, 0]) is True
+    assert bool(result["action"][0, 0]) is True
+
+
+def test_low_and_high_evidence_never_cross_prompt_roles():
+    high_only = {
+        ("high_veto", "video", 11): {
+            "prompt_role": "high_veto",
+            "semantic_pass": True,
+            "semantic_label": "TARGET_ACTION",
+            "absolute_center_time": 1.1,
+        }
+    }
+    mid_result = route(high_only, "bidirectional_semantic")
+    assert bool(mid_result["semantic_known"][0, 2]) is False
+    assert bool(mid_result["action"][0, 2]) is False
+
+    low_only = {
+        ("low_rescue", "video", 7): {
+            "prompt_role": "low_rescue",
+            "semantic_pass": False,
+            "semantic_label": "TRUE_BACKGROUND",
+            "absolute_center_time": 0.7,
+        }
+    }
+    logits = [torch.tensor([[[2.0, 0.0], [-1.0, 0.0], [-1.0, 0.0]]])]
+    high_result = route(
+        low_only, "bidirectional_semantic", teacher_logits=logits
+    )
+    assert bool(high_result["high_semantic_known"][0, 0]) is False
+    assert bool(high_result["action"][0, 0]) is True
 
 
 def test_joint_gate_uses_online_validity_and_missing_cache_is_ignore():
@@ -373,6 +511,10 @@ def test_real_crop_metadata_preserves_feature_receptive_field_for_router():
 
 
 def test_resume_signature_rejects_changed_mode_or_artifact():
+    prompt_protocols = {
+        "low_rescue": {"prompt_sha256": "d" * 64},
+        "high_veto": {"prompt_sha256": "e" * 64},
+    }
     signature = build_vlm_signature(
         "a" * 64,
         "b" * 64,
@@ -382,14 +524,23 @@ def test_resume_signature_rejects_changed_mode_or_artifact():
         1,
         "c" * 64,
         "ema",
+        prompt_protocols,
     )
-    assert signature["schema_version"] == "frozen-routing-teacher-v3"
+    assert signature["schema_version"] == "frozen-routing-teacher-v4"
     assert signature["evaluation_weights"] == "student_ema"
+    assert signature["semantic_prompt_protocols"] == prompt_protocols
     validate_vlm_resume({"vlm_routing": signature}, signature)
     changed = dict(signature)
     changed["routing_mode"] = "validity_only"
     with pytest.raises(ValueError, match="signature differs"):
         validate_vlm_resume({"vlm_routing": signature}, changed)
+    changed_protocol = dict(signature)
+    changed_protocol["semantic_prompt_protocols"] = {
+        **prompt_protocols,
+        "high_veto": {"prompt_sha256": "f" * 64},
+    }
+    with pytest.raises(ValueError, match="signature differs"):
+        validate_vlm_resume({"vlm_routing": signature}, changed_protocol)
     with pytest.raises(ValueError, match="no frozen VLM routing signature"):
         validate_vlm_resume({}, signature)
 

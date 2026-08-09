@@ -312,6 +312,9 @@ def main(cfg, resume, project_name='sada', debug=False):
                 cfg['dataset']['crop_alignment'],
                 teacher_state_sha256,
                 teacher_weights,
+                semantic_prompt_protocols=(
+                    routing_teacher.vlm_semantic_prompt_protocols
+                ),
             )
             del teacher_checkpoint
     elif cfg.get('vlm_routing', {}).get('enabled', False):
@@ -736,11 +739,12 @@ def create_argparser():
         '--vlm-routing-mode',
         choices=[
             'semantic_only',
+            'bidirectional_semantic',
             'validity_only',
             'semantic_and_validity',
             'mid_confidence_ignore',
         ],
-        default='semantic_and_validity',
+        default='bidirectional_semantic',
     )
     parser.add_argument(
         '--vlm-beta', type=float, default=0.1,
@@ -819,7 +823,8 @@ if __name__ == '__main__':
             )
         if (
             args.vlm_routing_mode in (
-                'semantic_only', 'semantic_and_validity'
+                'semantic_only', 'semantic_and_validity',
+                'bidirectional_semantic',
             )
             and args.vlm_semantic_cache is None
         ):

@@ -22,9 +22,12 @@ def selection_provenance():
     }
 
 
-def manifest_row(candidate_id="p123", position=123, center=12.5):
+def manifest_row(
+    candidate_id="p123", position=123, center=12.5, prompt_role="low_rescue"
+):
     return {
         "candidate_id": candidate_id,
+        "prompt_role": prompt_role,
         "video_id": "video",
         "absolute_feature_index": position,
         "absolute_center_time": center,
@@ -36,7 +39,16 @@ def prediction_row(manifest, prediction="TARGET_ACTION"):
     return {
         "candidate_id": manifest["candidate_id"],
         "semantic_cache_schema_version": "offline-vlm-semantic-evidence-v1",
-        "prompt_sha256": "a" * 64,
+        "prompt_role": manifest["prompt_role"],
+        "prompt_version": (
+            "candidate-blind-epic-semantic-gate-v3"
+            if manifest["prompt_role"] == "low_rescue"
+            else "candidate-blind-epic-semantic-veto-v1"
+        ),
+        "prompt_sha256": (
+            "a" * 64 if manifest["prompt_role"] == "low_rescue" else "b" * 64
+        ),
+        "response_contract_version": "vlm-actionness-label-json-schema-v1",
         "model": "qwen-test",
         "wire_api": "chat",
         "status": "ok",
@@ -82,6 +94,7 @@ def test_cache_contains_semantics_only(prediction, expected):
     manifest = manifest_row()
     entry = build_entries([manifest], [prediction_row(manifest, prediction)])[0]
     assert entry == {
+        "prompt_role": "low_rescue",
         "video_id": "video",
         "absolute_feature_index": 123,
         "absolute_center_time": 12.5,
@@ -96,11 +109,18 @@ def test_payload_locks_absolute_index_schema_and_provenance():
     payload = build_payload(
         [manifest], [prediction_row(manifest)], selection_provenance()
     )
-    assert payload["version"] == 6
-    assert payload["semantic_cache_schema_version"] == "offline-vlm-semantic-evidence-v1"
-    assert payload["source"] == "offline_vlm_candidate_blind_semantics"
-    assert payload["key_fields"] == ["video_id", "absolute_feature_index"]
-    assert payload["counts"] == {"TARGET_ACTION": 1}
+    assert payload["version"] == 7
+    assert payload["semantic_cache_schema_version"] == (
+        "offline-vlm-bidirectional-semantic-evidence-v2"
+    )
+    assert payload["source"] == "offline_vlm_candidate_blind_bidirectional_semantics"
+    assert payload["key_fields"] == [
+        "prompt_role",
+        "video_id",
+        "absolute_feature_index",
+    ]
+    assert payload["counts"] == {"low_rescue": {"TARGET_ACTION": 1}}
+    assert set(payload["prompt_protocols"]) == {"low_rescue"}
 
 
 def test_old_dual_gate_prediction_schema_is_rejected():
@@ -128,6 +148,25 @@ def test_absolute_index_is_exact_and_unique():
             [first, duplicate],
             [prediction_row(first), prediction_row(duplicate)],
         )
+
+    high = manifest_row("high", position=10, center=12.5, prompt_role="high_veto")
+    entries = build_entries(
+        [first, high], [prediction_row(first), prediction_row(high)]
+    )
+    assert {entry["prompt_role"] for entry in entries} == {
+        "low_rescue",
+        "high_veto",
+    }
+    payload = build_payload(
+        [first, high],
+        [prediction_row(first), prediction_row(high, "TRUE_BACKGROUND")],
+        selection_provenance(),
+    )
+    assert set(payload["prompt_protocols"]) == {"low_rescue", "high_veto"}
+    assert payload["counts"] == {
+        "high_veto": {"TRUE_BACKGROUND": 1},
+        "low_rescue": {"TARGET_ACTION": 1},
+    }
 
     bad = copy.deepcopy(first)
     bad["absolute_feature_index"] = 10.25
@@ -188,10 +227,11 @@ def test_legacy_candidate_blind_migration_keeps_only_absolute_semantics():
         "d" * 64,
         selection_provenance(),
     )
-    assert payload["counts"] == {"TARGET_ACTION": 1}
+    assert payload["counts"] == {"low_rescue": {"TARGET_ACTION": 1}}
     assert payload["migration"]["input_predictions_sha256"] == "d" * 64
     assert payload["entries"] == [
         {
+            "prompt_role": "low_rescue",
             "video_id": "video",
             "absolute_feature_index": 40,
             "absolute_center_time": 22.0,
@@ -258,5 +298,5 @@ def test_legacy_candidate_blind_migration_cli(tmp_path):
         text=True,
     )
     assert json.loads(output_path.read_text(encoding="utf-8"))["counts"] == {
-        "TARGET_ACTION": 1
+        "low_rescue": {"TARGET_ACTION": 1}
     }
