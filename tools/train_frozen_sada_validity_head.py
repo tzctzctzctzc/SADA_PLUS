@@ -21,6 +21,12 @@ from libs.models.SADA.anchor_validity import (
     source_validity_loss,
 )
 from libs.models.SADA.stage1_calibration import state_dict_sha256
+from libs.models.SADA.validity_replay import (
+    FrozenAnchorReplayPool,
+    crop_source_view,
+    exact_replay_batch,
+    exact_view_windows,
+)
 from libs.models.SADA.vlm_routing import file_sha256
 from libs.utils.utils import _update_config, read_yaml
 from tools.audit_original_sada_pseudolabels import move_video
@@ -99,6 +105,17 @@ def parse_args():
     parser.add_argument("--minimum-precision", type=float, default=0.9)
     parser.add_argument("--crop-alignment", type=int, default=1)
     parser.add_argument("--clip-grad-norm", type=float, default=1.0)
+    parser.add_argument(
+        "--training-mode",
+        choices=("standard", "exact_replay_consistency"),
+        default="standard",
+    )
+    parser.add_argument("--replay-views-per-video", type=int, default=8)
+    parser.add_argument("--replay-videos-per-cell", type=int, default=4)
+    parser.add_argument("--replay-steps-per-epoch", type=int, default=64)
+    parser.add_argument("--replay-alignment", type=int, default=32)
+    parser.add_argument("--replay-seed", type=int, default=20260812)
+    parser.add_argument("--consistency-weight", type=float, default=1.0)
     parser.add_argument(
         "--head-variant", choices=tuple(HEAD_VARIANTS), default="A"
     )
@@ -193,6 +210,122 @@ def frozen_source_batch(model, raw_videos, device):
     )
 
 
+def build_exact_replay_pool(model, dataset, rows, cfg, args):
+    """Cache frozen source-view anchors without reading Target or VLM data."""
+    full_dataset = make_dataset(
+        cfg["dataset_name"], False, cfg["src_train_split"], **cfg["dataset"]
+    )
+    full_dataset = clone_dataset(full_dataset, rows)
+    rng = random.Random(args.replay_seed)
+    feature_chunks = []
+    offset_chunks = []
+    level_chunks = []
+    label_chunks = []
+    video_chunks = []
+    point_chunks = []
+    crop_chunks = []
+    video_ids = []
+    view_manifest = []
+    crop_index = 0
+
+    model.eval()
+    for video_index in range(len(full_dataset)):
+        full_video = full_dataset[video_index]
+        video_id = str(full_video["metadata"]["video_id"])
+        video_ids.append(video_id)
+        windows = exact_view_windows(
+            full_video["feats"].shape[-1],
+            cfg["dataset"]["max_seq_len"],
+            cfg["dataset"].get("crop_ratio"),
+            args.replay_views_per_video,
+            args.replay_alignment,
+            rng,
+        )
+        video_manifest = {
+            "video_id": video_id,
+            "phase": windows["phase"],
+            "windows": [],
+        }
+        for start, end in windows["windows"]:
+            raw_view = crop_source_view(
+                full_video, start, end, cfg["dataset"]["trunc_thresh"]
+            )
+            if raw_view is None:
+                continue
+            video_manifest["windows"].append({
+                "crop_index": crop_index,
+                "start": start,
+                "end": end,
+            })
+            view = move_video(raw_view, args.device)
+            with torch.no_grad():
+                inputs, masks = model.preprocessing([view], mode="validation")
+                backbone, backbone_masks, _ = model.backbone_source(inputs, masks)
+                fpn, fpn_masks = model.neck_source(backbone, backbone_masks)
+                offsets, _ = model.reg_head(fpn, fpn_masks)
+                points = model.point_generator(fpn)
+                gt_cls, _ = model.label_points(
+                    points, [view["segments"]], [view["labels"]]
+                )
+                cohorts = model._source_validity_cohorts(
+                    points, [view["segments"]], fpn_masks
+                )
+
+                concat_start = 0
+                for level, (point_grid, level_fpn, level_offsets, cohort) in enumerate(
+                    zip(points, fpn, offsets, cohorts)
+                ):
+                    concat_end = concat_start + len(point_grid)
+                    labels = gt_cls[0][concat_start:concat_end].sum(dim=-1) > 0
+                    selected = cohort[0].bool()
+                    concat_start = concat_end
+                    if not selected.any():
+                        continue
+                    local_points = point_grid[selected, 0]
+                    rounded_points = local_points.round().long()
+                    if not torch.equal(local_points, rounded_points.to(local_points)):
+                        raise RuntimeError("replay point lattice is not integer-valued")
+                    count = int(selected.sum().item())
+                    feature_chunks.append(
+                        level_fpn[0, :, selected].transpose(0, 1).cpu().half()
+                    )
+                    offset_chunks.append(
+                        level_offsets[0, :, selected].transpose(0, 1).cpu().float()
+                    )
+                    level_chunks.append(torch.full((count,), level, dtype=torch.long))
+                    label_chunks.append(labels[selected].cpu().bool())
+                    video_chunks.append(
+                        torch.full((count,), video_index, dtype=torch.long)
+                    )
+                    point_chunks.append(rounded_points.cpu() + int(start))
+                    crop_chunks.append(
+                        torch.full((count,), crop_index, dtype=torch.long)
+                    )
+            crop_index += 1
+        view_manifest.append(video_manifest)
+
+    if not feature_chunks:
+        raise RuntimeError("exact replay cache produced no source anchors")
+    pool = FrozenAnchorReplayPool(
+        torch.cat(feature_chunks),
+        torch.cat(offset_chunks),
+        torch.cat(level_chunks),
+        torch.cat(label_chunks),
+        torch.cat(video_chunks),
+        torch.cat(point_chunks),
+        torch.cat(crop_chunks),
+        video_ids,
+        args.replay_seed,
+    )
+    manifest = {
+        "alignment": args.replay_alignment,
+        "views_per_video": args.replay_views_per_video,
+        "seed": args.replay_seed,
+        "videos": view_manifest,
+    }
+    return pool, manifest
+
+
 def selection_loss(model, dataset, alpha, args):
     random.seed(args.evaluation_seed)
     torch.manual_seed(args.evaluation_seed)
@@ -239,11 +372,19 @@ def validate_args(args):
         args.report_videos,
         args.crop_alignment,
         args.clip_grad_norm,
+        args.replay_views_per_video,
+        args.replay_videos_per_cell,
+        args.replay_steps_per_epoch,
+        args.replay_alignment,
     )
     if min(positive) <= 0:
         raise ValueError("frozen-head counts and optimization values must be positive")
     if args.weight_decay < 0.0:
         raise ValueError("weight decay must be non-negative")
+    if args.consistency_weight < 0.0:
+        raise ValueError("consistency weight must be non-negative")
+    if args.training_mode == "exact_replay_consistency" and args.head_variant != "F":
+        raise ValueError("exact replay consistency is defined for Head variant F")
 
 
 def main():
@@ -306,20 +447,22 @@ def main():
         raise ValueError("source train and external report video IDs overlap")
     partition["external_report_video_ids"] = sorted(external_ids)
 
-    train_dataset = repeated_training_dataset(
-        source_train, train_rows, args.train_crops_per_video
-    )
     selection_dataset = clone_dataset(source_train, selection_rows)
     calibration_dataset = clone_dataset(source_train, calibration_rows)
     internal_report_dataset = clone_dataset(source_train, report_rows)
-    loader_generator = torch.Generator().manual_seed(args.seed)
-    train_loader = make_data_loader(
-        train_dataset,
-        True,
-        loader_generator,
-        args.batch_size,
-        args.num_workers,
-    )
+    train_loader = None
+    if args.training_mode == "standard":
+        train_dataset = repeated_training_dataset(
+            source_train, train_rows, args.train_crops_per_video
+        )
+        loader_generator = torch.Generator().manual_seed(args.seed)
+        train_loader = make_data_loader(
+            train_dataset,
+            True,
+            loader_generator,
+            args.batch_size,
+            args.num_workers,
+        )
 
     model = make_meta_arch(cfg["model_name"], cfg, device=args.device).to(args.device)
     checkpoint = load_base_checkpoint(
@@ -335,24 +478,62 @@ def main():
         lr=args.learning_rate,
         weight_decay=args.weight_decay,
     )
+    replay_pool = None
+    replay_manifest = None
+    if args.training_mode == "exact_replay_consistency":
+        replay_pool, replay_manifest = build_exact_replay_pool(
+            model, source_train, train_rows, cfg, args
+        )
+        print(
+            json.dumps(
+                {"replay_cache": replay_pool.stats()}, sort_keys=True
+            ),
+            flush=True,
+        )
 
     best = None
     history = []
     total_supervised_anchors = 0
+    total_replay_rows = 0
+    total_consistency_pairs = 0
     for epoch in range(1, args.epochs + 1):
         model.eval()
         model.validity_head.train()
         epoch_loss_sum = 0.0
         epoch_anchors = 0
+        epoch_rows = 0
+        epoch_consistency_pairs = 0
+        epoch_classification_sum = 0.0
+        epoch_consistency_sum = 0.0
         epoch_positive = 0
         epoch_negative = 0
         epoch_by_level = [
             {"count": 0, "positive": 0, "negative": 0}
             for _ in range(model.n_levels)
         ]
-        for raw_videos in train_loader:
+        training_batches = (
+            train_loader
+            if args.training_mode == "standard"
+            else range(args.replay_steps_per_epoch)
+        )
+        for training_batch in training_batches:
             optimizer.zero_grad(set_to_none=True)
-            loss, stats = frozen_source_batch(model, raw_videos, args.device)
+            if args.training_mode == "standard":
+                loss, stats = frozen_source_batch(
+                    model, training_batch, args.device
+                )
+                stats["rows"] = stats["count"]
+                stats["consistency_pairs"] = 0
+                stats["classification_loss"] = float(loss.detach())
+                stats["consistency_loss"] = 0.0
+            else:
+                loss, stats = exact_replay_batch(
+                    model,
+                    replay_pool,
+                    args.device,
+                    args.replay_videos_per_cell,
+                    args.consistency_weight,
+                )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
                 model.validity_head.parameters(), args.clip_grad_norm
@@ -361,6 +542,10 @@ def main():
             count = int(stats["count"])
             epoch_loss_sum += float(loss.detach()) * count
             epoch_anchors += count
+            epoch_rows += int(stats["rows"])
+            epoch_consistency_pairs += int(stats["consistency_pairs"])
+            epoch_classification_sum += stats["classification_loss"] * count
+            epoch_consistency_sum += stats["consistency_loss"] * count
             epoch_positive += int(stats["positive"])
             epoch_negative += int(stats["negative"])
             for total, current in zip(
@@ -371,10 +556,16 @@ def main():
         if epoch_anchors == 0:
             raise RuntimeError("frozen-head epoch produced no supervised anchors")
         total_supervised_anchors += epoch_anchors
+        total_replay_rows += epoch_rows
+        total_consistency_pairs += epoch_consistency_pairs
         record = {
             "epoch": epoch,
             "train_loss": epoch_loss_sum / epoch_anchors,
+            "train_classification_loss": epoch_classification_sum / epoch_anchors,
+            "train_consistency_loss": epoch_consistency_sum / epoch_anchors,
             "train_anchors": epoch_anchors,
+            "train_rows": epoch_rows,
+            "train_consistency_pairs": epoch_consistency_pairs,
             "train_positive": epoch_positive,
             "train_negative": epoch_negative,
             "train_by_level": epoch_by_level,
@@ -451,9 +642,29 @@ def main():
         "clip_grad_norm": args.clip_grad_norm,
         "optimizer": "AdamW",
         "frozen_sada": True,
+        "training_mode": args.training_mode,
         "head_variant": args.head_variant,
         "head_design": head_design,
     }
+    replay_cache = None
+    if replay_pool is not None:
+        replay_cache = {
+            "manifest": replay_manifest,
+            "manifest_sha256": protocol_sha256(replay_manifest),
+            "pool_stats": replay_pool.stats(),
+        }
+        training_protocol["replay"] = {
+            "views_per_video": args.replay_views_per_video,
+            "videos_per_level_class_cell": args.replay_videos_per_cell,
+            "steps_per_epoch": args.replay_steps_per_epoch,
+            "alignment": args.replay_alignment,
+            "seed": args.replay_seed,
+            "consistency_weight": args.consistency_weight,
+            "consistency": "absolute_probability_l1_on_exact_label_consistent_keys",
+            "sampling": "video_cycle_then_anchor_with_equal_level_class_cells",
+            "manifest_sha256": replay_cache["manifest_sha256"],
+            "pool_stats": replay_cache["pool_stats"],
+        }
     payload = {
         "schema_version": SCHEMA_VERSION,
         "supervision": "source_gt_official_label_points_conditioned_on_target_event",
@@ -472,6 +683,9 @@ def main():
         "training_protocol": training_protocol,
         "training_protocol_sha256": protocol_sha256(training_protocol),
         "total_supervised_anchors": total_supervised_anchors,
+        "total_replay_rows": total_replay_rows,
+        "total_consistency_pairs": total_consistency_pairs,
+        "replay_cache": replay_cache,
         "head_variant": args.head_variant,
         "head_design": head_design,
         "head_design_sha256": protocol_sha256(head_design),
