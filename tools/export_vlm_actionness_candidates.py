@@ -366,7 +366,7 @@ def main():
                             "sada_top1_class": predicted_class,
                             "sada_top2_score": float(top_scores[index, 1]),
                             "sada_top2_class": second_class,
-                            "score_band": args.score_band,
+                            "score_band": reused.get("score_band", args.score_band),
                             "alpha": alpha,
                             "beta": args.beta,
                             "gt_is_foreground": gt_action,
@@ -413,7 +413,11 @@ def main():
         "levels": list(args.levels),
         "alpha": alpha,
         "beta": args.beta,
-        "score_band": args.score_band,
+        "score_band": (
+            sorted({row["score_band"] for row in reuse_rows})
+            if reuse_rows is not None
+            else args.score_band
+        ),
         "top_k_per_video_level": args.top_k_per_video_level,
         "min_gap_sec": args.min_gap_sec,
         "manifest_candidates": len(rows),
