@@ -24,6 +24,23 @@ def prompt_role_for_score(score, beta, alpha):
     return None
 
 
+def deduplicate_semantic_rows(rows):
+    """Keep one visual query for each role, video, and absolute position."""
+    unique = []
+    seen = set()
+    for row in rows:
+        key = (
+            row["prompt_role"],
+            row["video_id"],
+            int(row["absolute_feature_index"]),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(row)
+    return unique
+
+
 def prompt_role_for_row(row):
     role = row.get("prompt_role")
     if role in {LOW_PROMPT_ROLE, HIGH_PROMPT_ROLE}:
@@ -477,6 +494,8 @@ def main():
                         }
                     rows.append(row)
 
+    selected_candidates_before_semantic_dedup = len(rows)
+    rows = deduplicate_semantic_rows(rows)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="utf-8") as stream:
@@ -509,6 +528,9 @@ def main():
         "top_k_per_video_level": args.top_k_per_video_level,
         "min_gap_sec": args.min_gap_sec,
         "manifest_candidates": len(rows),
+        "semantic_duplicate_candidates_removed": (
+            selected_candidates_before_semantic_dedup - len(rows)
+        ),
         "candidate_selection": (
             "reused exact manifest anchors"
             if reuse_rows is not None

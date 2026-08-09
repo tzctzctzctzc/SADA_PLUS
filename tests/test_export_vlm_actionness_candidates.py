@@ -3,6 +3,7 @@ import torch
 
 from tools.export_vlm_actionness_candidates import (
     choose_indices,
+    deduplicate_semantic_rows,
     named_paths,
     prompt_role_for_score,
 )
@@ -35,6 +36,36 @@ def test_choose_indices_rejects_unknown_score_band():
             0,
             "all",
         )
+
+
+def test_semantic_rows_are_unique_across_fpn_levels():
+    rows = [
+        {
+            "candidate_id": "low-l0",
+            "prompt_role": "low_rescue",
+            "video_id": "P01_01",
+            "absolute_feature_index": 8,
+            "fpn_level": 0,
+        },
+        {
+            "candidate_id": "low-l1",
+            "prompt_role": "low_rescue",
+            "video_id": "P01_01",
+            "absolute_feature_index": 8,
+            "fpn_level": 1,
+        },
+        {
+            "candidate_id": "high-l1",
+            "prompt_role": "high_veto",
+            "video_id": "P01_01",
+            "absolute_feature_index": 8,
+            "fpn_level": 1,
+        },
+    ]
+
+    unique = deduplicate_semantic_rows(rows)
+
+    assert [row["candidate_id"] for row in unique] == ["low-l0", "high-l1"]
 
 
 def test_named_validity_models_are_unique_and_explicit():
