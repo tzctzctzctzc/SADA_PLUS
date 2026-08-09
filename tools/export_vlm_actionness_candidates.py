@@ -21,11 +21,26 @@ def video_ids_in(root):
     }
 
 
-def choose_indices(scores, centers, valid, beta, alpha, top_k, min_gap_sec):
+def choose_indices(
+    scores,
+    centers,
+    valid,
+    beta,
+    alpha,
+    top_k,
+    min_gap_sec,
+    score_band="low",
+):
+    if score_band == "low":
+        in_band = lambda score: beta < score < alpha
+    elif score_band == "high":
+        in_band = lambda score: score >= alpha
+    else:
+        raise ValueError("score_band must be low or high")
     candidates = [
         index
         for index in range(scores.numel())
-        if bool(valid[index]) and beta < float(scores[index]) < alpha
+        if bool(valid[index]) and in_band(float(scores[index]))
     ]
     candidates.sort(key=lambda index: float(scores[index]), reverse=True)
     chosen = []
@@ -56,6 +71,12 @@ def main():
         help="Override configured target split; may be repeated.",
     )
     parser.add_argument("--beta", type=float, default=0.1)
+    parser.add_argument(
+        "--score-band",
+        choices=("low", "high"),
+        default="low",
+        help="Export beta<score<alpha or score>=alpha anchors.",
+    )
     parser.add_argument("--top-k-per-video-level", type=int, default=5)
     parser.add_argument("--min-gap-sec", type=float, default=0.75)
     parser.add_argument("--levels", type=int, nargs="+", default=(0, 1, 2))
@@ -204,6 +225,7 @@ def main():
                         alpha,
                         args.top_k_per_video_level,
                         args.min_gap_sec,
+                        args.score_band,
                     )
                 else:
                     chosen = sorted(
@@ -268,6 +290,7 @@ def main():
                             "sada_top1_class": predicted_class,
                             "sada_top2_score": float(top_scores[index, 1]),
                             "sada_top2_class": second_class,
+                            "score_band": args.score_band,
                             "alpha": alpha,
                             "beta": args.beta,
                             "gt_is_foreground": gt_action,
@@ -302,13 +325,14 @@ def main():
         "levels": list(args.levels),
         "alpha": alpha,
         "beta": args.beta,
+        "score_band": args.score_band,
         "top_k_per_video_level": args.top_k_per_video_level,
         "min_gap_sec": args.min_gap_sec,
         "manifest_candidates": len(rows),
         "candidate_selection": (
             "reused exact manifest anchors"
             if reuse_rows is not None
-            else "frozen SADA low-confidence top-k"
+            else "frozen SADA {}-confidence top-k".format(args.score_band)
         ),
         "reuse_manifest": args.reuse_manifest,
         "candidate_gt_foreground_anchors": foreground,
