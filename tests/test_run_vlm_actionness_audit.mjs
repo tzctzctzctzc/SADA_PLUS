@@ -6,6 +6,8 @@ import {
   FRAME_OFFSETS_SEC,
   HttpStatusError,
   PROMPT_SHA256,
+  RESPONSE_CONTRACT_VERSION,
+  RESPONSE_TEXT_FORMAT,
   SEMANTIC_CACHE_SCHEMA_VERSION,
   RequestTimeoutError,
   absoluteCenterTime,
@@ -52,6 +54,16 @@ test('schema is semantic-only and absolute-index keyed', () => {
   const row = manifestRow();
   assert.equal(absoluteFeatureIndex(row), 123);
   assert.equal(semanticKey(row), 'video|123');
+  assert.equal(
+    RESPONSE_CONTRACT_VERSION,
+    'vlm-actionness-label-json-schema-v1',
+  );
+  assert.equal(RESPONSE_TEXT_FORMAT.type, 'json_schema');
+  assert.equal(RESPONSE_TEXT_FORMAT.strict, true);
+  assert.deepEqual(
+    RESPONSE_TEXT_FORMAT.schema.properties.label.enum,
+    ['TARGET_ACTION', 'OTHER_ACTIVITY', 'TRUE_BACKGROUND', 'UNCERTAIN'],
+  );
 });
 
 
@@ -155,6 +167,7 @@ test('resume output cannot mix schema, prompt, model, or wire API', () => {
   const prior = {
     candidate_id: manifest.candidate_id,
     semantic_cache_schema_version: SEMANTIC_CACHE_SCHEMA_VERSION,
+    response_contract_version: RESPONSE_CONTRACT_VERSION,
     prompt_sha256: PROMPT_SHA256,
     model,
     wire_api: wireApi,

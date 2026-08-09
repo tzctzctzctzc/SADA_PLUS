@@ -23,6 +23,7 @@ const FRAME_OFFSETS_SEC = Object.freeze([
 ]);
 const PROMPT_VERSION = 'candidate-blind-epic-semantic-gate-v3';
 const SEMANTIC_CACHE_SCHEMA_VERSION = 'offline-vlm-semantic-evidence-v1';
+const RESPONSE_CONTRACT_VERSION = 'vlm-actionness-label-json-schema-v1';
 
 const ALLOWED_ARGS = new Set([
   'manifest',
@@ -41,12 +42,30 @@ const ALLOWED_ARGS = new Set([
   'limit',
 ]);
 
-const LABEL_VALUES = new Set([
+const LABEL_ENUM = Object.freeze([
   'TARGET_ACTION',
   'OTHER_ACTIVITY',
   'TRUE_BACKGROUND',
   'UNCERTAIN',
 ]);
+const LABEL_VALUES = new Set(LABEL_ENUM);
+
+const RESPONSE_TEXT_FORMAT = Object.freeze({
+  type: 'json_schema',
+  name: 'vlm_actionness_label',
+  strict: true,
+  schema: {
+    type: 'object',
+    properties: {
+      label: {
+        type: 'string',
+        enum: [...LABEL_ENUM],
+      },
+    },
+    required: ['label'],
+    additionalProperties: false,
+  },
+});
 
 function argsOf(argv) {
   const out = {};
@@ -608,6 +627,9 @@ async function requestOnce({
         },
       ],
       max_output_tokens: maxOutputTokens,
+      text: {
+        format: RESPONSE_TEXT_FORMAT,
+      },
     };
 
     if (reasoningEffort) {
@@ -813,6 +835,7 @@ function requestFingerprint(row, model, wireApi) {
       frame_offsets_sec: FRAME_OFFSETS_SEC,
       prompt_sha256: PROMPT_SHA256,
       semantic_cache_schema_version: SEMANTIC_CACHE_SCHEMA_VERSION,
+      response_contract_version: RESPONSE_CONTRACT_VERSION,
       model,
       wire_api: wireApi,
     }),
@@ -846,6 +869,7 @@ function localUncertainResult(
     prompt_version: PROMPT_VERSION,
     prompt_sha256: PROMPT_SHA256,
     semantic_cache_schema_version: SEMANTIC_CACHE_SCHEMA_VERSION,
+    response_contract_version: RESPONSE_CONTRACT_VERSION,
     frame_offsets_sec: [...FRAME_OFFSETS_SEC],
     frame_timestamps_sec:
       frameInfo.frames.map(frame => frame.timestamp_sec),
@@ -885,6 +909,9 @@ function validatePriorRows(priorRows, manifestRows, model, wireApi) {
       !== SEMANTIC_CACHE_SCHEMA_VERSION
     ) {
       throw new Error('output semantic cache schema does not match this runner');
+    }
+    if (prior.response_contract_version !== RESPONSE_CONTRACT_VERSION) {
+      throw new Error('output response contract does not match this runner');
     }
     if (prior.prompt_sha256 !== PROMPT_SHA256) {
       throw new Error('output prompt_sha256 does not match this runner');
@@ -1128,6 +1155,7 @@ async function main() {
       prompt_version: PROMPT_VERSION,
       prompt_sha256: PROMPT_SHA256,
       semantic_cache_schema_version: SEMANTIC_CACHE_SCHEMA_VERSION,
+      response_contract_version: RESPONSE_CONTRACT_VERSION,
       video_id: row.video_id,
       absolute_feature_index: absoluteFeatureIndex(row),
       absolute_center_time: center,
@@ -1293,6 +1321,8 @@ export {
   FRAME_OFFSETS_SEC,
   PROMPT_SHA256,
   PROMPT_VERSION,
+  RESPONSE_CONTRACT_VERSION,
+  RESPONSE_TEXT_FORMAT,
   SEMANTIC_CACHE_SCHEMA_VERSION,
   HttpStatusError,
   ProtocolError,
