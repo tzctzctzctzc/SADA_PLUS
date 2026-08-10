@@ -1,3 +1,7 @@
+import subprocess
+import sys
+from pathlib import Path
+
 from tools.build_vlm_boundary_manifest import build_coarse_rows, build_fine_rows
 
 
@@ -65,3 +69,18 @@ def test_fine_manifest_skips_non_valid_coarse_decision():
         },
     }]
     assert build_fine_rows(proposals, coarse, prediction) == []
+
+
+def test_manifest_and_scorer_support_direct_script_entrypoints():
+    root = Path(__file__).resolve().parents[1]
+    for script in (
+        root / "tools" / "build_vlm_boundary_manifest.py",
+        root / "tools" / "score_vlm_boundary_audit.py",
+    ):
+        result = subprocess.run(
+            [sys.executable, str(script), "--help"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
