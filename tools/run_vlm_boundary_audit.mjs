@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 const QUERY_SCHEMA_VERSION = 'vlm-boundary-query-v2';
 const PREDICTION_SCHEMA_VERSION = 'vlm-boundary-prediction-v2';
-const PROMPT_VERSION = 'vlm-boundary-transition-coarse-to-fine-v2';
+const PROMPT_VERSION = 'vlm-boundary-full-action-extent-coarse-to-fine-v3';
 const ACTION_STATUS_VALUES = new Set([
   'VALID_ACTION', 'NO_ACTION', 'WRONG_ACTION', 'UNCERTAIN',
 ]);
@@ -19,17 +19,24 @@ const FINE_DECISION_VALUES = new Set([
   'UNCERTAIN', 'WRONG_ACTION', 'NO_ACTION',
 ]);
 const ACTION_GUIDANCE = Object.freeze({
-  TAKE: 'gaining possession or stable control; merely holding, carrying, removing, or lifting is not enough',
-  PUT: 'placing, positioning, returning, storing, or setting down an object; generic movement is not enough',
-  WASH: 'cleaning, rinsing, wiping, lathering, sponging, or soaping an object',
-  OPEN: 'changing a closure from closed to open or more accessible',
-  CLOSE: 'changing a closure from open to closed or secured',
-  INSERT: 'moving an object from outside to inside a container or opening',
-  'TURN-ON': 'operating a control so a device, light, flame, or flow becomes active',
-  CUT: 'slicing, dividing, or severing material with a cutting tool',
-  'TURN-OFF': 'operating a control so an active device, light, flame, or flow stops',
-  POUR: 'controlling a source container so contents visibly transfer to a destination',
+  TAKE: 'the full retrieve/pick-up event (collect, fetch, get, grab, pick, pull off, retrieve, take, or unload), from the first purposeful retrieval motion through the completed lift/removal into control; exclude later mere holding or carrying',
+  PUT: 'the full place/leave event (lay, place, position, put, replace, reposition, rest, return, set down, or store), from the first purposeful destination-directed placement motion through release or completion at the destination; exclude unrelated transport',
+  WASH: 'the full cleaning event (clean, lather, rinse, soap, sponge, wash, or wipe), from the first purposeful cleaning motion through the last cleaning stroke or rinse motion',
+  OPEN: 'the full opening event (open, uncork, or unzip), from the first purposeful manipulation of the closure through completion of the opening motion',
+  CLOSE: 'the full closing event (close, shut, screw on, or twist on), from the first purposeful closing manipulation through completion or securing',
+  INSERT: 'the full insertion/loading event (drop into, fit, insert, move in, place in, put in, load, or pack), from the first purposeful motion into the destination through completion inside it',
+  'TURN-ON': 'the full activation event (activate, ignite, light, start, switch on, turn on, or water on), from the first purposeful control manipulation through completion of activation',
+  CUT: 'the full cutting event (chop, cut, dice, halve, julienne, or slice), from the first purposeful cutting stroke through the last cutting stroke in the event',
+  'TURN-OFF': 'the full deactivation event (shut off, switch off, tap off, turn off, or water off), from the first purposeful control manipulation through completion of deactivation',
+  POUR: 'the full pouring/transfer event (drizzle, pour, shake into, sieve, or tip), from the first purposeful transfer or tilting motion through the end of the transfer and recovery motion',
 });
+
+const FULL_ACTION_EXTENT = `Use an EPIC-KITCHENS-style complete narrated action interval, not a single
+state-change instant or only the most salient core. START is the earliest
+purposeful motion that belongs to the named verb event. END is after its last
+purposeful motion, before later mere holding, unrelated transport, idle, or the
+next action. Do not expand the interval to generic preparation that does not yet
+belong to the named action.`;
 
 
 function sha256(value) {
@@ -97,6 +104,8 @@ Proposed action: ${row.predicted_class_name}
 Action boundary meaning: ${actionGuidance(row)}
 Proposed temporal region: ${left.toFixed(3)}s to ${right.toFixed(3)}s
 
+${FULL_ACTION_EXTENT}
+
 The images below are chronologically ordered:
 ${timeline}
 
@@ -105,6 +114,11 @@ First decide whether the proposed action is actually visible in this sequence.
 - WRONG_ACTION: a meaningful action occurs, but it is not the proposed action.
 - NO_ACTION: no meaningful action occurs in the proposed region.
 - UNCERTAIN: visual evidence is genuinely insufficient.
+
+If the named action is identifiable but only part of its complete interval is
+shown, return VALID_ACTION and mark each missing side NOT_VISIBLE or UNCERTAIN.
+Do not return NO_ACTION merely because a grasp, release, contact, or state-change
+instant is outside the shown frames.
 
 The surrounding context is only evidence. Do not confirm an action that occurs
 entirely outside the proposed temporal region.
@@ -134,6 +148,10 @@ function finePrompt(row) {
 
 Action: ${row.predicted_class_name}
 Action boundary meaning: ${actionGuidance(row)}
+Current coarse ${side} boundary: ${Number(row.rough_boundary_seconds).toFixed(3)}s
+
+${FULL_ACTION_EXTENT}
+
 Chronological frames:
 ${timeline}
 
@@ -143,9 +161,11 @@ ${candidates}
 Use the same transition definition as the coarse stage:
 ${side === 'start' ? 'START: before-frame is not in the action; after-frame is in the action.' : 'END: before-frame is in the action; after-frame is not in the action.'}
 
-Return SELECT_CANDIDATE with one option when a candidate visibly brackets the
-transition. Return KEEP_COARSE when the coarse boundary is better than every
-candidate. Return NO_VISIBLE_BOUNDARY when the action is visible but this side
+Return SELECT_CANDIDATE only when one option visibly brackets the complete-action
+transition and is clearly better than the current coarse boundary. Do not move
+the boundary inward to a grasp, release, contact, state-change instant, or other
+salient core within the action. Return KEEP_COARSE when no candidate clearly
+improves it. Return NO_VISIBLE_BOUNDARY when the action is visible but this side
 is outside the shown timeline; UNCERTAIN when evidence is ambiguous; or
 WRONG_ACTION / NO_ACTION when the coarse action decision is contradicted.
 Return JSON only.`;

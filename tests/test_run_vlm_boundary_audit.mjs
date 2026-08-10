@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   PREDICTION_SCHEMA_VERSION,
+  PROMPT_VERSION,
   parseDecision,
   promptFields,
   promptFor,
@@ -79,6 +80,11 @@ test('prompt whitelist excludes metadata and defines one transition protocol', (
   assert.equal('fpn_level' in fields, false);
   assert.equal('posthoc_gt' in fields, false);
   const prompt = promptFor(row);
+  assert.equal(PROMPT_VERSION, 'vlm-boundary-full-action-extent-coarse-to-fine-v3');
+  assert.match(prompt, /complete narrated action interval/);
+  assert.match(prompt, /only part of its complete interval is\s+shown/);
+  assert.match(prompt, /return VALID_ACTION/);
+  assert.match(prompt, /full place\/leave event/);
   assert.match(prompt, /not in the action; adjacent after-frame is in the action/);
   assert.match(prompt, /before-frame is in the action; adjacent after-frame is not/);
   assert.equal(prompt.includes('0.999'), false);
@@ -123,6 +129,9 @@ test('fine contract supports candidate, KEEP, abstention, and rejection', () => 
     decision: 'SELECT_CANDIDATE', selected_option: 'Z', reason: 'bad',
   }), row), /invalid/);
   assert.match(promptFor(row), /KEEP_COARSE/);
+  assert.match(promptFor(row), /Current coarse start boundary: 2\.000s/);
+  assert.match(promptFor(row), /only when one option/);
+  assert.match(promptFor(row), /Do not move\s+the boundary inward/);
   assert.deepEqual(resolvedBoundaryOutput(row, {
     decision: 'SELECT_CANDIDATE', selected_option: 'A', reason: 'edge',
   }), { seconds: 2, valid: true, source: 'VLM' });
