@@ -81,8 +81,11 @@ def build_coarse_rows(
     context_frame_count=6,
     boundary_frame_count=5,
     inside_frame_count=4,
+    task_mode="validity-and-boundary",
     **window_options
 ):
+    if task_mode not in ("validity-and-boundary", "boundary-only"):
+        raise ValueError("unknown task mode")
     rows = []
     for proposal in proposals:
         window = dynamic_context_window(
@@ -94,6 +97,7 @@ def build_coarse_rows(
         row = {
             "query_schema_version": QUERY_SCHEMA_VERSION,
             "stage": "coarse",
+            "task_mode": task_mode,
             "query_id": proposal["proposal_id"] + ":coarse",
             "proposal_id": proposal["proposal_id"],
             "video_id": proposal["video_id"],
@@ -166,7 +170,10 @@ def build_fine_rows(
     rows = []
     for query in coarse_queries:
         decision = decisions.get(query["query_id"])
-        if not decision or decision.get("action_status") != "VALID_ACTION":
+        boundary_only = query.get("task_mode") == "boundary-only"
+        if not decision or (
+            not boundary_only and decision.get("action_status") != "VALID_ACTION"
+        ):
             continue
         proposal = proposal_map[query["proposal_id"]]
         step = fine_step_seconds(
@@ -206,6 +213,7 @@ def build_fine_rows(
             row = {
                 "query_schema_version": QUERY_SCHEMA_VERSION,
                 "stage": "fine",
+                "task_mode": query.get("task_mode", "validity-and-boundary"),
                 "boundary_side": side,
                 "query_id": fine_query_id,
                 "proposal_id": proposal["proposal_id"],
@@ -248,6 +256,11 @@ def main():
     coarse.add_argument("--stride-multiplier", type=float, default=2.0)
     coarse.add_argument("--minimum-margin", type=float, default=1.0)
     coarse.add_argument("--maximum-margin", type=float, default=6.0)
+    coarse.add_argument(
+        "--task-mode",
+        choices=("validity-and-boundary", "boundary-only"),
+        default="validity-and-boundary",
+    )
 
     fine = subparsers.add_parser("fine")
     add_common_arguments(fine)
@@ -266,6 +279,7 @@ def main():
             context_frame_count=args.context_frame_count,
             boundary_frame_count=args.boundary_frame_count,
             inside_frame_count=args.inside_frame_count,
+            task_mode=args.task_mode,
             context_ratio=args.context_ratio,
             stride_multiplier=args.stride_multiplier,
             minimum_margin=args.minimum_margin,
@@ -294,6 +308,7 @@ def main():
         "selection_gt_use": "none",
     }
     if args.command == "coarse":
+        metadata["task_mode"] = args.task_mode
         metadata["parameters"] = {
             "context_frame_count": args.context_frame_count,
             "boundary_frame_count_per_side": args.boundary_frame_count,

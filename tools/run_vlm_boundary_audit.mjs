@@ -7,9 +7,9 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 
-const QUERY_SCHEMA_VERSION = 'vlm-boundary-query-v2';
-const PREDICTION_SCHEMA_VERSION = 'vlm-boundary-prediction-v2';
-const PROMPT_VERSION = 'vlm-boundary-full-action-extent-coarse-to-fine-v3';
+const QUERY_SCHEMA_VERSION = 'vlm-boundary-query-v3';
+const PREDICTION_SCHEMA_VERSION = 'vlm-boundary-prediction-v3';
+const PROMPT_VERSION = 'vlm-boundary-sada-top1-boundary-only-v4';
 const ACTION_STATUS_VALUES = new Set([
   'VALID_ACTION', 'NO_ACTION', 'WRONG_ACTION', 'UNCERTAIN',
 ]);
@@ -17,6 +17,9 @@ const SIDE_STATUS_VALUES = new Set(['VISIBLE', 'NOT_VISIBLE', 'UNCERTAIN']);
 const FINE_DECISION_VALUES = new Set([
   'SELECT_CANDIDATE', 'KEEP_COARSE', 'NO_VISIBLE_BOUNDARY',
   'UNCERTAIN', 'WRONG_ACTION', 'NO_ACTION',
+]);
+const BOUNDARY_ONLY_FINE_DECISION_VALUES = new Set([
+  'SELECT_CANDIDATE', 'KEEP_COARSE', 'NO_VISIBLE_BOUNDARY', 'UNCERTAIN',
 ]);
 const ACTION_GUIDANCE = Object.freeze({
   TAKE: 'the full retrieve/pick-up event (collect, fetch, get, grab, pick, pull off, retrieve, take, or unload), from the first purposeful retrieval motion through the completed lift/removal into control; exclude later mere holding or carrying',
@@ -61,6 +64,7 @@ function readJsonl(file, { allowMissing = false } = {}) {
 function promptFields(row) {
   const fields = {
     stage: row.stage,
+    task_mode: row.task_mode,
     predicted_class_name: row.predicted_class_name,
     coarse_segment_seconds: row.coarse_segment_seconds,
     frames: row.frames.map(frame => ({
@@ -82,6 +86,11 @@ function promptFields(row) {
 }
 
 
+function isBoundaryOnly(row) {
+  return row.task_mode === 'boundary-only';
+}
+
+
 function normalizedClassName(value) {
   return String(value).trim().toUpperCase().replace(/_/g, '-');
 }
@@ -98,6 +107,34 @@ function coarsePrompt(row) {
   const timeline = row.frames.map(frame => (
     `${frame.frame_id}: ${Number(frame.timestamp_sec).toFixed(3)}s`
   )).join('\n');
+  if (isBoundaryOnly(row)) {
+    return `You are locating the temporal boundaries of one frozen SADA action
+proposal in an egocentric video.
+
+Frozen SADA top-1 action: ${row.predicted_class_name}
+Action boundary meaning: ${actionGuidance(row)}
+Frozen SADA temporal proposal: ${left.toFixed(3)}s to ${right.toFixed(3)}s
+
+The action occurrence and class label are fixed inputs from high-confidence SADA.
+Do not verify, reject, or reclassify the action. Your only task is to locate its
+complete START and END boundaries from the chronological evidence.
+
+${FULL_ACTION_EXTENT}
+
+The images below are chronologically ordered:
+${timeline}
+
+Judge START and END independently:
+- VISIBLE: the transition is bracketed by one adjacent frame pair.
+- NOT_VISIBLE: this transition lies outside the shown timeline.
+- UNCERTAIN: the shown evidence cannot locate this transition reliably.
+
+Use exactly one transition definition throughout:
+- START: before-frame is not in the action; adjacent after-frame is in the action.
+- END: before-frame is in the action; adjacent after-frame is not in the action.
+The boundary time is the midpoint of that adjacent pair. Either side may be
+NOT_VISIBLE or UNCERTAIN. Return JSON only.`;
+  }
   return `You are checking one temporal action proposal in an egocentric video.
 
 Proposed action: ${row.predicted_class_name}
@@ -144,11 +181,25 @@ function finePrompt(row) {
   const candidates = row.candidates.map(candidate => (
     `option ${candidate.option}: ${candidate.before_frame_id} -> ${candidate.after_frame_id}, midpoint ${Number(candidate.timestamp_sec).toFixed(3)}s`
   )).join('\n');
+  const fixedInput = isBoundaryOnly(row)
+    ? `The high-confidence SADA action occurrence and class are frozen inputs.
+Do not verify, reject, or reclassify the action.`
+    : '';
+  const finalChoices = isBoundaryOnly(row)
+    ? `Return KEEP_COARSE when no candidate clearly improves it. Return
+NO_VISIBLE_BOUNDARY when this side is outside the shown timeline, or UNCERTAIN
+when the boundary evidence is ambiguous.`
+    : `Return KEEP_COARSE when no candidate clearly improves it. Return
+NO_VISIBLE_BOUNDARY when the action is visible but this side is outside the
+shown timeline; UNCERTAIN when evidence is ambiguous; or WRONG_ACTION /
+NO_ACTION when the coarse action decision is contradicted.`;
   return `You are refining the ${side} boundary of one visible action.
 
 Action: ${row.predicted_class_name}
 Action boundary meaning: ${actionGuidance(row)}
 Current coarse ${side} boundary: ${Number(row.rough_boundary_seconds).toFixed(3)}s
+
+${fixedInput}
 
 ${FULL_ACTION_EXTENT}
 
@@ -164,10 +215,7 @@ ${side === 'start' ? 'START: before-frame is not in the action; after-frame is i
 Return SELECT_CANDIDATE only when one option visibly brackets the complete-action
 transition and is clearly better than the current coarse boundary. Do not move
 the boundary inward to a grasp, release, contact, state-change instant, or other
-salient core within the action. Return KEEP_COARSE when no candidate clearly
-improves it. Return NO_VISIBLE_BOUNDARY when the action is visible but this side
-is outside the shown timeline; UNCERTAIN when evidence is ambiguous; or
-WRONG_ACTION / NO_ACTION when the coarse action decision is contradicted.
+salient core within the action. ${finalChoices}
 Return JSON only.`;
 }
 
@@ -184,31 +232,40 @@ function responseSchema(row) {
     const nullableFrame = {
       anyOf: [{ type: 'string', enum: frameIds }, { type: 'null' }],
     };
+    const boundaryProperties = {
+      start_status: { type: 'string', enum: [...SIDE_STATUS_VALUES] },
+      rough_start_before_frame: nullableFrame,
+      rough_start_after_frame: nullableFrame,
+      end_status: { type: 'string', enum: [...SIDE_STATUS_VALUES] },
+      rough_end_before_frame: nullableFrame,
+      rough_end_after_frame: nullableFrame,
+      ...reason,
+    };
+    const boundaryRequired = [
+      'start_status', 'rough_start_before_frame', 'rough_start_after_frame',
+      'end_status', 'rough_end_before_frame', 'rough_end_after_frame', 'reason',
+    ];
     return {
       type: 'object',
-      properties: {
-        action_status: { type: 'string', enum: [...ACTION_STATUS_VALUES] },
-        start_status: { type: 'string', enum: [...SIDE_STATUS_VALUES] },
-        rough_start_before_frame: nullableFrame,
-        rough_start_after_frame: nullableFrame,
-        end_status: { type: 'string', enum: [...SIDE_STATUS_VALUES] },
-        rough_end_before_frame: nullableFrame,
-        rough_end_after_frame: nullableFrame,
-        ...reason,
-      },
-      required: [
-        'action_status', 'start_status', 'rough_start_before_frame',
-        'rough_start_after_frame', 'end_status', 'rough_end_before_frame',
-        'rough_end_after_frame', 'reason',
-      ],
+      properties: isBoundaryOnly(row)
+        ? boundaryProperties
+        : {
+          action_status: { type: 'string', enum: [...ACTION_STATUS_VALUES] },
+          ...boundaryProperties,
+        },
+      required: isBoundaryOnly(row)
+        ? boundaryRequired
+        : ['action_status', ...boundaryRequired],
       additionalProperties: false,
     };
   }
   const options = row.candidates.map(candidate => candidate.option);
+  const fineDecisionValues = isBoundaryOnly(row)
+    ? BOUNDARY_ONLY_FINE_DECISION_VALUES : FINE_DECISION_VALUES;
   return {
     type: 'object',
     properties: {
-      decision: { type: 'string', enum: [...FINE_DECISION_VALUES] },
+      decision: { type: 'string', enum: [...fineDecisionValues] },
       selected_option: {
         anyOf: [{ type: 'string', enum: options }, { type: 'null' }],
       },
@@ -227,7 +284,8 @@ function parseDecision(text, row) {
   }
   const required = row.stage === 'coarse'
     ? [
-      'action_status', 'start_status', 'rough_start_before_frame',
+      ...(isBoundaryOnly(row) ? [] : ['action_status']),
+      'start_status', 'rough_start_before_frame',
       'rough_start_after_frame', 'end_status', 'rough_end_before_frame',
       'rough_end_after_frame', 'reason',
     ]
@@ -241,7 +299,7 @@ function parseDecision(text, row) {
   }
   if (row.stage === 'coarse') {
     const ids = row.frames.map(frame => frame.frame_id);
-    if (!ACTION_STATUS_VALUES.has(value.action_status)
+    if ((!isBoundaryOnly(row) && !ACTION_STATUS_VALUES.has(value.action_status))
         || !SIDE_STATUS_VALUES.has(value.start_status)
         || !SIDE_STATUS_VALUES.has(value.end_status)) {
       throw new Error('coarse status is invalid');
@@ -265,7 +323,7 @@ function parseDecision(text, row) {
         throw new Error(`non-visible coarse ${side} must use null frames`);
       }
     }
-    if (value.action_status !== 'VALID_ACTION'
+    if (!isBoundaryOnly(row) && value.action_status !== 'VALID_ACTION'
         && (value.start_status === 'VISIBLE' || value.end_status === 'VISIBLE')) {
       throw new Error('non-valid action cannot have a visible boundary');
     }
@@ -275,7 +333,9 @@ function parseDecision(text, row) {
     }
   } else {
     const options = new Set(row.candidates.map(candidate => candidate.option));
-    if (!FINE_DECISION_VALUES.has(value.decision)) {
+    const fineDecisionValues = isBoundaryOnly(row)
+      ? BOUNDARY_ONLY_FINE_DECISION_VALUES : FINE_DECISION_VALUES;
+    if (!fineDecisionValues.has(value.decision)) {
       throw new Error('fine decision is invalid');
     }
     if (value.decision === 'SELECT_CANDIDATE' && !options.has(value.selected_option)) {
@@ -333,6 +393,9 @@ function validateManifestRows(rows) {
     }
     if (!['coarse', 'fine'].includes(row.stage) || !row.query_id || seen.has(row.query_id)) {
       throw new Error(`invalid or duplicate query_id: ${row.query_id}`);
+    }
+    if (!['validity-and-boundary', 'boundary-only'].includes(row.task_mode)) {
+      throw new Error(`invalid task mode for ${row.query_id}`);
     }
     seen.add(row.query_id);
     if (!String(row.predicted_class_name || '').trim()) {
@@ -611,6 +674,7 @@ async function main() {
       query_id: row.query_id,
       proposal_id: row.proposal_id,
       stage: row.stage,
+      task_mode: row.task_mode,
       boundary_side: row.boundary_side || null,
       run_status: 'error',
       request_fingerprint: fingerprint,

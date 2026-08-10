@@ -17,8 +17,9 @@ import {
 
 function coarseRow() {
   return {
-    query_schema_version: 'vlm-boundary-query-v2',
+    query_schema_version: 'vlm-boundary-query-v3',
     stage: 'coarse',
+    task_mode: 'validity-and-boundary',
     query_id: 'p:coarse',
     proposal_id: 'p',
     predicted_class_name: 'PUT',
@@ -80,7 +81,7 @@ test('prompt whitelist excludes metadata and defines one transition protocol', (
   assert.equal('fpn_level' in fields, false);
   assert.equal('posthoc_gt' in fields, false);
   const prompt = promptFor(row);
-  assert.equal(PROMPT_VERSION, 'vlm-boundary-full-action-extent-coarse-to-fine-v3');
+  assert.equal(PROMPT_VERSION, 'vlm-boundary-sada-top1-boundary-only-v4');
   assert.match(prompt, /complete narrated action interval/);
   assert.match(prompt, /only part of its complete interval is\s+shown/);
   assert.match(prompt, /return VALID_ACTION/);
@@ -92,6 +93,22 @@ test('prompt whitelist excludes metadata and defines one transition protocol', (
     requestFingerprint(row, 'model', 'responses'),
     requestFingerprint({ ...row, score: 0.1, fpn_level: 5, posthoc_gt: {} }, 'model', 'responses'),
   );
+});
+
+
+test('boundary-only contract freezes SADA action and accepts only boundary fields', () => {
+  const row = { ...coarseRow(), task_mode: 'boundary-only' };
+  const decision = { ...oneSideCoarseDecision() };
+  delete decision.action_status;
+  assert.equal(parseDecision(JSON.stringify(decision), row).start_status, 'VISIBLE');
+  assert.throws(() => parseDecision(JSON.stringify({
+    ...decision, action_status: 'VALID_ACTION',
+  }), row), /keys violate/);
+  const prompt = promptFor(row);
+  assert.match(prompt, /fixed inputs from high-confidence SADA/);
+  assert.match(prompt, /only task is to locate its\s+complete START and END/);
+  assert.equal(prompt.includes('WRONG_ACTION'), false);
+  assert.equal(prompt.includes('NO_ACTION'), false);
 });
 
 
@@ -141,6 +158,23 @@ test('fine contract supports candidate, KEEP, abstention, and rejection', () => 
   assert.deepEqual(resolvedBoundaryOutput(row, {
     decision: 'UNCERTAIN', selected_option: null, reason: 'blur',
   }), { seconds: 2, valid: false, source: 'INVALID' });
+});
+
+
+test('boundary-only fine contract cannot reject or reclassify SADA action', () => {
+  const row = { ...fineRow(), task_mode: 'boundary-only' };
+  assert.equal(parseDecision(JSON.stringify({
+    decision: 'KEEP_COARSE', selected_option: null, reason: 'best boundary',
+  }), row).decision, 'KEEP_COARSE');
+  for (const decision of ['WRONG_ACTION', 'NO_ACTION']) {
+    assert.throws(() => parseDecision(JSON.stringify({
+      decision, selected_option: null, reason: 'forbidden',
+    }), row), /invalid/);
+  }
+  const prompt = promptFor(row);
+  assert.match(prompt, /Do not verify, reject, or reclassify/);
+  assert.equal(prompt.includes('WRONG_ACTION'), false);
+  assert.equal(prompt.includes('NO_ACTION'), false);
 });
 
 

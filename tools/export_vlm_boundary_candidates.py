@@ -199,8 +199,33 @@ def proposal_only_stratified_sample(rows, count):
     return selected
 
 
+def proposal_only_top_per_video(rows, count):
+    """Keep each video's strongest original-SADA anchor, then rank globally."""
+    if count is not None and count <= 0:
+        raise ValueError("sample count must be positive")
+    ranked = sorted(rows, key=lambda row: (-float(row["score"]), row["proposal_id"]))
+    best_by_video = {}
+    for row in ranked:
+        best_by_video.setdefault(row["video_id"], row)
+    selected = sorted(
+        best_by_video.values(),
+        key=lambda row: (-float(row["score"]), row["proposal_id"]),
+    )
+    return selected if count is None else selected[:count]
+
+
 @torch.no_grad()
-def export_video(model, video, domain, levels, alpha, nms_iou, max_proposals, class_names):
+def export_video(
+    model,
+    video,
+    domain,
+    levels,
+    alpha,
+    nms_iou,
+    max_proposals,
+    class_names,
+    apply_nms=True,
+):
     backbone, neck, cls_head, reg_head = model_modules(model, domain)
     inputs, masks = model.preprocessing([video], mode="validation")
     feats, backbone_masks, _ = backbone(inputs, masks)
@@ -290,6 +315,8 @@ def export_video(model, video, domain, levels, alpha, nms_iou, max_proposals, cl
 
     if not candidates:
         return []
+    if not apply_nms:
+        return candidates
     keep = hard_class_agnostic_nms_indices(
         torch.tensor(grid_segments, dtype=torch.float32),
         torch.tensor(candidate_scores, dtype=torch.float32),
@@ -317,6 +344,11 @@ def main():
     parser.add_argument("--nms-iou", type=float)
     parser.add_argument("--max-proposals-per-video", type=int)
     parser.add_argument("--sample-count", type=int)
+    parser.add_argument(
+        "--selection-protocol",
+        choices=("exact-origin-hard-nms-v1", "sada-top1-anchor-v1"),
+        default="exact-origin-hard-nms-v1",
+    )
     parser.add_argument("--ontology-csv")
     parser.add_argument("--video-root")
     parser.add_argument("--seed", type=int, default=20260810)
@@ -344,6 +376,15 @@ def main():
     class_names = load_class_names(args.ontology_csv)
 
     model = make_meta_arch(cfg["model_name"], cfg, device=args.device).to(args.device)
+    if (
+        args.selection_protocol == "sada-top1-anchor-v1"
+        and levels != list(range(model.n_levels))
+    ):
+        raise ValueError(
+            "sada-top1-anchor-v1 requires every FPN level: {}".format(
+                list(range(model.n_levels))
+            )
+        )
     checkpoint = torch.load(args.checkpoint, map_location=args.device)
     state_key = "ema_state_dict" if args.weights == "ema" else "state_dict"
     if state_key not in checkpoint:
@@ -381,6 +422,7 @@ def main():
                 nms_iou,
                 max_proposals,
                 class_names,
+                apply_nms=args.selection_protocol == "exact-origin-hard-nms-v1",
             )
         )
 
@@ -388,7 +430,10 @@ def main():
         raise RuntimeError("proposal IDs are not unique")
 
     proposal_pool_before_sampling = len(rows)
-    rows = proposal_only_stratified_sample(rows, args.sample_count)
+    if args.selection_protocol == "sada-top1-anchor-v1":
+        rows = proposal_only_top_per_video(rows, args.sample_count)
+    else:
+        rows = proposal_only_stratified_sample(rows, args.sample_count)
 
     database = json.loads(
         Path(cfg["dataset"]["json_file"]).read_text(encoding="utf-8")
@@ -421,14 +466,29 @@ def main():
         "split": args.split,
         "levels": levels,
         "alpha": alpha,
-        "nms": "hard_class_agnostic_exact_origin_v1",
+        "selection_protocol": args.selection_protocol,
+        "candidate_definition": (
+            "valid anchor; top1=max(sigmoid(domain logits)); score>=alpha; "
+            "segment=domain regression at the identical origin anchor"
+            if args.selection_protocol == "sada-top1-anchor-v1"
+            else "top1 anchor followed by hard class-agnostic NMS"
+        ),
+        "nms": (
+            "none_for_original_sada_anchor_eligibility"
+            if args.selection_protocol == "sada-top1-anchor-v1"
+            else "hard_class_agnostic_exact_origin_v1"
+        ),
         "nms_iou": nms_iou,
         "max_proposals_per_video": max_proposals,
         "proposal_pool_before_sampling": proposal_pool_before_sampling,
         "sample_count_requested": args.sample_count,
         "sampling": (
-            "proposal_only_video_class_fpn_score_band_coverage_v1"
-            if args.sample_count is not None else "none"
+            "proposal_only_top_score_per_video_then_global_v1"
+            if args.selection_protocol == "sada-top1-anchor-v1"
+            else (
+                "proposal_only_video_class_fpn_score_band_coverage_v1"
+                if args.sample_count is not None else "none"
+            )
         ),
         "exact_origin_key_fields": [
             "video_id",

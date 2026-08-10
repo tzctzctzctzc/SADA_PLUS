@@ -55,13 +55,13 @@ def test_tiny_synthetic_coarse_fine_score_pipeline(tmp_path):
         root,
         root / "tools" / "build_vlm_boundary_manifest.py",
         "coarse", "--proposals", proposals, "--output", coarse_manifest,
+        "--task-mode", "boundary-only",
     )
     coarse = json.loads(coarse_manifest.read_text(encoding="utf-8").splitlines()[0])
     frames = coarse["frames"]
     start_index, end_index = 4, len(frames) - 6
     assert start_index + 1 < end_index
     coarse_decision = {
-        "action_status": "VALID_ACTION",
         "start_status": "VISIBLE",
         "rough_start_before_frame": frames[start_index]["frame_id"],
         "rough_start_after_frame": frames[start_index + 1]["frame_id"],
@@ -109,7 +109,9 @@ def test_tiny_synthetic_coarse_fine_score_pipeline(tmp_path):
         "--output", report_path,
     )
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    assert report["protocol"].endswith("v2")
+    assert report["protocol"].endswith("v3")
+    assert report["task_mode"] == "boundary-only"
+    assert report["validity"]["applicable"] is False
     assert all(
         variant["evaluator_parity"]["passed"]
         for variant in report["variants"].values()

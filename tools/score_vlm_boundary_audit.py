@@ -195,10 +195,17 @@ def invalidate_result(coarse):
     }
 
 
+def is_boundary_only(query):
+    return query.get("task_mode") == "boundary-only"
+
+
 def vlm_rough_result(proposal, query, decision):
     coarse = list(map(float, proposal["coarse_segment_seconds"]))
     result = invalidate_result(coarse)
-    if not decision or decision.get("action_status") != "VALID_ACTION":
+    if not decision or (
+        not is_boundary_only(query)
+        and decision.get("action_status") != "VALID_ACTION"
+    ):
         return result
     candidate = list(coarse)
     for index, side in enumerate(("start", "end")):
@@ -223,7 +230,10 @@ def vlm_rough_segment(proposal, query, decision):
 
 def vlm_refined_result(proposal, query, coarse_decision, fine_queries, fine_decisions):
     rough = vlm_rough_result(proposal, query, coarse_decision)
-    if not coarse_decision or coarse_decision.get("action_status") != "VALID_ACTION":
+    if not coarse_decision or (
+        not is_boundary_only(query)
+        and coarse_decision.get("action_status") != "VALID_ACTION"
+    ):
         return rough
     coarse = list(map(float, proposal["coarse_segment_seconds"]))
     candidate = list(coarse)
@@ -598,6 +608,10 @@ def main():
     fine_predictions = (
         read_jsonl(args.fine_predictions) if args.fine_predictions else None
     )
+    task_modes = {row.get("task_mode", "validity-and-boundary") for row in coarse_queries}
+    if len(task_modes) != 1:
+        raise ValueError("coarse manifest mixes task modes")
+    task_mode = next(iter(task_modes))
     variants, details = segment_set(
         proposals,
         coarse_queries,
@@ -637,7 +651,8 @@ def main():
         variant_reports[name] = variant_report
 
     report = {
-        "protocol": "fixed-proposal-vlm-boundary-transition-audit-v2",
+        "protocol": "fixed-proposal-vlm-boundary-transition-audit-v3",
+        "task_mode": task_mode,
         "boundary_semantics": {
             "representation": "midpoint of an adjacent chronological frame pair",
             "start": "not-in-action -> in-action",
@@ -646,8 +661,13 @@ def main():
         "fixed_proposal_invariants": {
             "proposal_count": len(proposals),
             "labels_scores_and_proposal_set": "frozen",
+            "sada_action_occurrence_and_class": (
+                "frozen_not_judged_by_vlm"
+                if task_mode == "boundary-only"
+                else "judged_by_vlm"
+            ),
             "renms_after_refinement": False,
-            "invalid_wrong_uncertain_detection_policy": "retain_coarse_segment",
+            "invalid_or_uncertain_side_policy": "retain_coarse_boundary",
             "ground_truth_use": "offline_scoring_only",
             "oracle_candidate_count": args.oracle_candidate_count,
             "oracle_maximum_step": args.oracle_maximum_step,
@@ -675,8 +695,16 @@ def main():
         "variants": variant_reports,
     }
     if coarse_predictions is not None:
-        report["validity"] = validity_metrics(
-            proposals, coarse_queries, coarse_predictions
+        report["validity"] = (
+            {
+                "applicable": False,
+                "reason": "SADA action occurrence and class are frozen; VLM judges boundaries only",
+            }
+            if task_mode == "boundary-only"
+            else {
+                "applicable": True,
+                **validity_metrics(proposals, coarse_queries, coarse_predictions),
+            }
         )
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     Path(args.output).write_text(json.dumps(report, indent=2), encoding="utf-8")

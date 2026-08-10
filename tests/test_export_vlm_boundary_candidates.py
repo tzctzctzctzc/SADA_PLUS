@@ -5,6 +5,7 @@ from tools.export_vlm_boundary_candidates import (
     export_video,
     prediction_only_video,
     proposal_only_stratified_sample,
+    proposal_only_top_per_video,
     proposal_id,
 )
 
@@ -132,6 +133,29 @@ def test_stratified_sample_is_deterministic_and_gt_blind():
     assert len({row["fpn_level"] for row in selected}) == 2
 
 
+def test_top_per_video_uses_only_sada_score_and_is_gt_blind():
+    rows = [
+        {
+            "proposal_id": "v1-low", "video_id": "v1", "score": 0.7,
+            "posthoc_gt": {"kind": "VALID_ACTION"},
+        },
+        {
+            "proposal_id": "v1-high", "video_id": "v1", "score": 0.9,
+            "posthoc_gt": {"kind": "NO_ACTION"},
+        },
+        {
+            "proposal_id": "v2-high", "video_id": "v2", "score": 0.8,
+            "posthoc_gt": {"kind": "WRONG_ACTION"},
+        },
+    ]
+    selected = proposal_only_top_per_video(rows, 2)
+    assert [row["proposal_id"] for row in selected] == ["v1-high", "v2-high"]
+    changed = [dict(row, posthoc_gt={"kind": "VALID_ACTION"}) for row in rows]
+    assert [row["proposal_id"] for row in proposal_only_top_per_video(changed, 2)] == [
+        "v1-high", "v2-high"
+    ]
+
+
 def test_export_video_keeps_post_nms_exact_anchor_identity():
     video = {
         "feats": torch.ones(2, 4),
@@ -151,3 +175,18 @@ def test_export_video_keeps_post_nms_exact_anchor_identity():
         "v1:l0:x0:a0:c0",
         "v1:l0:x3:a3:c0",
     ]
+
+
+def test_export_video_can_preserve_every_original_sada_top1_anchor():
+    video = {
+        "feats": torch.ones(2, 4),
+        "metadata": {
+            "video_id": "v1", "fps": 10, "feat_stride": 2,
+            "feat_num_frames": 2, "duration": 2.0,
+        },
+    }
+    rows = export_video(
+        TinyModel(), video, "target", [0], 0.7, 0.49, 10, {0: "TAKE"},
+        apply_nms=False,
+    )
+    assert [row["origin_anchor_index"] for row in rows] == [0, 1, 3]

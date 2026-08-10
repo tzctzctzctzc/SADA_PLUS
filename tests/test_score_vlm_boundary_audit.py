@@ -143,6 +143,19 @@ def test_refined_segment_accepts_one_side_and_invalid_side_cannot_supervise():
     }
 
 
+def test_boundary_only_decision_does_not_require_action_status():
+    item = proposal()
+    query = {**coarse_query(), "task_mode": "boundary-only"}
+    decision = coarse_decision()
+    decision.pop("action_status")
+    variants, details = segment_set(
+        [item], [query], [prediction(query["query_id"], decision)],
+        return_details=True,
+    )
+    assert variants["vlm_rough"]["p1"] == [3.0, 7.0]
+    assert all(details["vlm_rough"]["p1"][side]["valid"] for side in ("start", "end"))
+
+
 def test_keep_coarse_preserves_rough_transition_with_keep_source():
     item, query = proposal(), coarse_query()
     rows = [fine_query("start", [2.7, 3.0])]

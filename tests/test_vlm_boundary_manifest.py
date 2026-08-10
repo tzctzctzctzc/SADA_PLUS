@@ -118,6 +118,21 @@ def test_fine_manifest_skips_non_valid_coarse_decision():
     assert build_fine_rows(proposals, coarse, prediction) == []
 
 
+def test_boundary_only_manifest_builds_fine_queries_without_action_status():
+    proposals = [proposal()]
+    coarse = build_coarse_rows(proposals, task_mode="boundary-only")
+    decision = visible_pair(coarse[0], "start", 4)
+    decision.pop("action_status")
+    prediction = [{
+        "query_id": coarse[0]["query_id"],
+        "run_status": "ok",
+        "decision": decision,
+    }]
+    fine = build_fine_rows(proposals, coarse, prediction)
+    assert [row["boundary_side"] for row in fine] == ["start"]
+    assert fine[0]["task_mode"] == "boundary-only"
+
+
 def test_manifest_and_scorer_support_direct_script_entrypoints():
     root = Path(__file__).resolve().parents[1]
     for script in (
