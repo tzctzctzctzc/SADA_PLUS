@@ -302,9 +302,10 @@ function parseDecision(text, row) {
       || Object.keys(value).sort().join('|') !== required.sort().join('|')) {
     throw new Error('response keys violate the contract');
   }
-  if (typeof value.reason !== 'string' || value.reason.length > 240) {
+  if (typeof value.reason !== 'string') {
     throw new Error('response reason is invalid');
   }
+  value.reason = value.reason.slice(0, 240);
   if (row.stage === 'coarse') {
     if (typeof value.instance_description !== 'string'
         || value.instance_description.length < 1

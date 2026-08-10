@@ -159,6 +159,16 @@ test('fine contract supports SADA, coarse, candidate, and abstention', () => {
 });
 
 
+test('non-semantic reason overflow is truncated without discarding the decision', () => {
+  const row = { ...fineRow(), task_mode: 'boundary-only' };
+  const parsed = parseDecision(JSON.stringify({
+    decision: 'KEEP_SADA', selected_option: null, reason: 'x'.repeat(300),
+  }), row);
+  assert.equal(parsed.decision, 'KEEP_SADA');
+  assert.equal(parsed.reason.length, 240);
+});
+
+
 test('boundary-only fine contract cannot reject or reclassify SADA action', () => {
   const row = { ...fineRow(), task_mode: 'boundary-only' };
   assert.equal(parseDecision(JSON.stringify({
