@@ -446,6 +446,15 @@ def test_binary_band_oracle_isolates_high_cleanup_and_mid_rescue():
     high = apply_binary_band_oracle(routes, gt, 'high_clean')
     mid = apply_binary_band_oracle(routes, gt, 'mid_rescue')
     both = apply_binary_band_oracle(routes, gt, 'both')
+    high_ignore = apply_binary_band_oracle(
+        routes, gt, 'high_clean', negative_route='ignore'
+    )
+    mid_ignore = apply_binary_band_oracle(
+        routes, gt, 'mid_rescue', negative_route='ignore'
+    )
+    both_ignore = apply_binary_band_oracle(
+        routes, gt, 'both', negative_route='ignore'
+    )
 
     assert control['action'].tolist() == [[True, True, False, False, False]]
     assert control['ignore'].tolist() == [[False, False, True, True, False]]
@@ -456,6 +465,15 @@ def test_binary_band_oracle_isolates_high_cleanup_and_mid_rescue():
     assert both['action'].tolist() == [[True, False, True, False, False]]
     assert both['background'].tolist() == [[False, True, False, True, True]]
     assert not both['ignore'].any()
+    assert high_ignore['action'].tolist() == [[True, False, False, False, False]]
+    assert high_ignore['background'].tolist() == [[False, False, False, False, True]]
+    assert high_ignore['ignore'].tolist() == [[False, True, True, True, False]]
+    assert mid_ignore['action'].tolist() == [[True, True, True, False, False]]
+    assert mid_ignore['background'].tolist() == [[False, False, False, False, True]]
+    assert mid_ignore['ignore'].tolist() == [[False, False, False, True, False]]
+    assert both_ignore['action'].tolist() == [[True, False, True, False, False]]
+    assert both_ignore['background'].tolist() == [[False, False, False, False, True]]
+    assert both_ignore['ignore'].tolist() == [[False, True, False, True, False]]
 
 
 def test_semantic_timestamp_must_match_current_feature_configuration():

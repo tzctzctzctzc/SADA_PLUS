@@ -15,6 +15,9 @@ LEGACY_SEMANTIC_CACHE_SCHEMA_VERSION = "offline-vlm-semantic-evidence-v1"
 SEMANTIC_CACHE_SCHEMA_VERSION = "offline-vlm-bidirectional-semantic-evidence-v2"
 VLM_RESUME_SCHEMA_VERSION = "frozen-routing-teacher-v4"
 BAND_ORACLE_RESUME_SCHEMA_VERSION = "frozen-routing-teacher-band-oracle-v1"
+BAND_ORACLE_IGNORE_RESUME_SCHEMA_VERSION = (
+    "frozen-routing-teacher-band-oracle-ignore-v1"
+)
 VLM_TRANSITION_SCHEMA_VERSION = "sada-to-vlm-continuation-v2"
 LOW_PROMPT_ROLE = "low_rescue"
 HIGH_PROMPT_ROLE = "high_veto"
@@ -34,6 +37,7 @@ BINARY_BAND_ORACLE_MODES = {
     "mid_rescue",
     "both",
 }
+BINARY_BAND_NEGATIVE_ROUTES = {"background", "ignore"}
 SEMANTIC_LABELS = {
     "TARGET_ACTION",
     "OTHER_ACTIVITY",
@@ -256,14 +260,21 @@ def build_vlm_signature(
     routing_teacher_weights,
     semantic_prompt_protocols=None,
     binary_band_oracle_mode="off",
+    binary_band_negative_route="background",
 ):
     if binary_band_oracle_mode not in BINARY_BAND_ORACLE_MODES:
         raise ValueError("unknown binary band Oracle mode")
+    if binary_band_negative_route not in BINARY_BAND_NEGATIVE_ROUTES:
+        raise ValueError("unknown binary band Oracle negative route")
     signature = {
         "schema_version": (
             VLM_RESUME_SCHEMA_VERSION
             if binary_band_oracle_mode == "off"
-            else BAND_ORACLE_RESUME_SCHEMA_VERSION
+            else (
+                BAND_ORACLE_RESUME_SCHEMA_VERSION
+                if binary_band_negative_route == "background"
+                else BAND_ORACLE_IGNORE_RESUME_SCHEMA_VERSION
+            )
         ),
         "semantic_cache_sha256": semantic_cache_sha256,
         "validity_artifact_sha256": validity_artifact_sha256,
@@ -278,6 +289,7 @@ def build_vlm_signature(
     }
     if binary_band_oracle_mode != "off":
         signature["binary_band_oracle_mode"] = binary_band_oracle_mode
+        signature["binary_band_negative_route"] = binary_band_negative_route
     signature["signature_sha256"] = _canonical_sha256(signature)
     return signature
 
@@ -657,10 +669,21 @@ def target_labels_from_full_routing(route, valid_mask, num_classes, dtype):
     return labels, action, background, ignore
 
 
-def apply_binary_band_oracle(route, gt_labels, mode):
+def apply_binary_band_oracle(
+    route,
+    gt_labels,
+    mode,
+    negative_route="background",
+):
     """Apply a GT action/background diagnostic to frozen-teacher score bands."""
     if mode not in BINARY_BAND_ORACLE_MODES - {"off"}:
         raise ValueError("unknown binary band Oracle mode: {}".format(mode))
+    if negative_route not in BINARY_BAND_NEGATIVE_ROUTES:
+        raise ValueError(
+            "unknown binary band Oracle negative route: {}".format(
+                negative_route
+            )
+        )
     if gt_labels.shape[:-1] != route["valid"].shape:
         raise ValueError("binary band Oracle GT shape differs from routing mask")
 
@@ -682,14 +705,19 @@ def apply_binary_band_oracle(route, gt_labels, mode):
     if mode in {"high_clean", "both"}:
         high_background = high & ~gt_foreground
         action &= ~high_background
-        background |= high_background
+        if negative_route == "background":
+            background |= high_background
+        else:
+            ignore |= high_background
 
     if mode in {"mid_rescue", "both"}:
         mid_foreground = mid & gt_foreground
         mid_background = mid & ~gt_foreground
         action |= mid_foreground
-        background |= mid_background
-        ignore &= ~mid
+        ignore &= ~mid_foreground
+        if negative_route == "background":
+            background |= mid_background
+            ignore &= ~mid_background
 
     partition = (
         action.to(torch.int8)

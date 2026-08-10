@@ -24,6 +24,7 @@ from .anchor_validity import (
 )
 from .vlm_routing import (
     BINARY_BAND_ORACLE_MODES,
+    BINARY_BAND_NEGATIVE_ROUTES,
     ROUTING_MODES,
     apply_binary_band_oracle,
     build_full_vlm_routing,
@@ -310,6 +311,15 @@ class SADA(nn.Module):
             raise ValueError(
                 'unknown binary band Oracle mode: {}'.format(
                     self.binary_band_oracle_mode
+                )
+            )
+        self.binary_band_negative_route = cfg.get('diagnostic', {}).get(
+            'binary_band_negative_route', 'background'
+        )
+        if self.binary_band_negative_route not in BINARY_BAND_NEGATIVE_ROUTES:
+            raise ValueError(
+                'unknown binary band Oracle negative route: {}'.format(
+                    self.binary_band_negative_route
                 )
             )
         self.oracle_target_regression_mode = cfg.get('diagnostic', {}).get(
@@ -2058,6 +2068,7 @@ class SADA(nn.Module):
                                 route_l,
                                 gts_per_level_tgt[l],
                                 self.binary_band_oracle_mode,
+                                self.binary_band_negative_route,
                             )
                         (
                             pseudo_gt_cls_target,

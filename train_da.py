@@ -318,6 +318,9 @@ def main(cfg, resume, project_name='sada', debug=False):
                 binary_band_oracle_mode=cfg.get('diagnostic', {}).get(
                     'binary_band_oracle', 'off'
                 ),
+                binary_band_negative_route=cfg.get('diagnostic', {}).get(
+                    'binary_band_negative_route', 'background'
+                ),
             )
             del teacher_checkpoint
     elif cfg.get('vlm_routing', {}).get('enabled', False):
@@ -771,6 +774,12 @@ def create_argparser():
         ),
     )
     parser.add_argument(
+        '--binary-band-negative-route',
+        choices=['background', 'ignore'],
+        default='background',
+        help='route Oracle-confirmed negatives to background or keep them ignored',
+    )
+    parser.add_argument(
         '--oracle-target-regression', choices=['off', 'selected', 'full'],
         default='off',
         help='diagnostic target boundary loss using target GT; not a UDA method',
@@ -942,6 +951,7 @@ if __name__ == '__main__':
     config_dict['diagnostic'] = {
         'oracle_routing': args.oracle_routing,
         'binary_band_oracle': args.binary_band_oracle,
+        'binary_band_negative_route': args.binary_band_negative_route,
         'oracle_target_regression': args.oracle_target_regression,
         'oracle_target_regression_weight': args.oracle_target_regression_weight,
         'target_regression_levels': target_regression_levels,
