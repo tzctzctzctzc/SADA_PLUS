@@ -322,6 +322,9 @@ class SADA(nn.Module):
                     self.binary_band_negative_route
                 )
             )
+        self.binary_band_oracle_levels = cfg.get('diagnostic', {}).get(
+            'binary_band_oracle_levels'
+        )
         self.oracle_target_regression_mode = cfg.get('diagnostic', {}).get(
             'oracle_target_regression', 'off'
         )
@@ -2063,7 +2066,13 @@ class SADA(nn.Module):
                     elif vlm_routes is not None:
                         route_l = vlm_routes[l]
                         route_valid = fpn_masks_tgt[l]
-                        if self.binary_band_oracle_mode != 'off':
+                        if (
+                            self.binary_band_oracle_mode != 'off'
+                            and (
+                                self.binary_band_oracle_levels is None
+                                or l in self.binary_band_oracle_levels
+                            )
+                        ):
                             route_l = apply_binary_band_oracle(
                                 route_l,
                                 gts_per_level_tgt[l],

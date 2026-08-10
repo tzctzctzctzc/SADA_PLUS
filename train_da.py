@@ -321,6 +321,9 @@ def main(cfg, resume, project_name='sada', debug=False):
                 binary_band_negative_route=cfg.get('diagnostic', {}).get(
                     'binary_band_negative_route', 'background'
                 ),
+                binary_band_oracle_levels=cfg.get('diagnostic', {}).get(
+                    'binary_band_oracle_levels'
+                ),
             )
             del teacher_checkpoint
     elif cfg.get('vlm_routing', {}).get('enabled', False):
@@ -784,6 +787,13 @@ def create_argparser():
         help='route Oracle-confirmed negatives to background or keep them ignored',
     )
     parser.add_argument(
+        '--binary-band-oracle-levels', default=None,
+        help=(
+            'optional comma-separated FPN levels on which the Oracle '
+            'correction is applied; other aligned levels keep control routing'
+        ),
+    )
+    parser.add_argument(
         '--oracle-target-regression', choices=['off', 'selected', 'full'],
         default='off',
         help='diagnostic target boundary loss using target GT; not a UDA method',
@@ -923,6 +933,22 @@ if __name__ == '__main__':
             raise ValueError(
                 'binary band Oracle and legacy Oracle routing are mutually exclusive'
             )
+    binary_band_oracle_levels = None
+    if args.binary_band_oracle_levels is not None:
+        binary_band_oracle_levels = [
+            int(level.strip())
+            for level in args.binary_band_oracle_levels.split(',')
+            if level.strip()
+        ]
+        if (
+            not binary_band_oracle_levels
+            or len(set(binary_band_oracle_levels))
+            != len(binary_band_oracle_levels)
+            or any(level < 0 or level > 5 for level in binary_band_oracle_levels)
+        ):
+            raise ValueError(
+                'binary band Oracle levels must be unique values from 0 to 5'
+            )
     diagnostic_levels = None
     if args.diagnostic_alignment_levels is not None:
         diagnostic_levels = [
@@ -956,6 +982,7 @@ if __name__ == '__main__':
         'oracle_routing': args.oracle_routing,
         'binary_band_oracle': args.binary_band_oracle,
         'binary_band_negative_route': args.binary_band_negative_route,
+        'binary_band_oracle_levels': binary_band_oracle_levels,
         'oracle_target_regression': args.oracle_target_regression,
         'oracle_target_regression_weight': args.oracle_target_regression_weight,
         'target_regression_levels': target_regression_levels,

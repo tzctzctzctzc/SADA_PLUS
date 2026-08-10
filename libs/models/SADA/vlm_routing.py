@@ -279,6 +279,7 @@ def build_vlm_signature(
     semantic_prompt_protocols=None,
     binary_band_oracle_mode="off",
     binary_band_negative_route="background",
+    binary_band_oracle_levels=None,
 ):
     if binary_band_oracle_mode not in BINARY_BAND_ORACLE_MODES:
         raise ValueError("unknown binary band Oracle mode")
@@ -308,6 +309,11 @@ def build_vlm_signature(
     if binary_band_oracle_mode != "off":
         signature["binary_band_oracle_mode"] = binary_band_oracle_mode
         signature["binary_band_negative_route"] = binary_band_negative_route
+        signature["binary_band_oracle_levels"] = (
+            None
+            if binary_band_oracle_levels is None
+            else list(binary_band_oracle_levels)
+        )
     signature["signature_sha256"] = _canonical_sha256(signature)
     return signature
 

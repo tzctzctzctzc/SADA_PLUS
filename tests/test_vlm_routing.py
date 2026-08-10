@@ -654,6 +654,24 @@ def test_resume_signature_rejects_changed_mode_or_artifact():
     }
     with pytest.raises(ValueError, match="signature differs"):
         validate_vlm_resume({"vlm_routing": signature}, changed_protocol)
+
+    band_signature = build_vlm_signature(
+        "a" * 64,
+        "b" * 64,
+        "mid_confidence_ignore",
+        0.1,
+        0.7,
+        1,
+        "c" * 64,
+        "ema",
+        binary_band_oracle_mode="full_actionness",
+        binary_band_oracle_levels=[0, 2],
+    )
+    assert band_signature["binary_band_oracle_levels"] == [0, 2]
+    changed_levels = dict(band_signature)
+    changed_levels["binary_band_oracle_levels"] = [0]
+    with pytest.raises(ValueError, match="signature differs"):
+        validate_vlm_resume({"vlm_routing": band_signature}, changed_levels)
     with pytest.raises(ValueError, match="no frozen VLM routing signature"):
         validate_vlm_resume({}, signature)
 
