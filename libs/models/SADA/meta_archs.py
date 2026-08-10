@@ -2066,13 +2066,14 @@ class SADA(nn.Module):
                     elif vlm_routes is not None:
                         route_l = vlm_routes[l]
                         route_valid = fpn_masks_tgt[l]
-                        if (
+                        binary_oracle_applied = (
                             self.binary_band_oracle_mode != 'off'
                             and (
                                 self.binary_band_oracle_levels is None
                                 or l in self.binary_band_oracle_levels
                             )
-                        ):
+                        )
+                        if binary_oracle_applied:
                             route_l = apply_binary_band_oracle(
                                 route_l,
                                 gts_per_level_tgt[l],
@@ -2127,7 +2128,7 @@ class SADA(nn.Module):
                             losses[metric_prefix + metric_name] = (
                                 metric_mask.sum().float()
                             )
-                        if self.binary_band_oracle_mode != 'off':
+                        if binary_oracle_applied:
                             for metric_name in (
                                 'band_oracle_gt_foreground',
                                 'band_oracle_high_background',
