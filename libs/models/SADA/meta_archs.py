@@ -336,6 +336,33 @@ class SADA(nn.Module):
                     self.diagnostic_target_alignment
                 )
             )
+        self.diagnostic_action_levels = cfg.get('diagnostic', {}).get(
+            'action_alignment_levels'
+        )
+        self.diagnostic_background_levels = cfg.get('diagnostic', {}).get(
+            'background_alignment_levels'
+        )
+        if (self.diagnostic_action_levels is None) != (
+            self.diagnostic_background_levels is None
+        ):
+            raise ValueError(
+                'diagnostic action/background levels must be set together'
+            )
+        if self.diagnostic_action_levels is not None:
+            content_levels = (
+                list(self.diagnostic_action_levels)
+                + list(self.diagnostic_background_levels)
+            )
+            alignment_levels = cfg['model'].get(
+                'semantic_alignment_levels', range(self.n_levels)
+            )
+            if (
+                any(level < 0 or level >= self.n_levels for level in content_levels)
+                or set(content_levels) != set(alignment_levels)
+            ):
+                raise ValueError(
+                    'diagnostic action/background levels do not match aligned levels'
+                )
         self.oracle_target_regression_mode = cfg.get('diagnostic', {}).get(
             'oracle_target_regression', 'off'
         )
@@ -2243,7 +2270,13 @@ class SADA(nn.Module):
                     weight_level['weight_level_5'] = self.cfg['model'].get('weight_level_5', 1.0)
                     
                     
-                    if self.diagnostic_target_alignment == 'action':
+                    if self.diagnostic_action_levels is not None:
+                        alignment_classes = []
+                        if l in self.diagnostic_action_levels:
+                            alignment_classes.extend(range(self.num_class_orig))
+                        if l in self.diagnostic_background_levels:
+                            alignment_classes.append(self.num_class_orig)
+                    elif self.diagnostic_target_alignment == 'action':
                         alignment_classes = range(self.num_class_orig)
                     elif self.diagnostic_target_alignment == 'background':
                         alignment_classes = (self.num_class_orig,)

@@ -825,6 +825,14 @@ def create_argparser():
         ),
     )
     parser.add_argument(
+        '--diagnostic-action-levels', default=None,
+        help='comma-separated aligned FPN levels that use action classes',
+    )
+    parser.add_argument(
+        '--diagnostic-background-levels', default=None,
+        help='comma-separated aligned FPN levels that use background',
+    )
+    parser.add_argument(
         '--stop-after-epoch', type=int, default=None,
         help='stop after this epoch without changing the scheduler horizon',
     )
@@ -975,6 +983,42 @@ if __name__ == '__main__':
                 'diagnostic alignment levels must be unique values from 0 to 5'
             )
         config_dict['model']['semantic_alignment_levels'] = diagnostic_levels
+    diagnostic_action_levels = None
+    diagnostic_background_levels = None
+    if (
+        args.diagnostic_action_levels is not None
+        or args.diagnostic_background_levels is not None
+    ):
+        if (
+            args.diagnostic_action_levels is None
+            or args.diagnostic_background_levels is None
+            or diagnostic_levels is None
+        ):
+            raise ValueError(
+                'per-level alignment content requires action, background, '
+                'and diagnostic alignment levels'
+            )
+        diagnostic_action_levels = [
+            int(level.strip())
+            for level in args.diagnostic_action_levels.split(',')
+            if level.strip()
+        ]
+        diagnostic_background_levels = [
+            int(level.strip())
+            for level in args.diagnostic_background_levels.split(',')
+            if level.strip()
+        ]
+        content_levels = diagnostic_action_levels + diagnostic_background_levels
+        if (
+            len(set(diagnostic_action_levels)) != len(diagnostic_action_levels)
+            or len(set(diagnostic_background_levels))
+            != len(diagnostic_background_levels)
+            or any(level < 0 or level > 5 for level in content_levels)
+            or set(content_levels) != set(diagnostic_levels)
+        ):
+            raise ValueError(
+                'action/background level union must equal diagnostic levels'
+            )
     target_regression_levels = [
         int(level.strip())
         for level in args.oracle_target_regression_levels.split(',')
@@ -1000,6 +1044,8 @@ if __name__ == '__main__':
         'no_conditional_update': args.diagnostic_no_ca,
         'alignment_levels': diagnostic_levels,
         'target_alignment': args.diagnostic_target_alignment,
+        'action_alignment_levels': diagnostic_action_levels,
+        'background_alignment_levels': diagnostic_background_levels,
     }
 
     update_config_with_arguments(config_dict, args, ARGS_TYPES, ARGS_CONFIGPATH)
