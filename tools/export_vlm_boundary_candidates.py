@@ -5,6 +5,7 @@ complete proposal set has been frozen and is used solely by offline scoring.
 """
 
 import argparse
+from collections import Counter
 import csv
 import json
 import random
@@ -159,6 +160,45 @@ def attach_posthoc_gt(rows, database, action_subsampling):
         }
 
 
+def proposal_only_stratified_sample(rows, count):
+    """Select a deterministic coverage sample before any ground truth is attached."""
+    if count is None or count >= len(rows):
+        return list(rows)
+    if count <= 0:
+        raise ValueError("sample count must be positive")
+
+    ranked = sorted(rows, key=lambda row: (-float(row["score"]), row["proposal_id"]))
+    score_band = {
+        row["proposal_id"]: min(2, index * 3 // len(ranked))
+        for index, row in enumerate(ranked)
+    }
+    dimensions = (
+        lambda row: row["video_id"],
+        lambda row: int(row["predicted_class_id"]),
+        lambda row: int(row["fpn_level"]),
+        lambda row: score_band[row["proposal_id"]],
+    )
+    counts = [Counter() for _ in dimensions]
+    remaining = list(ranked)
+    selected = []
+    while len(selected) < count:
+        def priority(row):
+            values = [dimension(row) for dimension in dimensions]
+            return (
+                sum(count[value] == 0 for count, value in zip(counts, values)),
+                *(int(count[value] == 0) for count, value in zip(counts, values)),
+                *(-count[value] for count, value in zip(counts, values)),
+                float(row["score"]),
+            )
+
+        chosen = max(remaining, key=priority)
+        selected.append(chosen)
+        remaining.remove(chosen)
+        for counter, dimension in zip(counts, dimensions):
+            counter[dimension(chosen)] += 1
+    return selected
+
+
 @torch.no_grad()
 def export_video(model, video, domain, levels, alpha, nms_iou, max_proposals, class_names):
     backbone, neck, cls_head, reg_head = model_modules(model, domain)
@@ -276,6 +316,7 @@ def main():
     parser.add_argument("--alpha", type=float)
     parser.add_argument("--nms-iou", type=float)
     parser.add_argument("--max-proposals-per-video", type=int)
+    parser.add_argument("--sample-count", type=int)
     parser.add_argument("--ontology-csv")
     parser.add_argument("--video-root")
     parser.add_argument("--seed", type=int, default=20260810)
@@ -346,6 +387,9 @@ def main():
     if len({row["proposal_id"] for row in rows}) != len(rows):
         raise RuntimeError("proposal IDs are not unique")
 
+    proposal_pool_before_sampling = len(rows)
+    rows = proposal_only_stratified_sample(rows, args.sample_count)
+
     database = json.loads(
         Path(cfg["dataset"]["json_file"]).read_text(encoding="utf-8")
     )["database"]
@@ -380,6 +424,12 @@ def main():
         "nms": "hard_class_agnostic_exact_origin_v1",
         "nms_iou": nms_iou,
         "max_proposals_per_video": max_proposals,
+        "proposal_pool_before_sampling": proposal_pool_before_sampling,
+        "sample_count_requested": args.sample_count,
+        "sampling": (
+            "proposal_only_video_class_fpn_score_band_coverage_v1"
+            if args.sample_count is not None else "none"
+        ),
         "exact_origin_key_fields": [
             "video_id",
             "fpn_level",

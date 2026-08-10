@@ -4,6 +4,7 @@ from tools.export_vlm_boundary_candidates import (
     attach_posthoc_gt,
     export_video,
     prediction_only_video,
+    proposal_only_stratified_sample,
     proposal_id,
 )
 
@@ -106,6 +107,29 @@ def test_prediction_view_strips_all_annotation_tensors():
     }
     view = prediction_only_video(raw, "cpu")
     assert set(view) == {"feats", "metadata"}
+
+
+def test_stratified_sample_is_deterministic_and_gt_blind():
+    rows = []
+    for index in range(12):
+        row = {
+            "proposal_id": "p{:02d}".format(index),
+            "video_id": "v{}".format(index % 4),
+            "predicted_class_id": index % 3,
+            "fpn_level": index % 2,
+            "score": 0.99 - index * 0.02,
+            "posthoc_gt": {"kind": "VALID_ACTION" if index % 2 else "NO_ACTION"},
+        }
+        rows.append(row)
+    selected = proposal_only_stratified_sample(rows, 6)
+    changed_gt = [dict(row, posthoc_gt={"kind": "WRONG_ACTION"}) for row in rows]
+    selected_changed_gt = proposal_only_stratified_sample(changed_gt, 6)
+    assert [row["proposal_id"] for row in selected] == [
+        row["proposal_id"] for row in selected_changed_gt
+    ]
+    assert len({row["video_id"] for row in selected}) == 4
+    assert len({row["predicted_class_id"] for row in selected}) == 3
+    assert len({row["fpn_level"] for row in selected}) == 2
 
 
 def test_export_video_keeps_post_nms_exact_anchor_identity():
