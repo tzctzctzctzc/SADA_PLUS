@@ -41,6 +41,7 @@ BINARY_BAND_ORACLE_MODES = {
     "background_clean",
     "full_actionness",
     "high_class_correct",
+    "mid_rescue_class_correct",
     "full_class_correct",
 }
 BINARY_BAND_NEGATIVE_ROUTES = {"background", "ignore"}
@@ -740,7 +741,7 @@ def apply_binary_band_oracle(
         else:
             ignore |= high_background
 
-    if mode in {"mid_rescue", "both"}:
+    if mode in {"mid_rescue", "mid_rescue_class_correct", "both"}:
         mid_foreground = mid & gt_foreground
         mid_background = mid & ~gt_foreground
         action |= mid_foreground
@@ -771,13 +772,22 @@ def apply_binary_band_oracle(
         ignore = torch.zeros_like(valid)
 
     action_labels = None
-    if mode in {"high_class_correct", "full_class_correct"}:
+    if mode in {
+        "high_class_correct",
+        "mid_rescue_class_correct",
+        "full_class_correct",
+    }:
         pseudo_class = route["pseudo_class"]
         action_labels = torch.zeros_like(gt_labels)
         action_labels[action] = F.one_hot(
             pseudo_class[action], num_classes=gt_labels.shape[-1]
         ).to(gt_labels.dtype)
-        corrected = action if mode == "full_class_correct" else high & gt_foreground
+        if mode == "full_class_correct":
+            corrected = action
+        elif mode == "mid_rescue_class_correct":
+            corrected = mid & gt_foreground
+        else:
+            corrected = high & gt_foreground
         action_labels[corrected] = gt_labels[corrected]
 
     partition = (

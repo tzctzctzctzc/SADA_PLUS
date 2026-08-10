@@ -772,7 +772,8 @@ def create_argparser():
         choices=[
             'off', 'control', 'high_clean', 'mid_rescue', 'low_rescue',
             'both', 'foreground_rescue', 'background_clean',
-            'full_actionness', 'high_class_correct', 'full_class_correct',
+            'full_actionness', 'high_class_correct',
+            'mid_rescue_class_correct', 'full_class_correct',
         ],
         default='off',
         help=(

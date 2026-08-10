@@ -499,6 +499,9 @@ def test_binary_band_oracle_factorizes_full_routing_and_class_correction():
     background = apply_binary_band_oracle(routes, gt, 'background_clean')
     full = apply_binary_band_oracle(routes, gt, 'full_actionness')
     high_class = apply_binary_band_oracle(routes, gt, 'high_class_correct')
+    mid_class = apply_binary_band_oracle(
+        routes, gt, 'mid_rescue_class_correct', negative_route='ignore'
+    )
     full_class = apply_binary_band_oracle(routes, gt, 'full_class_correct')
 
     assert low['action'].tolist() == [[True, True, False, False, True, False]]
@@ -517,6 +520,13 @@ def test_binary_band_oracle_factorizes_full_routing_and_class_correction():
     assert high_action.tolist() == [[True, True, False, False, False, False]][0]
     assert high_labels.tolist() == [[0.0, 1.0], [1.0, 0.0], [0.0, 0.0],
                                     [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
+
+    mid_labels, mid_action, _, _ = target_labels_from_full_routing(
+        mid_class, valid, num_classes=2, dtype=torch.float32
+    )
+    assert mid_action.tolist() == [True, True, True, False, False, False]
+    assert mid_labels.tolist() == [[1.0, 0.0], [1.0, 0.0], [0.0, 1.0],
+                                   [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
 
     full_labels, full_action, _, _ = target_labels_from_full_routing(
         full_class, valid, num_classes=2, dtype=torch.float32
