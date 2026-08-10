@@ -15,24 +15,38 @@ import {
 } from '../tools/run_vlm_boundary_audit.mjs';
 
 
+function frame(frameId, frameIndex) {
+  return { frame_id: frameId, frame_index: frameIndex, timestamp_sec: frameIndex / 30 };
+}
+
+
 function coarseRow() {
   return {
-    query_schema_version: 'vlm-boundary-query-v3',
+    query_schema_version: 'vlm-boundary-query-v4',
     stage: 'coarse',
     task_mode: 'validity-and-boundary',
     query_id: 'p:coarse',
     proposal_id: 'p',
     predicted_class_name: 'PUT',
     predicted_class_id: 1,
-    coarse_segment_seconds: [2, 5],
+    coarse_segment_seconds: [1, 3],
+    fps: 30,
     score: 0.999,
     fpn_level: 2,
     posthoc_gt: { kind: 'NO_ACTION' },
     frames: [
-      { frame_id: 'F1', timestamp_sec: 1 },
-      { frame_id: 'F2', timestamp_sec: 3 },
-      { frame_id: 'F3', timestamp_sec: 6 },
-      { frame_id: 'F4', timestamp_sec: 8 },
+      frame('F1', 0), frame('F2', 2), frame('F3', 30), frame('F4', 32),
+      frame('F5', 60), frame('F6', 62), frame('F7', 90), frame('F8', 92),
+    ],
+    context_frame_ids: ['F1', 'F8'],
+    instance_anchor_frame_ids: ['F3', 'F6'],
+    start_candidates: [
+      { option: 'B', before_frame_id: 'F1', after_frame_id: 'F2', timestamp_sec: 1 / 30 },
+      { option: 'A', before_frame_id: 'F3', after_frame_id: 'F4', timestamp_sec: 31 / 30 },
+    ],
+    end_candidates: [
+      { option: 'D', before_frame_id: 'F5', after_frame_id: 'F6', timestamp_sec: 61 / 30 },
+      { option: 'C', before_frame_id: 'F7', after_frame_id: 'F8', timestamp_sec: 91 / 30 },
     ],
   };
 }
@@ -44,50 +58,45 @@ function fineRow() {
     stage: 'fine',
     query_id: 'p:fine:start',
     boundary_side: 'start',
-    rough_boundary_seconds: 2,
-    frames: [
-      { frame_id: 'F1', timestamp_sec: 1.7 },
-      { frame_id: 'F2', timestamp_sec: 1.9 },
-      { frame_id: 'F3', timestamp_sec: 2.1 },
-      { frame_id: 'F4', timestamp_sec: 2.3 },
-    ],
+    instance_description: 'right hand places the white bowl on the counter',
+    sada_boundary_seconds: 1,
+    rough_boundary_seconds: 31 / 30,
+    frames: [frame('F1', 27), frame('F2', 29), frame('F3', 30), frame('F4', 32)],
+    instance_anchor_frame_ids: ['F3'],
     candidates: [
-      { option: 'C', before_frame_id: 'F1', after_frame_id: 'F2', timestamp_sec: 1.8 },
-      { option: 'A', before_frame_id: 'F2', after_frame_id: 'F3', timestamp_sec: 2.0 },
-      { option: 'B', before_frame_id: 'F3', after_frame_id: 'F4', timestamp_sec: 2.2 },
+      { option: 'B', before_frame_id: 'F1', after_frame_id: 'F2', timestamp_sec: 28 / 30 },
+      { option: 'A', before_frame_id: 'F3', after_frame_id: 'F4', timestamp_sec: 31 / 30 },
     ],
   };
 }
 
 
-function oneSideCoarseDecision() {
+function coarseDecision() {
   return {
     action_status: 'VALID_ACTION',
-    start_status: 'VISIBLE',
-    rough_start_before_frame: 'F1',
-    rough_start_after_frame: 'F2',
-    end_status: 'NOT_VISIBLE',
-    rough_end_before_frame: null,
-    rough_end_after_frame: null,
-    reason: 'start only',
+    instance_description: 'right hand places the white bowl on the counter',
+    start_decision: 'KEEP_SADA',
+    selected_start_option: null,
+    end_decision: 'SELECT_CANDIDATE',
+    selected_end_option: 'C',
+    reason: 'SADA start is already best; option C clearly brackets the same bowl',
   };
 }
 
 
-test('prompt whitelist excludes metadata and defines one transition protocol', () => {
+test('prompt whitelist excludes metadata and defines conservative residual protocol', () => {
   const row = coarseRow();
   const fields = promptFields(row);
   assert.equal('score' in fields, false);
   assert.equal('fpn_level' in fields, false);
   assert.equal('posthoc_gt' in fields, false);
   const prompt = promptFor(row);
-  assert.equal(PROMPT_VERSION, 'vlm-boundary-sada-top1-boundary-only-v4');
-  assert.match(prompt, /complete narrated action interval/);
-  assert.match(prompt, /only part of its complete interval is\s+shown/);
-  assert.match(prompt, /return VALID_ACTION/);
-  assert.match(prompt, /full place\/leave event/);
-  assert.match(prompt, /not in the action; adjacent after-frame is in the action/);
-  assert.match(prompt, /before-frame is in the action; adjacent after-frame is not/);
+  assert.equal(PROMPT_VERSION, 'vlm-boundary-sada-residual-instance-v5');
+  assert.match(prompt, /complete narrated action instance/);
+  assert.match(prompt, /instance_description/);
+  assert.match(prompt, /KEEP_SADA is the safe default/);
+  assert.match(prompt, /context only/);
+  assert.match(prompt, /complete narrated place\/leave instance/);
   assert.equal(prompt.includes('0.999'), false);
   assert.equal(
     requestFingerprint(row, 'model', 'responses'),
@@ -96,95 +105,88 @@ test('prompt whitelist excludes metadata and defines one transition protocol', (
 });
 
 
-test('boundary-only contract freezes SADA action and accepts only boundary fields', () => {
+test('boundary-only contract freezes SADA action and omits action status', () => {
   const row = { ...coarseRow(), task_mode: 'boundary-only' };
-  const decision = { ...oneSideCoarseDecision() };
+  const decision = { ...coarseDecision() };
   delete decision.action_status;
-  assert.equal(parseDecision(JSON.stringify(decision), row).start_status, 'VISIBLE');
+  assert.equal(parseDecision(JSON.stringify(decision), row).start_decision, 'KEEP_SADA');
   assert.throws(() => parseDecision(JSON.stringify({
     ...decision, action_status: 'VALID_ACTION',
   }), row), /keys violate/);
   const prompt = promptFor(row);
-  assert.match(prompt, /fixed inputs from high-confidence SADA/);
-  assert.match(prompt, /only task is to locate its\s+complete START and END/);
+  assert.match(prompt, /frozen high-confidence SADA inputs/);
   assert.equal(prompt.includes('WRONG_ACTION'), false);
   assert.equal(prompt.includes('NO_ACTION'), false);
 });
 
 
-test('coarse contract accepts one visible side and enforces adjacent pairs', () => {
-  const coarse = coarseRow();
-  assert.equal(
-    parseDecision(JSON.stringify(oneSideCoarseDecision()), coarse).start_status,
-    'VISIBLE',
-  );
+test('coarse contract validates side-specific options and legal final order', () => {
+  const row = coarseRow();
+  assert.equal(parseDecision(JSON.stringify(coarseDecision()), row).selected_end_option, 'C');
   assert.throws(() => parseDecision(JSON.stringify({
-    ...oneSideCoarseDecision(), rough_start_after_frame: 'F3',
-  }), coarse), /invalid/);
+    ...coarseDecision(), selected_end_option: 'A',
+  }), row), /invalid/);
   assert.throws(() => parseDecision(JSON.stringify({
-    ...oneSideCoarseDecision(), action_status: 'NO_ACTION',
-  }), coarse), /cannot have a visible/);
-  const normalized = parseDecision(JSON.stringify({
-    ...oneSideCoarseDecision(), end_status: 'UNCERTAIN', rough_end_before_frame: 'F3',
-  }), coarse);
-  assert.equal(normalized.rough_end_before_frame, null);
-  assert.equal(normalized.rough_end_after_frame, null);
+    ...coarseDecision(), action_status: 'NO_ACTION',
+  }), row), /cannot select/);
+  assert.throws(() => parseDecision(JSON.stringify({
+    ...coarseDecision(), end_decision: 'SELECT_CANDIDATE', selected_end_option: 'D',
+  }), { ...row, coarse_segment_seconds: [2.5, 3] }), /must precede/);
 });
 
 
-test('fine contract supports candidate, KEEP, abstention, and rejection', () => {
+test('fine contract supports SADA, coarse, candidate, and abstention', () => {
   const row = fineRow();
   assert.equal(parseDecision(JSON.stringify({
     decision: 'SELECT_CANDIDATE', selected_option: 'A', reason: 'edge',
   }), row).selected_option, 'A');
   for (const decision of [
-    'KEEP_COARSE', 'NO_VISIBLE_BOUNDARY', 'UNCERTAIN', 'WRONG_ACTION', 'NO_ACTION',
+    'KEEP_SADA', 'KEEP_COARSE', 'NO_VISIBLE_BOUNDARY', 'UNCERTAIN',
+    'WRONG_ACTION', 'NO_ACTION',
   ]) {
     assert.equal(parseDecision(JSON.stringify({
       decision, selected_option: null, reason: 'valid alternative',
     }), row).decision, decision);
   }
-  assert.throws(() => parseDecision(JSON.stringify({
-    decision: 'SELECT_CANDIDATE', selected_option: 'Z', reason: 'bad',
-  }), row), /invalid/);
-  assert.match(promptFor(row), /KEEP_COARSE/);
-  assert.match(promptFor(row), /Current coarse start boundary: 2\.000s/);
-  assert.match(promptFor(row), /only when one option/);
-  assert.match(promptFor(row), /Do not move\s+the boundary inward/);
+  assert.match(promptFor(row), /Original SADA start boundary: 1\.000s/);
+  assert.match(promptFor(row), /Frozen visual instance/);
   assert.deepEqual(resolvedBoundaryOutput(row, {
-    decision: 'SELECT_CANDIDATE', selected_option: 'A', reason: 'edge',
-  }), { seconds: 2, valid: true, source: 'VLM' });
+    decision: 'KEEP_SADA', selected_option: null, reason: 'keep',
+  }), { seconds: 1, valid: true, source: 'SADA_KEEP' });
   assert.deepEqual(resolvedBoundaryOutput(row, {
     decision: 'KEEP_COARSE', selected_option: null, reason: 'keep',
-  }), { seconds: 2, valid: true, source: 'KEEP' });
-  assert.deepEqual(resolvedBoundaryOutput(row, {
-    decision: 'UNCERTAIN', selected_option: null, reason: 'blur',
-  }), { seconds: 2, valid: false, source: 'INVALID' });
+  }), { seconds: 31 / 30, valid: true, source: 'COARSE_KEEP' });
 });
 
 
 test('boundary-only fine contract cannot reject or reclassify SADA action', () => {
   const row = { ...fineRow(), task_mode: 'boundary-only' };
   assert.equal(parseDecision(JSON.stringify({
-    decision: 'KEEP_COARSE', selected_option: null, reason: 'best boundary',
-  }), row).decision, 'KEEP_COARSE');
+    decision: 'KEEP_SADA', selected_option: null, reason: 'best boundary',
+  }), row).decision, 'KEEP_SADA');
   for (const decision of ['WRONG_ACTION', 'NO_ACTION']) {
     assert.throws(() => parseDecision(JSON.stringify({
       decision, selected_option: null, reason: 'forbidden',
     }), row), /invalid/);
   }
-  const prompt = promptFor(row);
-  assert.match(prompt, /Do not verify, reject, or reclassify/);
-  assert.equal(prompt.includes('WRONG_ACTION'), false);
-  assert.equal(prompt.includes('NO_ACTION'), false);
 });
 
 
-test('manifest validation rejects non-adjacent fine candidate', () => {
+test('manifest validation rejects a transition wider than three video frames', () => {
   validateManifestRows([coarseRow(), fineRow()]);
   const bad = fineRow();
-  bad.candidates[0] = { ...bad.candidates[0], after_frame_id: 'F3' };
-  assert.throws(() => validateManifestRows([bad]), /transition candidate/);
+  bad.frames[1] = frame('F2', 35);
+  bad.frames.sort((a, b) => a.frame_index - b.frame_index);
+  assert.throws(() => validateManifestRows([bad]), /timeline|transition candidate/);
+});
+
+
+test('coarse resolved output explicitly preserves SADA per side', () => {
+  const row = coarseRow();
+  assert.deepEqual(resolvedBoundaryOutput(row, coarseDecision()), {
+    start: { seconds: 1, valid: true, source: 'SADA_KEEP' },
+    end: { seconds: 91 / 30, valid: true, source: 'VLM' },
+  });
 });
 
 
@@ -198,10 +200,6 @@ test('resume rejects a mismatched fingerprint', () => {
   };
   assert.doesNotThrow(() => validatePriorRows([prior], [row], 'm1', 'chat'));
   assert.throws(() => validatePriorRows([prior], [row], 'm2', 'chat'), /fingerprint/);
-  assert.throws(
-    () => validatePriorRows([prior], [row], 'm1', 'chat', 'high'),
-    /fingerprint/,
-  );
 });
 
 

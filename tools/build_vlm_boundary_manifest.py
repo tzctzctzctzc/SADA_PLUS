@@ -17,7 +17,9 @@ from tools.vlm_boundary_utils import (
     fine_step_seconds,
     json_sha256,
     read_jsonl,
-    transition_grid,
+    transition_pair,
+    transition_pair_grid,
+    video_frame_index,
     write_jsonl,
 )
 
@@ -26,10 +28,10 @@ def dynamic_context_window(
     segment,
     duration,
     origin_stride_seconds,
-    context_ratio=0.5,
-    stride_multiplier=2.0,
-    minimum_margin=1.0,
-    maximum_margin=6.0,
+    context_ratio=1.0,
+    stride_multiplier=4.0,
+    minimum_margin=4.0,
+    maximum_margin=8.0,
 ):
     left, right = map(float, segment)
     proposal_duration = max(0.0, right - left)
@@ -42,45 +44,112 @@ def dynamic_context_window(
     return [max(0.0, left - margin), min(float(duration), right + margin)]
 
 
-def adaptive_coarse_frames(
+def _option_candidates(query_id, side, pairs, seed):
+    options = option_permutation(query_id, side, len(pairs), int(seed))
+    return [
+        {
+            "option": options[index],
+            **pair,
+        }
+        for index, pair in enumerate(pairs)
+    ]
+
+
+def _materialize_frames(frame_indices, fps):
+    ordered = sorted(set(map(int, frame_indices)))
+    frames = [
+        {
+            "frame_id": "F{}".format(index + 1),
+            "frame_index": int(frame_index),
+            "timestamp_sec": float(frame_index) / float(fps),
+        }
+        for index, frame_index in enumerate(ordered)
+    ]
+    return frames, {frame["frame_index"]: frame["frame_id"] for frame in frames}
+
+
+def _named_candidates(candidates, frame_ids):
+    return [
+        {
+            "option": candidate["option"],
+            "before_frame_id": frame_ids[candidate["before_frame_index"]],
+            "after_frame_id": frame_ids[candidate["after_frame_index"]],
+            "timestamp_sec": float(candidate["timestamp_sec"]),
+        }
+        for candidate in candidates
+    ]
+
+
+def adaptive_coarse_evidence(
     segment,
     window,
-    origin_stride_seconds,
     video_duration,
+    fps,
+    query_id,
     context_count=6,
-    boundary_count=5,
+    candidate_count=5,
     inside_count=4,
+    transition_gap_frames=2,
+    option_seed=20260810,
 ):
-    """Cover context, proposal interior, and both boundary neighborhoods."""
-    if min(int(context_count), int(boundary_count), int(inside_count)) < 2:
+    """Separate broad context/instance anchors from selectable frame pairs."""
+    if min(int(context_count), int(candidate_count), int(inside_count)) < 2:
         raise ValueError("all coarse sampling counts must be at least two")
+    if int(candidate_count) % 2 == 0:
+        raise ValueError("coarse candidate count must be odd")
     left, right = map(float, segment)
-    safe_duration = max(0.0, float(video_duration) - 0.05)
-    radius = max(0.15, float(origin_stride_seconds) / 2.0)
-    groups = (
-        np.linspace(float(window[0]), float(window[1]), int(context_count)),
-        np.linspace(left - radius, left + radius, int(boundary_count)),
-        np.linspace(left, right, int(inside_count)),
-        np.linspace(right - radius, right + radius, int(boundary_count)),
-    )
-    timestamps = sorted(
-        {
-            round(min(max(float(timestamp), 0.0), safe_duration), 6)
-            for group in groups
-            for timestamp in group
-        }
-    )
-    return [
-        {"frame_id": "F{}".format(index + 1), "timestamp_sec": float(timestamp)}
-        for index, timestamp in enumerate(timestamps)
-    ]
+    context_indices = {
+        video_frame_index(value, video_duration, fps)
+        for value in np.linspace(window[0], window[1], int(context_count))
+    }
+    anchor_indices = {
+        video_frame_index(value, video_duration, fps)
+        for value in np.linspace(left, right, int(inside_count) + 2)[1:-1]
+    }
+    minimum_duration = 1.0 / float(fps)
+    search_ranges = {
+        "start": [float(window[0]), min(float(window[1]), right - minimum_duration)],
+        "end": [max(float(window[0]), left + minimum_duration), float(window[1])],
+    }
+    side_candidates = {}
+    all_indices = set(context_indices) | set(anchor_indices)
+    for side, (search_left, search_right) in search_ranges.items():
+        pairs = []
+        seen = set()
+        for center in np.linspace(search_left, search_right, int(candidate_count)):
+            pair = transition_pair(
+                center,
+                video_duration,
+                fps,
+                transition_gap_frames,
+            )
+            key = (pair["before_frame_index"], pair["after_frame_index"])
+            if key not in seen:
+                seen.add(key)
+                pairs.append(pair)
+                all_indices.update(key)
+        side_candidates[side] = _option_candidates(
+            query_id, side, pairs, option_seed
+        )
+    frames, frame_ids = _materialize_frames(all_indices, fps)
+    return {
+        "frames": frames,
+        "context_frame_ids": [frame_ids[index] for index in sorted(context_indices)],
+        "instance_anchor_frame_ids": [
+            frame_ids[index] for index in sorted(anchor_indices)
+        ],
+        "start_candidates": _named_candidates(side_candidates["start"], frame_ids),
+        "end_candidates": _named_candidates(side_candidates["end"], frame_ids),
+    }
 
 
 def build_coarse_rows(
     proposals,
     context_frame_count=6,
-    boundary_frame_count=5,
+    boundary_candidate_count=5,
     inside_frame_count=4,
+    transition_gap_frames=2,
+    option_seed=20260810,
     task_mode="validity-and-boundary",
     **window_options
 ):
@@ -94,11 +163,24 @@ def build_coarse_rows(
             proposal["origin_stride_seconds"],
             **window_options,
         )
+        query_id = proposal["proposal_id"] + ":coarse"
+        evidence = adaptive_coarse_evidence(
+            proposal["coarse_segment_seconds"],
+            window,
+            proposal["video_duration_seconds"],
+            proposal["fps"],
+            query_id,
+            context_count=context_frame_count,
+            candidate_count=boundary_candidate_count,
+            inside_count=inside_frame_count,
+            transition_gap_frames=transition_gap_frames,
+            option_seed=option_seed,
+        )
         row = {
             "query_schema_version": QUERY_SCHEMA_VERSION,
             "stage": "coarse",
             "task_mode": task_mode,
-            "query_id": proposal["proposal_id"] + ":coarse",
+            "query_id": query_id,
             "proposal_id": proposal["proposal_id"],
             "video_id": proposal["video_id"],
             "video_duration_seconds": float(proposal["video_duration_seconds"]),
@@ -106,16 +188,9 @@ def build_coarse_rows(
             "predicted_class_name": proposal["predicted_class_name"],
             "coarse_segment_seconds": list(map(float, proposal["coarse_segment_seconds"])),
             "context_window_seconds": window,
-            "sampling_protocol": "adaptive-context-boundary-interior-v2",
-            "frames": adaptive_coarse_frames(
-                proposal["coarse_segment_seconds"],
-                window,
-                proposal["origin_stride_seconds"],
-                proposal["video_duration_seconds"],
-                context_count=context_frame_count,
-                boundary_count=boundary_frame_count,
-                inside_count=inside_frame_count,
-            ),
+            "fps": float(proposal["fps"]),
+            "sampling_protocol": "separate-context-real-frame-transitions-v3",
+            **evidence,
         }
         row["query_sha256"] = json_sha256(row)
         rows.append(row)
@@ -131,15 +206,11 @@ def decision_by_query(predictions):
     return result
 
 
-def transition_time(query, before_frame_id, after_frame_id):
-    ids = [frame["frame_id"] for frame in query["frames"]]
-    before_index = ids.index(before_frame_id)
-    after_index = ids.index(after_frame_id)
-    if after_index != before_index + 1:
-        raise ValueError("boundary transition frames must be adjacent")
-    before = float(query["frames"][before_index]["timestamp_sec"])
-    after = float(query["frames"][after_index]["timestamp_sec"])
-    return 0.5 * (before + after)
+def selected_candidate_time(query, side, option):
+    for candidate in query["{}_candidates".format(side)]:
+        if candidate["option"] == option:
+            return float(candidate["timestamp_sec"])
+    raise ValueError("unknown {} option {}".format(side, option))
 
 
 def option_permutation(query_id, side, count, seed):
@@ -163,6 +234,7 @@ def build_fine_rows(
     candidate_count=7,
     maximum_step=0.3,
     minimum_step=0.1,
+    transition_gap_frames=2,
     option_seed=20260810,
 ):
     proposal_map = {row["proposal_id"]: row for row in proposals}
@@ -180,36 +252,43 @@ def build_fine_rows(
             proposal["origin_stride_seconds"], maximum_step, minimum_step
         )
         for side in ("start", "end"):
-            if decision.get("{}_status".format(side)) != "VISIBLE":
+            side_decision = decision.get("{}_decision".format(side))
+            if side_decision not in ("SELECT_CANDIDATE", "KEEP_SADA"):
                 continue
-            before_key = "rough_{}_before_frame".format(side)
-            after_key = "rough_{}_after_frame".format(side)
-            center = transition_time(
-                query, decision.get(before_key), decision.get(after_key)
-            )
-            safe_duration = max(
-                0.0, float(proposal["video_duration_seconds"]) - 0.05
-            )
-            frames = transition_grid(
-                center, step, int(candidate_count), safe_duration
-            )
+            side_index = 0 if side == "start" else 1
+            sada_boundary = float(proposal["coarse_segment_seconds"][side_index])
+            center = sada_boundary
+            if side_decision == "SELECT_CANDIDATE":
+                center = selected_candidate_time(
+                    query, side, decision["selected_{}_option".format(side)]
+                )
             fine_query_id = proposal["proposal_id"] + ":fine:" + side
-            options = option_permutation(
-                fine_query_id, side, len(frames) - 1, int(option_seed)
+            raw_candidates = _option_candidates(
+                fine_query_id,
+                side,
+                transition_pair_grid(
+                    center,
+                    step,
+                    int(candidate_count),
+                    proposal["video_duration_seconds"],
+                    proposal["fps"],
+                    transition_gap_frames,
+                ),
+                option_seed,
             )
-            candidates = [
-                {
-                    "option": options[index],
-                    "before_frame_id": frames[index]["frame_id"],
-                    "after_frame_id": frames[index + 1]["frame_id"],
-                    "timestamp_sec": 0.5
-                    * (
-                        float(frames[index]["timestamp_sec"])
-                        + float(frames[index + 1]["timestamp_sec"])
-                    ),
-                }
-                for index in range(len(frames) - 1)
-            ]
+            coarse_frame_map = {
+                frame["frame_id"]: frame for frame in query["frames"]
+            }
+            anchor_indices = {
+                int(coarse_frame_map[frame_id]["frame_index"])
+                for frame_id in query["instance_anchor_frame_ids"]
+            }
+            all_indices = set(anchor_indices)
+            for candidate in raw_candidates:
+                all_indices.add(candidate["before_frame_index"])
+                all_indices.add(candidate["after_frame_index"])
+            frames, frame_ids = _materialize_frames(all_indices, proposal["fps"])
+            candidates = _named_candidates(raw_candidates, frame_ids)
             row = {
                 "query_schema_version": QUERY_SCHEMA_VERSION,
                 "stage": "fine",
@@ -225,10 +304,12 @@ def build_fine_rows(
                 "coarse_segment_seconds": list(
                     map(float, proposal["coarse_segment_seconds"])
                 ),
-                "rough_boundary_transition": {
-                    "before_frame_id": decision[before_key],
-                    "after_frame_id": decision[after_key],
-                },
+                "fps": float(proposal["fps"]),
+                "instance_description": decision["instance_description"],
+                "instance_anchor_frame_ids": [
+                    frame_ids[index] for index in sorted(anchor_indices)
+                ],
+                "sada_boundary_seconds": sada_boundary,
                 "rough_boundary_seconds": center,
                 "fine_step_seconds": step,
                 "frames": frames,
@@ -250,12 +331,14 @@ def main():
     coarse = subparsers.add_parser("coarse")
     add_common_arguments(coarse)
     coarse.add_argument("--context-frame-count", type=int, default=6)
-    coarse.add_argument("--boundary-frame-count", type=int, default=5)
+    coarse.add_argument("--boundary-candidate-count", type=int, default=5)
     coarse.add_argument("--inside-frame-count", type=int, default=4)
-    coarse.add_argument("--context-ratio", type=float, default=0.5)
-    coarse.add_argument("--stride-multiplier", type=float, default=2.0)
-    coarse.add_argument("--minimum-margin", type=float, default=1.0)
-    coarse.add_argument("--maximum-margin", type=float, default=6.0)
+    coarse.add_argument("--transition-gap-frames", type=int, default=2)
+    coarse.add_argument("--option-seed", type=int, default=20260810)
+    coarse.add_argument("--context-ratio", type=float, default=1.0)
+    coarse.add_argument("--stride-multiplier", type=float, default=4.0)
+    coarse.add_argument("--minimum-margin", type=float, default=4.0)
+    coarse.add_argument("--maximum-margin", type=float, default=8.0)
     coarse.add_argument(
         "--task-mode",
         choices=("validity-and-boundary", "boundary-only"),
@@ -269,6 +352,7 @@ def main():
     fine.add_argument("--candidate-count", type=int, default=7)
     fine.add_argument("--maximum-step", type=float, default=0.3)
     fine.add_argument("--minimum-step", type=float, default=0.1)
+    fine.add_argument("--transition-gap-frames", type=int, default=2)
     fine.add_argument("--option-seed", type=int, default=20260810)
     args = parser.parse_args()
 
@@ -277,8 +361,10 @@ def main():
         rows = build_coarse_rows(
             proposals,
             context_frame_count=args.context_frame_count,
-            boundary_frame_count=args.boundary_frame_count,
+            boundary_candidate_count=args.boundary_candidate_count,
             inside_frame_count=args.inside_frame_count,
+            transition_gap_frames=args.transition_gap_frames,
+            option_seed=args.option_seed,
             task_mode=args.task_mode,
             context_ratio=args.context_ratio,
             stride_multiplier=args.stride_multiplier,
@@ -293,6 +379,7 @@ def main():
             candidate_count=args.candidate_count,
             maximum_step=args.maximum_step,
             minimum_step=args.minimum_step,
+            transition_gap_frames=args.transition_gap_frames,
             option_seed=args.option_seed,
         )
 
@@ -311,13 +398,10 @@ def main():
         metadata["task_mode"] = args.task_mode
         metadata["parameters"] = {
             "context_frame_count": args.context_frame_count,
-            "boundary_frame_count_per_side": args.boundary_frame_count,
+            "boundary_candidate_count_per_side": args.boundary_candidate_count,
             "inside_frame_count": args.inside_frame_count,
-            "maximum_frames_before_deduplication": (
-                args.context_frame_count
-                + 2 * args.boundary_frame_count
-                + args.inside_frame_count
-            ),
+            "transition_gap_frames": args.transition_gap_frames,
+            "option_seed": args.option_seed,
             "context_ratio": args.context_ratio,
             "stride_multiplier": args.stride_multiplier,
             "minimum_margin": args.minimum_margin,
@@ -338,6 +422,7 @@ def main():
                     "candidate_count": args.candidate_count,
                     "maximum_step": args.maximum_step,
                     "minimum_step": args.minimum_step,
+                    "transition_gap_frames": args.transition_gap_frames,
                     "option_seed": args.option_seed,
                 },
             }

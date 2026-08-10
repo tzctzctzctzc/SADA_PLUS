@@ -14,8 +14,7 @@ from tools.vlm_boundary_utils import (
     fine_step_seconds,
     read_jsonl,
     temporal_iou,
-    transition_grid,
-    transition_midpoints,
+    transition_pair_grid,
     valid_segment,
 )
 from libs.evaluation.evaluator_anet import (
@@ -36,23 +35,25 @@ def kept_label(label, action_subsampling):
     return True
 
 
-def query_transition_time(query, before_frame_id, after_frame_id):
-    frame_ids = [frame["frame_id"] for frame in query["frames"]]
-    before_index = frame_ids.index(before_frame_id)
-    after_index = frame_ids.index(after_frame_id)
-    if after_index != before_index + 1:
-        raise ValueError("boundary transition frames must be adjacent")
-    return 0.5 * (
-        float(query["frames"][before_index]["timestamp_sec"])
-        + float(query["frames"][after_index]["timestamp_sec"])
-    )
-
-
 def selected_option_time(query, option):
     for candidate in query["candidates"]:
         if candidate["option"] == option:
             return float(candidate["timestamp_sec"])
     raise ValueError("unknown option {} in {}".format(option, query["query_id"]))
+
+
+def selected_coarse_option_time(query, side, option):
+    for candidate in query["{}_candidates".format(side)]:
+        if candidate["option"] == option:
+            return float(candidate["timestamp_sec"])
+    raise ValueError("unknown {} option {} in {}".format(side, option, query["query_id"]))
+
+
+def coarse_candidate_times(query, side):
+    return [
+        float(candidate["timestamp_sec"])
+        for candidate in query["{}_candidates".format(side)]
+    ]
 
 
 def prediction_decisions(rows):
@@ -76,9 +77,8 @@ def best_joint_segment(starts, ends, target):
 
 
 def coarse_oracle_segment(query, target, baseline=None):
-    times = transition_midpoints(query["frames"])
-    starts = list(times)
-    ends = list(times)
+    starts = coarse_candidate_times(query, "start")
+    ends = coarse_candidate_times(query, "end")
     if baseline is not None:
         starts.append(float(baseline[0]))
         ends.append(float(baseline[1]))
@@ -96,27 +96,50 @@ def two_stage_candidate_space(
     candidate_count=7,
     maximum_step=0.3,
     minimum_step=0.1,
+    transition_gap_frames=2,
 ):
-    """Exact per-side values reachable through coarse -> fine, including KEEP."""
+    """Exact residual choices reachable through coarse -> fine, including SADA."""
     baseline = list(map(float, proposal["coarse_segment_seconds"]))
     step = fine_step_seconds(
         proposal["origin_stride_seconds"], maximum_step, minimum_step
     )
-    duration = max(0.0, float(proposal["video_duration_seconds"]) - 0.05)
-    reachable = set()
-    paths = []
-    for rough in transition_midpoints(query["frames"]):
-        fine_frames = transition_grid(rough, step, int(candidate_count), duration)
-        values = set(transition_midpoints(fine_frames)) | {float(rough)}
-        reachable.update(values)
-        paths.append({"rough": float(rough), "values": sorted(values)})
+    duration = float(proposal["video_duration_seconds"])
+    fps = float(proposal["fps"])
+    side_paths = {}
+    reachable = {}
+    for index, side in enumerate(("start", "end")):
+        rough_values = coarse_candidate_times(query, side) + [baseline[index]]
+        paths = []
+        side_reachable = {baseline[index]}
+        for rough in sorted(set(rough_values)):
+            fine_values = {
+                float(pair["timestamp_sec"])
+                for pair in transition_pair_grid(
+                    rough,
+                    step,
+                    int(candidate_count),
+                    duration,
+                    fps,
+                    transition_gap_frames,
+                )
+            }
+            values = fine_values | {float(rough), baseline[index]}
+            side_reachable.update(values)
+            paths.append({"rough": float(rough), "values": sorted(values)})
+        side_paths[side] = paths
+        reachable[side] = sorted(side_reachable)
     return {
-        "start": sorted(reachable | {baseline[0]}),
-        "end": sorted(reachable | {baseline[1]}),
-        "visible_side_paths": paths,
-        "coarse_transition_count": len(transition_midpoints(query["frames"])),
+        "start": reachable["start"],
+        "end": reachable["end"],
+        "side_paths": side_paths,
+        "coarse_transition_count": {
+            side: len(query["{}_candidates".format(side)])
+            for side in ("start", "end")
+        },
         "fine_candidate_count_per_visible_side": int(candidate_count),
         "fine_step_seconds": float(step),
+        "transition_gap_frames": int(transition_gap_frames),
+        "includes_keep_sada": True,
         "includes_keep_coarse": True,
         "includes_side_abstention_detection_fallback": True,
     }
@@ -129,6 +152,7 @@ def two_stage_oracle_segments(
     candidate_count=7,
     maximum_step=0.3,
     minimum_step=0.1,
+    transition_gap_frames=2,
 ):
     baseline = list(map(float, proposal["coarse_segment_seconds"]))
     space = two_stage_candidate_space(
@@ -137,6 +161,7 @@ def two_stage_oracle_segments(
         candidate_count,
         maximum_step,
         minimum_step,
+        transition_gap_frames,
     )
     starts, ends = space["start"], space["end"]
     independent = [
@@ -146,19 +171,20 @@ def two_stage_oracle_segments(
     if not valid_segment(*independent):
         independent = baseline
     joint_candidates = [baseline]
-    for path in space["visible_side_paths"]:
+    for path in space["side_paths"]["end"]:
         joint_candidates.extend(
             [baseline[0], value]
             for value in path["values"]
             if valid_segment(baseline[0], value)
         )
+    for path in space["side_paths"]["start"]:
         joint_candidates.extend(
             [value, baseline[1]]
             for value in path["values"]
             if valid_segment(value, baseline[1])
         )
-    for start_path in space["visible_side_paths"]:
-        for end_path in space["visible_side_paths"]:
+    for start_path in space["side_paths"]["start"]:
+        for end_path in space["side_paths"]["end"]:
             if start_path["rough"] >= end_path["rough"]:
                 continue
             joint_candidates.extend(
@@ -209,15 +235,19 @@ def vlm_rough_result(proposal, query, decision):
         return result
     candidate = list(coarse)
     for index, side in enumerate(("start", "end")):
-        if decision.get("{}_status".format(side)) != "VISIBLE":
-            continue
-        value = query_transition_time(
-            query,
-            decision["rough_{}_before_frame".format(side)],
-            decision["rough_{}_after_frame".format(side)],
-        )
-        candidate[index] = value
-        result["sides"][side] = side_result(value, True, "VLM")
+        side_decision = decision.get("{}_decision".format(side))
+        if side_decision == "KEEP_SADA":
+            result["sides"][side] = side_result(
+                coarse[index], True, "SADA_KEEP"
+            )
+        elif side_decision == "SELECT_CANDIDATE":
+            value = selected_coarse_option_time(
+                query,
+                side,
+                decision["selected_{}_option".format(side)],
+            )
+            candidate[index] = value
+            result["sides"][side] = side_result(value, True, "VLM")
     if not valid_segment(*candidate):
         return invalidate_result(coarse)
     result["segment"] = candidate
@@ -236,12 +266,14 @@ def vlm_refined_result(proposal, query, coarse_decision, fine_queries, fine_deci
     ):
         return rough
     coarse = list(map(float, proposal["coarse_segment_seconds"]))
-    candidate = list(coarse)
+    candidate = list(rough["segment"])
     sides = {
         side: dict(rough["sides"][side]) for side in ("start", "end")
     }
     for index, side in enumerate(("start", "end")):
-        if coarse_decision.get("{}_status".format(side)) != "VISIBLE":
+        if coarse_decision.get("{}_decision".format(side)) not in (
+            "SELECT_CANDIDATE", "KEEP_SADA"
+        ):
             continue
         fine_query = fine_queries.get((proposal["proposal_id"], side))
         if fine_query is None:
@@ -257,8 +289,13 @@ def vlm_refined_result(proposal, query, coarse_decision, fine_queries, fine_deci
         elif decision and decision.get("decision") == "KEEP_COARSE":
             value = rough["sides"][side]["seconds"]
             candidate[index] = value
-            sides[side] = side_result(value, True, "KEEP")
+            sides[side] = side_result(value, True, "COARSE_KEEP")
+        elif decision and decision.get("decision") == "KEEP_SADA":
+            value = coarse[index]
+            candidate[index] = value
+            sides[side] = side_result(value, True, "SADA_KEEP")
         else:
+            candidate[index] = coarse[index]
             sides[side] = side_result(coarse[index], False, "INVALID")
     if not valid_segment(*candidate):
         return invalidate_result(coarse)
@@ -280,6 +317,7 @@ def segment_set(
     oracle_candidate_count=7,
     oracle_maximum_step=0.3,
     oracle_minimum_step=0.1,
+    oracle_transition_gap_frames=2,
     return_details=False,
 ):
     coarse_query_map = {row["proposal_id"]: row for row in coarse_queries}
@@ -317,6 +355,7 @@ def segment_set(
                 oracle_candidate_count,
                 oracle_maximum_step,
                 oracle_minimum_step,
+                oracle_transition_gap_frames,
             )
             variants["coarse_joint_oracle"][proposal_id] = coarse_oracle
             variants["two_stage_independent_oracle"][proposal_id] = independent or coarse
@@ -327,6 +366,7 @@ def segment_set(
                 oracle_candidate_count,
                 oracle_maximum_step,
                 oracle_minimum_step,
+                oracle_transition_gap_frames,
             )
             details["oracle_spaces"][proposal_id] = {
                 "start_values_seconds": space["start"],
@@ -336,8 +376,10 @@ def segment_set(
                     "fine_candidate_count_per_visible_side"
                 ],
                 "fine_step_seconds": space["fine_step_seconds"],
+                "transition_gap_frames": space["transition_gap_frames"],
                 "choices": [
                     "SELECT_CANDIDATE",
+                    "KEEP_SADA",
                     "KEEP_COARSE",
                     "SIDE_ABSTENTION_TO_DETECTION_FALLBACK",
                 ],
@@ -596,6 +638,7 @@ def main():
     parser.add_argument("--oracle-candidate-count", type=int, default=7)
     parser.add_argument("--oracle-maximum-step", type=float, default=0.3)
     parser.add_argument("--oracle-minimum-step", type=float, default=0.1)
+    parser.add_argument("--oracle-transition-gap-frames", type=int, default=2)
     parser.add_argument("--official-split")
     args = parser.parse_args()
 
@@ -621,6 +664,7 @@ def main():
         args.oracle_candidate_count,
         args.oracle_maximum_step,
         args.oracle_minimum_step,
+        args.oracle_transition_gap_frames,
         True,
     )
     ground_truth = load_ground_truth(
@@ -651,10 +695,10 @@ def main():
         variant_reports[name] = variant_report
 
     report = {
-        "protocol": "fixed-proposal-vlm-boundary-transition-audit-v3",
+        "protocol": "fixed-proposal-vlm-boundary-residual-audit-v4",
         "task_mode": task_mode,
         "boundary_semantics": {
-            "representation": "midpoint of an adjacent chronological frame pair",
+            "representation": "midpoint of one selectable short real-frame pair",
             "start": "not-in-action -> in-action",
             "end": "in-action -> out-of-action",
         },
@@ -667,20 +711,21 @@ def main():
                 else "judged_by_vlm"
             ),
             "renms_after_refinement": False,
-            "invalid_or_uncertain_side_policy": "retain_coarse_boundary",
+            "invalid_or_uncertain_side_policy": "retain_SADA_boundary_without_supervision",
             "ground_truth_use": "offline_scoring_only",
             "oracle_candidate_count": args.oracle_candidate_count,
             "oracle_maximum_step": args.oracle_maximum_step,
             "oracle_minimum_step": args.oracle_minimum_step,
+            "oracle_transition_gap_frames": args.oracle_transition_gap_frames,
             "official_split": args.official_split,
         },
         "oracle_definitions": {
             "coarse_joint_oracle": (
-                "best legal adjacent-pair midpoint combination or KEEP each side"
+                "best legal selectable midpoint combination or KEEP_SADA each side"
             ),
             "two_stage_independent_oracle": (
                 "best start/end independently from every reachable fine transition, "
-                "KEEP_COARSE, or side-abstention detection fallback"
+                "KEEP_SADA, KEEP_COARSE, or side-abstention fallback"
             ),
             "two_stage_joint_oracle": (
                 "best legal pair from the identical per-side reachable choice spaces"

@@ -29,6 +29,7 @@ def test_tiny_synthetic_coarse_fine_score_pipeline(tmp_path):
         "score": 0.9,
         "coarse_segment_seconds": [2.0, 8.0],
         "origin_stride_seconds": 0.6,
+        "fps": 30.0,
         "posthoc_gt": {
             "kind": "VALID_ACTION",
             "matched_segment_seconds": [3.0, 7.0],
@@ -58,16 +59,18 @@ def test_tiny_synthetic_coarse_fine_score_pipeline(tmp_path):
         "--task-mode", "boundary-only",
     )
     coarse = json.loads(coarse_manifest.read_text(encoding="utf-8").splitlines()[0])
-    frames = coarse["frames"]
-    start_index, end_index = 4, len(frames) - 6
-    assert start_index + 1 < end_index
+    start_option = min(
+        coarse["start_candidates"], key=lambda item: abs(item["timestamp_sec"] - 3.0)
+    )["option"]
+    end_option = min(
+        coarse["end_candidates"], key=lambda item: abs(item["timestamp_sec"] - 7.0)
+    )["option"]
     coarse_decision = {
-        "start_status": "VISIBLE",
-        "rough_start_before_frame": frames[start_index]["frame_id"],
-        "rough_start_after_frame": frames[start_index + 1]["frame_id"],
-        "end_status": "VISIBLE",
-        "rough_end_before_frame": frames[end_index]["frame_id"],
-        "rough_end_after_frame": frames[end_index + 1]["frame_id"],
+        "instance_description": "right hand puts the same bowl on the counter",
+        "start_decision": "SELECT_CANDIDATE",
+        "selected_start_option": start_option,
+        "end_decision": "SELECT_CANDIDATE",
+        "selected_end_option": end_option,
         "reason": "synthetic",
     }
     write_jsonl(coarse_predictions, [{
@@ -109,7 +112,7 @@ def test_tiny_synthetic_coarse_fine_score_pipeline(tmp_path):
         "--output", report_path,
     )
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    assert report["protocol"].endswith("v3")
+    assert report["protocol"].endswith("v4")
     assert report["task_mode"] == "boundary-only"
     assert report["validity"]["applicable"] is False
     assert all(
@@ -117,8 +120,9 @@ def test_tiny_synthetic_coarse_fine_score_pipeline(tmp_path):
         for variant in report["variants"].values()
     )
     sides = report["side_outputs"]["vlm_refined"][proposal["proposal_id"]]
-    assert sides["start"]["source"] == "KEEP"
-    assert sides["end"]["source"] == "KEEP"
+    assert sides["start"]["source"] == "COARSE_KEEP"
+    assert sides["end"]["source"] == "COARSE_KEEP"
     assert report["oracle_candidate_spaces"][proposal["proposal_id"]]["choices"] == [
-        "SELECT_CANDIDATE", "KEEP_COARSE", "SIDE_ABSTENTION_TO_DETECTION_FALLBACK"
+        "SELECT_CANDIDATE", "KEEP_SADA", "KEEP_COARSE",
+        "SIDE_ABSTENTION_TO_DETECTION_FALLBACK"
     ]

@@ -22,6 +22,7 @@ def proposal(kind="VALID_ACTION"):
         "score": 0.9,
         "coarse_segment_seconds": [1.0, 9.0],
         "origin_stride_seconds": 0.6,
+        "fps": 30.0,
         "posthoc_gt": {
             "kind": kind,
             "matched_segment_seconds": [3.0, 7.0] if kind == "VALID_ACTION" else None,
@@ -33,43 +34,36 @@ def coarse_query():
     return {
         "query_id": "p1:coarse",
         "proposal_id": "p1",
-        "frames": [
-            {"frame_id": "F{}".format(index + 1), "timestamp_sec": float(value)}
-            for index, value in enumerate((0, 2, 4, 6, 8, 9.95))
+        "start_candidates": [
+            {"option": "A", "timestamp_sec": 3.0},
+            {"option": "B", "timestamp_sec": 4.0},
+        ],
+        "end_candidates": [
+            {"option": "C", "timestamp_sec": 6.0},
+            {"option": "D", "timestamp_sec": 7.0},
         ],
     }
 
 
-def coarse_decision(start="VISIBLE", end="VISIBLE"):
+def coarse_decision(start="SELECT_CANDIDATE", end="SELECT_CANDIDATE"):
     return {
         "action_status": "VALID_ACTION",
-        "start_status": start,
-        "rough_start_before_frame": "F2" if start == "VISIBLE" else None,
-        "rough_start_after_frame": "F3" if start == "VISIBLE" else None,
-        "end_status": end,
-        "rough_end_before_frame": "F4" if end == "VISIBLE" else None,
-        "rough_end_after_frame": "F5" if end == "VISIBLE" else None,
-        "reason": "visible",
+        "instance_description": "right hand puts the same bowl on the counter",
+        "start_decision": start,
+        "selected_start_option": "A" if start == "SELECT_CANDIDATE" else None,
+        "end_decision": end,
+        "selected_end_option": "D" if end == "SELECT_CANDIDATE" else None,
+        "reason": "residual comparison",
     }
 
 
 def fine_query(side, candidates):
-    frames = [
-        {"frame_id": "F{}".format(index + 1), "timestamp_sec": value}
-        for index, value in enumerate(range(len(candidates) + 1))
-    ]
     return {
         "query_id": "p1:fine:{}".format(side),
         "proposal_id": "p1",
         "boundary_side": side,
-        "frames": frames,
         "candidates": [
-            {
-                "option": chr(ord("A") + index),
-                "before_frame_id": frames[index]["frame_id"],
-                "after_frame_id": frames[index + 1]["frame_id"],
-                "timestamp_sec": value,
-            }
+            {"option": chr(ord("A") + index), "timestamp_sec": value}
             for index, value in enumerate(candidates)
         ],
     }
@@ -79,7 +73,7 @@ def prediction(query_id, decision):
     return {"query_id": query_id, "run_status": "ok", "decision": decision}
 
 
-def test_geometry_oracles_use_exact_transition_choice_space_without_degradation():
+def test_geometry_oracles_use_side_specific_residual_space_without_degradation():
     item = proposal()
     query = coarse_query()
     target = [3.0, 7.0]
@@ -88,25 +82,18 @@ def test_geometry_oracles_use_exact_transition_choice_space_without_degradation(
     independent, joint = two_stage_oracle_segments(item, query, target)
     space = two_stage_candidate_space(item, query)
     assert 1.0 in space["start"] and 9.0 in space["end"]
-    assert space["coarse_transition_count"] == len(query["frames"]) - 1
+    assert space["coarse_transition_count"] == {"start": 2, "end": 2}
+    assert space["includes_keep_sada"] is True
     assert temporal_iou(coarse, target) >= baseline
     assert temporal_iou(independent, target) >= temporal_iou(coarse, target)
     assert temporal_iou(joint, target) >= temporal_iou(coarse, target)
 
 
-def test_non_valid_vlm_decision_retains_coarse_detection_and_invalid_sides():
+def test_non_valid_vlm_decision_retains_sada_detection_and_invalid_sides():
     item = proposal(kind="NO_ACTION")
     query = coarse_query()
-    decision = {
-        "action_status": "NO_ACTION",
-        "start_status": "NOT_VISIBLE",
-        "rough_start_before_frame": None,
-        "rough_start_after_frame": None,
-        "end_status": "NOT_VISIBLE",
-        "rough_end_before_frame": None,
-        "rough_end_after_frame": None,
-        "reason": "none",
-    }
+    decision = coarse_decision(start="NOT_VISIBLE", end="NOT_VISIBLE")
+    decision["action_status"] = "NO_ACTION"
     variants, details = segment_set(
         [item], [query], [prediction(query["query_id"], decision)], return_details=True
     )
@@ -116,7 +103,7 @@ def test_non_valid_vlm_decision_retains_coarse_detection_and_invalid_sides():
     }
 
 
-def test_refined_segment_accepts_one_side_and_invalid_side_cannot_supervise():
+def test_refined_segment_accepts_one_side_and_abstained_side_cannot_supervise():
     item = proposal()
     query = coarse_query()
     coarse_predictions = [prediction(query["query_id"], coarse_decision())]
@@ -156,27 +143,39 @@ def test_boundary_only_decision_does_not_require_action_status():
     assert all(details["vlm_rough"]["p1"][side]["valid"] for side in ("start", "end"))
 
 
-def test_keep_coarse_preserves_rough_transition_with_keep_source():
+def test_keep_sada_can_revert_a_coarse_replacement():
     item, query = proposal(), coarse_query()
-    rows = [fine_query("start", [2.7, 3.0])]
     variants, details = segment_set(
         [item], [query], [prediction(query["query_id"], coarse_decision(end="NOT_VISIBLE"))],
-        rows,
+        [fine_query("start", [2.7, 3.0])],
         [prediction("p1:fine:start", {
-            "decision": "KEEP_COARSE", "selected_option": None, "reason": "best"
+            "decision": "KEEP_SADA", "selected_option": None, "reason": "SADA best"
+        })],
+        return_details=True,
+    )
+    assert variants["vlm_refined"]["p1"] == [1.0, 9.0]
+    assert details["vlm_refined"]["p1"]["start"]["source"] == "SADA_KEEP"
+
+
+def test_keep_coarse_preserves_clear_coarse_improvement():
+    item, query = proposal(), coarse_query()
+    variants, details = segment_set(
+        [item], [query], [prediction(query["query_id"], coarse_decision(end="NOT_VISIBLE"))],
+        [fine_query("start", [2.7, 3.0])],
+        [prediction("p1:fine:start", {
+            "decision": "KEEP_COARSE", "selected_option": None, "reason": "coarse best"
         })],
         return_details=True,
     )
     assert variants["vlm_refined"]["p1"] == [3.0, 9.0]
-    assert details["vlm_refined"]["p1"]["start"]["source"] == "KEEP"
+    assert details["vlm_refined"]["p1"]["start"]["source"] == "COARSE_KEEP"
 
 
 def test_start_not_before_end_safely_invalidates_both_sides():
     item, query = proposal(), coarse_query()
-    bad_start = fine_query("start", [9.5])
     variants, details = segment_set(
         [item], [query], [prediction(query["query_id"], coarse_decision(end="NOT_VISIBLE"))],
-        [bad_start],
+        [fine_query("start", [9.5])],
         [prediction("p1:fine:start", {
             "decision": "SELECT_CANDIDATE", "selected_option": "A", "reason": "bad"
         })],

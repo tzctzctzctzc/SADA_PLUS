@@ -7,39 +7,40 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 
-const QUERY_SCHEMA_VERSION = 'vlm-boundary-query-v3';
-const PREDICTION_SCHEMA_VERSION = 'vlm-boundary-prediction-v3';
-const PROMPT_VERSION = 'vlm-boundary-sada-top1-boundary-only-v4';
+const QUERY_SCHEMA_VERSION = 'vlm-boundary-query-v4';
+const PREDICTION_SCHEMA_VERSION = 'vlm-boundary-prediction-v4';
+const PROMPT_VERSION = 'vlm-boundary-sada-residual-instance-v5';
 const ACTION_STATUS_VALUES = new Set([
   'VALID_ACTION', 'NO_ACTION', 'WRONG_ACTION', 'UNCERTAIN',
 ]);
-const SIDE_STATUS_VALUES = new Set(['VISIBLE', 'NOT_VISIBLE', 'UNCERTAIN']);
+const SIDE_DECISION_VALUES = new Set([
+  'SELECT_CANDIDATE', 'KEEP_SADA', 'NOT_VISIBLE', 'UNCERTAIN',
+]);
 const FINE_DECISION_VALUES = new Set([
-  'SELECT_CANDIDATE', 'KEEP_COARSE', 'NO_VISIBLE_BOUNDARY',
+  'SELECT_CANDIDATE', 'KEEP_SADA', 'KEEP_COARSE', 'NO_VISIBLE_BOUNDARY',
   'UNCERTAIN', 'WRONG_ACTION', 'NO_ACTION',
 ]);
 const BOUNDARY_ONLY_FINE_DECISION_VALUES = new Set([
-  'SELECT_CANDIDATE', 'KEEP_COARSE', 'NO_VISIBLE_BOUNDARY', 'UNCERTAIN',
+  'SELECT_CANDIDATE', 'KEEP_SADA', 'KEEP_COARSE', 'NO_VISIBLE_BOUNDARY', 'UNCERTAIN',
 ]);
 const ACTION_GUIDANCE = Object.freeze({
-  TAKE: 'the full retrieve/pick-up event (collect, fetch, get, grab, pick, pull off, retrieve, take, or unload), from the first purposeful retrieval motion through the completed lift/removal into control; exclude later mere holding or carrying',
-  PUT: 'the full place/leave event (lay, place, position, put, replace, reposition, rest, return, set down, or store), from the first purposeful destination-directed placement motion through release or completion at the destination; exclude unrelated transport',
-  WASH: 'the full cleaning event (clean, lather, rinse, soap, sponge, wash, or wipe), from the first purposeful cleaning motion through the last cleaning stroke or rinse motion',
-  OPEN: 'the full opening event (open, uncork, or unzip), from the first purposeful manipulation of the closure through completion of the opening motion',
-  CLOSE: 'the full closing event (close, shut, screw on, or twist on), from the first purposeful closing manipulation through completion or securing',
-  INSERT: 'the full insertion/loading event (drop into, fit, insert, move in, place in, put in, load, or pack), from the first purposeful motion into the destination through completion inside it',
-  'TURN-ON': 'the full activation event (activate, ignite, light, start, switch on, turn on, or water on), from the first purposeful control manipulation through completion of activation',
-  CUT: 'the full cutting event (chop, cut, dice, halve, julienne, or slice), from the first purposeful cutting stroke through the last cutting stroke in the event',
-  'TURN-OFF': 'the full deactivation event (shut off, switch off, tap off, turn off, or water off), from the first purposeful control manipulation through completion of deactivation',
-  POUR: 'the full pouring/transfer event (drizzle, pour, shake into, sieve, or tip), from the first purposeful transfer or tilting motion through the end of the transfer and recovery motion',
+  TAKE: 'the complete narrated retrieve/pick-up instance (collect, fetch, get, grab, pick, pull off, retrieve, take, or unload), distinguished from a preceding reach and later unrelated carry by the same hand-object interaction',
+  PUT: 'the complete narrated place/leave instance (lay, place, position, put, replace, reposition, rest, return, set down, or store), distinguished from preceding transport and a neighboring placement by the same object and destination',
+  WASH: 'the complete narrated cleaning instance (clean, lather, rinse, soap, sponge, wash, or wipe), including its continuous cleaning strokes but not a separate neighboring cleaning action',
+  OPEN: 'the complete narrated opening instance (open, uncork, or unzip) for the same closure, not a nearby opening of another container or part',
+  CLOSE: 'the complete narrated closing instance (close, shut, screw on, or twist on) for the same closure, not a nearby closing action',
+  INSERT: 'the complete narrated insertion/loading instance (drop into, fit, insert, move in, place in, put in, load, or pack) for the same object and destination',
+  'TURN-ON': 'the complete narrated activation instance (activate, ignite, light, start, switch on, turn on, or water on) for the same control',
+  CUT: 'the complete narrated cutting instance (chop, cut, dice, halve, julienne, or slice) on the same object, separated from neighboring cutting instances',
+  'TURN-OFF': 'the complete narrated deactivation instance (shut off, switch off, tap off, turn off, or water off) for the same control',
+  POUR: 'the complete narrated pouring/transfer instance (drizzle, pour, shake into, sieve, or tip) for the same source and destination',
 });
 
-const FULL_ACTION_EXTENT = `Use an EPIC-KITCHENS-style complete narrated action interval, not a single
-state-change instant or only the most salient core. START is the earliest
-purposeful motion that belongs to the named verb event. END is after its last
-purposeful motion, before later mere holding, unrelated transport, idle, or the
-next action. Do not expand the interval to generic preparation that does not yet
-belong to the named action.`;
+const FULL_ACTION_EXTENT = `Estimate the visible extent of the same complete narrated action instance,
+not only its most salient contact or state-change instant. Do not automatically
+include an earlier reach, generic preparation, transport, recovery, or a nearby
+same-verb event. Include such motion only when the visual sequence clearly shows
+that it is continuous evidence for this exact hand-object-location instance.`;
 
 
 function sha256(value) {
@@ -69,11 +70,15 @@ function promptFields(row) {
     coarse_segment_seconds: row.coarse_segment_seconds,
     frames: row.frames.map(frame => ({
       frame_id: frame.frame_id,
+      frame_index: frame.frame_index,
       timestamp_sec: frame.timestamp_sec,
     })),
   };
+  fields.instance_anchor_frame_ids = row.instance_anchor_frame_ids;
   if (row.stage === 'fine') {
     fields.boundary_side = row.boundary_side;
+    fields.instance_description = row.instance_description;
+    fields.sada_boundary_seconds = row.sada_boundary_seconds;
     fields.rough_boundary_seconds = row.rough_boundary_seconds;
     fields.candidates = row.candidates.map(candidate => ({
       option: candidate.option,
@@ -81,6 +86,16 @@ function promptFields(row) {
       after_frame_id: candidate.after_frame_id,
       timestamp_sec: candidate.timestamp_sec,
     }));
+  } else {
+    fields.context_frame_ids = row.context_frame_ids;
+    for (const side of ['start', 'end']) {
+      fields[`${side}_candidates`] = row[`${side}_candidates`].map(candidate => ({
+        option: candidate.option,
+        before_frame_id: candidate.before_frame_id,
+        after_frame_id: candidate.after_frame_id,
+        timestamp_sec: candidate.timestamp_sec,
+      }));
+    }
   }
   return fields;
 }
@@ -105,78 +120,67 @@ function actionGuidance(row) {
 function coarsePrompt(row) {
   const [left, right] = row.coarse_segment_seconds.map(Number);
   const timeline = row.frames.map(frame => (
-    `${frame.frame_id}: ${Number(frame.timestamp_sec).toFixed(3)}s`
+    `${frame.frame_id}: ${Number(frame.timestamp_sec).toFixed(3)}s (video frame ${frame.frame_index})`
   )).join('\n');
-  if (isBoundaryOnly(row)) {
-    return `You are locating the temporal boundaries of one frozen SADA action
+  const candidates = side => row[`${side}_candidates`].map(candidate => (
+    `option ${candidate.option}: ${candidate.before_frame_id} -> ${candidate.after_frame_id}, midpoint ${Number(candidate.timestamp_sec).toFixed(3)}s`
+  )).join('\n');
+  const validity = isBoundaryOnly(row)
+    ? `The occurrence and class are frozen high-confidence SADA inputs. Do not
+verify, reject, or reclassify the action.`
+    : `First return action_status: VALID_ACTION, WRONG_ACTION, NO_ACTION, or
+UNCERTAIN. Only VALID_ACTION may select a replacement boundary.`;
+  return `You are conservatively auditing the temporal boundaries of one SADA
 proposal in an egocentric video.
 
-Frozen SADA top-1 action: ${row.predicted_class_name}
+Frozen SADA action: ${row.predicted_class_name}
 Action boundary meaning: ${actionGuidance(row)}
-Frozen SADA temporal proposal: ${left.toFixed(3)}s to ${right.toFixed(3)}s
+Original SADA interval: ${left.toFixed(3)}s to ${right.toFixed(3)}s
 
-The action occurrence and class label are fixed inputs from high-confidence SADA.
-Do not verify, reject, or reclassify the action. Your only task is to locate its
-complete START and END boundaries from the chronological evidence.
+${validity}
 
 ${FULL_ACTION_EXTENT}
 
-The images below are chronologically ordered:
+The images are chronologically ordered:
 ${timeline}
 
-Judge START and END independently:
-- VISIBLE: the transition is bracketed by one adjacent frame pair.
-- NOT_VISIBLE: this transition lies outside the shown timeline.
-- UNCERTAIN: the shown evidence cannot locate this transition reliably.
+Broad context frames (context only; only listed transition pairs are choices):
+${row.context_frame_ids.join(', ')}
+Instance-anchor frames inside the original SADA proposal:
+${row.instance_anchor_frame_ids.join(', ')}
 
-Use exactly one transition definition throughout:
-- START: before-frame is not in the action; adjacent after-frame is in the action.
-- END: before-frame is in the action; adjacent after-frame is not in the action.
-The boundary time is the midpoint of that adjacent pair. Either side may be
-NOT_VISIBLE or UNCERTAIN. Return JSON only.`;
-  }
-  return `You are checking one temporal action proposal in an egocentric video.
+First write instance_description: a short visual identity for this exact action
+instance using the anchor frames, preferably hand/object/location. Track only
+that same instance at both boundaries. Do not switch to a nearby occurrence of
+the same verb. If the object is unclear, state that it is unclear.
 
-Proposed action: ${row.predicted_class_name}
-Action boundary meaning: ${actionGuidance(row)}
-Proposed temporal region: ${left.toFixed(3)}s to ${right.toFixed(3)}s
+Selectable START transition pairs:
+${candidates('start')}
 
-${FULL_ACTION_EXTENT}
+Selectable END transition pairs:
+${candidates('end')}
 
-The images below are chronologically ordered:
-${timeline}
+Each option is a short pair of real video frames. Context frames between options
+are not additional choices. Judge START and END independently against the exact
+original SADA boundary:
+- SELECT_CANDIDATE only when one option visibly brackets the same instance and is
+  clearly better than SADA.
+- KEEP_SADA when SADA is at least as good, evidence is tied, or improvement is
+  not clear. Changing a boundary is never required; KEEP_SADA is the safe default.
+- NOT_VISIBLE when the transition is outside all shown evidence.
+- UNCERTAIN when competing interpretations remain.
 
-First decide whether the proposed action is actually visible in this sequence.
-- VALID_ACTION: the proposed action occurs.
-- WRONG_ACTION: a meaningful action occurs, but it is not the proposed action.
-- NO_ACTION: no meaningful action occurs in the proposed region.
-- UNCERTAIN: visual evidence is genuinely insufficient.
-
-If the named action is identifiable but only part of its complete interval is
-shown, return VALID_ACTION and mark each missing side NOT_VISIBLE or UNCERTAIN.
-Do not return NO_ACTION merely because a grasp, release, contact, or state-change
-instant is outside the shown frames.
-
-The surrounding context is only evidence. Do not confirm an action that occurs
-entirely outside the proposed temporal region.
-
-Then judge START and END independently:
-- VISIBLE: the transition is bracketed by one adjacent frame pair.
-- NOT_VISIBLE: the action is valid, but this transition lies outside the shown timeline.
-- UNCERTAIN: the shown evidence cannot locate this transition reliably.
-
-Use exactly one transition definition throughout:
-- START: before-frame is not in the action; adjacent after-frame is in the action.
-- END: before-frame is in the action; adjacent after-frame is not in the action.
-The boundary time is the midpoint of that adjacent pair. A VALID_ACTION may have
-only one visible side. For a non-valid action, no side may be VISIBLE. Return JSON only.`;
+START means before-frame is not in the action and after-frame is in it. END means
+before-frame is in the action and after-frame is not. A selected_option is required
+only for SELECT_CANDIDATE and must otherwise be null. The final start must precede
+the final end. Return JSON only.`;
 }
 
 
 function finePrompt(row) {
   const side = row.boundary_side === 'start' ? 'start' : 'end';
   const timeline = row.frames.map(frame => (
-    `${frame.frame_id}: ${Number(frame.timestamp_sec).toFixed(3)}s`
+    `${frame.frame_id}: ${Number(frame.timestamp_sec).toFixed(3)}s (video frame ${frame.frame_index})`
   )).join('\n');
   const candidates = row.candidates.map(candidate => (
     `option ${candidate.option}: ${candidate.before_frame_id} -> ${candidate.after_frame_id}, midpoint ${Number(candidate.timestamp_sec).toFixed(3)}s`
@@ -186,17 +190,16 @@ function finePrompt(row) {
 Do not verify, reject, or reclassify the action.`
     : '';
   const finalChoices = isBoundaryOnly(row)
-    ? `Return KEEP_COARSE when no candidate clearly improves it. Return
-NO_VISIBLE_BOUNDARY when this side is outside the shown timeline, or UNCERTAIN
-when the boundary evidence is ambiguous.`
-    : `Return KEEP_COARSE when no candidate clearly improves it. Return
-NO_VISIBLE_BOUNDARY when the action is visible but this side is outside the
-shown timeline; UNCERTAIN when evidence is ambiguous; or WRONG_ACTION /
-NO_ACTION when the coarse action decision is contradicted.`;
-  return `You are refining the ${side} boundary of one visible action.
+    ? `Return NO_VISIBLE_BOUNDARY when this side is outside the shown evidence,
+or UNCERTAIN when the boundary evidence is ambiguous.`
+    : `You may also return WRONG_ACTION or NO_ACTION when the coarse action
+decision is contradicted.`;
+  return `You are conservatively refining the ${side} boundary of one visible action.
 
 Action: ${row.predicted_class_name}
 Action boundary meaning: ${actionGuidance(row)}
+Frozen visual instance: ${row.instance_description}
+Original SADA ${side} boundary: ${Number(row.sada_boundary_seconds).toFixed(3)}s
 Current coarse ${side} boundary: ${Number(row.rough_boundary_seconds).toFixed(3)}s
 
 ${fixedInput}
@@ -206,16 +209,21 @@ ${FULL_ACTION_EXTENT}
 Chronological frames:
 ${timeline}
 
+Instance-anchor frames (identity labels; only listed transition pairs are choices):
+${row.instance_anchor_frame_ids.join(', ')}
+
 Option letters are deliberately shuffled. Candidate adjacent-frame transitions:
 ${candidates}
 
 Use the same transition definition as the coarse stage:
 ${side === 'start' ? 'START: before-frame is not in the action; after-frame is in the action.' : 'END: before-frame is in the action; after-frame is not in the action.'}
 
-Return SELECT_CANDIDATE only when one option visibly brackets the complete-action
-transition and is clearly better than the current coarse boundary. Do not move
-the boundary inward to a grasp, release, contact, state-change instant, or other
-salient core within the action. ${finalChoices}
+Compare every choice to the original SADA boundary and keep tracking the frozen
+visual instance. Return SELECT_CANDIDATE only when one option is clearly the best
+and clearly improves SADA. Return KEEP_COARSE only when the current coarse boundary
+clearly improves SADA and no fine option clearly improves the coarse boundary.
+Return KEEP_SADA whenever SADA remains best or the comparison is tied/ambiguous.
+Do not move inward to a salient core within the action. ${finalChoices}
 Return JSON only.`;
 }
 
@@ -228,22 +236,23 @@ function promptFor(row) {
 function responseSchema(row) {
   const reason = { reason: { type: 'string', maxLength: 240 } };
   if (row.stage === 'coarse') {
-    const frameIds = row.frames.map(frame => frame.frame_id);
-    const nullableFrame = {
-      anyOf: [{ type: 'string', enum: frameIds }, { type: 'null' }],
-    };
+    const nullableOption = side => ({
+      anyOf: [
+        { type: 'string', enum: row[`${side}_candidates`].map(item => item.option) },
+        { type: 'null' },
+      ],
+    });
     const boundaryProperties = {
-      start_status: { type: 'string', enum: [...SIDE_STATUS_VALUES] },
-      rough_start_before_frame: nullableFrame,
-      rough_start_after_frame: nullableFrame,
-      end_status: { type: 'string', enum: [...SIDE_STATUS_VALUES] },
-      rough_end_before_frame: nullableFrame,
-      rough_end_after_frame: nullableFrame,
+      instance_description: { type: 'string', maxLength: 160 },
+      start_decision: { type: 'string', enum: [...SIDE_DECISION_VALUES] },
+      selected_start_option: nullableOption('start'),
+      end_decision: { type: 'string', enum: [...SIDE_DECISION_VALUES] },
+      selected_end_option: nullableOption('end'),
       ...reason,
     };
     const boundaryRequired = [
-      'start_status', 'rough_start_before_frame', 'rough_start_after_frame',
-      'end_status', 'rough_end_before_frame', 'rough_end_after_frame', 'reason',
+      'instance_description', 'start_decision', 'selected_start_option',
+      'end_decision', 'selected_end_option', 'reason',
     ];
     return {
       type: 'object',
@@ -285,9 +294,8 @@ function parseDecision(text, row) {
   const required = row.stage === 'coarse'
     ? [
       ...(isBoundaryOnly(row) ? [] : ['action_status']),
-      'start_status', 'rough_start_before_frame',
-      'rough_start_after_frame', 'end_status', 'rough_end_before_frame',
-      'rough_end_after_frame', 'reason',
+      'instance_description', 'start_decision', 'selected_start_option',
+      'end_decision', 'selected_end_option', 'reason',
     ]
     : ['decision', 'selected_option', 'reason'];
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -298,40 +306,37 @@ function parseDecision(text, row) {
     throw new Error('response reason is invalid');
   }
   if (row.stage === 'coarse') {
-    const ids = row.frames.map(frame => frame.frame_id);
-    if ((!isBoundaryOnly(row) && !ACTION_STATUS_VALUES.has(value.action_status))
-        || !SIDE_STATUS_VALUES.has(value.start_status)
-        || !SIDE_STATUS_VALUES.has(value.end_status)) {
-      throw new Error('coarse status is invalid');
+    if (typeof value.instance_description !== 'string'
+        || value.instance_description.length < 1
+        || value.instance_description.length > 160) {
+      throw new Error('instance description is invalid');
     }
-    const midpoints = {};
+    if ((!isBoundaryOnly(row) && !ACTION_STATUS_VALUES.has(value.action_status))
+        || !SIDE_DECISION_VALUES.has(value.start_decision)
+        || !SIDE_DECISION_VALUES.has(value.end_decision)) {
+      throw new Error('coarse decision is invalid');
+    }
+    const boundaries = {
+      start: Number(row.coarse_segment_seconds[0]),
+      end: Number(row.coarse_segment_seconds[1]),
+    };
     for (const side of ['start', 'end']) {
-      const status = value[`${side}_status`];
-      const before = value[`rough_${side}_before_frame`];
-      const after = value[`rough_${side}_after_frame`];
-      if (status === 'VISIBLE') {
-        const beforeIndex = ids.indexOf(before);
-        const afterIndex = ids.indexOf(after);
-        if (beforeIndex < 0 || afterIndex !== beforeIndex + 1) {
-          throw new Error(`coarse ${side} transition frames are invalid`);
-        }
-        midpoints[side] = 0.5 * (
-          Number(row.frames[beforeIndex].timestamp_sec)
-          + Number(row.frames[afterIndex].timestamp_sec)
-        );
-      } else {
-        // Frame identities are semantically irrelevant for an abstained side.
-        // Normalize them instead of turning a safe side abstention into a failed run.
-        value[`rough_${side}_before_frame`] = null;
-        value[`rough_${side}_after_frame`] = null;
+      const decision = value[`${side}_decision`];
+      const option = value[`selected_${side}_option`];
+      if (decision === 'SELECT_CANDIDATE') {
+        const candidate = row[`${side}_candidates`].find(item => item.option === option);
+        if (!candidate) throw new Error(`selected coarse ${side} option is invalid`);
+        boundaries[side] = Number(candidate.timestamp_sec);
+      } else if (option !== null) {
+        throw new Error(`non-selection coarse ${side} response must use a null option`);
       }
     }
     if (!isBoundaryOnly(row) && value.action_status !== 'VALID_ACTION'
-        && (value.start_status === 'VISIBLE' || value.end_status === 'VISIBLE')) {
-      throw new Error('non-valid action cannot have a visible boundary');
+        && (value.start_decision === 'SELECT_CANDIDATE'
+          || value.end_decision === 'SELECT_CANDIDATE')) {
+      throw new Error('non-valid action cannot select a replacement boundary');
     }
-    if (midpoints.start !== undefined && midpoints.end !== undefined
-        && midpoints.start >= midpoints.end) {
+    if (boundaries.start >= boundaries.end) {
       throw new Error('coarse start must precede coarse end');
     }
   } else {
@@ -364,22 +369,34 @@ function resolvedBoundaryOutput(row, decision) {
       return { seconds: Number(candidate.timestamp_sec), valid: true, source: 'VLM' };
     }
     if (decision.decision === 'KEEP_COARSE') {
-      return { seconds: Number(row.rough_boundary_seconds), valid: true, source: 'KEEP' };
+      return { seconds: Number(row.rough_boundary_seconds), valid: true, source: 'COARSE_KEEP' };
+    }
+    if (decision.decision === 'KEEP_SADA') {
+      return { seconds: Number(row.sada_boundary_seconds), valid: true, source: 'SADA_KEEP' };
     }
     return invalid(row.boundary_side);
   }
   const result = {};
   for (const side of ['start', 'end']) {
-    if (decision[`${side}_status`] !== 'VISIBLE') {
+    const sideIndex = side === 'start' ? 0 : 1;
+    const sideDecision = decision[`${side}_decision`];
+    if (sideDecision === 'KEEP_SADA') {
+      result[side] = {
+        seconds: Number(row.coarse_segment_seconds[sideIndex]),
+        valid: true,
+        source: 'SADA_KEEP',
+      };
+      continue;
+    }
+    if (sideDecision !== 'SELECT_CANDIDATE') {
       result[side] = invalid(side);
       continue;
     }
-    const beforeId = decision[`rough_${side}_before_frame`];
-    const afterId = decision[`rough_${side}_after_frame`];
-    const before = row.frames.find(frame => frame.frame_id === beforeId);
-    const after = row.frames.find(frame => frame.frame_id === afterId);
+    const candidate = row[`${side}_candidates`].find(
+      item => item.option === decision[`selected_${side}_option`],
+    );
     result[side] = {
-      seconds: 0.5 * (Number(before.timestamp_sec) + Number(after.timestamp_sec)),
+      seconds: Number(candidate.timestamp_sec),
       valid: true,
       source: 'VLM',
     };
@@ -412,37 +429,67 @@ function validateManifestRows(rows) {
     if (!Array.isArray(row.frames) || row.frames.length < 2) {
       throw new Error(`insufficient frames for ${row.query_id}`);
     }
+    if (!Number.isFinite(Number(row.fps)) || Number(row.fps) <= 0) {
+      throw new Error(`invalid fps for ${row.query_id}`);
+    }
     let prior = -Infinity;
+    let priorFrameIndex = -1;
     const frameIds = new Set();
     for (const frame of row.frames) {
       const timestamp = Number(frame.timestamp_sec);
+      const frameIndex = Number(frame.frame_index);
       if (!frame.frame_id || frameIds.has(frame.frame_id)
           || !Number.isFinite(timestamp)
-          || (prior !== -Infinity && timestamp <= prior)) {
+          || !Number.isInteger(frameIndex)
+          || frameIndex <= priorFrameIndex
+          || (prior !== -Infinity && timestamp <= prior)
+          || Math.abs(timestamp - frameIndex / Number(row.fps)) > 1e-6) {
         throw new Error(`invalid frame timeline for ${row.query_id}`);
       }
       frameIds.add(frame.frame_id);
       prior = timestamp;
+      priorFrameIndex = frameIndex;
     }
-    if (row.stage === 'fine') {
-      if (!['start', 'end'].includes(row.boundary_side)
-          || !Array.isArray(row.candidates) || row.candidates.length < 1) {
-        throw new Error(`invalid boundary side or candidates for ${row.query_id}`);
+    const validateCandidates = (candidates, label) => {
+      if (!Array.isArray(candidates) || candidates.length < 1) {
+        throw new Error(`missing ${label} candidates for ${row.query_id}`);
       }
       const options = new Set();
-      for (const candidate of row.candidates) {
-        const before = row.frames.findIndex(frame => frame.frame_id === candidate.before_frame_id);
-        const after = row.frames.findIndex(frame => frame.frame_id === candidate.after_frame_id);
-        const midpoint = before >= 0 && after >= 0
-          ? 0.5 * (Number(row.frames[before].timestamp_sec) + Number(row.frames[after].timestamp_sec))
-          : NaN;
-        if (!candidate.option || options.has(candidate.option) || before < 0 || after !== before + 1
+      for (const candidate of candidates) {
+        const before = row.frames.find(frame => frame.frame_id === candidate.before_frame_id);
+        const after = row.frames.find(frame => frame.frame_id === candidate.after_frame_id);
+        const gap = before && after ? after.frame_index - before.frame_index : NaN;
+        const midpoint = before && after
+          ? 0.5 * (Number(before.timestamp_sec) + Number(after.timestamp_sec)) : NaN;
+        if (!candidate.option || options.has(candidate.option) || !before || !after
+            || gap < 1 || gap > 3
             || !Number.isFinite(Number(candidate.timestamp_sec))
             || Math.abs(Number(candidate.timestamp_sec) - midpoint) > 1e-6) {
-          throw new Error(`invalid fine transition candidate for ${row.query_id}`);
+          throw new Error(`invalid ${label} transition candidate for ${row.query_id}`);
         }
         options.add(candidate.option);
       }
+    };
+    if (!Array.isArray(row.instance_anchor_frame_ids)
+        || row.instance_anchor_frame_ids.length < 1
+        || row.instance_anchor_frame_ids.some(id => !frameIds.has(id))) {
+      throw new Error(`invalid instance anchors for ${row.query_id}`);
+    }
+    if (row.stage === 'fine') {
+      if (!['start', 'end'].includes(row.boundary_side)
+          || typeof row.instance_description !== 'string'
+          || !Number.isFinite(Number(row.sada_boundary_seconds))) {
+        throw new Error(`invalid boundary side or candidates for ${row.query_id}`);
+      }
+      validateCandidates(row.candidates, 'fine');
+    } else {
+      if (!Array.isArray(row.context_frame_ids)
+          || row.context_frame_ids.length < 2
+          || row.context_frame_ids.some(id => !frameIds.has(id))) {
+        throw new Error(`invalid context frames for ${row.query_id}`);
+      }
+      validateCandidates(row.start_candidates, 'coarse start');
+      validateCandidates(row.end_candidates, 'coarse end');
     }
   }
 }
@@ -601,7 +648,16 @@ async function requestModel({
     const response = await postJson(
       `${root}/responses`, { authorization: `Bearer ${apiKey}` }, payload, timeoutMs,
     );
-    return { text: responseText(response, wireApi), usage: response.usage || null };
+    return {
+      text: responseText(response, wireApi),
+      usage: response.usage || null,
+      server_metadata: {
+        id: response.id || null,
+        model: response.model || null,
+        system_fingerprint: response.system_fingerprint || null,
+        status: response.status || null,
+      },
+    };
   }
   const payload = {
     model, messages: [{ role: 'user', content }], max_tokens: maxTokens,
@@ -611,7 +667,16 @@ async function requestModel({
   const response = await postJson(
     `${root}/chat/completions`, { authorization: `Bearer ${apiKey}` }, payload, timeoutMs,
   );
-  return { text: responseText(response, wireApi), usage: response.usage || null };
+  return {
+    text: responseText(response, wireApi),
+    usage: response.usage || null,
+    server_metadata: {
+      id: response.id || null,
+      model: response.model || null,
+      system_fingerprint: response.system_fingerprint || null,
+      status: null,
+    },
+  };
 }
 
 
@@ -700,6 +765,7 @@ async function main() {
       output.boundary_results = resolvedBoundaryOutput(row, output.decision);
       output.response_text = response.text;
       output.usage = response.usage;
+      output.server_metadata = response.server_metadata || null;
       output.request_attempts = response.attempts;
       output.run_status = 'ok';
     } catch (error) {

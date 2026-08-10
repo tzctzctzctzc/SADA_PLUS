@@ -2,14 +2,15 @@
 
 import hashlib
 import json
+import math
 from pathlib import Path
 
 import torch
 
 
 PROPOSAL_SCHEMA_VERSION = "vlm-boundary-proposal-v1"
-QUERY_SCHEMA_VERSION = "vlm-boundary-query-v3"
-PREDICTION_SCHEMA_VERSION = "vlm-boundary-prediction-v3"
+QUERY_SCHEMA_VERSION = "vlm-boundary-query-v4"
+PREDICTION_SCHEMA_VERSION = "vlm-boundary-prediction-v4"
 
 
 def file_sha256(path):
@@ -158,6 +159,60 @@ def transition_grid(center, step, candidate_count, duration):
         {"frame_id": "F{}".format(index + 1), "timestamp_sec": timestamp}
         for index, timestamp in enumerate(timestamps)
     ]
+
+
+def video_frame_index(timestamp, duration, fps):
+    """Quantize a timestamp to one decodable video frame index."""
+    if float(fps) <= 0 or float(duration) <= 0:
+        raise ValueError("duration and fps must be positive")
+    last = max(1, int(math.floor((float(duration) - 1e-6) * float(fps))))
+    return min(max(int(round(float(timestamp) * float(fps))), 0), last)
+
+
+def transition_pair(center, duration, fps, gap_frames=2):
+    """Return one short real-frame pair whose midpoint is nearest ``center``."""
+    gap = int(gap_frames)
+    if gap < 1 or gap > 3:
+        raise ValueError("transition gap must be between one and three frames")
+    last = max(1, int(math.floor((float(duration) - 1e-6) * float(fps))))
+    if last < gap:
+        gap = last
+    before = int(round(float(center) * float(fps) - gap / 2.0))
+    before = min(max(before, 0), last - gap)
+    after = before + gap
+    return {
+        "before_frame_index": before,
+        "after_frame_index": after,
+        "timestamp_sec": (before + after) / (2.0 * float(fps)),
+    }
+
+
+def transition_pair_grid(
+    center,
+    step,
+    candidate_count,
+    duration,
+    fps,
+    gap_frames=2,
+):
+    """Build deduplicated short transition pairs around one coarse center."""
+    if candidate_count < 3 or candidate_count % 2 == 0:
+        raise ValueError("candidate count must be an odd integer >= 3")
+    radius = candidate_count // 2
+    pairs = []
+    seen = set()
+    for offset in range(-radius, radius + 1):
+        pair = transition_pair(
+            float(center) + offset * float(step),
+            duration,
+            fps,
+            gap_frames,
+        )
+        key = (pair["before_frame_index"], pair["after_frame_index"])
+        if key not in seen:
+            seen.add(key)
+            pairs.append(pair)
+    return pairs
 
 
 def valid_segment(left, right, minimum_duration=1e-6):
