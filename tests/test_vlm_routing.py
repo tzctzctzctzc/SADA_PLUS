@@ -723,6 +723,19 @@ def test_sada_continuation_rejects_nonrouting_training_protocol_change():
         validate_sada_continuation_checkpoint(checkpoint, changed)
 
 
+def test_sada_continuation_allows_explicit_diagnostic_alignment_levels():
+    checkpoint = ordinary_sada_checkpoint()
+    current = continuation_config()
+    current["model"]["semantic_alignment_levels"] = [0, 2]
+    current["diagnostic"] = {"alignment_levels": [0, 2]}
+    assert validate_sada_continuation_checkpoint(checkpoint, current) == 5
+
+    without_diagnostic = continuation_config()
+    without_diagnostic["model"]["semantic_alignment_levels"] = [0, 2]
+    with pytest.raises(ValueError, match="outside routing"):
+        validate_sada_continuation_checkpoint(checkpoint, without_diagnostic)
+
+
 def test_true_continuation_restores_all_optimizers_and_scheduler_phase():
     parameters = [torch.nn.Parameter(torch.tensor([1.0])) for _ in range(3)]
     old_optimizers = [

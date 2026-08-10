@@ -150,6 +150,18 @@ def validate_sada_continuation_checkpoint(checkpoint, current_config):
         )
     parent = _continuation_protocol(checkpoint["config"])
     current = _continuation_protocol(current_config)
+    current_plain = _plain_config(current_config)
+    diagnostic_levels = current_plain.get("diagnostic", {}).get(
+        "alignment_levels"
+    )
+    if diagnostic_levels is not None:
+        # This explicit diagnostic changes only which already-computed
+        # conditional losses are aggregated. Keep every other model field
+        # under the strict continuation check.
+        parent["model"] = dict(parent["model"])
+        current["model"] = dict(current["model"])
+        parent["model"].pop("semantic_alignment_levels", None)
+        current["model"].pop("semantic_alignment_levels", None)
     mismatches = [key for key in parent if parent[key] != current[key]]
     if mismatches:
         raise ValueError(
