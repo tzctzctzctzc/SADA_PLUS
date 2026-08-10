@@ -97,7 +97,7 @@ test('teacher score region selects the independent prompt role', () => {
 });
 
 
-test('high veto prompt uses exact-frame official EPIC verb boundaries', () => {
+test('high veto prompt minimally corrects confirmed EPIC verb boundaries', () => {
   const high = promptProtocol({ ...manifestRow(), prompt_role: HIGH_PROMPT_ROLE });
   assert.equal(high.version, HIGH_PROMPT_PROTOCOL_VERSION);
   assert.equal(high.sha256, HIGH_PROMPT_SHA256);
@@ -105,7 +105,7 @@ test('high veto prompt uses exact-frame official EPIC verb boundaries', () => {
   assert.notEqual(HIGH_PROMPT_SHA256, LOW_PROMPT_SHA256);
   assert.equal(
     HIGH_PROMPT_PROTOCOL_VERSION,
-    'candidate-blind-epic-official-verb-veto-v3',
+    'candidate-blind-epic-boundary-veto-v4',
   );
   assert.equal(HIGH_PROMPT_TEXT.toLowerCase().includes('false positive'), false);
   assert.match(
@@ -114,17 +114,19 @@ test('high veto prompt uses exact-frame official EPIC verb boundaries', () => {
   );
   assert.match(
     HIGH_PROMPT_TEXT,
-    /Classify the action interval, if\nany, that contains the exact time of Frame 5/,
+    /temporal neighborhood around Frame 5 genuinely contains/,
   );
-  assert.match(HIGH_PROMPT_TEXT, /other frames only as\ntemporal evidence/);
-  assert.match(HIGH_PROMPT_TEXT, /official EPIC-KITCHENS-100 verb-class boundaries/);
-  assert.match(HIGH_PROMPT_TEXT, /exactly official verb classes 0-9/);
-  assert.match(HIGH_PROMPT_TEXT, /PUT includes LEAVE and REPOSITION/);
-  assert.match(HIGH_PROMPT_TEXT, /WASH includes CLEAN, RINSE, LATHER, and WIPE/);
-  assert.match(HIGH_PROMPT_TEXT, /It is not DRY, SCRAPE, SCRUB/);
-  assert.match(HIGH_PROMPT_TEXT, /PULL-OFF is TAKE, but\n  PULL by itself is not/);
+  assert.match(HIGH_PROMPT_TEXT, /confirmed dataset-specific boundaries exactly/);
+  assert.match(HIGH_PROMPT_TEXT, /PUT includes POSITION, REPOSITION/);
+  assert.match(HIGH_PROMPT_TEXT, /WASH includes CLEAN, RINSE, WIPE, LATHER/);
+  assert.match(HIGH_PROMPT_TEXT, /SCRUB, DRY, BRUSH/);
+  assert.match(HIGH_PROMPT_TEXT, /PULL-OFF belongs to TAKE, but generic PULL does not/);
+  assert.match(HIGH_PROMPT_TEXT, /DROP-INTO can be INSERT, but generic DROP is not INSERT/);
+  assert.match(HIGH_PROMPT_TEXT, /Do not use UNCERTAIN merely because target-action evidence is weak/);
+  assert.match(HIGH_PROMPT_TEXT, /Weak target evidence alone is not sufficient/);
   assert.equal(HIGH_PROMPT_TEXT.includes('moving or\nrepositioning an object'), false);
-  assert.equal(HIGH_PROMPT_TEXT.includes('temporal neighborhood around Frame 5'), false);
+  assert.equal(HIGH_PROMPT_TEXT.includes('exactly official verb classes 0-9'), false);
+  assert.equal(HIGH_PROMPT_TEXT.includes('Classify the action interval, if'), false);
   for (const forbidden of [
     'teacher score', 'model confidence', 'target gt', 'ground truth',
     'fpn level', 'assignment validity', 'regression range', 'cohort',
@@ -133,7 +135,7 @@ test('high veto prompt uses exact-frame official EPIC verb boundaries', () => {
   }
   assert.match(HIGH_PROMPT_TEXT, /Object presence is not action evidence/);
   assert.match(HIGH_PROMPT_TEXT, /Hand-object contact alone is not/);
-  assert.match(HIGH_PROMPT_TEXT, /prefer UNCERTAIN/);
+  assert.equal(HIGH_PROMPT_TEXT.includes('prefer UNCERTAIN'), false);
 });
 
 

@@ -25,7 +25,7 @@ const LOW_PROMPT_ROLE = 'low_rescue';
 const HIGH_PROMPT_ROLE = 'high_veto';
 const PROMPT_ROLES = new Set([LOW_PROMPT_ROLE, HIGH_PROMPT_ROLE]);
 const LOW_PROMPT_PROTOCOL_VERSION = 'candidate-blind-epic-semantic-gate-v3';
-const HIGH_PROMPT_PROTOCOL_VERSION = 'candidate-blind-epic-official-verb-veto-v3';
+const HIGH_PROMPT_PROTOCOL_VERSION = 'candidate-blind-epic-boundary-veto-v4';
 const SEMANTIC_CACHE_SCHEMA_VERSION = 'offline-vlm-semantic-evidence-v1';
 const RESPONSE_CONTRACT_VERSION = 'vlm-actionness-label-json-schema-v1';
 
@@ -405,89 +405,83 @@ an egocentric kitchen video.
 
 You are given nine chronologically ordered frames sampled every 0.2 seconds.
 Frame 5 is the exact temporal location being evaluated. Frames 1-4 are preceding
-context and Frames 6-9 are following context. Classify the action interval, if
-any, that contains the exact time of Frame 5. Use the other frames only as
-temporal evidence for that exact time. An action occurring entirely before or
-after Frame 5 does not count, even when it appears elsewhere in the nine frames.
-An ongoing action can count at Frame 5 even if its start or end is outside the
-frames.
+context and Frames 6-9 are following context.
 
-Judge only from the visual-temporal evidence. No upstream prediction or
-candidate label is provided and none should be assumed.
+Determine whether the temporal neighborhood around Frame 5 genuinely contains
+one event from the ten-action target ontology below, or whether the visible
+evidence clearly shows non-target activity or true background. Judge only from
+the visual-temporal evidence. No upstream prediction or candidate label is
+provided and none should be assumed.
 
-Use the official EPIC-KITCHENS-100 verb-class boundaries. The target set is
-exactly official verb classes 0-9 below. Do not replace these dataset classes
-with broader commonsense categories or a self-defined state-change ontology.
-Representative official narration words are included to define membership:
-- 0 TAKE: take, pick up, grab, get, retrieve, fetch, unload, or pull off.
-- 1 PUT: put, put down, place, lay, leave, position, reposition, rest, return,
-  replace, store, or set down.
-- 2 WASH: wash, rinse, clean, lather, wipe, sponge, soap, or mop up.
-- 3 OPEN: open, open up, lever open, unzip, or uncork.
-- 4 CLOSE: close, shut, screw on, or twist on.
-- 5 INSERT: insert, put in/into, place in/into, move in, push in/into, slide into,
-  drop into, fit inside, load, pack, or sheathe.
-- 6 TURN-ON: turn on, switch on, activate, start, restart, ignite, light, play,
-  or water on.
-- 7 CUT: cut, chop, slice, dice, halve, julienne, score, snip, or trim.
-- 8 TURN-OFF: turn off, switch off, shut off, tap off, water off, or flush.
-- 9 POUR: pour, drizzle, shake into, sieve, or tip into/from.
+Target ontology:
+- TAKE: take, pick up, grab, get, retrieve, fetch, unload, or pull off.
+- PUT: put, put down, place, position, reposition, rest, return, store, or set
+  down. Visible release of the object is not required.
+- WASH: wash, rinse, clean, wipe, lather, sponge, or soap.
+- OPEN: changing a closure from closed to open or more accessible.
+- CLOSE: changing a closure from open to closed or secured.
+- INSERT: moving an object from outside to inside a container or opening.
+- TURN-ON: operating a control so a device, light, flame, or flow becomes active.
+- CUT: visibly slicing, dividing, or severing material with a cutting tool.
+- TURN-OFF: operating a control so an active device, light, flame, or flow stops.
+- POUR: controlling a source container so contents visibly transfer to a destination.
 
-Respect the following official distinctions between target classes and their
-visually related non-target sibling classes:
-- TAKE is not REMOVE, SCOOP, LIFT, GATHER, HOLD, or CHECK. PULL-OFF is TAKE, but
-  PULL by itself is not.
-- PUT includes LEAVE and REPOSITION. It is not MOVE, THROW, HANG, DROP, LET-GO,
-  SERVE, or SET. SET-DOWN is PUT, but SET by itself is not.
-- WASH includes CLEAN, RINSE, LATHER, and WIPE. It is not DRY, SCRAPE, SCRUB,
-  RUB, SOAK, or BRUSH.
-- OPEN is not PULL, UNROLL, UNSCREW, UNCOVER, UNWRAP, SWITCH, UNLOCK, ADJUST,
-  or PRESS.
-- CLOSE is not WRAP, ROLL, or LOCK.
-- INSERT includes DROP-INTO, but DROP by itself is not INSERT.
-- CUT is not PEEL, EMPTY, BREAK, FILTER, RIP, CRUSH, DIVIDE, GRATE, or STAB.
-- POUR is not MIX, FILL, ADD, ATTACH, COAT, FILTER, SCOOP, EMPTY, APPLY, or
-  SPRINKLE.
+Apply these confirmed dataset-specific boundaries exactly:
+- PUT includes POSITION, REPOSITION, REST, RETURN, STORE, and SET-DOWN. Generic
+  MOVE or SET is not PUT.
+- WASH includes CLEAN, RINSE, WIPE, LATHER, SPONGE, and SOAP. SCRUB, DRY, BRUSH,
+  SCRAPE, RUB, and SOAK are not WASH.
+- PULL-OFF belongs to TAKE, but generic PULL does not. REMOVE, SCOOP, LIFT,
+  GATHER, HOLD, and CHECK are also not TAKE.
+- DROP-INTO can be INSERT, but generic DROP is not INSERT.
+- Generic PULL must not be relabeled as OPEN merely because the pulled object
+  becomes more accessible.
 
-When the frames cannot reliably distinguish an official target verb class from
-a visually similar non-target sibling class, choose UNCERTAIN instead of
-inventing a broader category or forcing a negative label.
+Related non-target activities must not be broadened into a target action. These
+include holding or carrying an already controlled object, generic moving,
+removing, reaching, walking, adjusting, setting, emptying, filling, scrubbing,
+drying, brushing, scraping, rubbing, soaking, generic pulling, pressing,
+wrapping, dropping, or unrelated motion.
 
 Your task is to strictly distinguish genuine target-action events from clear
 non-target activity or background.
-Before deciding, ask: "Which action interval, if any, contains the exact time of
-Frame 5 under the official verb-class boundaries?"
+Before deciding, ask: "What observable action or meaningful state transition is
+actually happening around Frame 5?"
+
+Do not use UNCERTAIN merely because target-action evidence is weak. Choose
+OTHER_ACTIVITY when observable motion is better explained by a listed non-target
+action. Choose TRUE_BACKGROUND when no meaningful classifiable activity occurs
+in the central neighborhood. Use UNCERTAIN only when there is positive evidence
+for competing interpretations or the decisive motion is visibly occluded.
 
 Do not choose TARGET_ACTION merely because:
 - a relevant object is visible;
 - a hand approaches, touches, holds, or carries an object;
-- generic manipulation occurs;
+- generic manipulation or object motion occurs;
 - the scene makes a target action plausible;
 - the person appears to be preparing for a target action;
 - the target event may have occurred before Frame 5 and only its result remains;
-- a target action appears in the outer context but its temporal interval does not
-  include the exact time of Frame 5.
+- motion in the outer context resembles part of a target event but the event does
+  not genuinely include the central neighborhood.
 
 Object presence is not action evidence. Hand-object contact alone is not
 sufficient. Generic manipulation is not automatically a target action. A
 plausible scene is not evidence that the action actually occurs.
 
 Labels:
-- TARGET_ACTION: meaningful visual-temporal evidence supports that the exact time
-  of Frame 5 belongs to one official target-class action interval. The complete
-  action need not be visible, and an ongoing action must not be rejected only
-  because its beginning or ending lies outside the frames.
+- TARGET_ACTION: meaningful visual-temporal evidence supports that Frame 5's
+  neighborhood genuinely belongs to one continuous event in the target ontology.
+  The complete transition need not be visible, and an ongoing target event must
+  not be rejected only because its beginning or ending lies outside the frames.
 - OTHER_ACTIVITY: use only when a meaningful activity is clearly occurring but
-  the exact time of Frame 5 is better explained by an official non-target verb
-  class. This requires observable positive evidence for the non-target activity,
-  not merely absence of target evidence.
-- TRUE_BACKGROUND: use only when the exact time of Frame 5 belongs to no
-  meaningful classifiable activity, such as idle behavior, static context, or
-  another clear background state.
-- UNCERTAIN: use when the evidence cannot confidently distinguish a target event
-  from a non-target or background interpretation. Occlusion, subtle state change,
-  incomplete evidence, or genuine ambiguity should prefer UNCERTAIN over an
-  unsupported negative judgment.
+  is better explained by a non-target action. This requires observable positive
+  evidence for the non-target activity, not merely absence of target evidence.
+- TRUE_BACKGROUND: use when the central neighborhood contains no meaningful
+  classifiable activity, such as idle behavior, static context, irrelevant
+  camera motion, or another clear background state.
+- UNCERTAIN: reserve for genuine competing positive interpretations or visible
+  occlusion of the decisive motion. Weak target evidence alone is not sufficient
+  reason to choose UNCERTAIN.
 
 Return exactly one JSON object with exactly one key and no other text:
 {"label":"TARGET_ACTION|OTHER_ACTIVITY|TRUE_BACKGROUND|UNCERTAIN"}`;
