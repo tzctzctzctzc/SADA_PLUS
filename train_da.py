@@ -816,6 +816,15 @@ def create_argparser():
         help='comma-separated FPN levels used only for diagnostic runs',
     )
     parser.add_argument(
+        '--diagnostic-target-alignment',
+        choices=['both', 'action', 'background'],
+        default='both',
+        help=(
+            'diagnostic conditional alignment content: use action classes, '
+            'background, or both'
+        ),
+    )
+    parser.add_argument(
         '--stop-after-epoch', type=int, default=None,
         help='stop after this epoch without changing the scheduler horizon',
     )
@@ -990,6 +999,7 @@ if __name__ == '__main__':
         'stop_after_epoch': args.stop_after_epoch,
         'no_conditional_update': args.diagnostic_no_ca,
         'alignment_levels': diagnostic_levels,
+        'target_alignment': args.diagnostic_target_alignment,
     }
 
     update_config_with_arguments(config_dict, args, ARGS_TYPES, ARGS_CONFIGPATH)

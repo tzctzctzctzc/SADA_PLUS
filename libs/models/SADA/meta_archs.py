@@ -325,6 +325,17 @@ class SADA(nn.Module):
         self.binary_band_oracle_levels = cfg.get('diagnostic', {}).get(
             'binary_band_oracle_levels'
         )
+        self.diagnostic_target_alignment = cfg.get('diagnostic', {}).get(
+            'target_alignment', 'both'
+        )
+        if self.diagnostic_target_alignment not in (
+            'both', 'action', 'background'
+        ):
+            raise ValueError(
+                'unknown diagnostic target alignment: {}'.format(
+                    self.diagnostic_target_alignment
+                )
+            )
         self.oracle_target_regression_mode = cfg.get('diagnostic', {}).get(
             'oracle_target_regression', 'off'
         )
@@ -2232,7 +2243,14 @@ class SADA(nn.Module):
                     weight_level['weight_level_5'] = self.cfg['model'].get('weight_level_5', 1.0)
                     
                     
-                    for c in range(n_classes):
+                    if self.diagnostic_target_alignment == 'action':
+                        alignment_classes = range(self.num_class_orig)
+                    elif self.diagnostic_target_alignment == 'background':
+                        alignment_classes = (self.num_class_orig,)
+                    else:
+                        alignment_classes = range(n_classes)
+
+                    for c in alignment_classes:
                         class_c_weight = 1.0
                         if c == self.num_class_orig:
                             # Select all the background embeddings (all zeros in the source), and all the ones below all the thresholds in the pseudo-labels
