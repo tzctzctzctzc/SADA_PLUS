@@ -319,8 +319,11 @@ function parseDecision(text, row) {
           Number(row.frames[beforeIndex].timestamp_sec)
           + Number(row.frames[afterIndex].timestamp_sec)
         );
-      } else if (before !== null || after !== null) {
-        throw new Error(`non-visible coarse ${side} must use null frames`);
+      } else {
+        // Frame identities are semantically irrelevant for an abstained side.
+        // Normalize them instead of turning a safe side abstention into a failed run.
+        value[`rough_${side}_before_frame`] = null;
+        value[`rough_${side}_after_frame`] = null;
       }
     }
     if (!isBoundaryOnly(row) && value.action_status !== 'VALID_ACTION'

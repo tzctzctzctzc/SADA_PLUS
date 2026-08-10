@@ -124,9 +124,11 @@ test('coarse contract accepts one visible side and enforces adjacent pairs', () 
   assert.throws(() => parseDecision(JSON.stringify({
     ...oneSideCoarseDecision(), action_status: 'NO_ACTION',
   }), coarse), /cannot have a visible/);
-  assert.throws(() => parseDecision(JSON.stringify({
+  const normalized = parseDecision(JSON.stringify({
     ...oneSideCoarseDecision(), end_status: 'UNCERTAIN', rough_end_before_frame: 'F3',
-  }), coarse), /null/);
+  }), coarse);
+  assert.equal(normalized.rough_end_before_frame, null);
+  assert.equal(normalized.rough_end_after_frame, null);
 });
 
 
