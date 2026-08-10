@@ -8,6 +8,7 @@ import {
   promptFor,
   requestFingerprint,
   requestWithRetry,
+  resolvedBoundaryOutput,
   validateManifestRows,
   validatePriorRows,
 } from '../tools/run_vlm_boundary_audit.mjs';
@@ -15,7 +16,7 @@ import {
 
 function coarseRow() {
   return {
-    query_schema_version: 'vlm-boundary-query-v1',
+    query_schema_version: 'vlm-boundary-query-v2',
     stage: 'coarse',
     query_id: 'p:coarse',
     proposal_id: 'p',
@@ -29,6 +30,7 @@ function coarseRow() {
       { frame_id: 'F1', timestamp_sec: 1 },
       { frame_id: 'F2', timestamp_sec: 3 },
       { frame_id: 'F3', timestamp_sec: 6 },
+      { frame_id: 'F4', timestamp_sec: 8 },
     ],
   };
 }
@@ -40,24 +42,46 @@ function fineRow() {
     stage: 'fine',
     query_id: 'p:fine:start',
     boundary_side: 'start',
+    rough_boundary_seconds: 2,
     frames: [
-      { frame_id: 'F1', timestamp_sec: 1.8, option: 'C' },
-      { frame_id: 'F2', timestamp_sec: 2.0, option: 'A' },
-      { frame_id: 'F3', timestamp_sec: 2.2, option: 'B' },
+      { frame_id: 'F1', timestamp_sec: 1.7 },
+      { frame_id: 'F2', timestamp_sec: 1.9 },
+      { frame_id: 'F3', timestamp_sec: 2.1 },
+      { frame_id: 'F4', timestamp_sec: 2.3 },
+    ],
+    candidates: [
+      { option: 'C', before_frame_id: 'F1', after_frame_id: 'F2', timestamp_sec: 1.8 },
+      { option: 'A', before_frame_id: 'F2', after_frame_id: 'F3', timestamp_sec: 2.0 },
+      { option: 'B', before_frame_id: 'F3', after_frame_id: 'F4', timestamp_sec: 2.2 },
     ],
   };
 }
 
 
-test('prompt whitelist excludes model metadata and post-hoc labels', () => {
+function oneSideCoarseDecision() {
+  return {
+    action_status: 'VALID_ACTION',
+    start_status: 'VISIBLE',
+    rough_start_before_frame: 'F1',
+    rough_start_after_frame: 'F2',
+    end_status: 'NOT_VISIBLE',
+    rough_end_before_frame: null,
+    rough_end_after_frame: null,
+    reason: 'start only',
+  };
+}
+
+
+test('prompt whitelist excludes metadata and defines one transition protocol', () => {
   const row = coarseRow();
   const fields = promptFields(row);
   assert.equal('score' in fields, false);
   assert.equal('fpn_level' in fields, false);
   assert.equal('posthoc_gt' in fields, false);
   const prompt = promptFor(row);
+  assert.match(prompt, /not in the action; adjacent after-frame is in the action/);
+  assert.match(prompt, /before-frame is in the action; adjacent after-frame is not/);
   assert.equal(prompt.includes('0.999'), false);
-  assert.equal(prompt.includes('NO_ACTION' + JSON.stringify(row.posthoc_gt)), false);
   assert.equal(
     requestFingerprint(row, 'model', 'responses'),
     requestFingerprint({ ...row, score: 0.1, fpn_level: 5, posthoc_gt: {} }, 'model', 'responses'),
@@ -65,21 +89,57 @@ test('prompt whitelist excludes model metadata and post-hoc labels', () => {
 });
 
 
-test('strict coarse and fine response contracts reject invalid geometry', () => {
+test('coarse contract accepts one visible side and enforces adjacent pairs', () => {
   const coarse = coarseRow();
-  const valid = parseDecision(JSON.stringify({
-    status: 'VALID_ACTION', rough_start_frame: 'F1', rough_end_frame: 'F3', reason: 'visible',
-  }), coarse);
-  assert.equal(valid.status, 'VALID_ACTION');
+  assert.equal(
+    parseDecision(JSON.stringify(oneSideCoarseDecision()), coarse).start_status,
+    'VISIBLE',
+  );
   assert.throws(() => parseDecision(JSON.stringify({
-    status: 'VALID_ACTION', rough_start_frame: 'F3', rough_end_frame: 'F1', reason: 'bad',
+    ...oneSideCoarseDecision(), rough_start_after_frame: 'F3',
   }), coarse), /invalid/);
-  assert.equal(parseDecision(JSON.stringify({
-    status: 'VALID_ACTION', selected_option: 'A', reason: 'edge',
-  }), fineRow()).selected_option, 'A');
   assert.throws(() => parseDecision(JSON.stringify({
-    status: 'VALID_ACTION', selected_option: 'Z', reason: 'bad',
-  }), fineRow()), /invalid/);
+    ...oneSideCoarseDecision(), action_status: 'NO_ACTION',
+  }), coarse), /cannot have a visible/);
+  assert.throws(() => parseDecision(JSON.stringify({
+    ...oneSideCoarseDecision(), end_status: 'UNCERTAIN', rough_end_before_frame: 'F3',
+  }), coarse), /null/);
+});
+
+
+test('fine contract supports candidate, KEEP, abstention, and rejection', () => {
+  const row = fineRow();
+  assert.equal(parseDecision(JSON.stringify({
+    decision: 'SELECT_CANDIDATE', selected_option: 'A', reason: 'edge',
+  }), row).selected_option, 'A');
+  for (const decision of [
+    'KEEP_COARSE', 'NO_VISIBLE_BOUNDARY', 'UNCERTAIN', 'WRONG_ACTION', 'NO_ACTION',
+  ]) {
+    assert.equal(parseDecision(JSON.stringify({
+      decision, selected_option: null, reason: 'valid alternative',
+    }), row).decision, decision);
+  }
+  assert.throws(() => parseDecision(JSON.stringify({
+    decision: 'SELECT_CANDIDATE', selected_option: 'Z', reason: 'bad',
+  }), row), /invalid/);
+  assert.match(promptFor(row), /KEEP_COARSE/);
+  assert.deepEqual(resolvedBoundaryOutput(row, {
+    decision: 'SELECT_CANDIDATE', selected_option: 'A', reason: 'edge',
+  }), { seconds: 2, valid: true, source: 'VLM' });
+  assert.deepEqual(resolvedBoundaryOutput(row, {
+    decision: 'KEEP_COARSE', selected_option: null, reason: 'keep',
+  }), { seconds: 2, valid: true, source: 'KEEP' });
+  assert.deepEqual(resolvedBoundaryOutput(row, {
+    decision: 'UNCERTAIN', selected_option: null, reason: 'blur',
+  }), { seconds: 2, valid: false, source: 'INVALID' });
+});
+
+
+test('manifest validation rejects non-adjacent fine candidate', () => {
+  validateManifestRows([coarseRow(), fineRow()]);
+  const bad = fineRow();
+  bad.candidates[0] = { ...bad.candidates[0], after_frame_id: 'F3' };
+  assert.throws(() => validateManifestRows([bad]), /transition candidate/);
 });
 
 

@@ -8,8 +8,8 @@ import torch
 
 
 PROPOSAL_SCHEMA_VERSION = "vlm-boundary-proposal-v1"
-QUERY_SCHEMA_VERSION = "vlm-boundary-query-v1"
-PREDICTION_SCHEMA_VERSION = "vlm-boundary-prediction-v1"
+QUERY_SCHEMA_VERSION = "vlm-boundary-query-v2"
+PREDICTION_SCHEMA_VERSION = "vlm-boundary-prediction-v2"
 
 
 def file_sha256(path):
@@ -133,6 +133,31 @@ def centered_candidates(center, step, count, duration):
         if not values or abs(value - values[-1]) > 1e-9:
             values.append(value)
     return values
+
+
+def transition_midpoints(frames):
+    """Return midpoint times for every adjacent chronological frame pair."""
+    return [
+        0.5 * (float(before["timestamp_sec"]) + float(after["timestamp_sec"]))
+        for before, after in zip(frames, frames[1:])
+    ]
+
+
+def transition_grid(center, step, candidate_count, duration):
+    """Build frames whose adjacent pairs are boundary-transition candidates."""
+    if candidate_count < 3 or candidate_count % 2 == 0:
+        raise ValueError("candidate count must be an odd integer >= 3")
+    half = candidate_count / 2.0
+    timestamps = []
+    for index in range(candidate_count + 1):
+        value = float(center) + (index - half) * float(step)
+        value = round(min(max(value, 0.0), float(duration)), 6)
+        if not timestamps or abs(value - timestamps[-1]) > 1e-9:
+            timestamps.append(value)
+    return [
+        {"frame_id": "F{}".format(index + 1), "timestamp_sec": timestamp}
+        for index, timestamp in enumerate(timestamps)
+    ]
 
 
 def valid_segment(left, right, minimum_duration=1e-6):

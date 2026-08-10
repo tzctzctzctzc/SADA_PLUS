@@ -3,19 +3,25 @@
 import argparse
 import json
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.vlm_boundary_utils import (
-    centered_candidates,
     fine_step_seconds,
     read_jsonl,
     temporal_iou,
+    transition_grid,
+    transition_midpoints,
     valid_segment,
+)
+from libs.evaluation.evaluator_anet import (
+    ANETdetection,
+    compute_average_precision_detection,
+    remove_duplicate_annotations,
 )
 
 
@@ -25,22 +31,27 @@ TIOU_THRESHOLDS = (0.1, 0.2, 0.3, 0.4, 0.5)
 def kept_label(label, action_subsampling):
     if action_subsampling == "10_majority_classes":
         return int(label) < 10
-    if action_subsampling == "20_random_classes":
-        return int(label) < 20
+    if action_subsampling == "20_majority_classes":
+        return int(label) in set(range(14)) | {15, 17, 18, 19}
     return True
 
 
-def query_frame_time(query, frame_id):
-    for frame in query["frames"]:
-        if frame["frame_id"] == frame_id:
-            return float(frame["timestamp_sec"])
-    raise ValueError("unknown frame {} in {}".format(frame_id, query["query_id"]))
+def query_transition_time(query, before_frame_id, after_frame_id):
+    frame_ids = [frame["frame_id"] for frame in query["frames"]]
+    before_index = frame_ids.index(before_frame_id)
+    after_index = frame_ids.index(after_frame_id)
+    if after_index != before_index + 1:
+        raise ValueError("boundary transition frames must be adjacent")
+    return 0.5 * (
+        float(query["frames"][before_index]["timestamp_sec"])
+        + float(query["frames"][after_index]["timestamp_sec"])
+    )
 
 
 def selected_option_time(query, option):
-    for frame in query["frames"]:
-        if frame["option"] == option:
-            return float(frame["timestamp_sec"])
+    for candidate in query["candidates"]:
+        if candidate["option"] == option:
+            return float(candidate["timestamp_sec"])
     raise ValueError("unknown option {} in {}".format(option, query["query_id"]))
 
 
@@ -65,13 +76,50 @@ def best_joint_segment(starts, ends, target):
 
 
 def coarse_oracle_segment(query, target, baseline=None):
-    times = [float(frame["timestamp_sec"]) for frame in query["frames"]]
-    best = best_joint_segment(times, times, target)
+    times = transition_midpoints(query["frames"])
+    starts = list(times)
+    ends = list(times)
+    if baseline is not None:
+        starts.append(float(baseline[0]))
+        ends.append(float(baseline[1]))
+    best = best_joint_segment(starts, ends, target)
     if baseline is not None and (
         best is None or temporal_iou(baseline, target) >= temporal_iou(best, target)
     ):
         return list(map(float, baseline))
     return best
+
+
+def two_stage_candidate_space(
+    proposal,
+    query,
+    candidate_count=7,
+    maximum_step=0.3,
+    minimum_step=0.1,
+):
+    """Exact per-side values reachable through coarse -> fine, including KEEP."""
+    baseline = list(map(float, proposal["coarse_segment_seconds"]))
+    step = fine_step_seconds(
+        proposal["origin_stride_seconds"], maximum_step, minimum_step
+    )
+    duration = max(0.0, float(proposal["video_duration_seconds"]) - 0.05)
+    reachable = set()
+    paths = []
+    for rough in transition_midpoints(query["frames"]):
+        fine_frames = transition_grid(rough, step, int(candidate_count), duration)
+        values = set(transition_midpoints(fine_frames)) | {float(rough)}
+        reachable.update(values)
+        paths.append({"rough": float(rough), "values": sorted(values)})
+    return {
+        "start": sorted(reachable | {baseline[0]}),
+        "end": sorted(reachable | {baseline[1]}),
+        "visible_side_paths": paths,
+        "coarse_transition_count": len(transition_midpoints(query["frames"])),
+        "fine_candidate_count_per_visible_side": int(candidate_count),
+        "fine_step_seconds": float(step),
+        "includes_keep_coarse": True,
+        "includes_side_abstention_detection_fallback": True,
+    }
 
 
 def two_stage_oracle_segments(
@@ -83,32 +131,45 @@ def two_stage_oracle_segments(
     minimum_step=0.1,
 ):
     baseline = list(map(float, proposal["coarse_segment_seconds"]))
-    rough = coarse_oracle_segment(query, target)
-    if rough is None:
-        return None, None
-    step = fine_step_seconds(
-        proposal["origin_stride_seconds"], maximum_step, minimum_step
+    space = two_stage_candidate_space(
+        proposal,
+        query,
+        candidate_count,
+        maximum_step,
+        minimum_step,
     )
-    duration = max(0.0, float(proposal["video_duration_seconds"]) - 0.05)
-    starts = sorted(
-        set(
-            centered_candidates(rough[0], step, candidate_count, duration)
-            + [baseline[0]]
-        )
-    )
-    ends = sorted(
-        set(
-            centered_candidates(rough[1], step, candidate_count, duration)
-            + [baseline[1]]
-        )
-    )
+    starts, ends = space["start"], space["end"]
     independent = [
         min(starts, key=lambda value: abs(value - float(target[0]))),
         min(ends, key=lambda value: abs(value - float(target[1]))),
     ]
     if not valid_segment(*independent):
-        independent = rough
-    joint = best_joint_segment(starts, ends, target) or rough
+        independent = baseline
+    joint_candidates = [baseline]
+    for path in space["visible_side_paths"]:
+        joint_candidates.extend(
+            [baseline[0], value]
+            for value in path["values"]
+            if valid_segment(baseline[0], value)
+        )
+        joint_candidates.extend(
+            [value, baseline[1]]
+            for value in path["values"]
+            if valid_segment(value, baseline[1])
+        )
+    for start_path in space["visible_side_paths"]:
+        for end_path in space["visible_side_paths"]:
+            if start_path["rough"] >= end_path["rough"]:
+                continue
+            joint_candidates.extend(
+                [left, right]
+                for left in start_path["values"]
+                for right in end_path["values"]
+                if valid_segment(left, right)
+            )
+    joint = max(
+        joint_candidates, key=lambda segment: temporal_iou(segment, target)
+    )
     if temporal_iou(independent, target) < temporal_iou(baseline, target):
         independent = baseline
     if temporal_iou(joint, target) < temporal_iou(baseline, target):
@@ -116,33 +177,88 @@ def two_stage_oracle_segments(
     return independent, joint
 
 
-def vlm_rough_segment(proposal, query, decision):
+def side_result(seconds, valid, source):
+    return {
+        "seconds": float(seconds),
+        "valid": bool(valid),
+        "source": str(source),
+    }
+
+
+def invalidate_result(coarse):
+    return {
+        "segment": list(map(float, coarse)),
+        "sides": {
+            "start": side_result(coarse[0], False, "INVALID"),
+            "end": side_result(coarse[1], False, "INVALID"),
+        },
+    }
+
+
+def vlm_rough_result(proposal, query, decision):
     coarse = list(map(float, proposal["coarse_segment_seconds"]))
-    if not decision or decision.get("status") != "VALID_ACTION":
-        return coarse
-    candidate = [
-        query_frame_time(query, decision["rough_start_frame"]),
-        query_frame_time(query, decision["rough_end_frame"]),
-    ]
-    return candidate if valid_segment(*candidate) else coarse
+    result = invalidate_result(coarse)
+    if not decision or decision.get("action_status") != "VALID_ACTION":
+        return result
+    candidate = list(coarse)
+    for index, side in enumerate(("start", "end")):
+        if decision.get("{}_status".format(side)) != "VISIBLE":
+            continue
+        value = query_transition_time(
+            query,
+            decision["rough_{}_before_frame".format(side)],
+            decision["rough_{}_after_frame".format(side)],
+        )
+        candidate[index] = value
+        result["sides"][side] = side_result(value, True, "VLM")
+    if not valid_segment(*candidate):
+        return invalidate_result(coarse)
+    result["segment"] = candidate
+    return result
 
 
-def vlm_refined_segment(proposal, query, coarse_decision, fine_queries, fine_decisions):
-    rough = vlm_rough_segment(proposal, query, coarse_decision)
-    if not coarse_decision or coarse_decision.get("status") != "VALID_ACTION":
+def vlm_rough_segment(proposal, query, decision):
+    return vlm_rough_result(proposal, query, decision)["segment"]
+
+
+def vlm_refined_result(proposal, query, coarse_decision, fine_queries, fine_decisions):
+    rough = vlm_rough_result(proposal, query, coarse_decision)
+    if not coarse_decision or coarse_decision.get("action_status") != "VALID_ACTION":
         return rough
     coarse = list(map(float, proposal["coarse_segment_seconds"]))
     candidate = list(coarse)
+    sides = {
+        side: dict(rough["sides"][side]) for side in ("start", "end")
+    }
     for index, side in enumerate(("start", "end")):
+        if coarse_decision.get("{}_status".format(side)) != "VISIBLE":
+            continue
         fine_query = fine_queries.get((proposal["proposal_id"], side))
         if fine_query is None:
+            candidate[index] = rough["sides"][side]["seconds"]
             continue
         decision = fine_decisions.get(fine_query["query_id"])
-        if decision and decision.get("status") == "VALID_ACTION":
-            candidate[index] = selected_option_time(
+        if decision and decision.get("decision") == "SELECT_CANDIDATE":
+            value = selected_option_time(
                 fine_query, decision["selected_option"]
             )
-    return candidate if valid_segment(*candidate) else coarse
+            candidate[index] = value
+            sides[side] = side_result(value, True, "VLM")
+        elif decision and decision.get("decision") == "KEEP_COARSE":
+            value = rough["sides"][side]["seconds"]
+            candidate[index] = value
+            sides[side] = side_result(value, True, "KEEP")
+        else:
+            sides[side] = side_result(coarse[index], False, "INVALID")
+    if not valid_segment(*candidate):
+        return invalidate_result(coarse)
+    return {"segment": candidate, "sides": sides}
+
+
+def vlm_refined_segment(proposal, query, coarse_decision, fine_queries, fine_decisions):
+    return vlm_refined_result(
+        proposal, query, coarse_decision, fine_queries, fine_decisions
+    )["segment"]
 
 
 def segment_set(
@@ -154,6 +270,7 @@ def segment_set(
     oracle_candidate_count=7,
     oracle_maximum_step=0.3,
     oracle_minimum_step=0.1,
+    return_details=False,
 ):
     coarse_query_map = {row["proposal_id"]: row for row in coarse_queries}
     coarse_decisions = prediction_decisions(coarse_predictions or [])
@@ -171,6 +288,7 @@ def segment_set(
     if coarse_predictions is not None:
         variants["vlm_rough"] = {}
         variants["vlm_refined"] = {}
+    details = {"vlm_rough": {}, "vlm_refined": {}, "oracle_spaces": {}}
 
     for proposal in proposals:
         proposal_id = proposal["proposal_id"]
@@ -193,19 +311,48 @@ def segment_set(
             variants["coarse_joint_oracle"][proposal_id] = coarse_oracle
             variants["two_stage_independent_oracle"][proposal_id] = independent or coarse
             variants["two_stage_joint_oracle"][proposal_id] = joint or coarse
+            space = two_stage_candidate_space(
+                proposal,
+                query,
+                oracle_candidate_count,
+                oracle_maximum_step,
+                oracle_minimum_step,
+            )
+            details["oracle_spaces"][proposal_id] = {
+                "start_values_seconds": space["start"],
+                "end_values_seconds": space["end"],
+                "coarse_transition_count": space["coarse_transition_count"],
+                "fine_candidate_count_per_visible_side": space[
+                    "fine_candidate_count_per_visible_side"
+                ],
+                "fine_step_seconds": space["fine_step_seconds"],
+                "choices": [
+                    "SELECT_CANDIDATE",
+                    "KEEP_COARSE",
+                    "SIDE_ABSTENTION_TO_DETECTION_FALLBACK",
+                ],
+                "joint_path_constraint": (
+                    "when both sides are valid, their coarse rough transitions "
+                    "must satisfy rough_start < rough_end"
+                ),
+            }
         if coarse_predictions is not None:
             decision = coarse_decisions.get(query["query_id"])
-            variants["vlm_rough"][proposal_id] = vlm_rough_segment(
+            rough_result = vlm_rough_result(
                 proposal, query, decision
             )
-            variants["vlm_refined"][proposal_id] = vlm_refined_segment(
+            refined_result = vlm_refined_result(
                 proposal,
                 query,
                 decision,
                 fine_query_map,
                 fine_decisions,
             )
-    return variants
+            variants["vlm_rough"][proposal_id] = rough_result["segment"]
+            variants["vlm_refined"][proposal_id] = refined_result["segment"]
+            details["vlm_rough"][proposal_id] = rough_result["sides"]
+            details["vlm_refined"][proposal_id] = refined_result["sides"]
+    return (variants, details) if return_details else variants
 
 
 def proposal_boundary_metrics(proposals, segments):
@@ -272,6 +419,9 @@ def proposal_boundary_metrics(proposals, segments):
         "high_quality_wins": sum(value > 1e-9 for value in high_deltas),
         "high_quality_losses": sum(value < -1e-9 for value in high_deltas),
         "high_quality_ties": sum(abs(value) <= 1e-9 for value in high_deltas),
+        "high_quality_degradation_rate": mean(
+            [value < -1e-9 for value in high_deltas]
+        ),
     }
 
 
@@ -287,7 +437,7 @@ def validity_metrics(proposals, coarse_queries, coarse_predictions):
         if decision is None:
             missing += 1
             continue
-        matrix[truth][decision["status"]] += 1
+        matrix[truth][decision["action_status"]] += 1
     decided_total = sum(
         matrix[truth][prediction]
         for truth in labels[:-1]
@@ -308,83 +458,119 @@ def load_ground_truth(annotation_json, video_ids, action_subsampling):
     database = json.loads(Path(annotation_json).read_text(encoding="utf-8"))["database"]
     ground_truth = []
     for video_id in video_ids:
-        for annotation in database[video_id].get("annotations", []):
+        annotations = remove_duplicate_annotations(
+            database[video_id].get("annotations", [])
+        )
+        for annotation in annotations:
             label = int(annotation["label_id"])
-            if kept_label(label, action_subsampling):
+            segment = list(map(float, annotation["segment"]))
+            if segment[0] != segment[1] and kept_label(label, action_subsampling):
                 ground_truth.append(
                     {
                         "video_id": video_id,
                         "label": label,
-                        "segment": list(map(float, annotation["segment"])),
+                        "segment": segment,
                     }
                 )
     return ground_truth
 
 
-def interpolated_ap(precision, recall):
-    precision = np.concatenate(([0.0], np.asarray(precision), [0.0]))
-    recall = np.concatenate(([0.0], np.asarray(recall), [1.0]))
-    for index in range(len(precision) - 2, -1, -1):
-        precision[index] = max(precision[index], precision[index + 1])
-    changed = np.where(recall[1:] != recall[:-1])[0] + 1
-    return float(np.sum((recall[changed] - recall[changed - 1]) * precision[changed]))
+def prediction_dataframe(proposals, segments):
+    return pd.DataFrame(
+        {
+            "video-id": [row["video_id"] for row in proposals],
+            "t-start": [segments[row["proposal_id"]][0] for row in proposals],
+            "t-end": [segments[row["proposal_id"]][1] for row in proposals],
+            "label": [int(row["predicted_class_id"]) for row in proposals],
+            "score": [float(row["score"]) for row in proposals],
+        }
+    )
 
 
 def fixed_proposal_map(proposals, segments, ground_truth, thresholds=TIOU_THRESHOLDS):
     classes = sorted({row["label"] for row in ground_truth})
-    by_class_gt = defaultdict(list)
-    for index, row in enumerate(ground_truth):
-        by_class_gt[row["label"]].append((index, row))
-    predictions = [
+    threshold_array = np.asarray(thresholds, dtype=float)
+    gt_frame = pd.DataFrame(
         {
-            "video_id": row["video_id"],
-            "label": int(row["predicted_class_id"]),
-            "score": float(row["score"]),
-            "segment": segments[row["proposal_id"]],
-            "proposal_id": row["proposal_id"],
+            "video-id": [row["video_id"] for row in ground_truth],
+            "t-start": [row["segment"][0] for row in ground_truth],
+            "t-end": [row["segment"][1] for row in ground_truth],
+            "label": [row["label"] for row in ground_truth],
         }
-        for row in proposals
-    ]
-    result = {}
-    for threshold in thresholds:
-        aps = []
-        for label in classes:
-            class_gt = by_class_gt[label]
-            class_predictions = sorted(
-                (row for row in predictions if row["label"] == label),
-                key=lambda row: (-row["score"], row["proposal_id"]),
-            )
-            matched = set()
-            tp, fp = [], []
-            for prediction in class_predictions:
-                same_video = [
-                    (index, temporal_iou(prediction["segment"], gt["segment"]))
-                    for index, gt in class_gt
-                    if gt["video_id"] == prediction["video_id"]
-                ]
-                best = max(same_video, key=lambda item: item[1]) if same_video else None
-                if (
-                    best is not None
-                    and best[1] >= float(threshold)
-                    and best[0] not in matched
-                ):
-                    matched.add(best[0])
-                    tp.append(1.0)
-                    fp.append(0.0)
-                else:
-                    tp.append(0.0)
-                    fp.append(1.0)
-            if not class_gt:
-                continue
-            cumulative_tp = np.cumsum(tp)
-            cumulative_fp = np.cumsum(fp)
-            recall = cumulative_tp / len(class_gt)
-            precision = cumulative_tp / np.maximum(cumulative_tp + cumulative_fp, 1e-12)
-            aps.append(interpolated_ap(precision, recall))
-        result["{:.1f}".format(threshold)] = float(np.mean(aps)) if aps else None
-    available = [value for value in result.values() if value is not None]
-    result["average_0.1_0.5"] = float(np.mean(available)) if available else None
+    )
+    predictions = prediction_dataframe(proposals, segments)
+    class_aps = []
+    for label in classes:
+        class_gt = gt_frame[gt_frame["label"] == label].reset_index(drop=True)
+        class_predictions = predictions[
+            predictions["label"] == label
+        ].reset_index(drop=True)
+        computed = compute_average_precision_detection(
+            class_gt, class_predictions, threshold_array
+        )
+        class_aps.append(np.asarray(computed[0] if isinstance(computed, tuple) else computed))
+    mean_ap = np.mean(np.stack(class_aps), axis=0) if class_aps else None
+    result = {
+        "{:.1f}".format(threshold): (
+            float(mean_ap[index]) if mean_ap is not None else None
+        )
+        for index, threshold in enumerate(threshold_array)
+    }
+    result["average_0.1_0.5"] = (
+        float(np.mean(mean_ap)) if mean_ap is not None else None
+    )
     return result
+
+
+def official_evaluator_map(
+    proposals,
+    segments,
+    annotation_json,
+    split,
+    action_subsampling,
+    thresholds=TIOU_THRESHOLDS,
+):
+    database = json.loads(Path(annotation_json).read_text(encoding="utf-8"))["database"]
+    split_videos = {
+        video_id
+        for video_id, value in database.items()
+        if value["subset"].lower() == str(split).lower()
+    }
+    proposal_videos = {row["video_id"] for row in proposals}
+    if proposal_videos != split_videos:
+        raise ValueError(
+            "official parity requires the complete split: proposals={} split={}".format(
+                len(proposal_videos), len(split_videos)
+            )
+        )
+    evaluator = ANETdetection(
+        annotation_json,
+        split=[split],
+        tiou_thresholds=np.asarray(thresholds, dtype=float),
+        num_workers=1,
+        action_subsampling=action_subsampling,
+    )
+    values = evaluator.evaluate(
+        prediction_dataframe(proposals, segments), verbose=False
+    )[0]
+    result = {
+        "{:.1f}".format(threshold): float(values[index])
+        for index, threshold in enumerate(thresholds)
+    }
+    result["average_0.1_0.5"] = float(np.mean(values))
+    return result
+
+
+def evaluator_parity(fixed_map, official_map, tolerance=1e-12):
+    keys = ["{:.1f}".format(value) for value in TIOU_THRESHOLDS]
+    differences = [abs(float(fixed_map[key]) - float(official_map[key])) for key in keys]
+    maximum = max(differences) if differences else 0.0
+    return {
+        "same_prediction_set": True,
+        "maximum_absolute_difference": float(maximum),
+        "tolerance": float(tolerance),
+        "passed": bool(maximum <= float(tolerance)),
+    }
 
 
 def main():
@@ -400,6 +586,7 @@ def main():
     parser.add_argument("--oracle-candidate-count", type=int, default=7)
     parser.add_argument("--oracle-maximum-step", type=float, default=0.3)
     parser.add_argument("--oracle-minimum-step", type=float, default=0.1)
+    parser.add_argument("--official-split")
     args = parser.parse_args()
 
     proposals = read_jsonl(args.proposals)
@@ -411,7 +598,7 @@ def main():
     fine_predictions = (
         read_jsonl(args.fine_predictions) if args.fine_predictions else None
     )
-    variants = segment_set(
+    variants, details = segment_set(
         proposals,
         coarse_queries,
         coarse_predictions,
@@ -420,14 +607,42 @@ def main():
         args.oracle_candidate_count,
         args.oracle_maximum_step,
         args.oracle_minimum_step,
+        True,
     )
     ground_truth = load_ground_truth(
         args.annotation_json,
         sorted({row["video_id"] for row in proposals}),
         args.action_subsampling,
     )
+    variant_reports = {}
+    for name, segments in variants.items():
+        fixed_map = fixed_proposal_map(proposals, segments, ground_truth)
+        variant_report = {
+            "proposal_boundary": proposal_boundary_metrics(proposals, segments),
+            "fixed_proposal_map": fixed_map,
+        }
+        if args.official_split:
+            official_map = official_evaluator_map(
+                proposals,
+                segments,
+                args.annotation_json,
+                args.official_split,
+                args.action_subsampling,
+            )
+            parity = evaluator_parity(fixed_map, official_map)
+            variant_report["official_evaluator_map"] = official_map
+            variant_report["evaluator_parity"] = parity
+            if not parity["passed"]:
+                raise RuntimeError("official evaluator parity failed for {}".format(name))
+        variant_reports[name] = variant_report
+
     report = {
-        "protocol": "fixed-proposal-vlm-boundary-audit-v1",
+        "protocol": "fixed-proposal-vlm-boundary-transition-audit-v2",
+        "boundary_semantics": {
+            "representation": "midpoint of an adjacent chronological frame pair",
+            "start": "not-in-action -> in-action",
+            "end": "in-action -> out-of-action",
+        },
         "fixed_proposal_invariants": {
             "proposal_count": len(proposals),
             "labels_scores_and_proposal_set": "frozen",
@@ -437,27 +652,27 @@ def main():
             "oracle_candidate_count": args.oracle_candidate_count,
             "oracle_maximum_step": args.oracle_maximum_step,
             "oracle_minimum_step": args.oracle_minimum_step,
+            "official_split": args.official_split,
         },
         "oracle_definitions": {
             "coarse_joint_oracle": (
-                "best legal coarse-frame pair or KEEP original segment"
+                "best legal adjacent-pair midpoint combination or KEEP each side"
             ),
             "two_stage_independent_oracle": (
-                "best start and end independently from fine grid or KEEP each side"
+                "best start/end independently from every reachable fine transition, "
+                "KEEP_COARSE, or side-abstention detection fallback"
             ),
             "two_stage_joint_oracle": (
-                "best legal start/end pair from fine grids plus per-side KEEP"
+                "best legal pair from the identical per-side reachable choice spaces"
             ),
         },
-        "variants": {
-            name: {
-                "proposal_boundary": proposal_boundary_metrics(proposals, segments),
-                "fixed_proposal_map": fixed_proposal_map(
-                    proposals, segments, ground_truth
-                ),
-            }
-            for name, segments in variants.items()
+        "oracle_candidate_spaces": details["oracle_spaces"],
+        "side_outputs": {
+            key: value
+            for key, value in details.items()
+            if key in ("vlm_rough", "vlm_refined") and value
         },
+        "variants": variant_reports,
     }
     if coarse_predictions is not None:
         report["validity"] = validity_metrics(

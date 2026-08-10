@@ -7,11 +7,16 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 
-const QUERY_SCHEMA_VERSION = 'vlm-boundary-query-v1';
-const PREDICTION_SCHEMA_VERSION = 'vlm-boundary-prediction-v1';
-const PROMPT_VERSION = 'vlm-boundary-coarse-to-fine-v1';
-const STATUS_VALUES = new Set([
+const QUERY_SCHEMA_VERSION = 'vlm-boundary-query-v2';
+const PREDICTION_SCHEMA_VERSION = 'vlm-boundary-prediction-v2';
+const PROMPT_VERSION = 'vlm-boundary-transition-coarse-to-fine-v2';
+const ACTION_STATUS_VALUES = new Set([
   'VALID_ACTION', 'NO_ACTION', 'WRONG_ACTION', 'UNCERTAIN',
+]);
+const SIDE_STATUS_VALUES = new Set(['VISIBLE', 'NOT_VISIBLE', 'UNCERTAIN']);
+const FINE_DECISION_VALUES = new Set([
+  'SELECT_CANDIDATE', 'KEEP_COARSE', 'NO_VISIBLE_BOUNDARY',
+  'UNCERTAIN', 'WRONG_ACTION', 'NO_ACTION',
 ]);
 const ACTION_GUIDANCE = Object.freeze({
   TAKE: 'gaining possession or stable control; merely holding, carrying, removing, or lifting is not enough',
@@ -54,10 +59,18 @@ function promptFields(row) {
     frames: row.frames.map(frame => ({
       frame_id: frame.frame_id,
       timestamp_sec: frame.timestamp_sec,
-      ...(row.stage === 'fine' ? { option: frame.option } : {}),
     })),
   };
-  if (row.stage === 'fine') fields.boundary_side = row.boundary_side;
+  if (row.stage === 'fine') {
+    fields.boundary_side = row.boundary_side;
+    fields.rough_boundary_seconds = row.rough_boundary_seconds;
+    fields.candidates = row.candidates.map(candidate => ({
+      option: candidate.option,
+      before_frame_id: candidate.before_frame_id,
+      after_frame_id: candidate.after_frame_id,
+      timestamp_sec: candidate.timestamp_sec,
+    }));
+  }
   return fields;
 }
 
@@ -96,30 +109,46 @@ First decide whether the proposed action is actually visible in this sequence.
 The surrounding context is only evidence. Do not confirm an action that occurs
 entirely outside the proposed temporal region.
 
-If and only if the status is VALID_ACTION, select the frame at or immediately
-before the visible action start and the frame at or immediately after its end.
-The start frame must precede the end frame. Return JSON only.`;
+Then judge START and END independently:
+- VISIBLE: the transition is bracketed by one adjacent frame pair.
+- NOT_VISIBLE: the action is valid, but this transition lies outside the shown timeline.
+- UNCERTAIN: the shown evidence cannot locate this transition reliably.
+
+Use exactly one transition definition throughout:
+- START: before-frame is not in the action; adjacent after-frame is in the action.
+- END: before-frame is in the action; adjacent after-frame is not in the action.
+The boundary time is the midpoint of that adjacent pair. A VALID_ACTION may have
+only one visible side. For a non-valid action, no side may be VISIBLE. Return JSON only.`;
 }
 
 
 function finePrompt(row) {
   const side = row.boundary_side === 'start' ? 'start' : 'end';
-  const candidates = row.frames.map(frame => (
-    `${frame.frame_id}: option ${frame.option}, ${Number(frame.timestamp_sec).toFixed(3)}s`
+  const timeline = row.frames.map(frame => (
+    `${frame.frame_id}: ${Number(frame.timestamp_sec).toFixed(3)}s`
+  )).join('\n');
+  const candidates = row.candidates.map(candidate => (
+    `option ${candidate.option}: ${candidate.before_frame_id} -> ${candidate.after_frame_id}, midpoint ${Number(candidate.timestamp_sec).toFixed(3)}s`
   )).join('\n');
   return `You are refining the ${side} boundary of one visible action.
 
 Action: ${row.predicted_class_name}
 Action boundary meaning: ${actionGuidance(row)}
-The images are chronologically ordered, while option letters are deliberately
-shuffled. Candidate frames:
+Chronological frames:
+${timeline}
+
+Option letters are deliberately shuffled. Candidate adjacent-frame transitions:
 ${candidates}
 
-Choose the option whose image best marks the action ${side} boundary. For a
-start boundary choose the first frame belonging to the action; for an end
-boundary choose the last frame belonging to the action. If the action identity
-is contradicted, absent, or genuinely ambiguous, use WRONG_ACTION, NO_ACTION,
-or UNCERTAIN. Return JSON only.`;
+Use the same transition definition as the coarse stage:
+${side === 'start' ? 'START: before-frame is not in the action; after-frame is in the action.' : 'END: before-frame is in the action; after-frame is not in the action.'}
+
+Return SELECT_CANDIDATE with one option when a candidate visibly brackets the
+transition. Return KEEP_COARSE when the coarse boundary is better than every
+candidate. Return NO_VISIBLE_BOUNDARY when the action is visible but this side
+is outside the shown timeline; UNCERTAIN when evidence is ambiguous; or
+WRONG_ACTION / NO_ACTION when the coarse action decision is contradicted.
+Return JSON only.`;
 }
 
 
@@ -129,37 +158,43 @@ function promptFor(row) {
 
 
 function responseSchema(row) {
-  const common = {
-    status: { type: 'string', enum: [...STATUS_VALUES] },
-    reason: { type: 'string', maxLength: 240 },
-  };
+  const reason = { reason: { type: 'string', maxLength: 240 } };
   if (row.stage === 'coarse') {
     const frameIds = row.frames.map(frame => frame.frame_id);
+    const nullableFrame = {
+      anyOf: [{ type: 'string', enum: frameIds }, { type: 'null' }],
+    };
     return {
       type: 'object',
       properties: {
-        ...common,
-        rough_start_frame: {
-          anyOf: [{ type: 'string', enum: frameIds }, { type: 'null' }],
-        },
-        rough_end_frame: {
-          anyOf: [{ type: 'string', enum: frameIds }, { type: 'null' }],
-        },
+        action_status: { type: 'string', enum: [...ACTION_STATUS_VALUES] },
+        start_status: { type: 'string', enum: [...SIDE_STATUS_VALUES] },
+        rough_start_before_frame: nullableFrame,
+        rough_start_after_frame: nullableFrame,
+        end_status: { type: 'string', enum: [...SIDE_STATUS_VALUES] },
+        rough_end_before_frame: nullableFrame,
+        rough_end_after_frame: nullableFrame,
+        ...reason,
       },
-      required: ['status', 'rough_start_frame', 'rough_end_frame', 'reason'],
+      required: [
+        'action_status', 'start_status', 'rough_start_before_frame',
+        'rough_start_after_frame', 'end_status', 'rough_end_before_frame',
+        'rough_end_after_frame', 'reason',
+      ],
       additionalProperties: false,
     };
   }
-  const options = row.frames.map(frame => frame.option);
+  const options = row.candidates.map(candidate => candidate.option);
   return {
     type: 'object',
     properties: {
-      ...common,
+      decision: { type: 'string', enum: [...FINE_DECISION_VALUES] },
       selected_option: {
         anyOf: [{ type: 'string', enum: options }, { type: 'null' }],
       },
+      ...reason,
     },
-    required: ['status', 'selected_option', 'reason'],
+    required: ['decision', 'selected_option', 'reason'],
     additionalProperties: false,
   };
 }
@@ -171,37 +206,102 @@ function parseDecision(text, row) {
     throw new Error('response is not valid JSON');
   }
   const required = row.stage === 'coarse'
-    ? ['status', 'rough_start_frame', 'rough_end_frame', 'reason']
-    : ['status', 'selected_option', 'reason'];
+    ? [
+      'action_status', 'start_status', 'rough_start_before_frame',
+      'rough_start_after_frame', 'end_status', 'rough_end_before_frame',
+      'rough_end_after_frame', 'reason',
+    ]
+    : ['decision', 'selected_option', 'reason'];
   if (!value || typeof value !== 'object' || Array.isArray(value)
       || Object.keys(value).sort().join('|') !== required.sort().join('|')) {
     throw new Error('response keys violate the contract');
   }
-  if (!STATUS_VALUES.has(value.status) || typeof value.reason !== 'string'
-      || value.reason.length > 240) {
-    throw new Error('response status or reason is invalid');
+  if (typeof value.reason !== 'string' || value.reason.length > 240) {
+    throw new Error('response reason is invalid');
   }
   if (row.stage === 'coarse') {
     const ids = row.frames.map(frame => frame.frame_id);
-    if (value.status === 'VALID_ACTION') {
-      const start = ids.indexOf(value.rough_start_frame);
-      const end = ids.indexOf(value.rough_end_frame);
-      if (start < 0 || end < 0 || start >= end) {
-        throw new Error('coarse boundary frames are invalid');
+    if (!ACTION_STATUS_VALUES.has(value.action_status)
+        || !SIDE_STATUS_VALUES.has(value.start_status)
+        || !SIDE_STATUS_VALUES.has(value.end_status)) {
+      throw new Error('coarse status is invalid');
+    }
+    const midpoints = {};
+    for (const side of ['start', 'end']) {
+      const status = value[`${side}_status`];
+      const before = value[`rough_${side}_before_frame`];
+      const after = value[`rough_${side}_after_frame`];
+      if (status === 'VISIBLE') {
+        const beforeIndex = ids.indexOf(before);
+        const afterIndex = ids.indexOf(after);
+        if (beforeIndex < 0 || afterIndex !== beforeIndex + 1) {
+          throw new Error(`coarse ${side} transition frames are invalid`);
+        }
+        midpoints[side] = 0.5 * (
+          Number(row.frames[beforeIndex].timestamp_sec)
+          + Number(row.frames[afterIndex].timestamp_sec)
+        );
+      } else if (before !== null || after !== null) {
+        throw new Error(`non-visible coarse ${side} must use null frames`);
       }
-    } else if (value.rough_start_frame !== null || value.rough_end_frame !== null) {
-      throw new Error('non-valid coarse response must use null boundaries');
+    }
+    if (value.action_status !== 'VALID_ACTION'
+        && (value.start_status === 'VISIBLE' || value.end_status === 'VISIBLE')) {
+      throw new Error('non-valid action cannot have a visible boundary');
+    }
+    if (midpoints.start !== undefined && midpoints.end !== undefined
+        && midpoints.start >= midpoints.end) {
+      throw new Error('coarse start must precede coarse end');
     }
   } else {
-    const options = new Set(row.frames.map(frame => frame.option));
-    if (value.status === 'VALID_ACTION' && !options.has(value.selected_option)) {
+    const options = new Set(row.candidates.map(candidate => candidate.option));
+    if (!FINE_DECISION_VALUES.has(value.decision)) {
+      throw new Error('fine decision is invalid');
+    }
+    if (value.decision === 'SELECT_CANDIDATE' && !options.has(value.selected_option)) {
       throw new Error('selected fine option is invalid');
     }
-    if (value.status !== 'VALID_ACTION' && value.selected_option !== null) {
-      throw new Error('non-valid fine response must use a null option');
+    if (value.decision !== 'SELECT_CANDIDATE' && value.selected_option !== null) {
+      throw new Error('non-selection fine response must use a null option');
     }
   }
   return value;
+}
+
+
+function resolvedBoundaryOutput(row, decision) {
+  const invalid = side => ({
+    seconds: Number(row.coarse_segment_seconds[side === 'start' ? 0 : 1]),
+    valid: false,
+    source: 'INVALID',
+  });
+  if (row.stage === 'fine') {
+    if (decision.decision === 'SELECT_CANDIDATE') {
+      const candidate = row.candidates.find(item => item.option === decision.selected_option);
+      return { seconds: Number(candidate.timestamp_sec), valid: true, source: 'VLM' };
+    }
+    if (decision.decision === 'KEEP_COARSE') {
+      return { seconds: Number(row.rough_boundary_seconds), valid: true, source: 'KEEP' };
+    }
+    return invalid(row.boundary_side);
+  }
+  const result = {};
+  for (const side of ['start', 'end']) {
+    if (decision[`${side}_status`] !== 'VISIBLE') {
+      result[side] = invalid(side);
+      continue;
+    }
+    const beforeId = decision[`rough_${side}_before_frame`];
+    const afterId = decision[`rough_${side}_after_frame`];
+    const before = row.frames.find(frame => frame.frame_id === beforeId);
+    const after = row.frames.find(frame => frame.frame_id === afterId);
+    result[side] = {
+      seconds: 0.5 * (Number(before.timestamp_sec) + Number(after.timestamp_sec)),
+      valid: true,
+      source: 'VLM',
+    };
+  }
+  return result;
 }
 
 
@@ -228,7 +328,6 @@ function validateManifestRows(rows) {
     }
     let prior = -Infinity;
     const frameIds = new Set();
-    const options = new Set();
     for (const frame of row.frames) {
       const timestamp = Number(frame.timestamp_sec);
       if (!frame.frame_id || frameIds.has(frame.frame_id)
@@ -238,15 +337,26 @@ function validateManifestRows(rows) {
       }
       frameIds.add(frame.frame_id);
       prior = timestamp;
-      if (row.stage === 'fine') {
-        if (!frame.option || options.has(frame.option)) {
-          throw new Error(`invalid fine options for ${row.query_id}`);
-        }
-        options.add(frame.option);
-      }
     }
-    if (row.stage === 'fine' && !['start', 'end'].includes(row.boundary_side)) {
-      throw new Error(`invalid boundary side for ${row.query_id}`);
+    if (row.stage === 'fine') {
+      if (!['start', 'end'].includes(row.boundary_side)
+          || !Array.isArray(row.candidates) || row.candidates.length < 1) {
+        throw new Error(`invalid boundary side or candidates for ${row.query_id}`);
+      }
+      const options = new Set();
+      for (const candidate of row.candidates) {
+        const before = row.frames.findIndex(frame => frame.frame_id === candidate.before_frame_id);
+        const after = row.frames.findIndex(frame => frame.frame_id === candidate.after_frame_id);
+        const midpoint = before >= 0 && after >= 0
+          ? 0.5 * (Number(row.frames[before].timestamp_sec) + Number(row.frames[after].timestamp_sec))
+          : NaN;
+        if (!candidate.option || options.has(candidate.option) || before < 0 || after !== before + 1
+            || !Number.isFinite(Number(candidate.timestamp_sec))
+            || Math.abs(Number(candidate.timestamp_sec) - midpoint) > 1e-6) {
+          throw new Error(`invalid fine transition candidate for ${row.query_id}`);
+        }
+        options.add(candidate.option);
+      }
     }
   }
 }
@@ -500,6 +610,7 @@ async function main() {
         wireApi: args['wire-api'], maxTokens, timeoutMs, reasoningEffort,
       }, maxRetries, retryBaseMs);
       output.decision = parseDecision(response.text, row);
+      output.boundary_results = resolvedBoundaryOutput(row, output.decision);
       output.response_text = response.text;
       output.usage = response.usage;
       output.request_attempts = response.attempts;
@@ -534,6 +645,7 @@ export {
   promptFor,
   requestFingerprint,
   requestWithRetry,
+  resolvedBoundaryOutput,
   responseSchema,
   validateManifestRows,
   validatePriorRows,
