@@ -56,7 +56,7 @@ def adaptive_coarse_frames(
         raise ValueError("all coarse sampling counts must be at least two")
     left, right = map(float, segment)
     safe_duration = max(0.0, float(video_duration) - 0.05)
-    radius = max(0.25, float(origin_stride_seconds))
+    radius = max(0.15, float(origin_stride_seconds) / 2.0)
     groups = (
         np.linspace(float(window[0]), float(window[1]), int(context_count)),
         np.linspace(left - radius, left + radius, int(boundary_count)),

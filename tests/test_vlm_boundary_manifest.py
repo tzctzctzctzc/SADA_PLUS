@@ -53,6 +53,10 @@ def test_coarse_manifest_adaptively_covers_context_interior_and_boundaries():
     uniform_gap = 8.0 / 5.0
     assert min(abs(value - 5.0) for value in times if value != 5.0) < uniform_gap
     assert min(abs(value - 9.0) for value in times if value != 9.0) < uniform_gap
+    assert 5.0 - max(value for value in times if value < 5.0) <= 0.533 / 4 + 1e-6
+    assert min(value for value in times if value > 5.0) - 5.0 <= 0.533 / 4 + 1e-6
+    assert 9.0 - max(value for value in times if value < 9.0) <= 0.533 / 4 + 1e-6
+    assert min(value for value in times if value > 9.0) - 9.0 <= 0.533 / 4 + 1e-6
     assert "score" not in row and "fpn_level" not in row and "posthoc_gt" not in row
 
 
