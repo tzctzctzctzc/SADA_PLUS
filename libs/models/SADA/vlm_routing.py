@@ -35,7 +35,13 @@ BINARY_BAND_ORACLE_MODES = {
     "control",
     "high_clean",
     "mid_rescue",
+    "low_rescue",
     "both",
+    "foreground_rescue",
+    "background_clean",
+    "full_actionness",
+    "high_class_correct",
+    "full_class_correct",
 }
 BINARY_BAND_NEGATIVE_ROUTES = {"background", "ignore"}
 SEMANTIC_LABELS = {
@@ -659,13 +665,19 @@ def target_labels_from_full_routing(route, valid_mask, num_classes, dtype):
     ignore = route["ignore"][valid_mask]
     if not torch.all(action.to(torch.int8) + background.to(torch.int8) + ignore.to(torch.int8) == 1):
         raise ValueError("full target routing is not mutually exclusive")
-    classes = route["pseudo_class"][valid_mask]
-    labels = torch.zeros(
-        action.shape[0], num_classes, dtype=dtype, device=action.device
-    )
-    labels[action] = F.one_hot(
-        classes[action], num_classes=num_classes
-    ).to(dtype)
+    if "action_labels" in route:
+        if route["action_labels"].shape != (*valid_mask.shape, num_classes):
+            raise ValueError("Oracle action labels have incompatible shape")
+        labels = route["action_labels"][valid_mask].to(dtype).clone()
+        labels[~action] = 0
+    else:
+        classes = route["pseudo_class"][valid_mask]
+        labels = torch.zeros(
+            action.shape[0], num_classes, dtype=dtype, device=action.device
+        )
+        labels[action] = F.one_hot(
+            classes[action], num_classes=num_classes
+        ).to(dtype)
     return labels, action, background, ignore
 
 
@@ -719,6 +731,37 @@ def apply_binary_band_oracle(
             background |= mid_background
             ignore &= ~mid_background
 
+    if mode == "low_rescue":
+        low_foreground = low & gt_foreground
+        action |= low_foreground
+        background &= ~low_foreground
+
+    if mode == "foreground_rescue":
+        rescued = (mid | low) & gt_foreground
+        action |= rescued
+        background &= ~rescued
+        ignore &= ~rescued
+
+    if mode == "background_clean":
+        action = high & gt_foreground
+        background = valid & ~gt_foreground
+        ignore = valid & gt_foreground & ~high
+
+    if mode in {"full_actionness", "full_class_correct"}:
+        action = valid & gt_foreground
+        background = valid & ~gt_foreground
+        ignore = torch.zeros_like(valid)
+
+    action_labels = None
+    if mode in {"high_class_correct", "full_class_correct"}:
+        pseudo_class = route["pseudo_class"]
+        action_labels = torch.zeros_like(gt_labels)
+        action_labels[action] = F.one_hot(
+            pseudo_class[action], num_classes=gt_labels.shape[-1]
+        ).to(gt_labels.dtype)
+        corrected = action if mode == "full_class_correct" else high & gt_foreground
+        action_labels[corrected] = gt_labels[corrected]
+
     partition = (
         action.to(torch.int8)
         + background.to(torch.int8)
@@ -740,6 +783,8 @@ def apply_binary_band_oracle(
         "band_oracle_mid_foreground": mid & gt_foreground,
         "band_oracle_mid_background": mid & ~gt_foreground,
     })
+    if action_labels is not None:
+        result["action_labels"] = action_labels
     return result
 
 

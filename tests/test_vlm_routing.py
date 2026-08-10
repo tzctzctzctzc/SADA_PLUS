@@ -476,6 +476,56 @@ def test_binary_band_oracle_isolates_high_cleanup_and_mid_rescue():
     assert both_ignore['ignore'].tolist() == [[False, True, False, True, False]]
 
 
+def test_binary_band_oracle_factorizes_full_routing_and_class_correction():
+    valid = torch.ones(1, 6, dtype=torch.bool)
+    routes = {
+        'valid': valid,
+        'high_confidence': torch.tensor([[True, True, False, False, False, False]]),
+        'mid_confidence': torch.tensor([[False, False, True, True, False, False]]),
+        'low_confidence': torch.tensor([[False, False, False, False, True, True]]),
+        'pseudo_class': torch.zeros(1, 6, dtype=torch.long),
+    }
+    gt = torch.tensor([[
+        [0.0, 1.0],  # high foreground, teacher class is wrong
+        [0.0, 0.0],  # high background
+        [0.0, 1.0],  # mid foreground
+        [0.0, 0.0],  # mid background
+        [0.0, 1.0],  # low foreground
+        [0.0, 0.0],  # low background
+    ]])
+
+    low = apply_binary_band_oracle(routes, gt, 'low_rescue')
+    foreground = apply_binary_band_oracle(routes, gt, 'foreground_rescue')
+    background = apply_binary_band_oracle(routes, gt, 'background_clean')
+    full = apply_binary_band_oracle(routes, gt, 'full_actionness')
+    high_class = apply_binary_band_oracle(routes, gt, 'high_class_correct')
+    full_class = apply_binary_band_oracle(routes, gt, 'full_class_correct')
+
+    assert low['action'].tolist() == [[True, True, False, False, True, False]]
+    assert foreground['action'].tolist() == [[True, True, True, False, True, False]]
+    assert foreground['ignore'].tolist() == [[False, False, False, True, False, False]]
+    assert background['action'].tolist() == [[True, False, False, False, False, False]]
+    assert background['background'].tolist() == [[False, True, False, True, False, True]]
+    assert background['ignore'].tolist() == [[False, False, True, False, True, False]]
+    assert full['action'].tolist() == [[True, False, True, False, True, False]]
+    assert full['background'].tolist() == [[False, True, False, True, False, True]]
+    assert not full['ignore'].any()
+
+    high_labels, high_action, _, _ = target_labels_from_full_routing(
+        high_class, valid, num_classes=2, dtype=torch.float32
+    )
+    assert high_action.tolist() == [[True, True, False, False, False, False]][0]
+    assert high_labels.tolist() == [[0.0, 1.0], [1.0, 0.0], [0.0, 0.0],
+                                    [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
+
+    full_labels, full_action, _, _ = target_labels_from_full_routing(
+        full_class, valid, num_classes=2, dtype=torch.float32
+    )
+    assert full_action.tolist() == [[True, False, True, False, True, False]][0]
+    assert full_labels.tolist() == [[0.0, 1.0], [0.0, 0.0], [0.0, 1.0],
+                                    [0.0, 0.0], [0.0, 1.0], [0.0, 0.0]]
+
+
 def test_semantic_timestamp_must_match_current_feature_configuration():
     cache = {
         ("video", 11): {

@@ -766,11 +766,15 @@ def create_argparser():
     )
     parser.add_argument(
         '--binary-band-oracle',
-        choices=['off', 'control', 'high_clean', 'mid_rescue', 'both'],
+        choices=[
+            'off', 'control', 'high_clean', 'mid_rescue', 'low_rescue',
+            'both', 'foreground_rescue', 'background_clean',
+            'full_actionness', 'high_class_correct', 'full_class_correct',
+        ],
         default='off',
         help=(
-            'diagnostic GT action/background routing inside frozen-teacher '
-            'high and mid confidence bands'
+            'diagnostic GT routing and class-correction ablations using the '
+            'frozen teacher score bands and top-1 labels'
         ),
     )
     parser.add_argument(
