@@ -29,6 +29,7 @@ data_spec = importlib.util.spec_from_file_location(
 data_utils = importlib.util.module_from_spec(data_spec)
 data_spec.loader.exec_module(data_utils)
 build_online_vlm_routing = vlm_routing.build_online_vlm_routing
+apply_binary_band_oracle = vlm_routing.apply_binary_band_oracle
 load_semantic_cache = vlm_routing.load_semantic_cache
 target_labels_from_full_routing = vlm_routing.target_labels_from_full_routing
 build_vlm_signature = vlm_routing.build_vlm_signature
@@ -411,6 +412,50 @@ def test_student_logits_cannot_change_frozen_teacher_labels():
     )
     for left, right in zip(first, second):
         assert torch.equal(left, right)
+
+
+def test_binary_band_oracle_isolates_high_cleanup_and_mid_rescue():
+    # Use a five-anchor input directly so every confidence/GT combination is covered.
+    valid = torch.ones(1, 5, dtype=torch.bool)
+    logits = [torch.tensor([[
+        [3.0, -3.0],   # high foreground
+        [3.0, -3.0],   # high background
+        [0.0, -3.0],   # mid foreground
+        [0.0, -3.0],   # mid background
+        [-3.0, -3.0],  # low background
+    ]])]
+    routes = build_online_vlm_routing(
+        {}, None, None, 'mid_confidence_ignore',
+        [{"metadata": {
+            "video_id": "video", "crop_start": 0, "feat_stride": 1,
+            "feat_num_frames": 0, "fps": 10, "duration": 100,
+        }}],
+        [torch.tensor([[float(i), 0.0, 0.0, 1.0] for i in range(5)])],
+        [valid], logits, [torch.ones(1, 5, 2)],
+        [torch.zeros(1, 4, 5)], beta=0.1, alpha=0.7,
+    )[0]
+    gt = torch.tensor([[
+        [1.0, 0.0],
+        [0.0, 0.0],
+        [0.0, 1.0],
+        [0.0, 0.0],
+        [0.0, 0.0],
+    ]])
+
+    control = apply_binary_band_oracle(routes, gt, 'control')
+    high = apply_binary_band_oracle(routes, gt, 'high_clean')
+    mid = apply_binary_band_oracle(routes, gt, 'mid_rescue')
+    both = apply_binary_band_oracle(routes, gt, 'both')
+
+    assert control['action'].tolist() == [[True, True, False, False, False]]
+    assert control['ignore'].tolist() == [[False, False, True, True, False]]
+    assert high['action'].tolist() == [[True, False, False, False, False]]
+    assert high['background'].tolist() == [[False, True, False, False, True]]
+    assert mid['action'].tolist() == [[True, True, True, False, False]]
+    assert mid['background'].tolist() == [[False, False, False, True, True]]
+    assert both['action'].tolist() == [[True, False, True, False, False]]
+    assert both['background'].tolist() == [[False, True, False, True, True]]
+    assert not both['ignore'].any()
 
 
 def test_semantic_timestamp_must_match_current_feature_configuration():

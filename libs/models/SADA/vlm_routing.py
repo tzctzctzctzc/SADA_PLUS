@@ -14,6 +14,7 @@ from .anchor_validity import anchor_validity_features, probe_probabilities
 LEGACY_SEMANTIC_CACHE_SCHEMA_VERSION = "offline-vlm-semantic-evidence-v1"
 SEMANTIC_CACHE_SCHEMA_VERSION = "offline-vlm-bidirectional-semantic-evidence-v2"
 VLM_RESUME_SCHEMA_VERSION = "frozen-routing-teacher-v4"
+BAND_ORACLE_RESUME_SCHEMA_VERSION = "frozen-routing-teacher-band-oracle-v1"
 VLM_TRANSITION_SCHEMA_VERSION = "sada-to-vlm-continuation-v2"
 LOW_PROMPT_ROLE = "low_rescue"
 HIGH_PROMPT_ROLE = "high_veto"
@@ -25,6 +26,13 @@ ROUTING_MODES = {
     "validity_only",
     "semantic_and_validity",
     "mid_confidence_ignore",
+}
+BINARY_BAND_ORACLE_MODES = {
+    "off",
+    "control",
+    "high_clean",
+    "mid_rescue",
+    "both",
 }
 SEMANTIC_LABELS = {
     "TARGET_ACTION",
@@ -247,9 +255,16 @@ def build_vlm_signature(
     routing_teacher_state_sha256,
     routing_teacher_weights,
     semantic_prompt_protocols=None,
+    binary_band_oracle_mode="off",
 ):
+    if binary_band_oracle_mode not in BINARY_BAND_ORACLE_MODES:
+        raise ValueError("unknown binary band Oracle mode")
     signature = {
-        "schema_version": VLM_RESUME_SCHEMA_VERSION,
+        "schema_version": (
+            VLM_RESUME_SCHEMA_VERSION
+            if binary_band_oracle_mode == "off"
+            else BAND_ORACLE_RESUME_SCHEMA_VERSION
+        ),
         "semantic_cache_sha256": semantic_cache_sha256,
         "validity_artifact_sha256": validity_artifact_sha256,
         "routing_mode": routing_mode,
@@ -261,6 +276,8 @@ def build_vlm_signature(
         "semantic_prompt_protocols": semantic_prompt_protocols or {},
         "evaluation_weights": "student_ema",
     }
+    if binary_band_oracle_mode != "off":
+        signature["binary_band_oracle_mode"] = binary_band_oracle_mode
     signature["signature_sha256"] = _canonical_sha256(signature)
     return signature
 
@@ -638,6 +655,64 @@ def target_labels_from_full_routing(route, valid_mask, num_classes, dtype):
         classes[action], num_classes=num_classes
     ).to(dtype)
     return labels, action, background, ignore
+
+
+def apply_binary_band_oracle(route, gt_labels, mode):
+    """Apply a GT action/background diagnostic to frozen-teacher score bands."""
+    if mode not in BINARY_BAND_ORACLE_MODES - {"off"}:
+        raise ValueError("unknown binary band Oracle mode: {}".format(mode))
+    if gt_labels.shape[:-1] != route["valid"].shape:
+        raise ValueError("binary band Oracle GT shape differs from routing mask")
+
+    valid = route["valid"].bool()
+    high = route["high_confidence"].bool()
+    mid = route["mid_confidence"].bool()
+    low = route["low_confidence"].bool()
+    if not torch.equal(
+        high.to(torch.int8) + mid.to(torch.int8) + low.to(torch.int8),
+        valid.to(torch.int8),
+    ):
+        raise ValueError("frozen-teacher score bands do not partition valid anchors")
+
+    gt_foreground = gt_labels.sum(dim=-1) > 0
+    action = high.clone()
+    background = low.clone()
+    ignore = mid.clone()
+
+    if mode in {"high_clean", "both"}:
+        high_background = high & ~gt_foreground
+        action &= ~high_background
+        background |= high_background
+
+    if mode in {"mid_rescue", "both"}:
+        mid_foreground = mid & gt_foreground
+        mid_background = mid & ~gt_foreground
+        action |= mid_foreground
+        background |= mid_background
+        ignore &= ~mid
+
+    partition = (
+        action.to(torch.int8)
+        + background.to(torch.int8)
+        + ignore.to(torch.int8)
+    )
+    if not torch.equal(partition, valid.to(torch.int8)):
+        raise ValueError("binary band Oracle did not produce a complete partition")
+
+    result = dict(route)
+    result.update({
+        "action": action,
+        "background": background,
+        "ignore": ignore,
+        "high_action": high & action,
+        "high_veto": high & ~action,
+        "mid_action": mid & action,
+        "band_oracle_gt_foreground": valid & gt_foreground,
+        "band_oracle_high_background": high & ~gt_foreground,
+        "band_oracle_mid_foreground": mid & gt_foreground,
+        "band_oracle_mid_background": mid & ~gt_foreground,
+    })
+    return result
 
 
 build_online_vlm_routing = build_full_vlm_routing

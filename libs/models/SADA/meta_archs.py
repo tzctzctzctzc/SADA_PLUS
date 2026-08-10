@@ -23,7 +23,9 @@ from .anchor_validity import (
     validity_model_to,
 )
 from .vlm_routing import (
+    BINARY_BAND_ORACLE_MODES,
     ROUTING_MODES,
+    apply_binary_band_oracle,
     build_full_vlm_routing,
     load_semantic_cache,
     semantic_prompt_protocols,
@@ -299,6 +301,15 @@ class SADA(nn.Module):
             raise ValueError(
                 'unknown oracle routing mode: {}'.format(
                     self.oracle_routing_mode
+                )
+            )
+        self.binary_band_oracle_mode = cfg.get('diagnostic', {}).get(
+            'binary_band_oracle', 'off'
+        )
+        if self.binary_band_oracle_mode not in BINARY_BAND_ORACLE_MODES:
+            raise ValueError(
+                'unknown binary band Oracle mode: {}'.format(
+                    self.binary_band_oracle_mode
                 )
             )
         self.oracle_target_regression_mode = cfg.get('diagnostic', {}).get(
@@ -2042,6 +2053,12 @@ class SADA(nn.Module):
                     elif vlm_routes is not None:
                         route_l = vlm_routes[l]
                         route_valid = fpn_masks_tgt[l]
+                        if self.binary_band_oracle_mode != 'off':
+                            route_l = apply_binary_band_oracle(
+                                route_l,
+                                gts_per_level_tgt[l],
+                                self.binary_band_oracle_mode,
+                            )
                         (
                             pseudo_gt_cls_target,
                             selected_anchors_mask,
@@ -2090,6 +2107,16 @@ class SADA(nn.Module):
                             losses[metric_prefix + metric_name] = (
                                 metric_mask.sum().float()
                             )
+                        if self.binary_band_oracle_mode != 'off':
+                            for metric_name in (
+                                'band_oracle_gt_foreground',
+                                'band_oracle_high_background',
+                                'band_oracle_mid_foreground',
+                                'band_oracle_mid_background',
+                            ):
+                                losses[metric_prefix + metric_name] = (
+                                    route_l[metric_name].sum().float()
+                                )
                     elif stage1_routes is None:
                         selected_anchors_mask = max_cls_prob_tgt >= threshold[max_cls_idx_tgt]
                         pseudo_gt_cls_target[selected_anchors_mask] = F.one_hot(max_cls_idx_tgt[selected_anchors_mask], num_classes=self.num_classes).float()

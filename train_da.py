@@ -315,6 +315,9 @@ def main(cfg, resume, project_name='sada', debug=False):
                 semantic_prompt_protocols=(
                     routing_teacher.vlm_semantic_prompt_protocols
                 ),
+                binary_band_oracle_mode=cfg.get('diagnostic', {}).get(
+                    'binary_band_oracle', 'off'
+                ),
             )
             del teacher_checkpoint
     elif cfg.get('vlm_routing', {}).get('enabled', False):
@@ -759,6 +762,15 @@ def create_argparser():
         help='diagnostic target routing; uses target GT and is not a UDA method',
     )
     parser.add_argument(
+        '--binary-band-oracle',
+        choices=['off', 'control', 'high_clean', 'mid_rescue', 'both'],
+        default='off',
+        help=(
+            'diagnostic GT action/background routing inside frozen-teacher '
+            'high and mid confidence bands'
+        ),
+    )
+    parser.add_argument(
         '--oracle-target-regression', choices=['off', 'selected', 'full'],
         default='off',
         help='diagnostic target boundary loss using target GT; not a UDA method',
@@ -888,6 +900,16 @@ if __name__ == '__main__':
         )
     ):
         raise ValueError('Stage 1 and Oracle diagnostics cannot both be enabled')
+    if args.binary_band_oracle != 'off':
+        if not vlm_enabled or args.vlm_routing_mode != 'mid_confidence_ignore':
+            raise ValueError(
+                'binary band Oracle requires frozen-teacher '
+                'mid_confidence_ignore routing'
+            )
+        if args.oracle_routing != 'off':
+            raise ValueError(
+                'binary band Oracle and legacy Oracle routing are mutually exclusive'
+            )
     diagnostic_levels = None
     if args.diagnostic_alignment_levels is not None:
         diagnostic_levels = [
@@ -919,6 +941,7 @@ if __name__ == '__main__':
         )
     config_dict['diagnostic'] = {
         'oracle_routing': args.oracle_routing,
+        'binary_band_oracle': args.binary_band_oracle,
         'oracle_target_regression': args.oracle_target_regression,
         'oracle_target_regression_weight': args.oracle_target_regression_weight,
         'target_regression_levels': target_regression_levels,
