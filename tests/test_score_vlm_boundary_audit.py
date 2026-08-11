@@ -171,6 +171,23 @@ def test_keep_coarse_preserves_clear_coarse_improvement():
     assert details["vlm_refined"]["p1"]["start"]["source"] == "COARSE_KEEP"
 
 
+def test_coarse_keep_sada_is_terminal_even_if_legacy_fine_output_exists():
+    item, query = proposal(), coarse_query()
+    decision = coarse_decision(start="KEEP_SADA", end="NOT_VISIBLE")
+    variants, details = segment_set(
+        [item], [query], [prediction(query["query_id"], decision)],
+        [fine_query("start", [2.7, 3.0])],
+        [prediction("p1:fine:start", {
+            "decision": "SELECT_CANDIDATE", "selected_option": "B", "reason": "legacy"
+        })],
+        return_details=True,
+    )
+    assert variants["vlm_refined"]["p1"] == [1.0, 9.0]
+    assert details["vlm_refined"]["p1"]["start"] == {
+        "seconds": 1.0, "valid": True, "source": "SADA_KEEP"
+    }
+
+
 def test_start_not_before_end_safely_invalidates_both_sides():
     item, query = proposal(), coarse_query()
     variants, details = segment_set(

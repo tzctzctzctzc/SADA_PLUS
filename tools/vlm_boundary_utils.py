@@ -9,8 +9,8 @@ import torch
 
 
 PROPOSAL_SCHEMA_VERSION = "vlm-boundary-proposal-v1"
-QUERY_SCHEMA_VERSION = "vlm-boundary-query-v4"
-PREDICTION_SCHEMA_VERSION = "vlm-boundary-prediction-v4"
+QUERY_SCHEMA_VERSION = "vlm-boundary-query-v5"
+PREDICTION_SCHEMA_VERSION = "vlm-boundary-prediction-v5"
 
 
 def file_sha256(path):

@@ -98,7 +98,7 @@ def two_stage_candidate_space(
     minimum_step=0.1,
     transition_gap_frames=2,
 ):
-    """Exact residual choices reachable through coarse -> fine, including SADA."""
+    """Exact monotone residual choices reachable through coarse -> fine."""
     baseline = list(map(float, proposal["coarse_segment_seconds"]))
     step = fine_step_seconds(
         proposal["origin_stride_seconds"], maximum_step, minimum_step
@@ -108,7 +108,10 @@ def two_stage_candidate_space(
     side_paths = {}
     reachable = {}
     for index, side in enumerate(("start", "end")):
-        rough_values = coarse_candidate_times(query, side) + [baseline[index]]
+        # Fine is reachable only after Coarse selects a replacement.  Choosing
+        # KEEP_SADA terminates the side, while Fine may still revert a selected
+        # coarse candidate back to SADA.
+        rough_values = coarse_candidate_times(query, side)
         paths = []
         side_reachable = {baseline[index]}
         for rough in sorted(set(rough_values)):
@@ -271,9 +274,7 @@ def vlm_refined_result(proposal, query, coarse_decision, fine_queries, fine_deci
         side: dict(rough["sides"][side]) for side in ("start", "end")
     }
     for index, side in enumerate(("start", "end")):
-        if coarse_decision.get("{}_decision".format(side)) not in (
-            "SELECT_CANDIDATE", "KEEP_SADA"
-        ):
+        if coarse_decision.get("{}_decision".format(side)) != "SELECT_CANDIDATE":
             continue
         fine_query = fine_queries.get((proposal["proposal_id"], side))
         if fine_query is None:
@@ -695,7 +696,7 @@ def main():
         variant_reports[name] = variant_report
 
     report = {
-        "protocol": "fixed-proposal-vlm-boundary-residual-audit-v4",
+        "protocol": "fixed-proposal-vlm-boundary-monotone-residual-audit-v5",
         "task_mode": task_mode,
         "boundary_semantics": {
             "representation": "midpoint of one selectable short real-frame pair",
@@ -712,6 +713,7 @@ def main():
             ),
             "renms_after_refinement": False,
             "invalid_or_uncertain_side_policy": "retain_SADA_boundary_without_supervision",
+            "coarse_keep_sada_policy": "terminal_no_fine_reopening",
             "ground_truth_use": "offline_scoring_only",
             "oracle_candidate_count": args.oracle_candidate_count,
             "oracle_maximum_step": args.oracle_maximum_step,
@@ -724,8 +726,8 @@ def main():
                 "best legal selectable midpoint combination or KEEP_SADA each side"
             ),
             "two_stage_independent_oracle": (
-                "best start/end independently from every reachable fine transition, "
-                "KEEP_SADA, KEEP_COARSE, or side-abstention fallback"
+                "best start/end independently after a selected coarse replacement, "
+                "with terminal coarse KEEP_SADA and Fine KEEP_SADA/KEEP_COARSE"
             ),
             "two_stage_joint_oracle": (
                 "best legal pair from the identical per-side reachable choice spaces"

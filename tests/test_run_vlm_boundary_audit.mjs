@@ -22,7 +22,7 @@ function frame(frameId, frameIndex) {
 
 function coarseRow() {
   return {
-    query_schema_version: 'vlm-boundary-query-v4',
+    query_schema_version: 'vlm-boundary-query-v5',
     stage: 'coarse',
     task_mode: 'validity-and-boundary',
     query_id: 'p:coarse',

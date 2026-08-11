@@ -7,8 +7,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 
-const QUERY_SCHEMA_VERSION = 'vlm-boundary-query-v4';
-const PREDICTION_SCHEMA_VERSION = 'vlm-boundary-prediction-v4';
+const QUERY_SCHEMA_VERSION = 'vlm-boundary-query-v5';
+const PREDICTION_SCHEMA_VERSION = 'vlm-boundary-prediction-v5';
 const PROMPT_VERSION = 'vlm-boundary-sada-residual-instance-v5';
 const ACTION_STATUS_VALUES = new Set([
   'VALID_ACTION', 'NO_ACTION', 'WRONG_ACTION', 'UNCERTAIN',

@@ -81,7 +81,7 @@ def test_fine_manifest_compares_candidate_and_sada_for_same_instance():
     first = build_fine_rows(proposals, coarse, prediction)
     second = build_fine_rows(proposals, coarse, prediction)
     assert first == second
-    assert {row["boundary_side"] for row in first} == {"start", "end"}
+    assert {row["boundary_side"] for row in first} == {"start"}
     for row in first:
         assert row["instance_description"].startswith("right hand washes")
         side_index = 0 if row["boundary_side"] == "start" else 1
@@ -100,7 +100,7 @@ def test_fine_grid_is_safe_near_video_boundary_and_frame_deduplicated():
     prediction = [{
         "query_id": coarse[0]["query_id"],
         "run_status": "ok",
-        "decision": residual_decision(coarse[0], start="KEEP_SADA"),
+        "decision": residual_decision(coarse[0], start="SELECT_CANDIDATE"),
     }]
     rows = build_fine_rows(proposals, coarse, prediction)
     indices = [frame["frame_index"] for frame in rows[0]["frames"]]
@@ -124,7 +124,7 @@ def test_fine_manifest_skips_abstained_side_and_non_valid_action():
 def test_boundary_only_manifest_does_not_require_action_status():
     proposals = [proposal()]
     coarse = build_coarse_rows(proposals, task_mode="boundary-only")
-    decision = residual_decision(coarse[0], start="KEEP_SADA")
+    decision = residual_decision(coarse[0], start="SELECT_CANDIDATE")
     decision.pop("action_status")
     prediction = [{
         "query_id": coarse[0]["query_id"], "run_status": "ok", "decision": decision
@@ -132,6 +132,17 @@ def test_boundary_only_manifest_does_not_require_action_status():
     fine = build_fine_rows(proposals, coarse, prediction)
     assert [row["boundary_side"] for row in fine] == ["start"]
     assert fine[0]["task_mode"] == "boundary-only"
+
+
+def test_keep_sada_is_terminal_and_does_not_create_fine_query():
+    proposals = [proposal()]
+    coarse = build_coarse_rows(proposals, task_mode="boundary-only")
+    decision = residual_decision(coarse[0], start="KEEP_SADA")
+    decision.pop("action_status")
+    prediction = [{
+        "query_id": coarse[0]["query_id"], "run_status": "ok", "decision": decision
+    }]
+    assert build_fine_rows(proposals, coarse, prediction) == []
 
 
 def test_manifest_and_scorer_support_direct_script_entrypoints():

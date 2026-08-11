@@ -112,7 +112,10 @@ def test_tiny_synthetic_coarse_fine_score_pipeline(tmp_path):
         "--output", report_path,
     )
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    assert report["protocol"].endswith("v4")
+    assert report["protocol"].endswith("v5")
+    assert report["fixed_proposal_invariants"]["coarse_keep_sada_policy"] == (
+        "terminal_no_fine_reopening"
+    )
     assert report["task_mode"] == "boundary-only"
     assert report["validity"]["applicable"] is False
     assert all(

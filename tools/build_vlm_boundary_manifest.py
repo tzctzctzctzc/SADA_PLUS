@@ -253,7 +253,10 @@ def build_fine_rows(
         )
         for side in ("start", "end"):
             side_decision = decision.get("{}_decision".format(side))
-            if side_decision not in ("SELECT_CANDIDATE", "KEEP_SADA"):
+            # KEEP_SADA is terminal: once the coarse audit finds no clear
+            # improvement, Fine must not reopen that side and introduce a
+            # lower-confidence replacement.
+            if side_decision != "SELECT_CANDIDATE":
                 continue
             side_index = 0 if side == "start" else 1
             sada_boundary = float(proposal["coarse_segment_seconds"][side_index])
