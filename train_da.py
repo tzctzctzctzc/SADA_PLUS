@@ -324,6 +324,15 @@ def main(cfg, resume, project_name='sada', debug=False):
                 binary_band_oracle_levels=cfg.get('diagnostic', {}).get(
                     'binary_band_oracle_levels'
                 ),
+                soft_residual=cfg.get('vlm_routing', {}).get(
+                    'soft_residual', False
+                ),
+                residual_levels=cfg.get('vlm_routing', {}).get(
+                    'residual_levels', [0]
+                ),
+                residual_budget=cfg.get('vlm_routing', {}).get(
+                    'residual_budget', 0.05
+                ),
             )
             del teacher_checkpoint
     elif cfg.get('vlm_routing', {}).get('enabled', False):
@@ -760,6 +769,14 @@ def create_argparser():
         help='lower current-teacher confidence bound for low-confidence rescue',
     )
     parser.add_argument(
+        '--vlm-soft-residual', action='store_true',
+        help='enable the preregistered L0-only bounded semantic residual',
+    )
+    parser.add_argument(
+        '--vlm-residual-budget', type=float, default=0.05,
+        help='maximum residual/base target loss ratio per class and batch',
+    )
+    parser.add_argument(
         '--vlm-crop-alignment', type=int, default=1,
         help='controlled experiment: align random crop starts; 1 is the final method',
     )
@@ -872,6 +889,13 @@ if __name__ == '__main__':
     )
     if args.vlm_crop_alignment <= 0:
         raise ValueError('VLM crop alignment must be positive')
+    if args.vlm_soft_residual:
+        if not vlm_enabled or args.vlm_routing_mode != 'semantic_only':
+            raise ValueError(
+                'soft VLM residual requires semantic_only VLM routing'
+            )
+        if not 0.0 < args.vlm_residual_budget <= 1.0:
+            raise ValueError('VLM residual budget must be in (0, 1]')
     vlm_alpha = float(config_dict['model'].get('pl_threshold', 0.7))
     if not 0.0 <= args.vlm_beta < vlm_alpha <= 1.0:
         raise ValueError('VLM thresholds must satisfy 0 <= beta < alpha <= 1')
@@ -912,6 +936,9 @@ if __name__ == '__main__':
         'teacher_checkpoint': args.vlm_routing_teacher_checkpoint,
         'teacher_weights': args.vlm_routing_teacher_weights,
         'load_evidence': False,
+        'soft_residual': args.vlm_soft_residual,
+        'residual_levels': [0],
+        'residual_budget': args.vlm_residual_budget,
     }
     validity_head_enabled = args.validity_head == 'train'
     if args.validity_head_loss_weight < 0.0:
@@ -949,6 +976,8 @@ if __name__ == '__main__':
     ):
         raise ValueError('Stage 1 and Oracle diagnostics cannot both be enabled')
     if args.binary_band_oracle != 'off':
+        if args.vlm_soft_residual:
+            raise ValueError('soft VLM residual cannot use binary band Oracle')
         if not vlm_enabled or args.vlm_routing_mode != 'mid_confidence_ignore':
             raise ValueError(
                 'binary band Oracle requires frozen-teacher '

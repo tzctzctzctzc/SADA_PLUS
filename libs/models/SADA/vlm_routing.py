@@ -14,6 +14,7 @@ from .anchor_validity import anchor_validity_features, probe_probabilities
 LEGACY_SEMANTIC_CACHE_SCHEMA_VERSION = "offline-vlm-semantic-evidence-v1"
 SEMANTIC_CACHE_SCHEMA_VERSION = "offline-vlm-bidirectional-semantic-evidence-v2"
 VLM_RESUME_SCHEMA_VERSION = "frozen-routing-teacher-v4"
+VLM_RESIDUAL_RESUME_SCHEMA_VERSION = "frozen-routing-teacher-soft-residual-v1"
 BAND_ORACLE_RESUME_SCHEMA_VERSION = "frozen-routing-teacher-band-oracle-v1"
 BAND_ORACLE_IGNORE_RESUME_SCHEMA_VERSION = (
     "frozen-routing-teacher-band-oracle-ignore-v1"
@@ -281,19 +282,35 @@ def build_vlm_signature(
     binary_band_oracle_mode="off",
     binary_band_negative_route="background",
     binary_band_oracle_levels=None,
+    soft_residual=False,
+    residual_levels=None,
+    residual_budget=0.05,
 ):
     if binary_band_oracle_mode not in BINARY_BAND_ORACLE_MODES:
         raise ValueError("unknown binary band Oracle mode")
     if binary_band_negative_route not in BINARY_BAND_NEGATIVE_ROUTES:
         raise ValueError("unknown binary band Oracle negative route")
+    if soft_residual:
+        if binary_band_oracle_mode != "off":
+            raise ValueError("soft residual cannot be combined with band Oracle")
+        if routing_mode != "semantic_only":
+            raise ValueError("soft residual requires semantic_only routing")
+        if list(residual_levels or [0]) != [0]:
+            raise ValueError("soft residual is preregistered for L0 only")
+        if not 0.0 < float(residual_budget) <= 1.0:
+            raise ValueError("soft residual budget must be in (0, 1]")
     signature = {
         "schema_version": (
-            VLM_RESUME_SCHEMA_VERSION
-            if binary_band_oracle_mode == "off"
+            VLM_RESIDUAL_RESUME_SCHEMA_VERSION
+            if soft_residual
             else (
-                BAND_ORACLE_RESUME_SCHEMA_VERSION
-                if binary_band_negative_route == "background"
-                else BAND_ORACLE_IGNORE_RESUME_SCHEMA_VERSION
+                VLM_RESUME_SCHEMA_VERSION
+                if binary_band_oracle_mode == "off"
+                else (
+                    BAND_ORACLE_RESUME_SCHEMA_VERSION
+                    if binary_band_negative_route == "background"
+                    else BAND_ORACLE_IGNORE_RESUME_SCHEMA_VERSION
+                )
             )
         ),
         "semantic_cache_sha256": semantic_cache_sha256,
@@ -315,6 +332,10 @@ def build_vlm_signature(
             if binary_band_oracle_levels is None
             else list(binary_band_oracle_levels)
         )
+    if soft_residual:
+        signature["soft_residual"] = True
+        signature["residual_levels"] = list(residual_levels or [0])
+        signature["residual_budget"] = float(residual_budget)
     signature["signature_sha256"] = _canonical_sha256(signature)
     return signature
 

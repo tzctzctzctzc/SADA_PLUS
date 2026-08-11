@@ -32,6 +32,7 @@ from .vlm_routing import (
     semantic_prompt_protocols,
     target_labels_from_full_routing,
 )
+from .vlm_residual import bounded_residual_loss, select_supported_residual
 from libs.utils import batched_nms
 import einops
 import copy
@@ -331,6 +332,23 @@ class SADA(nn.Module):
         self.diagnostic_class_support = bool(
             cfg.get('diagnostic', {}).get('class_support', False)
         )
+        vlm_cfg = cfg.get('vlm_routing', {})
+        self.vlm_soft_residual = bool(vlm_cfg.get('soft_residual', False))
+        self.vlm_residual_levels = tuple(
+            int(level) for level in vlm_cfg.get('residual_levels', [0])
+        )
+        self.vlm_residual_budget = float(
+            vlm_cfg.get('residual_budget', 0.05)
+        )
+        if self.vlm_soft_residual:
+            if not vlm_cfg.get('enabled', False):
+                raise ValueError('soft VLM residual requires VLM routing')
+            if vlm_cfg.get('mode') != 'semantic_only':
+                raise ValueError('soft VLM residual requires semantic_only routing')
+            if self.vlm_residual_levels != (0,):
+                raise ValueError('the preregistered soft VLM residual is L0-only')
+            if not 0.0 < self.vlm_residual_budget <= 1.0:
+                raise ValueError('soft VLM residual budget must be in (0, 1]')
         if self.diagnostic_target_alignment not in (
             'both', 'action', 'background'
         ):
@@ -2313,18 +2331,41 @@ class SADA(nn.Module):
                             class_c_mask_src = source_labels[:, c] == 1   # shape: T' (subtract start_idx to to adapt to the no-class)   
                             class_c_mask_tgt = pseudo_gt_cls_target[:, c] == 1   # shape: T''
                             
+                        source_class_samples = int(class_c_mask_src.sum().item())
+                        rescue_candidate_mask = torch.zeros_like(
+                            class_c_mask_tgt, dtype=torch.bool
+                        )
+                        if c < self.num_class_orig:
+                            rescue_candidate_mask = (
+                                vlm_rescue_mask & (vlm_rescue_classes == c)
+                            )
+                        base_target_mask = class_c_mask_tgt & ~rescue_candidate_mask
+                        accepted_rescue_mask = rescue_candidate_mask
+                        if self.vlm_soft_residual and c < self.num_class_orig:
+                            accepted_rescue_mask = select_supported_residual(
+                                rescue_candidate_mask,
+                                base_target_mask,
+                                source_class_samples,
+                                l,
+                                self.vlm_residual_levels,
+                            )
+                            class_c_mask_tgt = (
+                                base_target_mask | accepted_rescue_mask
+                            )
+
                         # 2.2) Select their corresponding embeddings
                         out_features_src = dom_inv_feats_src[class_c_mask_src]  # shape: N' x F
                         out_features_tgt = dom_inv_feats_tgt[class_c_mask_tgt]
-                        source_class_samples = int(class_c_mask_src.sum().item())
                         target_class_samples = int(class_c_mask_tgt.sum().item())
-                        if c < self.num_class_orig:
-                            rescue_class_samples = int((
-                                vlm_rescue_mask
-                                & (vlm_rescue_classes == c)
-                            ).sum().item())
-                        else:
-                            rescue_class_samples = 0
+                        rescue_candidate_samples = int(
+                            rescue_candidate_mask.sum().item()
+                        )
+                        rescue_class_samples = int(
+                            accepted_rescue_mask.sum().item()
+                        )
+                        selected_rescue_mask = accepted_rescue_mask[
+                            class_c_mask_tgt
+                        ]
                         
                         # 2.3) Concatenate the learnable embedding of this class
                         out_features_src = torch.cat((out_features_src, self.learnable_embeddings[c].unsqueeze(0).expand(out_features_src.size(0), -1)), dim=-1)  # shape: N' x 2F
@@ -2343,7 +2384,28 @@ class SADA(nn.Module):
                             
                             # Compute the adversarial domain loss
                             domain_loss_src = self.criterion_domain(torch.squeeze(da_cond_pred_src, -1), source_domain_label)
-                            domain_loss_tgt = self.criterion_domain(torch.squeeze(da_cond_pred_tgt, -1), target_domain_label)
+                            residual_domain_loss = torch.tensor(0.0, device=self.device)
+                            residual_budget_excess = torch.tensor(0.0, device=self.device)
+                            if self.vlm_soft_residual and c < self.num_class_orig:
+                                target_losses = F.binary_cross_entropy_with_logits(
+                                    torch.squeeze(da_cond_pred_tgt, -1),
+                                    target_domain_label,
+                                    reduction='none',
+                                )
+                                (
+                                    domain_loss_tgt,
+                                    residual_domain_loss,
+                                    residual_budget_excess,
+                                ) = bounded_residual_loss(
+                                    target_losses[~selected_rescue_mask],
+                                    target_losses[selected_rescue_mask],
+                                    self.vlm_residual_budget,
+                                )
+                            else:
+                                domain_loss_tgt = self.criterion_domain(
+                                    torch.squeeze(da_cond_pred_tgt, -1),
+                                    target_domain_label,
+                                )
 
                             # Check for nan values and replace with 0
                             if torch.isnan(domain_loss_src).any():
@@ -2377,8 +2439,11 @@ class SADA(nn.Module):
                                     'class_id': c,
                                     'source_samples': source_class_samples,
                                     'target_samples': target_class_samples,
+                                    'vlm_rescue_candidate_samples': rescue_candidate_samples,
                                     'vlm_rescue_samples': rescue_class_samples,
                                     'target_loss': domain_loss_tgt.detach(),
+                                    'vlm_residual_loss': residual_domain_loss.detach(),
+                                    'vlm_residual_budget_excess': residual_budget_excess.detach(),
                                     'class_weight': class_c_weight,
                                 })
 
@@ -2433,6 +2498,10 @@ class SADA(nn.Module):
                                     row['class_weight'] * target_loss
                                     / target_denominator
                                 )
+                                residual_objective = (
+                                    row['class_weight'] * row['vlm_residual_loss']
+                                    / target_denominator
+                                )
                                 source_absent = not source_present
                                 losses[class_prefix + 'source_samples'] = torch.tensor(
                                     float(row['source_samples']), device=self.device
@@ -2443,6 +2512,10 @@ class SADA(nn.Module):
                                 losses[class_prefix + 'vlm_rescue_samples'] = torch.tensor(
                                     float(row['vlm_rescue_samples']), device=self.device
                                 )
+                                losses[class_prefix + 'vlm_rescue_candidate_samples'] = torch.tensor(
+                                    float(row['vlm_rescue_candidate_samples']),
+                                    device=self.device,
+                                )
                                 losses[class_prefix + 'source_present'] = torch.tensor(
                                     float(source_present), device=self.device
                                 )
@@ -2451,6 +2524,10 @@ class SADA(nn.Module):
                                 )
                                 losses[class_prefix + 'target_loss'] = target_loss
                                 losses[class_prefix + 'target_objective'] = target_objective
+                                losses[class_prefix + 'vlm_residual_objective'] = residual_objective
+                                losses[class_prefix + 'vlm_residual_budget_excess'] = (
+                                    row['vlm_residual_budget_excess']
+                                )
                                 losses[class_prefix + 'target_samples_without_source'] = torch.tensor(
                                     float(row['target_samples'] if source_absent else 0),
                                     device=self.device,

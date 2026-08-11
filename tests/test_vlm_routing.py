@@ -685,6 +685,26 @@ def test_resume_signature_rejects_changed_mode_or_artifact():
     with pytest.raises(ValueError, match="no frozen VLM routing signature"):
         validate_vlm_resume({}, signature)
 
+    residual_signature = build_vlm_signature(
+        "a" * 64,
+        None,
+        "semantic_only",
+        0.1,
+        0.7,
+        1,
+        "c" * 64,
+        "ema",
+        prompt_protocols,
+        soft_residual=True,
+        residual_levels=[0],
+        residual_budget=0.05,
+    )
+    assert residual_signature["schema_version"] == (
+        "frozen-routing-teacher-soft-residual-v1"
+    )
+    assert residual_signature["residual_levels"] == [0]
+    assert residual_signature["residual_budget"] == 0.05
+
 
 def continuation_config():
     return {

@@ -24,6 +24,9 @@ def build_conditional_class_report(accumulator, batch_count, epoch):
         source_samples = metrics.get("source_samples", 0.0)
         target_samples = metrics.get("target_samples", 0.0)
         rescue_samples = metrics.get("vlm_rescue_samples", 0.0)
+        rescue_candidates = metrics.get(
+            "vlm_rescue_candidate_samples", rescue_samples
+        )
         unpaired_target = metrics.get("target_samples_without_source", 0.0)
         unpaired_rescue = metrics.get(
             "vlm_rescue_samples_without_source", 0.0
@@ -35,12 +38,17 @@ def build_conditional_class_report(accumulator, batch_count, epoch):
         unpaired_objective = metrics.get(
             "target_objective_without_source", 0.0
         )
+        residual_objective = metrics.get("vlm_residual_objective", 0.0)
+        residual_budget_excess = metrics.get(
+            "vlm_residual_budget_excess", 0.0
+        )
         rows.append({
             "level": level,
             "class_id": class_id,
             "source_samples_total": source_samples,
             "target_samples_total": target_samples,
             "vlm_rescue_samples_total": rescue_samples,
+            "vlm_rescue_candidate_samples_total": rescue_candidates,
             "target_samples_without_source_total": unpaired_target,
             "vlm_rescue_samples_without_source_total": unpaired_rescue,
             "source_present_rate": source_present / batch_count,
@@ -52,6 +60,10 @@ def build_conditional_class_report(accumulator, batch_count, epoch):
             "target_objective_without_source_mean_per_batch": (
                 unpaired_objective / batch_count
             ),
+            "vlm_residual_objective_mean_per_batch": (
+                residual_objective / batch_count
+            ),
+            "vlm_residual_budget_excess_total": residual_budget_excess,
             "target_without_source_rate": (
                 unpaired_target / target_samples if target_samples else 0.0
             ),
@@ -65,6 +77,9 @@ def build_conditional_class_report(accumulator, batch_count, epoch):
         row["target_samples_without_source_total"] for row in rows
     )
     rescue_total = sum(row["vlm_rescue_samples_total"] for row in rows)
+    rescue_candidate_total = sum(
+        row["vlm_rescue_candidate_samples_total"] for row in rows
+    )
     unpaired_rescue_total = sum(
         row["vlm_rescue_samples_without_source_total"] for row in rows
     )
@@ -74,6 +89,12 @@ def build_conditional_class_report(accumulator, batch_count, epoch):
     unpaired_objective_total = sum(
         row["target_objective_without_source_mean_per_batch"] for row in rows
     )
+    residual_objective_total = sum(
+        row["vlm_residual_objective_mean_per_batch"] for row in rows
+    )
+    residual_budget_excess_total = sum(
+        row["vlm_residual_budget_excess_total"] for row in rows
+    )
     summary = {
         "target_samples_total": target_total,
         "target_samples_without_source_total": unpaired_target_total,
@@ -81,6 +102,7 @@ def build_conditional_class_report(accumulator, batch_count, epoch):
             unpaired_target_total / target_total if target_total else 0.0
         ),
         "vlm_rescue_samples_total": rescue_total,
+        "vlm_rescue_candidate_samples_total": rescue_candidate_total,
         "vlm_rescue_samples_without_source_total": unpaired_rescue_total,
         "vlm_rescue_without_source_rate": (
             unpaired_rescue_total / rescue_total if rescue_total else 0.0
@@ -91,9 +113,11 @@ def build_conditional_class_report(accumulator, batch_count, epoch):
             unpaired_objective_total / target_objective_total
             if target_objective_total else 0.0
         ),
+        "vlm_residual_objective_mean_per_batch": residual_objective_total,
+        "vlm_residual_budget_excess_total": residual_budget_excess_total,
     }
     return {
-        "schema_version": "conditional-class-support-diagnostic-v1",
+        "schema_version": "conditional-class-support-diagnostic-v2",
         "epoch": int(epoch),
         "batch_count": int(batch_count),
         "summary": summary,
