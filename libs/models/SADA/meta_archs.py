@@ -328,6 +328,9 @@ class SADA(nn.Module):
         self.diagnostic_target_alignment = cfg.get('diagnostic', {}).get(
             'target_alignment', 'both'
         )
+        self.diagnostic_class_support = bool(
+            cfg.get('diagnostic', {}).get('class_support', False)
+        )
         if self.diagnostic_target_alignment not in (
             'both', 'action', 'background'
         ):
@@ -2072,6 +2075,10 @@ class SADA(nn.Module):
                     # 2) Compute the pseudo-labels of the target domain
                     # c* = argmax_c \hat{p}_c
                     max_cls_prob_tgt, max_cls_idx_tgt = torch.max(out_cls_logits_tgt2, dim=1)  # shape: B(T_i)
+                    vlm_rescue_mask = torch.zeros_like(
+                        max_cls_idx_tgt, dtype=torch.bool
+                    )
+                    vlm_rescue_classes = max_cls_idx_tgt
                     
                     # Apply thresholding to the maximum class probability
                     pseudo_gt_cls_target = torch.zeros_like(out_cls_logits_tgt2).detach()  # shape: B(T_l) x C or B(T_l) x C+1
@@ -2129,6 +2136,8 @@ class SADA(nn.Module):
                             self.num_classes,
                             out_cls_logits_tgt2.dtype,
                         )
+                        vlm_rescue_mask = route_l['mid_action'][route_valid]
+                        vlm_rescue_classes = route_l['pseudo_class'][route_valid]
                         metric_prefix = 'vlm_l{}_'.format(l)
                         for metric_name in (
                             'valid',
@@ -2252,6 +2261,7 @@ class SADA(nn.Module):
                     target_sample_count = 0
                     min_source_class_samples = None
                     min_target_class_samples = None
+                    class_support_rows = []
                     
                     # Iterate over the true class labels (and not the no-class)
                     n_classes = self.num_class_orig if not self.align_bkg else self.num_class_orig + 1
@@ -2306,6 +2316,15 @@ class SADA(nn.Module):
                         # 2.2) Select their corresponding embeddings
                         out_features_src = dom_inv_feats_src[class_c_mask_src]  # shape: N' x F
                         out_features_tgt = dom_inv_feats_tgt[class_c_mask_tgt]
+                        source_class_samples = int(class_c_mask_src.sum().item())
+                        target_class_samples = int(class_c_mask_tgt.sum().item())
+                        if c < self.num_class_orig:
+                            rescue_class_samples = int((
+                                vlm_rescue_mask
+                                & (vlm_rescue_classes == c)
+                            ).sum().item())
+                        else:
+                            rescue_class_samples = 0
                         
                         # 2.3) Concatenate the learnable embedding of this class
                         out_features_src = torch.cat((out_features_src, self.learnable_embeddings[c].unsqueeze(0).expand(out_features_src.size(0), -1)), dim=-1)  # shape: N' x 2F
@@ -2353,6 +2372,15 @@ class SADA(nn.Module):
                                     else min(min_target_class_samples, class_samples)
                                 )
                                 target_class_losses.append(domain_loss_tgt.detach())
+                            if self.diagnostic_class_support:
+                                class_support_rows.append({
+                                    'class_id': c,
+                                    'source_samples': source_class_samples,
+                                    'target_samples': target_class_samples,
+                                    'vlm_rescue_samples': rescue_class_samples,
+                                    'target_loss': domain_loss_tgt.detach(),
+                                    'class_weight': class_c_weight,
+                                })
 
                     if 'conditional_rev' in self.cfg['model']['adv_method']:
                         loss_cond_reverse_level_source = loss_cond_reverse_level_source / (max(counter_src,1))
@@ -2391,6 +2419,49 @@ class SADA(nn.Module):
                             torch.stack(target_class_losses).max()
                             if target_class_losses else torch.tensor(0.0, device=self.device)
                         )
+                        if self.diagnostic_class_support:
+                            zero = torch.tensor(0.0, device=self.device)
+                            target_denominator = max(counter_tgt, 1)
+                            for row in class_support_rows:
+                                class_prefix = 'conditional_class_l{}_c{}_'.format(
+                                    l, row['class_id']
+                                )
+                                source_present = row['source_samples'] > 0
+                                target_present = row['target_samples'] > 0
+                                target_loss = row['target_loss'] if target_present else zero
+                                target_objective = (
+                                    row['class_weight'] * target_loss
+                                    / target_denominator
+                                )
+                                source_absent = not source_present
+                                losses[class_prefix + 'source_samples'] = torch.tensor(
+                                    float(row['source_samples']), device=self.device
+                                )
+                                losses[class_prefix + 'target_samples'] = torch.tensor(
+                                    float(row['target_samples']), device=self.device
+                                )
+                                losses[class_prefix + 'vlm_rescue_samples'] = torch.tensor(
+                                    float(row['vlm_rescue_samples']), device=self.device
+                                )
+                                losses[class_prefix + 'source_present'] = torch.tensor(
+                                    float(source_present), device=self.device
+                                )
+                                losses[class_prefix + 'target_present'] = torch.tensor(
+                                    float(target_present), device=self.device
+                                )
+                                losses[class_prefix + 'target_loss'] = target_loss
+                                losses[class_prefix + 'target_objective'] = target_objective
+                                losses[class_prefix + 'target_samples_without_source'] = torch.tensor(
+                                    float(row['target_samples'] if source_absent else 0),
+                                    device=self.device,
+                                )
+                                losses[class_prefix + 'vlm_rescue_samples_without_source'] = torch.tensor(
+                                    float(row['vlm_rescue_samples'] if source_absent else 0),
+                                    device=self.device,
+                                )
+                                losses[class_prefix + 'target_objective_without_source'] = (
+                                    target_objective if source_absent else zero
+                                )
                         
                         loss_cond_reverse_level = weight_source * loss_cond_reverse_level_source + weight_target * loss_cond_reverse_level_target
                         losses['loss_conditional_adv_rev_' + str(l)] = loss_cond_reverse_level

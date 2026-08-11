@@ -825,6 +825,13 @@ def create_argparser():
         ),
     )
     parser.add_argument(
+        '--diagnostic-class-support', action='store_true',
+        help=(
+            'write per-level/per-class source, target, VLM rescue, and '
+            'conditional-loss support diagnostics'
+        ),
+    )
+    parser.add_argument(
         '--diagnostic-action-levels', default=None,
         help='comma-separated aligned FPN levels that use action classes',
     )
@@ -1044,6 +1051,7 @@ if __name__ == '__main__':
         'no_conditional_update': args.diagnostic_no_ca,
         'alignment_levels': diagnostic_levels,
         'target_alignment': args.diagnostic_target_alignment,
+        'class_support': args.diagnostic_class_support,
         'action_alignment_levels': diagnostic_action_levels,
         'background_alignment_levels': diagnostic_background_levels,
     }

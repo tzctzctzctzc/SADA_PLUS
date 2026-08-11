@@ -285,6 +285,8 @@ class Trainer(BaseTrainerDA):
         self.model.train()
         self.stage1_epoch_summary = {}
         self.vlm_epoch_summary = {}
+        self.conditional_class_epoch_summary = {}
+        self.conditional_class_batch_count = 0
         
         # Create iterator for the source and target data loaders
         iter_src = iter(self.train_loader_src)
@@ -299,6 +301,7 @@ class Trainer(BaseTrainerDA):
         
         counter = 0
         for iter_idx in tqdm(range(num_iters)):
+            self.conditional_class_batch_count += 1
             # Get the video data of each of the datasets and move to device
             video_list_src = next(iter_src)
             video_list_src = move_to_device(video_list_src, self.model.device)
@@ -412,6 +415,13 @@ class Trainer(BaseTrainerDA):
             # Define all these as training losses
             for loss_name, loss_tr in losses.items():
                 raw_loss_name = loss_name
+                if raw_loss_name.startswith('conditional_class_'):
+                    self.conditional_class_epoch_summary[raw_loss_name] = (
+                        self.conditional_class_epoch_summary.get(
+                            raw_loss_name, 0.0
+                        ) + loss_tr.item()
+                    )
+                    continue
                 metric_name = 't_' + raw_loss_name
                 if not self.train_metrics.contains(metric_name):
                     self.train_metrics.add_new(metric_name)

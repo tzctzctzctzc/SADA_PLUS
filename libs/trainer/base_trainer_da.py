@@ -16,6 +16,9 @@ from libs.models.SADA.vlm_routing import (
     validate_vlm_resume,
     validate_vlm_transition,
 )
+from libs.trainer.conditional_diagnostics import (
+    build_conditional_class_report,
+)
 
 class BaseTrainerDA:
     """
@@ -345,6 +348,19 @@ class BaseTrainerDA:
                 vlm_summary['t_vlm_semantic_hit_rate'] = vlm_known / vlm_mid
                 vlm_summary['t_vlm_mid_rescue_rate'] = vlm_rescued / vlm_mid
             log_data.update(vlm_summary)
+            if self.cfg.get('diagnostic', {}).get('class_support', False):
+                class_report = build_conditional_class_report(
+                    getattr(self, 'conditional_class_epoch_summary', {}),
+                    getattr(self, 'conditional_class_batch_count', 0),
+                    epoch,
+                )
+                for key, value in class_report['summary'].items():
+                    log_data['conditional_class_' + key] = value
+                class_log = os.path.join(
+                    self.cfg.save_dir, 'conditional_class_metrics.jsonl'
+                )
+                with open(class_log, 'a', encoding='utf-8') as handle:
+                    handle.write(json.dumps(class_report, ensure_ascii=False) + '\n')
             
             # Upload to wandb
             if wandb.run is not None:
