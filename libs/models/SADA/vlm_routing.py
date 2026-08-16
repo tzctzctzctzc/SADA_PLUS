@@ -15,6 +15,7 @@ LEGACY_SEMANTIC_CACHE_SCHEMA_VERSION = "offline-vlm-semantic-evidence-v1"
 SEMANTIC_CACHE_SCHEMA_VERSION = "offline-vlm-bidirectional-semantic-evidence-v2"
 VLM_RESUME_SCHEMA_VERSION = "frozen-routing-teacher-v4"
 VLM_RESIDUAL_RESUME_SCHEMA_VERSION = "frozen-routing-teacher-soft-residual-v1"
+VLM_FORGETTING_RESUME_SCHEMA_VERSION = "frozen-routing-teacher-forgetting-v1"
 BAND_ORACLE_RESUME_SCHEMA_VERSION = "frozen-routing-teacher-band-oracle-v1"
 BAND_ORACLE_IGNORE_RESUME_SCHEMA_VERSION = (
     "frozen-routing-teacher-band-oracle-ignore-v1"
@@ -24,8 +25,10 @@ LOW_PROMPT_ROLE = "low_rescue"
 HIGH_PROMPT_ROLE = "high_veto"
 PROMPT_ROLES = {LOW_PROMPT_ROLE, HIGH_PROMPT_ROLE}
 CLEAR_NEGATIVE_LABELS = {"OTHER_ACTIVITY", "TRUE_BACKGROUND"}
+FORGETTING_NEGATIVE_LABELS = ("TRUE_BACKGROUND",)
 ROUTING_MODES = {
     "semantic_only",
+    "high_veto_only",
     "bidirectional_semantic",
     "validity_only",
     "semantic_and_validity",
@@ -285,6 +288,10 @@ def build_vlm_signature(
     soft_residual=False,
     residual_levels=None,
     residual_budget=0.05,
+    forgetting=False,
+    forgetting_levels=None,
+    forgetting_budget=0.01,
+    forgetting_labels=None,
 ):
     if binary_band_oracle_mode not in BINARY_BAND_ORACLE_MODES:
         raise ValueError("unknown binary band Oracle mode")
@@ -299,17 +306,38 @@ def build_vlm_signature(
             raise ValueError("soft residual is preregistered for L0 only")
         if not 0.0 < float(residual_budget) <= 1.0:
             raise ValueError("soft residual budget must be in (0, 1]")
+    if forgetting:
+        if binary_band_oracle_mode != "off":
+            raise ValueError("forgetting cannot be combined with band Oracle")
+        if soft_residual:
+            raise ValueError("forgetting cannot be combined with soft residual")
+        if routing_mode != "high_veto_only":
+            raise ValueError("forgetting requires high_veto_only routing")
+        if not 0.0 < float(forgetting_budget) <= 0.05:
+            raise ValueError("forgetting budget must be in (0, 0.05]")
+        if list(forgetting_levels or [0, 1, 2]) != sorted(
+            set(forgetting_levels or [0, 1, 2])
+        ):
+            raise ValueError("forgetting levels must be sorted and unique")
+        if any(level not in (0, 1, 2) for level in (forgetting_levels or [0, 1, 2])):
+            raise ValueError("forgetting is preregistered for L0-L2 only")
+        if tuple(forgetting_labels or FORGETTING_NEGATIVE_LABELS) != FORGETTING_NEGATIVE_LABELS:
+            raise ValueError("forgetting only supports TRUE_BACKGROUND labels")
     signature = {
         "schema_version": (
-            VLM_RESIDUAL_RESUME_SCHEMA_VERSION
-            if soft_residual
+            VLM_FORGETTING_RESUME_SCHEMA_VERSION
+            if forgetting
             else (
-                VLM_RESUME_SCHEMA_VERSION
-                if binary_band_oracle_mode == "off"
+                VLM_RESIDUAL_RESUME_SCHEMA_VERSION
+                if soft_residual
                 else (
-                    BAND_ORACLE_RESUME_SCHEMA_VERSION
-                    if binary_band_negative_route == "background"
-                    else BAND_ORACLE_IGNORE_RESUME_SCHEMA_VERSION
+                    VLM_RESUME_SCHEMA_VERSION
+                    if binary_band_oracle_mode == "off"
+                    else (
+                        BAND_ORACLE_RESUME_SCHEMA_VERSION
+                        if binary_band_negative_route == "background"
+                        else BAND_ORACLE_IGNORE_RESUME_SCHEMA_VERSION
+                    )
                 )
             )
         ),
@@ -336,6 +364,13 @@ def build_vlm_signature(
         signature["soft_residual"] = True
         signature["residual_levels"] = list(residual_levels or [0])
         signature["residual_budget"] = float(residual_budget)
+    if forgetting:
+        signature["forgetting"] = True
+        signature["forgetting_levels"] = list(forgetting_levels or [0, 1, 2])
+        signature["forgetting_budget"] = float(forgetting_budget)
+        signature["forgetting_labels"] = list(
+            forgetting_labels or FORGETTING_NEGATIVE_LABELS
+        )
     signature["signature_sha256"] = _canonical_sha256(signature)
     return signature
 
@@ -537,6 +572,7 @@ def build_full_vlm_routing(
     fpn_features,
     beta,
     alpha,
+    high_veto_labels=None,
 ):
     """Build the complete target route from one routing-teacher forward."""
     if routing_mode not in ROUTING_MODES:
@@ -545,6 +581,9 @@ def build_full_vlm_routing(
         raise ValueError("routing thresholds must satisfy 0 <= beta < alpha <= 1")
     if routing_mode in {"validity_only", "semantic_and_validity"} and validity_model is None:
         raise ValueError("online structural routing requires a validity model")
+    high_veto_labels = set(high_veto_labels or CLEAR_NEGATIVE_LABELS)
+    if not high_veto_labels.issubset(SEMANTIC_LABELS):
+        raise ValueError("high-veto labels must be semantic labels")
 
     routes = []
     for level, (point_grid, level_mask, logits, offsets, features) in enumerate(
@@ -581,8 +620,10 @@ def build_full_vlm_routing(
         semantic_pass = torch.zeros_like(valid)
         high_semantic_known = torch.zeros_like(valid)
         high_semantic_veto = torch.zeros_like(valid)
+        high_forgetting_suspect = torch.zeros_like(valid)
         if routing_mode in {
             "semantic_only",
+            "high_veto_only",
             "semantic_and_validity",
             "bidirectional_semantic",
         }:
@@ -596,14 +637,20 @@ def build_full_vlm_routing(
                 ):
                     raise ValueError("crop_start must be an integer feature index")
                 crop_start = int(raw_crop_start)
-                bands = [
-                    (
-                        LOW_PROMPT_ROLE,
-                        mid_confidence[batch_index],
-                        semantic_known,
+                bands = []
+                if routing_mode in {
+                    "semantic_only",
+                    "semantic_and_validity",
+                    "bidirectional_semantic",
+                }:
+                    bands.append(
+                        (
+                            LOW_PROMPT_ROLE,
+                            mid_confidence[batch_index],
+                            semantic_known,
+                        )
                     )
-                ]
-                if routing_mode == "bidirectional_semantic":
+                if routing_mode in {"high_veto_only", "bidirectional_semantic"}:
                     bands.append(
                         (
                             HIGH_PROMPT_ROLE,
@@ -645,7 +692,10 @@ def build_full_vlm_routing(
                             ]
                         else:
                             high_semantic_veto[batch_index, local_index] = (
-                                evidence["semantic_label"] in CLEAR_NEGATIVE_LABELS
+                                evidence["semantic_label"] in high_veto_labels
+                            )
+                            high_forgetting_suspect[batch_index, local_index] = (
+                                evidence["semantic_label"] == "TRUE_BACKGROUND"
                             )
         if routing_mode in {"semantic_only", "bidirectional_semantic"}:
             mid_action = mid_confidence & semantic_known & semantic_pass
@@ -683,6 +733,7 @@ def build_full_vlm_routing(
                 "high_veto": high_veto,
                 "high_semantic_known": high_semantic_known,
                 "high_semantic_veto": high_semantic_veto,
+                "high_forgetting_suspect": high_forgetting_suspect,
                 "mid_confidence": mid_confidence,
                 "mid_action": mid_action,
                 "low_confidence": low_confidence,

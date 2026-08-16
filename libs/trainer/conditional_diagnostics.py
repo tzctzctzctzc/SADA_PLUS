@@ -27,6 +27,10 @@ def build_conditional_class_report(accumulator, batch_count, epoch):
         rescue_candidates = metrics.get(
             "vlm_rescue_candidate_samples", rescue_samples
         )
+        forgetting_samples = metrics.get("vlm_forgetting_samples", 0.0)
+        forgetting_candidates = metrics.get(
+            "vlm_forgetting_candidate_samples", forgetting_samples
+        )
         unpaired_target = metrics.get("target_samples_without_source", 0.0)
         unpaired_rescue = metrics.get(
             "vlm_rescue_samples_without_source", 0.0
@@ -42,6 +46,10 @@ def build_conditional_class_report(accumulator, batch_count, epoch):
         residual_budget_excess = metrics.get(
             "vlm_residual_budget_excess", 0.0
         )
+        forgetting_objective = metrics.get("vlm_forgetting_objective", 0.0)
+        forgetting_budget_excess = metrics.get(
+            "vlm_forgetting_budget_excess", 0.0
+        )
         rows.append({
             "level": level,
             "class_id": class_id,
@@ -49,6 +57,8 @@ def build_conditional_class_report(accumulator, batch_count, epoch):
             "target_samples_total": target_samples,
             "vlm_rescue_samples_total": rescue_samples,
             "vlm_rescue_candidate_samples_total": rescue_candidates,
+            "vlm_forgetting_samples_total": forgetting_samples,
+            "vlm_forgetting_candidate_samples_total": forgetting_candidates,
             "target_samples_without_source_total": unpaired_target,
             "vlm_rescue_samples_without_source_total": unpaired_rescue,
             "source_present_rate": source_present / batch_count,
@@ -64,6 +74,10 @@ def build_conditional_class_report(accumulator, batch_count, epoch):
                 residual_objective / batch_count
             ),
             "vlm_residual_budget_excess_total": residual_budget_excess,
+            "vlm_forgetting_objective_mean_per_batch": (
+                forgetting_objective / batch_count
+            ),
+            "vlm_forgetting_budget_excess_total": forgetting_budget_excess,
             "target_without_source_rate": (
                 unpaired_target / target_samples if target_samples else 0.0
             ),
@@ -80,6 +94,10 @@ def build_conditional_class_report(accumulator, batch_count, epoch):
     rescue_candidate_total = sum(
         row["vlm_rescue_candidate_samples_total"] for row in rows
     )
+    forgetting_total = sum(row["vlm_forgetting_samples_total"] for row in rows)
+    forgetting_candidate_total = sum(
+        row["vlm_forgetting_candidate_samples_total"] for row in rows
+    )
     unpaired_rescue_total = sum(
         row["vlm_rescue_samples_without_source_total"] for row in rows
     )
@@ -95,6 +113,12 @@ def build_conditional_class_report(accumulator, batch_count, epoch):
     residual_budget_excess_total = sum(
         row["vlm_residual_budget_excess_total"] for row in rows
     )
+    forgetting_objective_total = sum(
+        row["vlm_forgetting_objective_mean_per_batch"] for row in rows
+    )
+    forgetting_budget_excess_total = sum(
+        row["vlm_forgetting_budget_excess_total"] for row in rows
+    )
     summary = {
         "target_samples_total": target_total,
         "target_samples_without_source_total": unpaired_target_total,
@@ -104,6 +128,8 @@ def build_conditional_class_report(accumulator, batch_count, epoch):
         "vlm_rescue_samples_total": rescue_total,
         "vlm_rescue_candidate_samples_total": rescue_candidate_total,
         "vlm_rescue_samples_without_source_total": unpaired_rescue_total,
+        "vlm_forgetting_samples_total": forgetting_total,
+        "vlm_forgetting_candidate_samples_total": forgetting_candidate_total,
         "vlm_rescue_without_source_rate": (
             unpaired_rescue_total / rescue_total if rescue_total else 0.0
         ),
@@ -115,9 +141,11 @@ def build_conditional_class_report(accumulator, batch_count, epoch):
         ),
         "vlm_residual_objective_mean_per_batch": residual_objective_total,
         "vlm_residual_budget_excess_total": residual_budget_excess_total,
+        "vlm_forgetting_objective_mean_per_batch": forgetting_objective_total,
+        "vlm_forgetting_budget_excess_total": forgetting_budget_excess_total,
     }
     return {
-        "schema_version": "conditional-class-support-diagnostic-v2",
+        "schema_version": "conditional-class-support-diagnostic-v3",
         "epoch": int(epoch),
         "batch_count": int(batch_count),
         "summary": summary,

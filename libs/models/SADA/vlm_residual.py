@@ -40,3 +40,24 @@ def bounded_residual_loss(base_losses, residual_losses, budget_fraction):
     residual = scale * raw_residual
     budget_excess = torch.clamp(residual.detach() - budget, min=0.0)
     return base_loss + residual, residual, budget_excess
+
+
+def bounded_extra_loss(reference_losses, extra_losses, budget_fraction):
+    """Scale an auxiliary loss by a detached budget from trusted losses."""
+    if not 0.0 < float(budget_fraction) <= 1.0:
+        raise ValueError("extra budget fraction must be in (0, 1]")
+
+    zero = reference_losses.sum() * 0.0 + extra_losses.sum() * 0.0
+    if reference_losses.numel() == 0 or extra_losses.numel() == 0:
+        return zero, zero
+
+    raw_extra = extra_losses.mean()
+    reference = reference_losses.mean().detach()
+    budget = float(budget_fraction) * reference
+    scale = torch.clamp(
+        budget / raw_extra.detach().clamp_min(torch.finfo(raw_extra.dtype).eps),
+        max=1.0,
+    )
+    extra = scale * raw_extra
+    budget_excess = torch.clamp(extra.detach() - budget, min=0.0)
+    return extra, budget_excess

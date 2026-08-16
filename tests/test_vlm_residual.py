@@ -15,6 +15,7 @@ SPEC = importlib.util.spec_from_file_location("vlm_residual", MODULE_PATH)
 vlm_residual = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(vlm_residual)
 bounded_residual_loss = vlm_residual.bounded_residual_loss
+bounded_extra_loss = vlm_residual.bounded_extra_loss
 select_supported_residual = vlm_residual.select_supported_residual
 
 
@@ -73,3 +74,29 @@ def test_small_residual_is_not_scaled_when_already_under_budget():
     assert total.item() == pytest.approx(2.01)
     assert residual.item() == pytest.approx(0.01)
     assert excess.item() == pytest.approx(0.0)
+
+
+def test_bounded_extra_loss_is_scaled_by_reference_budget():
+    reference = torch.tensor([2.0, 2.0], requires_grad=True)
+    extra = torch.tensor([100.0], requires_grad=True)
+
+    scaled, excess = bounded_extra_loss(reference, extra, 0.01)
+
+    assert scaled.item() == pytest.approx(0.02)
+    assert excess.item() == pytest.approx(0.0)
+    scaled.backward()
+    assert extra.grad.item() == pytest.approx(0.0002)
+    assert reference.grad is None
+
+
+def test_bounded_extra_loss_rejects_missing_reference_or_extra():
+    assert bounded_extra_loss(
+        torch.empty(0, requires_grad=True),
+        torch.tensor([1.0], requires_grad=True),
+        0.01,
+    )[0].item() == 0.0
+    assert bounded_extra_loss(
+        torch.tensor([1.0], requires_grad=True),
+        torch.empty(0, requires_grad=True),
+        0.01,
+    )[0].item() == 0.0

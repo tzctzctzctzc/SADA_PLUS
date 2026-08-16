@@ -333,6 +333,16 @@ def main(cfg, resume, project_name='sada', debug=False):
                 residual_budget=cfg.get('vlm_routing', {}).get(
                     'residual_budget', 0.05
                 ),
+                forgetting=cfg.get('vlm_routing', {}).get('forgetting', False),
+                forgetting_levels=cfg.get('vlm_routing', {}).get(
+                    'forgetting_levels', [0, 1, 2]
+                ),
+                forgetting_budget=cfg.get('vlm_routing', {}).get(
+                    'forgetting_budget', 0.01
+                ),
+                forgetting_labels=cfg.get('vlm_routing', {}).get(
+                    'forgetting_labels', ['TRUE_BACKGROUND']
+                ),
             )
             del teacher_checkpoint
     elif cfg.get('vlm_routing', {}).get('enabled', False):
@@ -757,6 +767,7 @@ def create_argparser():
         '--vlm-routing-mode',
         choices=[
             'semantic_only',
+            'high_veto_only',
             'bidirectional_semantic',
             'validity_only',
             'semantic_and_validity',
@@ -775,6 +786,18 @@ def create_argparser():
     parser.add_argument(
         '--vlm-residual-budget', type=float, default=0.05,
         help='maximum residual/base target loss ratio per class and batch',
+    )
+    parser.add_argument(
+        '--vlm-forgetting', action='store_true',
+        help='enable bounded top-1 negative learning for TRUE_BACKGROUND high-veto anchors',
+    )
+    parser.add_argument(
+        '--vlm-forgetting-budget', type=float, default=0.01,
+        help='maximum forgetting/reference target loss ratio per class and batch',
+    )
+    parser.add_argument(
+        '--vlm-forgetting-levels', default='0,1,2',
+        help='comma-separated FPN levels for target pseudo-action forgetting',
     )
     parser.add_argument(
         '--vlm-crop-alignment', type=int, default=1,
@@ -896,6 +919,30 @@ if __name__ == '__main__':
             )
         if not 0.0 < args.vlm_residual_budget <= 1.0:
             raise ValueError('VLM residual budget must be in (0, 1]')
+    forgetting_levels = [0, 1, 2]
+    if args.vlm_forgetting:
+        if not vlm_enabled or args.vlm_routing_mode != 'high_veto_only':
+            raise ValueError(
+                'VLM forgetting requires high_veto_only VLM routing'
+            )
+        if args.vlm_soft_residual:
+            raise ValueError('VLM forgetting cannot use soft residual')
+        if not 0.0 < args.vlm_forgetting_budget <= 0.05:
+            raise ValueError('VLM forgetting budget must be in (0, 0.05]')
+        forgetting_levels = [
+            int(level.strip())
+            for level in args.vlm_forgetting_levels.split(',')
+            if level.strip()
+        ]
+        if (
+            not forgetting_levels
+            or len(set(forgetting_levels)) != len(forgetting_levels)
+            or any(level not in (0, 1, 2) for level in forgetting_levels)
+        ):
+            raise ValueError(
+                'VLM forgetting levels must be unique values from 0 to 2'
+            )
+        forgetting_levels = sorted(forgetting_levels)
     vlm_alpha = float(config_dict['model'].get('pl_threshold', 0.7))
     if not 0.0 <= args.vlm_beta < vlm_alpha <= 1.0:
         raise ValueError('VLM thresholds must satisfy 0 <= beta < alpha <= 1')
@@ -908,7 +955,7 @@ if __name__ == '__main__':
         if (
             args.vlm_routing_mode in (
                 'semantic_only', 'semantic_and_validity',
-                'bidirectional_semantic',
+                'bidirectional_semantic', 'high_veto_only',
             )
             and args.vlm_semantic_cache is None
         ):
@@ -939,6 +986,10 @@ if __name__ == '__main__':
         'soft_residual': args.vlm_soft_residual,
         'residual_levels': [0],
         'residual_budget': args.vlm_residual_budget,
+        'forgetting': args.vlm_forgetting,
+        'forgetting_levels': forgetting_levels,
+        'forgetting_budget': args.vlm_forgetting_budget,
+        'forgetting_labels': ['TRUE_BACKGROUND'],
     }
     validity_head_enabled = args.validity_head == 'train'
     if args.validity_head_loss_weight < 0.0:
@@ -978,6 +1029,8 @@ if __name__ == '__main__':
     if args.binary_band_oracle != 'off':
         if args.vlm_soft_residual:
             raise ValueError('soft VLM residual cannot use binary band Oracle')
+        if args.vlm_forgetting:
+            raise ValueError('VLM forgetting cannot use binary band Oracle')
         if not vlm_enabled or args.vlm_routing_mode != 'mid_confidence_ignore':
             raise ValueError(
                 'binary band Oracle requires frozen-teacher '

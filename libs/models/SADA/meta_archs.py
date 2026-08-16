@@ -32,7 +32,11 @@ from .vlm_routing import (
     semantic_prompt_protocols,
     target_labels_from_full_routing,
 )
-from .vlm_residual import bounded_residual_loss, select_supported_residual
+from .vlm_residual import (
+    bounded_extra_loss,
+    bounded_residual_loss,
+    select_supported_residual,
+)
 from libs.utils import batched_nms
 import einops
 import copy
@@ -340,6 +344,16 @@ class SADA(nn.Module):
         self.vlm_residual_budget = float(
             vlm_cfg.get('residual_budget', 0.05)
         )
+        self.vlm_forgetting_enabled = bool(vlm_cfg.get('forgetting', False))
+        self.vlm_forgetting_levels = tuple(
+            int(level) for level in vlm_cfg.get('forgetting_levels', [0, 1, 2])
+        )
+        self.vlm_forgetting_budget = float(
+            vlm_cfg.get('forgetting_budget', 0.01)
+        )
+        self.vlm_forgetting_labels = tuple(
+            vlm_cfg.get('forgetting_labels', ['TRUE_BACKGROUND'])
+        )
         if self.vlm_soft_residual:
             if not vlm_cfg.get('enabled', False):
                 raise ValueError('soft VLM residual requires VLM routing')
@@ -349,6 +363,23 @@ class SADA(nn.Module):
                 raise ValueError('the preregistered soft VLM residual is L0-only')
             if not 0.0 < self.vlm_residual_budget <= 1.0:
                 raise ValueError('soft VLM residual budget must be in (0, 1]')
+        if self.vlm_forgetting_enabled:
+            if not vlm_cfg.get('enabled', False):
+                raise ValueError('target forgetting requires VLM routing')
+            if self.vlm_soft_residual:
+                raise ValueError('target forgetting cannot use soft residual')
+            if vlm_cfg.get('mode') != 'high_veto_only':
+                raise ValueError('target forgetting requires high_veto_only routing')
+            if self.vlm_forgetting_levels != tuple(sorted(set(self.vlm_forgetting_levels))):
+                raise ValueError('target forgetting levels must be sorted and unique')
+            if any(level not in (0, 1, 2) for level in self.vlm_forgetting_levels):
+                raise ValueError('target forgetting is preregistered for L0-L2')
+            if not 0.0 < self.vlm_forgetting_budget <= 0.05:
+                raise ValueError('target forgetting budget must be in (0, 0.05]')
+            if self.vlm_forgetting_labels != ('TRUE_BACKGROUND',):
+                raise ValueError('target forgetting only supports TRUE_BACKGROUND')
+            if 'conditional_rev' not in cfg['model']['adv_method']:
+                raise ValueError('target forgetting requires conditional_rev training')
         if self.diagnostic_target_alignment not in (
             'both', 'action', 'background'
         ):
@@ -478,7 +509,8 @@ class SADA(nn.Module):
                 )
             semantic_cache_path = vlm_cfg.get('semantic_cache_path')
             if self.vlm_routing_mode in (
-                'semantic_only', 'semantic_and_validity', 'bidirectional_semantic'
+                'semantic_only', 'high_veto_only',
+                'semantic_and_validity', 'bidirectional_semantic'
             ):
                 if not semantic_cache_path:
                     raise ValueError('semantic VLM routing requires a semantic cache')
@@ -499,6 +531,13 @@ class SADA(nn.Module):
                     raise ValueError(
                         'bidirectional semantic routing requires isolated '
                         'low_rescue and high_veto prompt protocols'
+                    )
+                if (
+                    self.vlm_routing_mode == 'high_veto_only'
+                    and 'high_veto' not in self.vlm_semantic_prompt_protocols
+                ):
+                    raise ValueError(
+                        'high-veto-only routing requires high_veto prompt evidence'
                     )
             validity_model_path = vlm_cfg.get('validity_model_path')
             if self.vlm_routing_mode in (
@@ -1238,6 +1277,11 @@ class SADA(nn.Module):
             fpn_feats,
             self.vlm_beta,
             self.stage1_alpha,
+            high_veto_labels=(
+                self.vlm_forgetting_labels
+                if self.vlm_forgetting_enabled
+                else None
+            ),
         )
 
     @torch.no_grad()
@@ -2079,7 +2123,8 @@ class SADA(nn.Module):
                 
                 # Start computing this only after the warmup period and if semantic_alignment is True
                 loss_cond_reverse = 0
-                
+                loss_vlm_forgetting = losses['downstream_loss'] * 0.0
+
                 for l in range(self.n_levels):
                     # Compute it over all the levels for debugging purposes, but use only the selected ones to add them to the final loss
                     
@@ -2087,7 +2132,8 @@ class SADA(nn.Module):
                     valid_mask_l_tgt = fpn_masks_tgt[l] # shape: B x T
                     
                     # 1. Optional filtering of the anchors
-                    out_cls_logits_tgt2 = out_cls_logits_tgt[l][valid_mask_l_tgt].sigmoid()  # shape: B(T_i) x C
+                    out_cls_logits_tgt_valid = out_cls_logits_tgt[l][valid_mask_l_tgt]
+                    out_cls_logits_tgt2 = out_cls_logits_tgt_valid.sigmoid()  # shape: B(T_i) x C
                     out_cls_logits_src2 = out_cls_logits_src[l][valid_mask_l_src].sigmoid()  # shape: B(T_i) x C
                     
                     # 2) Compute the pseudo-labels of the target domain
@@ -2097,6 +2143,10 @@ class SADA(nn.Module):
                         max_cls_idx_tgt, dtype=torch.bool
                     )
                     vlm_rescue_classes = max_cls_idx_tgt
+                    vlm_forgetting_mask = torch.zeros_like(
+                        max_cls_idx_tgt, dtype=torch.bool
+                    )
+                    vlm_forgetting_classes = max_cls_idx_tgt
                     
                     # Apply thresholding to the maximum class probability
                     pseudo_gt_cls_target = torch.zeros_like(out_cls_logits_tgt2).detach()  # shape: B(T_l) x C or B(T_l) x C+1
@@ -2156,6 +2206,10 @@ class SADA(nn.Module):
                         )
                         vlm_rescue_mask = route_l['mid_action'][route_valid]
                         vlm_rescue_classes = route_l['pseudo_class'][route_valid]
+                        vlm_forgetting_mask = route_l['high_forgetting_suspect'][
+                            route_valid
+                        ]
+                        vlm_forgetting_classes = route_l['pseudo_class'][route_valid]
                         metric_prefix = 'vlm_l{}_'.format(l)
                         for metric_name in (
                             'valid',
@@ -2167,6 +2221,7 @@ class SADA(nn.Module):
                             'high_veto',
                             'high_semantic_known',
                             'high_semantic_veto',
+                            'high_forgetting_suspect',
                             'mid_confidence',
                             'mid_action',
                             'low_confidence',
@@ -2280,6 +2335,8 @@ class SADA(nn.Module):
                     min_source_class_samples = None
                     min_target_class_samples = None
                     class_support_rows = []
+                    level_forgetting_candidates = 0
+                    level_forgetting_accepted = 0
                     
                     # Iterate over the true class labels (and not the no-class)
                     n_classes = self.num_class_orig if not self.align_bkg else self.num_class_orig + 1
@@ -2339,6 +2396,18 @@ class SADA(nn.Module):
                             rescue_candidate_mask = (
                                 vlm_rescue_mask & (vlm_rescue_classes == c)
                             )
+                        forgetting_candidate_mask = torch.zeros_like(
+                            class_c_mask_tgt, dtype=torch.bool
+                        )
+                        if (
+                            self.vlm_forgetting_enabled
+                            and c < self.num_class_orig
+                            and l in self.vlm_forgetting_levels
+                        ):
+                            forgetting_candidate_mask = (
+                                vlm_forgetting_mask
+                                & (vlm_forgetting_classes == c)
+                            )
                         base_target_mask = class_c_mask_tgt & ~rescue_candidate_mask
                         accepted_rescue_mask = rescue_candidate_mask
                         if self.vlm_soft_residual and c < self.num_class_orig:
@@ -2363,6 +2432,9 @@ class SADA(nn.Module):
                         rescue_class_samples = int(
                             accepted_rescue_mask.sum().item()
                         )
+                        forgetting_candidate_samples = int(
+                            forgetting_candidate_mask.sum().item()
+                        )
                         selected_rescue_mask = accepted_rescue_mask[
                             class_c_mask_tgt
                         ]
@@ -2386,12 +2458,15 @@ class SADA(nn.Module):
                             domain_loss_src = self.criterion_domain(torch.squeeze(da_cond_pred_src, -1), source_domain_label)
                             residual_domain_loss = torch.tensor(0.0, device=self.device)
                             residual_budget_excess = torch.tensor(0.0, device=self.device)
+                            forgetting_loss = torch.tensor(0.0, device=self.device)
+                            forgetting_budget_excess = torch.tensor(0.0, device=self.device)
+                            forgetting_accepted_samples = 0
+                            target_losses = F.binary_cross_entropy_with_logits(
+                                torch.squeeze(da_cond_pred_tgt, -1),
+                                target_domain_label,
+                                reduction='none',
+                            )
                             if self.vlm_soft_residual and c < self.num_class_orig:
-                                target_losses = F.binary_cross_entropy_with_logits(
-                                    torch.squeeze(da_cond_pred_tgt, -1),
-                                    target_domain_label,
-                                    reduction='none',
-                                )
                                 (
                                     domain_loss_tgt,
                                     residual_domain_loss,
@@ -2402,10 +2477,33 @@ class SADA(nn.Module):
                                     self.vlm_residual_budget,
                                 )
                             else:
-                                domain_loss_tgt = self.criterion_domain(
-                                    torch.squeeze(da_cond_pred_tgt, -1),
-                                    target_domain_label,
+                                domain_loss_tgt = (
+                                    target_losses.mean()
+                                    if target_losses.numel() > 0
+                                    else target_losses.sum() * 0.0
                                 )
+
+                            if (
+                                self.vlm_forgetting_enabled
+                                and c < self.num_class_orig
+                                and source_class_samples > 0
+                                and target_losses.numel() > 0
+                                and forgetting_candidate_mask.any()
+                            ):
+                                forget_logits = out_cls_logits_tgt_valid[
+                                    forgetting_candidate_mask, c
+                                ]
+                                forgetting_loss, forgetting_budget_excess = bounded_extra_loss(
+                                    target_losses,
+                                    F.softplus(forget_logits),
+                                    self.vlm_forgetting_budget,
+                                )
+                                loss_vlm_forgetting += forgetting_loss
+                                forgetting_accepted_samples = int(
+                                    forgetting_candidate_mask.sum().item()
+                                )
+                            level_forgetting_candidates += forgetting_candidate_samples
+                            level_forgetting_accepted += forgetting_accepted_samples
 
                             # Check for nan values and replace with 0
                             if torch.isnan(domain_loss_src).any():
@@ -2441,9 +2539,13 @@ class SADA(nn.Module):
                                     'target_samples': target_class_samples,
                                     'vlm_rescue_candidate_samples': rescue_candidate_samples,
                                     'vlm_rescue_samples': rescue_class_samples,
+                                    'vlm_forgetting_candidate_samples': forgetting_candidate_samples,
+                                    'vlm_forgetting_samples': forgetting_accepted_samples,
                                     'target_loss': domain_loss_tgt.detach(),
                                     'vlm_residual_loss': residual_domain_loss.detach(),
                                     'vlm_residual_budget_excess': residual_budget_excess.detach(),
+                                    'vlm_forgetting_loss': forgetting_loss.detach(),
+                                    'vlm_forgetting_budget_excess': forgetting_budget_excess.detach(),
                                     'class_weight': class_c_weight,
                                 })
 
@@ -2484,6 +2586,12 @@ class SADA(nn.Module):
                             torch.stack(target_class_losses).max()
                             if target_class_losses else torch.tensor(0.0, device=self.device)
                         )
+                        losses[diagnostic_prefix + 'vlm_forgetting_candidate'] = torch.tensor(
+                            float(level_forgetting_candidates), device=self.device
+                        )
+                        losses[diagnostic_prefix + 'vlm_forgetting'] = torch.tensor(
+                            float(level_forgetting_accepted), device=self.device
+                        )
                         if self.diagnostic_class_support:
                             zero = torch.tensor(0.0, device=self.device)
                             target_denominator = max(counter_tgt, 1)
@@ -2502,6 +2610,7 @@ class SADA(nn.Module):
                                     row['class_weight'] * row['vlm_residual_loss']
                                     / target_denominator
                                 )
+                                forgetting_objective = row['vlm_forgetting_loss']
                                 source_absent = not source_present
                                 losses[class_prefix + 'source_samples'] = torch.tensor(
                                     float(row['source_samples']), device=self.device
@@ -2516,6 +2625,14 @@ class SADA(nn.Module):
                                     float(row['vlm_rescue_candidate_samples']),
                                     device=self.device,
                                 )
+                                losses[class_prefix + 'vlm_forgetting_samples'] = torch.tensor(
+                                    float(row['vlm_forgetting_samples']),
+                                    device=self.device,
+                                )
+                                losses[class_prefix + 'vlm_forgetting_candidate_samples'] = torch.tensor(
+                                    float(row['vlm_forgetting_candidate_samples']),
+                                    device=self.device,
+                                )
                                 losses[class_prefix + 'source_present'] = torch.tensor(
                                     float(source_present), device=self.device
                                 )
@@ -2527,6 +2644,12 @@ class SADA(nn.Module):
                                 losses[class_prefix + 'vlm_residual_objective'] = residual_objective
                                 losses[class_prefix + 'vlm_residual_budget_excess'] = (
                                     row['vlm_residual_budget_excess']
+                                )
+                                losses[class_prefix + 'vlm_forgetting_objective'] = (
+                                    forgetting_objective
+                                )
+                                losses[class_prefix + 'vlm_forgetting_budget_excess'] = (
+                                    row['vlm_forgetting_budget_excess']
                                 )
                                 losses[class_prefix + 'target_samples_without_source'] = torch.tensor(
                                     float(row['target_samples'] if source_absent else 0),
@@ -2549,6 +2672,10 @@ class SADA(nn.Module):
                 
                 if 'conditional_rev' in self.cfg['model']['adv_method']:
                     losses['loss_conditional_adv_rev'] = loss_cond_reverse
+                    losses['vlm_forgetting_loss'] = loss_vlm_forgetting
+                    losses['downstream_loss'] = (
+                        losses['downstream_loss'] + loss_vlm_forgetting
+                    )
             
         return losses
 

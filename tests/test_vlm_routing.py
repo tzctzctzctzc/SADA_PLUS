@@ -7,12 +7,17 @@ from pathlib import Path
 import pytest
 import torch
 
-for package_name in ("libs", "libs.models", "libs.models.SADA"):
+ROOT = Path(__file__).parents[1]
+PACKAGE_PATHS = {
+    "libs": ROOT / "libs",
+    "libs.models": ROOT / "libs" / "models",
+    "libs.models.SADA": ROOT / "libs" / "models" / "SADA",
+}
+for package_name, package_path in PACKAGE_PATHS.items():
     if package_name not in sys.modules:
         package = types.ModuleType(package_name)
-        package.__path__ = []
+        package.__path__ = [str(package_path)]
         sys.modules[package_name] = package
-ROOT = Path(__file__).parents[1]
 for module_name in ("anchor_validity", "vlm_routing"):
     qualified = "libs.models.SADA.{}".format(module_name)
     spec = importlib.util.spec_from_file_location(
@@ -120,6 +125,7 @@ def route(
     validity_model=None,
     threshold=None,
     teacher_logits=None,
+    high_veto_labels=None,
 ):
     videos, points, masks, logits, offsets, fpn = inputs()
     if teacher_logits is not None:
@@ -137,6 +143,7 @@ def route(
         fpn,
         beta=0.1,
         alpha=0.7,
+        high_veto_labels=high_veto_labels,
     )[0]
 
 
@@ -331,6 +338,44 @@ def test_low_and_high_evidence_never_cross_prompt_roles():
     )
     assert bool(high_result["high_semantic_known"][0, 0]) is False
     assert bool(high_result["action"][0, 0]) is True
+
+
+def test_high_veto_only_reads_only_high_prompt_and_marks_true_background():
+    cache = {
+        ("high_veto", "video", 7): {
+            "prompt_role": "high_veto",
+            "semantic_pass": False,
+            "semantic_label": "TRUE_BACKGROUND",
+            "absolute_center_time": 0.7,
+        },
+        ("low_rescue", "video", 9): {
+            "prompt_role": "low_rescue",
+            "semantic_pass": True,
+            "semantic_label": "TARGET_ACTION",
+            "absolute_center_time": 0.9,
+        },
+        ("high_veto", "video", 11): {
+            "prompt_role": "high_veto",
+            "semantic_pass": False,
+            "semantic_label": "OTHER_ACTIVITY",
+            "absolute_center_time": 1.1,
+        },
+    }
+    logits = [torch.tensor([[[2.0, -2.0], [-1.0, 0.0], [2.0, -2.0]]])]
+
+    result = route(
+        cache,
+        "high_veto_only",
+        teacher_logits=logits,
+        high_veto_labels=("TRUE_BACKGROUND",),
+    )
+
+    assert result["semantic_known"].tolist() == [[False, False, False]]
+    assert result["high_semantic_known"].tolist() == [[True, False, True]]
+    assert result["high_veto"].tolist() == [[True, False, False]]
+    assert result["high_forgetting_suspect"].tolist() == [[True, False, False]]
+    assert result["action"].tolist() == [[False, False, True]]
+    assert result["ignore"].tolist() == [[True, True, False]]
 
 
 def test_joint_gate_uses_online_validity_and_missing_cache_is_ignore():
@@ -704,6 +749,42 @@ def test_resume_signature_rejects_changed_mode_or_artifact():
     )
     assert residual_signature["residual_levels"] == [0]
     assert residual_signature["residual_budget"] == 0.05
+
+    forgetting_signature = build_vlm_signature(
+        "a" * 64,
+        None,
+        "high_veto_only",
+        0.1,
+        0.7,
+        1,
+        "c" * 64,
+        "ema",
+        prompt_protocols,
+        forgetting=True,
+        forgetting_levels=[0, 1, 2],
+        forgetting_budget=0.01,
+        forgetting_labels=["TRUE_BACKGROUND"],
+    )
+    assert forgetting_signature["schema_version"] == (
+        "frozen-routing-teacher-forgetting-v1"
+    )
+    assert forgetting_signature["forgetting_levels"] == [0, 1, 2]
+    assert forgetting_signature["forgetting_budget"] == 0.01
+    assert forgetting_signature["forgetting_labels"] == ["TRUE_BACKGROUND"]
+    with pytest.raises(ValueError, match="TRUE_BACKGROUND"):
+        build_vlm_signature(
+            "a" * 64,
+            None,
+            "high_veto_only",
+            0.1,
+            0.7,
+            1,
+            "c" * 64,
+            "ema",
+            prompt_protocols,
+            forgetting=True,
+            forgetting_labels=["OTHER_ACTIVITY"],
+        )
 
 
 def continuation_config():
