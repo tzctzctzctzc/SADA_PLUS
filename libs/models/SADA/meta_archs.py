@@ -354,6 +354,9 @@ class SADA(nn.Module):
         self.vlm_forgetting_labels = tuple(
             vlm_cfg.get('forgetting_labels', ['TRUE_BACKGROUND'])
         )
+        self.vlm_other_activity_class_negative = bool(
+            vlm_cfg.get('other_activity_class_negative', False)
+        )
         if self.vlm_soft_residual:
             if not vlm_cfg.get('enabled', False):
                 raise ValueError('soft VLM residual requires VLM routing')
@@ -380,6 +383,11 @@ class SADA(nn.Module):
                 raise ValueError('target forgetting only supports TRUE_BACKGROUND')
             if 'conditional_rev' not in cfg['model']['adv_method']:
                 raise ValueError('target forgetting requires conditional_rev training')
+        if self.vlm_other_activity_class_negative:
+            if not self.vlm_forgetting_enabled:
+                raise ValueError(
+                    'OTHER_ACTIVITY class-negative requires target forgetting'
+                )
         if self.diagnostic_target_alignment not in (
             'both', 'action', 'background'
         ):
@@ -1264,6 +1272,12 @@ class SADA(nn.Module):
         logits, _ = self.cls_head_target(fpn_feats, fpn_masks)
         offsets, _ = self.reg_head_target(fpn_feats, fpn_masks)
         points = self.point_generator(fpn_feats)
+        high_veto_labels = None
+        if self.vlm_forgetting_enabled:
+            high_veto_labels = list(self.vlm_forgetting_labels)
+            if self.vlm_other_activity_class_negative:
+                high_veto_labels.append('OTHER_ACTIVITY')
+            high_veto_labels = tuple(dict.fromkeys(high_veto_labels))
         return build_full_vlm_routing(
             self.vlm_semantic_cache,
             self.vlm_validity_model,
@@ -1277,11 +1291,7 @@ class SADA(nn.Module):
             fpn_feats,
             self.vlm_beta,
             self.stage1_alpha,
-            high_veto_labels=(
-                self.vlm_forgetting_labels
-                if self.vlm_forgetting_enabled
-                else None
-            ),
+            high_veto_labels=high_veto_labels,
         )
 
     @torch.no_grad()
@@ -2147,6 +2157,10 @@ class SADA(nn.Module):
                         max_cls_idx_tgt, dtype=torch.bool
                     )
                     vlm_forgetting_classes = max_cls_idx_tgt
+                    vlm_other_activity_mask = torch.zeros_like(
+                        max_cls_idx_tgt, dtype=torch.bool
+                    )
+                    vlm_other_activity_classes = max_cls_idx_tgt
                     
                     # Apply thresholding to the maximum class probability
                     pseudo_gt_cls_target = torch.zeros_like(out_cls_logits_tgt2).detach()  # shape: B(T_l) x C or B(T_l) x C+1
@@ -2210,6 +2224,12 @@ class SADA(nn.Module):
                             route_valid
                         ]
                         vlm_forgetting_classes = route_l['pseudo_class'][route_valid]
+                        vlm_other_activity_mask = route_l[
+                            'high_other_activity_suspect'
+                        ][route_valid]
+                        vlm_other_activity_classes = route_l['pseudo_class'][
+                            route_valid
+                        ]
                         metric_prefix = 'vlm_l{}_'.format(l)
                         for metric_name in (
                             'valid',
@@ -2222,6 +2242,7 @@ class SADA(nn.Module):
                             'high_semantic_known',
                             'high_semantic_veto',
                             'high_forgetting_suspect',
+                            'high_other_activity_suspect',
                             'mid_confidence',
                             'mid_action',
                             'low_confidence',
@@ -2337,6 +2358,8 @@ class SADA(nn.Module):
                     class_support_rows = []
                     level_forgetting_candidates = 0
                     level_forgetting_accepted = 0
+                    level_other_activity_candidates = 0
+                    level_other_activity_accepted = 0
                     
                     # Iterate over the true class labels (and not the no-class)
                     n_classes = self.num_class_orig if not self.align_bkg else self.num_class_orig + 1
@@ -2399,6 +2422,9 @@ class SADA(nn.Module):
                         forgetting_candidate_mask = torch.zeros_like(
                             class_c_mask_tgt, dtype=torch.bool
                         )
+                        other_activity_candidate_mask = torch.zeros_like(
+                            class_c_mask_tgt, dtype=torch.bool
+                        )
                         if (
                             self.vlm_forgetting_enabled
                             and c < self.num_class_orig
@@ -2408,6 +2434,15 @@ class SADA(nn.Module):
                                 vlm_forgetting_mask
                                 & (vlm_forgetting_classes == c)
                             )
+                            if self.vlm_other_activity_class_negative:
+                                other_activity_candidate_mask = (
+                                    vlm_other_activity_mask
+                                    & (vlm_other_activity_classes == c)
+                                )
+                        class_negative_candidate_mask = (
+                            forgetting_candidate_mask
+                            | other_activity_candidate_mask
+                        )
                         base_target_mask = class_c_mask_tgt & ~rescue_candidate_mask
                         accepted_rescue_mask = rescue_candidate_mask
                         if self.vlm_soft_residual and c < self.num_class_orig:
@@ -2433,7 +2468,10 @@ class SADA(nn.Module):
                             accepted_rescue_mask.sum().item()
                         )
                         forgetting_candidate_samples = int(
-                            forgetting_candidate_mask.sum().item()
+                            class_negative_candidate_mask.sum().item()
+                        )
+                        other_activity_candidate_samples = int(
+                            other_activity_candidate_mask.sum().item()
                         )
                         selected_rescue_mask = accepted_rescue_mask[
                             class_c_mask_tgt
@@ -2461,6 +2499,7 @@ class SADA(nn.Module):
                             forgetting_loss = torch.tensor(0.0, device=self.device)
                             forgetting_budget_excess = torch.tensor(0.0, device=self.device)
                             forgetting_accepted_samples = 0
+                            other_activity_accepted_samples = 0
                             target_losses = F.binary_cross_entropy_with_logits(
                                 torch.squeeze(da_cond_pred_tgt, -1),
                                 target_domain_label,
@@ -2488,10 +2527,10 @@ class SADA(nn.Module):
                                 and c < self.num_class_orig
                                 and source_class_samples > 0
                                 and target_losses.numel() > 0
-                                and forgetting_candidate_mask.any()
+                                and class_negative_candidate_mask.any()
                             ):
                                 forget_logits = out_cls_logits_tgt_valid[
-                                    forgetting_candidate_mask, c
+                                    class_negative_candidate_mask, c
                                 ]
                                 forgetting_loss, forgetting_budget_excess = bounded_extra_loss(
                                     target_losses,
@@ -2500,10 +2539,15 @@ class SADA(nn.Module):
                                 )
                                 loss_vlm_forgetting += forgetting_loss
                                 forgetting_accepted_samples = int(
-                                    forgetting_candidate_mask.sum().item()
+                                    class_negative_candidate_mask.sum().item()
+                                )
+                                other_activity_accepted_samples = int(
+                                    other_activity_candidate_mask.sum().item()
                                 )
                             level_forgetting_candidates += forgetting_candidate_samples
                             level_forgetting_accepted += forgetting_accepted_samples
+                            level_other_activity_candidates += other_activity_candidate_samples
+                            level_other_activity_accepted += other_activity_accepted_samples
 
                             # Check for nan values and replace with 0
                             if torch.isnan(domain_loss_src).any():
@@ -2541,6 +2585,8 @@ class SADA(nn.Module):
                                     'vlm_rescue_samples': rescue_class_samples,
                                     'vlm_forgetting_candidate_samples': forgetting_candidate_samples,
                                     'vlm_forgetting_samples': forgetting_accepted_samples,
+                                    'vlm_other_activity_class_negative_candidate_samples': other_activity_candidate_samples,
+                                    'vlm_other_activity_class_negative_samples': other_activity_accepted_samples,
                                     'target_loss': domain_loss_tgt.detach(),
                                     'vlm_residual_loss': residual_domain_loss.detach(),
                                     'vlm_residual_budget_excess': residual_budget_excess.detach(),
@@ -2592,6 +2638,12 @@ class SADA(nn.Module):
                         losses[diagnostic_prefix + 'vlm_forgetting'] = torch.tensor(
                             float(level_forgetting_accepted), device=self.device
                         )
+                        losses[diagnostic_prefix + 'vlm_other_activity_class_negative_candidate'] = torch.tensor(
+                            float(level_other_activity_candidates), device=self.device
+                        )
+                        losses[diagnostic_prefix + 'vlm_other_activity_class_negative'] = torch.tensor(
+                            float(level_other_activity_accepted), device=self.device
+                        )
                         if self.diagnostic_class_support:
                             zero = torch.tensor(0.0, device=self.device)
                             target_denominator = max(counter_tgt, 1)
@@ -2631,6 +2683,14 @@ class SADA(nn.Module):
                                 )
                                 losses[class_prefix + 'vlm_forgetting_candidate_samples'] = torch.tensor(
                                     float(row['vlm_forgetting_candidate_samples']),
+                                    device=self.device,
+                                )
+                                losses[class_prefix + 'vlm_other_activity_class_negative_samples'] = torch.tensor(
+                                    float(row['vlm_other_activity_class_negative_samples']),
+                                    device=self.device,
+                                )
+                                losses[class_prefix + 'vlm_other_activity_class_negative_candidate_samples'] = torch.tensor(
+                                    float(row['vlm_other_activity_class_negative_candidate_samples']),
                                     device=self.device,
                                 )
                                 losses[class_prefix + 'source_present'] = torch.tensor(

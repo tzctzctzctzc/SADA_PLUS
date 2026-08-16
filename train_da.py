@@ -343,6 +343,9 @@ def main(cfg, resume, project_name='sada', debug=False):
                 forgetting_labels=cfg.get('vlm_routing', {}).get(
                     'forgetting_labels', ['TRUE_BACKGROUND']
                 ),
+                other_activity_class_negative=cfg.get('vlm_routing', {}).get(
+                    'other_activity_class_negative', False
+                ),
             )
             del teacher_checkpoint
     elif cfg.get('vlm_routing', {}).get('enabled', False):
@@ -800,6 +803,10 @@ def create_argparser():
         help='comma-separated FPN levels for target pseudo-action forgetting',
     )
     parser.add_argument(
+        '--vlm-other-activity-class-negative', action='store_true',
+        help='also apply class-negative learning to OTHER_ACTIVITY high-veto anchors',
+    )
+    parser.add_argument(
         '--vlm-crop-alignment', type=int, default=1,
         help='controlled experiment: align random crop starts; 1 is the final method',
     )
@@ -943,6 +950,10 @@ if __name__ == '__main__':
                 'VLM forgetting levels must be unique values from 0 to 2'
             )
         forgetting_levels = sorted(forgetting_levels)
+    elif args.vlm_other_activity_class_negative:
+        raise ValueError(
+            'OTHER_ACTIVITY class-negative requires --vlm-forgetting'
+        )
     vlm_alpha = float(config_dict['model'].get('pl_threshold', 0.7))
     if not 0.0 <= args.vlm_beta < vlm_alpha <= 1.0:
         raise ValueError('VLM thresholds must satisfy 0 <= beta < alpha <= 1')
@@ -990,6 +1001,7 @@ if __name__ == '__main__':
         'forgetting_levels': forgetting_levels,
         'forgetting_budget': args.vlm_forgetting_budget,
         'forgetting_labels': ['TRUE_BACKGROUND'],
+        'other_activity_class_negative': args.vlm_other_activity_class_negative,
     }
     validity_head_enabled = args.validity_head == 'train'
     if args.validity_head_loss_weight < 0.0:

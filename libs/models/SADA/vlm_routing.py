@@ -292,7 +292,10 @@ def build_vlm_signature(
     forgetting_levels=None,
     forgetting_budget=0.01,
     forgetting_labels=None,
+    other_activity_class_negative=False,
 ):
+    if other_activity_class_negative and not forgetting:
+        raise ValueError("OTHER_ACTIVITY class-negative requires forgetting")
     if binary_band_oracle_mode not in BINARY_BAND_ORACLE_MODES:
         raise ValueError("unknown binary band Oracle mode")
     if binary_band_negative_route not in BINARY_BAND_NEGATIVE_ROUTES:
@@ -371,6 +374,8 @@ def build_vlm_signature(
         signature["forgetting_labels"] = list(
             forgetting_labels or FORGETTING_NEGATIVE_LABELS
         )
+        if other_activity_class_negative:
+            signature["other_activity_class_negative"] = True
     signature["signature_sha256"] = _canonical_sha256(signature)
     return signature
 
@@ -621,6 +626,7 @@ def build_full_vlm_routing(
         high_semantic_known = torch.zeros_like(valid)
         high_semantic_veto = torch.zeros_like(valid)
         high_forgetting_suspect = torch.zeros_like(valid)
+        high_other_activity_suspect = torch.zeros_like(valid)
         if routing_mode in {
             "semantic_only",
             "high_veto_only",
@@ -697,6 +703,9 @@ def build_full_vlm_routing(
                             high_forgetting_suspect[batch_index, local_index] = (
                                 evidence["semantic_label"] == "TRUE_BACKGROUND"
                             )
+                            high_other_activity_suspect[batch_index, local_index] = (
+                                evidence["semantic_label"] == "OTHER_ACTIVITY"
+                            )
         if routing_mode in {"semantic_only", "bidirectional_semantic"}:
             mid_action = mid_confidence & semantic_known & semantic_pass
         elif routing_mode == "validity_only":
@@ -734,6 +743,7 @@ def build_full_vlm_routing(
                 "high_semantic_known": high_semantic_known,
                 "high_semantic_veto": high_semantic_veto,
                 "high_forgetting_suspect": high_forgetting_suspect,
+                "high_other_activity_suspect": high_other_activity_suspect,
                 "mid_confidence": mid_confidence,
                 "mid_action": mid_action,
                 "low_confidence": low_confidence,

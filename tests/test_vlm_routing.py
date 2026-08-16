@@ -374,8 +374,21 @@ def test_high_veto_only_reads_only_high_prompt_and_marks_true_background():
     assert result["high_semantic_known"].tolist() == [[True, False, True]]
     assert result["high_veto"].tolist() == [[True, False, False]]
     assert result["high_forgetting_suspect"].tolist() == [[True, False, False]]
+    assert result["high_other_activity_suspect"].tolist() == [[False, False, True]]
     assert result["action"].tolist() == [[False, False, True]]
     assert result["ignore"].tolist() == [[True, True, False]]
+
+    class_negative_result = route(
+        cache,
+        "high_veto_only",
+        teacher_logits=logits,
+        high_veto_labels=("TRUE_BACKGROUND", "OTHER_ACTIVITY"),
+    )
+    assert class_negative_result["high_veto"].tolist() == [[True, False, True]]
+    assert class_negative_result["high_forgetting_suspect"].tolist() == [[True, False, False]]
+    assert class_negative_result["high_other_activity_suspect"].tolist() == [[False, False, True]]
+    assert class_negative_result["action"].tolist() == [[False, False, False]]
+    assert class_negative_result["ignore"].tolist() == [[True, True, True]]
 
 
 def test_joint_gate_uses_online_validity_and_missing_cache_is_ignore():
@@ -771,6 +784,36 @@ def test_resume_signature_rejects_changed_mode_or_artifact():
     assert forgetting_signature["forgetting_levels"] == [0, 1, 2]
     assert forgetting_signature["forgetting_budget"] == 0.01
     assert forgetting_signature["forgetting_labels"] == ["TRUE_BACKGROUND"]
+    other_activity_signature = build_vlm_signature(
+        "a" * 64,
+        None,
+        "high_veto_only",
+        0.1,
+        0.7,
+        1,
+        "c" * 64,
+        "ema",
+        prompt_protocols,
+        forgetting=True,
+        forgetting_levels=[0, 1, 2],
+        forgetting_budget=0.01,
+        forgetting_labels=["TRUE_BACKGROUND"],
+        other_activity_class_negative=True,
+    )
+    assert other_activity_signature["other_activity_class_negative"] is True
+    with pytest.raises(ValueError, match="requires forgetting"):
+        build_vlm_signature(
+            "a" * 64,
+            None,
+            "high_veto_only",
+            0.1,
+            0.7,
+            1,
+            "c" * 64,
+            "ema",
+            prompt_protocols,
+            other_activity_class_negative=True,
+        )
     with pytest.raises(ValueError, match="TRUE_BACKGROUND"):
         build_vlm_signature(
             "a" * 64,
