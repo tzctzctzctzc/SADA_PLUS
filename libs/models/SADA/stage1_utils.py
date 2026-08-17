@@ -52,6 +52,44 @@ def build_oracle_routing(probabilities, gt_labels, alpha, mode):
     }
 
 
+def build_oracle_false_action_routing(probabilities, gt_labels, alpha):
+    """Ignore only high-confidence target actions that GT proves are false."""
+    if probabilities.shape != gt_labels.shape:
+        raise ValueError("probabilities and GT labels must have the same shape")
+
+    score, pseudo_class = probabilities.max(dim=-1)
+    high_confidence = score >= alpha
+    gt_foreground = gt_labels.sum(dim=-1) > 0
+    false_action = high_confidence & ~gt_foreground
+    action = high_confidence & gt_foreground
+    background = ~high_confidence
+    ignore = false_action
+
+    pseudo_labels = F.one_hot(
+        pseudo_class, num_classes=probabilities.shape[-1]
+    ).to(probabilities.dtype)
+    action_labels = torch.zeros_like(probabilities).detach()
+    action_labels[action] = pseudo_labels[action]
+
+    partition = action.to(torch.int8) + background.to(torch.int8) + ignore.to(
+        torch.int8
+    )
+    if not torch.all(partition == 1):
+        raise ValueError("Oracle false-action routing is not a partition")
+
+    return {
+        "action_labels": action_labels,
+        "action": action,
+        "background": background,
+        "ignore": ignore,
+        "false_action": false_action,
+        "gt_foreground": gt_foreground,
+        "high_confidence": high_confidence,
+        "pseudo_class": pseudo_class,
+        "score": score,
+    }
+
+
 def build_oracle_target_regression_mask(
     max_scores, gt_labels, valid_mask, enabled_levels, alpha, mode
 ):

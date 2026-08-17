@@ -426,7 +426,14 @@ class Trainer(BaseTrainerDA):
                 if not self.train_metrics.contains(metric_name):
                     self.train_metrics.add_new(metric_name)
                 self.train_metrics.update(metric_name, loss_tr.item())
-                if raw_loss_name.startswith('stage1_') and not raw_loss_name.endswith('_std'):
+                count_oracle_forgetting = (
+                    raw_loss_name.startswith('oracle_forgetting_l')
+                    or raw_loss_name == 'oracle_forgetting_samples'
+                )
+                if (
+                    raw_loss_name.startswith('stage1_')
+                    and not raw_loss_name.endswith('_std')
+                ) or count_oracle_forgetting:
                     key = 't_' + raw_loss_name + '_total'
                     self.stage1_epoch_summary[key] = (
                         self.stage1_epoch_summary.get(key, 0.0) + loss_tr.item()

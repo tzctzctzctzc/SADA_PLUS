@@ -815,6 +815,17 @@ def create_argparser():
         help='diagnostic target routing; uses target GT and is not a UDA method',
     )
     parser.add_argument(
+        '--oracle-forgetting', choices=['off', 'ignore', 'unlearn'], default='off',
+        help=(
+            'diagnostic false-action routing and unlearning using target GT; '
+            'not a UDA method'
+        ),
+    )
+    parser.add_argument(
+        '--oracle-forgetting-budget', type=float, default=0.01,
+        help='global Oracle forgetting/source-task loss ratio',
+    )
+    parser.add_argument(
         '--binary-band-oracle',
         choices=[
             'off', 'control', 'high_clean', 'mid_rescue', 'low_rescue',
@@ -1034,10 +1045,26 @@ if __name__ == '__main__':
         args.stage1 != 'off'
         and (
             args.oracle_routing != 'off'
+            or args.oracle_forgetting != 'off'
             or args.oracle_target_regression != 'off'
         )
     ):
         raise ValueError('Stage 1 and Oracle diagnostics cannot both be enabled')
+    if args.oracle_forgetting != 'off':
+        if not 0.0 < args.oracle_forgetting_budget <= 0.05:
+            raise ValueError('Oracle forgetting budget must be in (0, 0.05]')
+        if args.oracle_routing != 'off':
+            raise ValueError(
+                'Oracle forgetting and legacy Oracle routing are mutually exclusive'
+            )
+        if args.oracle_target_regression != 'off':
+            raise ValueError(
+                'Oracle forgetting and target regression are mutually exclusive'
+            )
+        if args.binary_band_oracle != 'off' or vlm_enabled:
+            raise ValueError('Oracle forgetting requires VLM routing to be disabled')
+        if 'conditional_rev' not in config_dict['model']['adv_method']:
+            raise ValueError('Oracle forgetting requires conditional_rev training')
     if args.binary_band_oracle != 'off':
         if args.vlm_soft_residual:
             raise ValueError('soft VLM residual cannot use binary band Oracle')
@@ -1135,6 +1162,8 @@ if __name__ == '__main__':
         )
     config_dict['diagnostic'] = {
         'oracle_routing': args.oracle_routing,
+        'oracle_forgetting': args.oracle_forgetting,
+        'oracle_forgetting_budget': args.oracle_forgetting_budget,
         'binary_band_oracle': args.binary_band_oracle,
         'binary_band_negative_route': args.binary_band_negative_route,
         'binary_band_oracle_levels': binary_band_oracle_levels,

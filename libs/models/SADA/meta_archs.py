@@ -7,6 +7,7 @@ from .blocks import MaskedConv1D, Scale, LayerNorm
 from .losses_aux import ctr_diou_loss_1d, sigmoid_focal_loss, ctr_giou_loss_1d
 from .models import register_meta_arch, make_backbone, make_neck, make_generator
 from .stage1_utils import (
+    build_oracle_false_action_routing,
     build_oracle_target_regression_mask,
     build_oracle_routing,
     build_routing_masks,
@@ -300,6 +301,21 @@ class SADA(nn.Module):
         self.reg_range = cfg['model']['regression_range']
         self.n_levels = len(self.fpn_strides)
         self.warmup_adv = cfg['train_cfg'].get('warmup_adv', 0)
+        diagnostic_cfg = cfg.get('diagnostic', {})
+        self.oracle_forgetting_mode = diagnostic_cfg.get(
+            'oracle_forgetting', 'off'
+        )
+        if self.oracle_forgetting_mode not in ('off', 'ignore', 'unlearn'):
+            raise ValueError(
+                'unknown Oracle forgetting mode: {}'.format(
+                    self.oracle_forgetting_mode
+                )
+            )
+        self.oracle_forgetting_budget = float(
+            diagnostic_cfg.get('oracle_forgetting_budget', 0.01)
+        )
+        if not 0.0 < self.oracle_forgetting_budget <= 0.05:
+            raise ValueError('Oracle forgetting budget must be in (0, 0.05]')
         self.oracle_routing_mode = cfg.get('diagnostic', {}).get(
             'oracle_routing', 'off'
         )
@@ -477,6 +493,17 @@ class SADA(nn.Module):
                 or self.oracle_target_regression_mode != 'off'
             ):
                 raise ValueError('Stage 1 and Oracle diagnostics cannot both be enabled')
+        if self.oracle_forgetting_mode != 'off':
+            if self.oracle_routing_mode != 'off':
+                raise ValueError(
+                    'Oracle forgetting and legacy Oracle routing are mutually exclusive'
+                )
+            if self.oracle_target_regression_mode != 'off':
+                raise ValueError(
+                    'Oracle forgetting and target regression are mutually exclusive'
+                )
+            if 'conditional_rev' not in cfg['model']['adv_method']:
+                raise ValueError('Oracle forgetting requires conditional_rev training')
         assert len(self.fpn_strides) == len(self.reg_range)
         self.scale_factor = scale_factor
         self.iou_weight_power = iou_weight_power
@@ -511,7 +538,11 @@ class SADA(nn.Module):
         self.vlm_beta = float(vlm_cfg.get('beta', 0.1))
         self.vlm_load_evidence = vlm_cfg.get('load_evidence', False)
         if self.vlm_routing_enabled and self.vlm_load_evidence:
-            if self.stage1_enabled or self.oracle_routing_mode != 'off':
+            if (
+                self.stage1_enabled
+                or self.oracle_routing_mode != 'off'
+                or self.oracle_forgetting_mode != 'off'
+            ):
                 raise ValueError(
                     'VLM routing cannot be combined with Stage 1 stability or Oracle routing'
                 )
@@ -2134,6 +2165,8 @@ class SADA(nn.Module):
                 # Start computing this only after the warmup period and if semantic_alignment is True
                 loss_cond_reverse = 0
                 loss_vlm_forgetting = losses['downstream_loss'] * 0.0
+                oracle_forgetting_raw_losses = []
+                oracle_forgetting_samples = 0
 
                 for l in range(self.n_levels):
                     # Compute it over all the levels for debugging purposes, but use only the selected ones to add them to the final loss
@@ -2164,7 +2197,37 @@ class SADA(nn.Module):
                     
                     # Apply thresholding to the maximum class probability
                     pseudo_gt_cls_target = torch.zeros_like(out_cls_logits_tgt2).detach()  # shape: B(T_l) x C or B(T_l) x C+1
-                    if self.oracle_routing_mode != 'off':
+                    if self.oracle_forgetting_mode != 'off':
+                        oracle_route = build_oracle_false_action_routing(
+                            out_cls_logits_tgt2,
+                            gts_per_level_tgt[l][valid_mask_l_tgt],
+                            static_threshold,
+                        )
+                        selected_anchors_mask = oracle_route['action']
+                        pseudo_gt_cls_target = oracle_route['action_labels']
+                        stage1_background_mask = oracle_route['background']
+                        metric_prefix = 'oracle_forgetting_l{}_'.format(l)
+                        for metric_name in (
+                            'action', 'background', 'ignore', 'false_action'
+                        ):
+                            losses[metric_prefix + metric_name] = (
+                                oracle_route[metric_name].sum().float()
+                            )
+                        if (
+                            self.oracle_forgetting_mode == 'unlearn'
+                            and l in semantic_alignment_levels
+                            and oracle_route['false_action'].any()
+                        ):
+                            false_action_logits = out_cls_logits_tgt_valid.gather(
+                                1, oracle_route['pseudo_class'].unsqueeze(1)
+                            ).squeeze(1)[oracle_route['false_action']]
+                            oracle_forgetting_raw_losses.append(
+                                F.softplus(false_action_logits)
+                            )
+                            oracle_forgetting_samples += int(
+                                oracle_route['false_action'].sum().item()
+                            )
+                    elif self.oracle_routing_mode != 'off':
                         oracle_route = build_oracle_routing(
                             out_cls_logits_tgt2,
                             gts_per_level_tgt[l][valid_mask_l_tgt],
@@ -2733,9 +2796,46 @@ class SADA(nn.Module):
                 if 'conditional_rev' in self.cfg['model']['adv_method']:
                     losses['loss_conditional_adv_rev'] = loss_cond_reverse
                     losses['vlm_forgetting_loss'] = loss_vlm_forgetting
+                    zero = losses['downstream_loss'] * 0.0
+                    oracle_forgetting_loss = zero
+                    oracle_forgetting_raw_loss = zero
+                    oracle_forgetting_budget = zero
+                    oracle_forgetting_budget_excess = zero
+                    if oracle_forgetting_raw_losses:
+                        raw_losses = torch.cat(oracle_forgetting_raw_losses)
+                        oracle_forgetting_raw_loss = raw_losses.mean()
+                        reference_loss = losses['downstream_loss'].reshape(1)
+                        (
+                            oracle_forgetting_loss,
+                            oracle_forgetting_budget_excess,
+                        ) = bounded_extra_loss(
+                            reference_loss,
+                            raw_losses,
+                            self.oracle_forgetting_budget,
+                        )
+                        oracle_forgetting_budget = (
+                            self.oracle_forgetting_budget
+                            * reference_loss.detach().mean()
+                        )
+                    losses['oracle_forgetting_loss'] = oracle_forgetting_loss
+                    losses['oracle_forgetting_raw_loss'] = (
+                        oracle_forgetting_raw_loss.detach()
+                    )
+                    losses['oracle_forgetting_budget'] = oracle_forgetting_budget
+                    losses['oracle_forgetting_budget_excess'] = (
+                        oracle_forgetting_budget_excess
+                    )
+                    losses['oracle_forgetting_samples'] = torch.tensor(
+                        float(oracle_forgetting_samples), device=self.device
+                    )
                     losses['downstream_loss'] = (
                         losses['downstream_loss'] + loss_vlm_forgetting
                     )
+                    if self.oracle_forgetting_mode == 'unlearn':
+                        losses['downstream_loss'] = (
+                            losses['downstream_loss']
+                            + oracle_forgetting_loss
+                        )
             
         return losses
 

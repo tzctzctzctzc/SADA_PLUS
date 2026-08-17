@@ -25,6 +25,9 @@ stage1_calibration = importlib.util.module_from_spec(CALIBRATION_SPEC)
 CALIBRATION_SPEC.loader.exec_module(stage1_calibration)
 build_routing_masks = stage1_utils.build_routing_masks
 build_oracle_routing = stage1_utils.build_oracle_routing
+build_oracle_false_action_routing = (
+    stage1_utils.build_oracle_false_action_routing
+)
 build_oracle_target_regression_mask = (
     stage1_utils.build_oracle_target_regression_mask
 )
@@ -264,6 +267,31 @@ class Stage1UtilsTest(unittest.TestCase):
         )
         self.assertEqual(selected.tolist(), [[True, False, False, False]])
         self.assertEqual(full.tolist(), [[True, True, False, False]])
+
+    def test_oracle_false_action_routing_only_ignores_selected_gt_background(self):
+        probabilities = torch.tensor([
+            [0.80, 0.10],
+            [0.40, 0.20],
+            [0.05, 0.90],
+            [0.30, 0.20],
+        ])
+        gt_labels = torch.tensor([
+            [0.0, 1.0],
+            [1.0, 0.0],
+            [0.0, 0.0],
+            [0.0, 0.0],
+        ])
+
+        route = build_oracle_false_action_routing(
+            probabilities, gt_labels, 0.6
+        )
+
+        self.assertEqual(route['action'].tolist(), [True, False, False, False])
+        self.assertEqual(route['background'].tolist(), [False, True, False, True])
+        self.assertEqual(route['ignore'].tolist(), [False, False, True, False])
+        self.assertEqual(route['false_action'].tolist(), [False, False, True, False])
+        self.assertEqual(route['action_labels'][0].tolist(), [1.0, 0.0])
+        self.assertFalse(route['action_labels'][2].any())
 
     def test_weighted_quantile(self):
         value = weighted_quantile(
