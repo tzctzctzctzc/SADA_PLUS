@@ -901,6 +901,13 @@ def create_argparser():
         ),
     )
     parser.add_argument(
+        '--conditional-paired-support', action='store_true',
+        help=(
+            'forget same-batch source-only and target-only classes from '
+            'conditional alignment and aggregate both domains over paired classes'
+        ),
+    )
+    parser.add_argument(
         '--diagnostic-action-levels', default=None,
         help='comma-separated aligned FPN levels that use action classes',
     )
@@ -1079,6 +1086,24 @@ if __name__ == '__main__':
             raise ValueError('Oracle forgetting requires VLM routing to be disabled')
         if 'conditional_rev' not in config_dict['model']['adv_method']:
             raise ValueError('Oracle forgetting requires conditional_rev training')
+    if args.conditional_paired_support:
+        if 'conditional_rev' not in config_dict['model']['adv_method']:
+            raise ValueError(
+                'paired conditional support requires conditional_rev training'
+            )
+        if effective_stage1 != 'off' or vlm_enabled:
+            raise ValueError(
+                'paired conditional support requires original SADA routing'
+            )
+        if (
+            args.oracle_routing != 'off'
+            or args.oracle_forgetting != 'off'
+            or args.oracle_target_regression != 'off'
+            or args.binary_band_oracle != 'off'
+        ):
+            raise ValueError(
+                'paired conditional support cannot use Oracle diagnostics'
+            )
     if args.binary_band_oracle != 'off':
         if args.vlm_soft_residual:
             raise ValueError('soft VLM residual cannot use binary band Oracle')
@@ -1188,10 +1213,14 @@ if __name__ == '__main__':
         'no_conditional_update': args.diagnostic_no_ca,
         'alignment_levels': diagnostic_levels,
         'target_alignment': args.diagnostic_target_alignment,
-        'class_support': args.diagnostic_class_support,
+        'class_support': (
+            args.diagnostic_class_support
+            or args.conditional_paired_support
+        ),
         'action_alignment_levels': diagnostic_action_levels,
         'background_alignment_levels': diagnostic_background_levels,
         'selective_alignment': args.selective_alignment,
+        'conditional_paired_support': args.conditional_paired_support,
     }
 
     update_config_with_arguments(config_dict, args, ARGS_TYPES, ARGS_CONFIGPATH)

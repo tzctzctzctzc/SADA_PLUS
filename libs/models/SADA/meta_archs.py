@@ -39,6 +39,7 @@ from .vlm_residual import (
     bounded_residual_loss,
     select_supported_residual,
 )
+from .conditional_alignment import aggregate_conditional_class_losses
 from libs.utils import batched_nms
 import einops
 import copy
@@ -362,6 +363,11 @@ class SADA(nn.Module):
         self.diagnostic_class_support = bool(
             cfg.get('diagnostic', {}).get('class_support', False)
         )
+        self.conditional_paired_support = bool(
+            diagnostic_cfg.get('conditional_paired_support', False)
+        )
+        if self.conditional_paired_support:
+            self.diagnostic_class_support = True
         vlm_cfg = cfg.get('vlm_routing', {})
         self.vlm_soft_residual = bool(vlm_cfg.get('soft_residual', False))
         self.vlm_residual_levels = tuple(
@@ -523,6 +529,23 @@ class SADA(nn.Module):
                 or self.oracle_target_regression_mode != 'off'
             ):
                 raise ValueError('Stage 1 and Oracle diagnostics cannot both be enabled')
+        if self.conditional_paired_support:
+            if 'conditional_rev' not in cfg['model']['adv_method']:
+                raise ValueError(
+                    'paired conditional support requires conditional_rev training'
+                )
+            if self.stage1_enabled or vlm_cfg.get('enabled', False):
+                raise ValueError(
+                    'paired conditional support requires original SADA routing'
+                )
+            if (
+                self.oracle_routing_mode != 'off'
+                or self.oracle_forgetting_mode != 'off'
+                or self.oracle_target_regression_mode != 'off'
+            ):
+                raise ValueError(
+                    'paired conditional support cannot use Oracle diagnostics'
+                )
         if self.oracle_forgetting_mode != 'off':
             if self.oracle_routing_mode != 'off':
                 raise ValueError(
@@ -2497,6 +2520,7 @@ class SADA(nn.Module):
                     min_source_class_samples = None
                     min_target_class_samples = None
                     class_support_rows = []
+                    conditional_loss_rows = []
                     level_forgetting_candidates = 0
                     level_forgetting_accepted = 0
                     level_other_activity_candidates = 0
@@ -2504,8 +2528,6 @@ class SADA(nn.Module):
                     
                     # Iterate over the true class labels (and not the no-class)
                     n_classes = self.num_class_orig if not self.align_bkg else self.num_class_orig + 1
-                    counter_src, counter_tgt = 0, 0
-                    
                     # Define the hyperparameters for the influence of the source and the target domain, and also the effect of every level
                     weight_source = self.cfg['model'].get('weight_source_cond_adv', 1.0)
                     weight_target = self.cfg['model'].get('weight_target_cond_adv', 1.0)
@@ -2706,10 +2728,16 @@ class SADA(nn.Module):
                             
                             if torch.isnan(domain_loss_tgt).any():
                                 domain_loss_tgt = torch.where(torch.isnan(domain_loss_tgt), torch.zeros_like(domain_loss_tgt), domain_loss_tgt).to(self.device)
+
+                            conditional_loss_rows.append({
+                                'source_loss': domain_loss_src,
+                                'target_loss': domain_loss_tgt,
+                                'source_samples': source_class_samples,
+                                'target_samples': target_class_samples,
+                                'class_weight': class_c_weight,
+                            })
                             
                             if torch.sum(class_c_mask_src) > 0:
-                                loss_cond_reverse_level_source += class_c_weight * domain_loss_src
-                                counter_src += 1
                                 class_samples = int(class_c_mask_src.sum().item())
                                 source_sample_count += class_samples
                                 min_source_class_samples = (
@@ -2718,8 +2746,6 @@ class SADA(nn.Module):
                                 )
                                 source_class_losses.append(domain_loss_src.detach())
                             if torch.sum(class_c_mask_tgt) > 0:
-                                loss_cond_reverse_level_target += class_c_weight * domain_loss_tgt
-                                counter_tgt += 1
                                 class_samples = int(class_c_mask_tgt.sum().item())
                                 target_sample_count += class_samples
                                 if target_alignment_weights is not None:
@@ -2751,8 +2777,20 @@ class SADA(nn.Module):
                                 })
 
                     if 'conditional_rev' in self.cfg['model']['adv_method']:
-                        loss_cond_reverse_level_source = loss_cond_reverse_level_source / (max(counter_src,1))
-                        loss_cond_reverse_level_target = loss_cond_reverse_level_target / (max(counter_tgt,1))
+                        conditional_aggregation = (
+                            aggregate_conditional_class_losses(
+                                conditional_loss_rows,
+                                loss_cond_reverse_level_source
+                                + loss_cond_reverse_level_target,
+                                paired_support=self.conditional_paired_support,
+                            )
+                        )
+                        loss_cond_reverse_level_source = (
+                            conditional_aggregation['source_loss']
+                        )
+                        loss_cond_reverse_level_target = (
+                            conditional_aggregation['target_loss']
+                        )
 
                         diagnostic_prefix = 'conditional_l{}_'.format(l)
                         losses[diagnostic_prefix + 'source_loss'] = (
@@ -2762,10 +2800,37 @@ class SADA(nn.Module):
                             loss_cond_reverse_level_target.detach()
                         )
                         losses[diagnostic_prefix + 'source_classes'] = torch.tensor(
-                            float(counter_src), device=self.device
+                            float(conditional_aggregation['source_classes']),
+                            device=self.device,
                         )
                         losses[diagnostic_prefix + 'target_classes'] = torch.tensor(
-                            float(counter_tgt), device=self.device
+                            float(conditional_aggregation['target_classes']),
+                            device=self.device,
+                        )
+                        losses[diagnostic_prefix + 'source_present_classes'] = torch.tensor(
+                            float(conditional_aggregation['source_present_classes']),
+                            device=self.device,
+                        )
+                        losses[diagnostic_prefix + 'target_present_classes'] = torch.tensor(
+                            float(conditional_aggregation['target_present_classes']),
+                            device=self.device,
+                        )
+                        losses[diagnostic_prefix + 'paired_classes'] = torch.tensor(
+                            float(conditional_aggregation['paired_classes']),
+                            device=self.device,
+                        )
+                        losses[diagnostic_prefix + 'forgotten_target_classes'] = torch.tensor(
+                            float(conditional_aggregation['forgotten_target_classes']),
+                            device=self.device,
+                        )
+                        losses[diagnostic_prefix + 'forgotten_target_samples'] = torch.tensor(
+                            float(conditional_aggregation['forgotten_target_samples']),
+                            device=self.device,
+                        )
+                        losses[diagnostic_prefix + 'forgotten_target_objective'] = (
+                            conditional_aggregation[
+                                'forgotten_target_objective'
+                            ].detach()
                         )
                         losses[diagnostic_prefix + 'source_samples'] = torch.tensor(
                             float(source_sample_count), device=self.device
@@ -2804,7 +2869,9 @@ class SADA(nn.Module):
                         )
                         if self.diagnostic_class_support:
                             zero = torch.tensor(0.0, device=self.device)
-                            target_denominator = max(counter_tgt, 1)
+                            target_denominator = max(
+                                conditional_aggregation['target_classes'], 1
+                            )
                             for row in class_support_rows:
                                 class_prefix = 'conditional_class_l{}_c{}_'.format(
                                     l, row['class_id']
@@ -2812,9 +2879,14 @@ class SADA(nn.Module):
                                 source_present = row['source_samples'] > 0
                                 target_present = row['target_samples'] > 0
                                 target_loss = row['target_loss'] if target_present else zero
+                                target_is_active = target_present and (
+                                    not self.conditional_paired_support
+                                    or source_present
+                                )
                                 target_objective = (
                                     row['class_weight'] * target_loss
                                     / target_denominator
+                                    if target_is_active else zero
                                 )
                                 residual_objective = (
                                     row['class_weight'] * row['vlm_residual_loss']
