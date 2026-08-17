@@ -72,6 +72,24 @@ class ConditionalAlignmentAggregationTests(unittest.TestCase):
         self.assertEqual(result["forgotten_target_classes"], 1)
         self.assertEqual(result["forgotten_target_samples"], 2)
 
+    def test_fixed_denominator_does_not_redistribute_forgotten_weight(self):
+        result = aggregate_conditional_class_losses(
+            self._rows(),
+            torch.tensor(0.0),
+            paired_support=True,
+            preserve_denominator=True,
+        )
+
+        self.assertAlmostEqual(result["source_loss"].item(), 2.0)
+        self.assertAlmostEqual(result["target_loss"].item(), 1.0)
+        self.assertEqual(result["source_classes"], 2)
+        self.assertEqual(result["target_classes"], 1)
+        self.assertEqual(result["source_denominator"], 2)
+        self.assertEqual(result["target_denominator"], 2)
+        self.assertAlmostEqual(
+            result["forgotten_target_objective"].item(), 3.0
+        )
+
     def test_no_pair_returns_differentiable_zero(self):
         source_loss = torch.tensor(1.0, requires_grad=True)
         target_loss = torch.tensor(2.0, requires_grad=True)

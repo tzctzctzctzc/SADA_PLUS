@@ -1,5 +1,12 @@
-def aggregate_conditional_class_losses(rows, zero, paired_support=False):
+def aggregate_conditional_class_losses(
+    rows,
+    zero,
+    paired_support=False,
+    preserve_denominator=False,
+):
     """Aggregate class-wise domain losses with optional same-batch support."""
+    if preserve_denominator and not paired_support:
+        raise ValueError("preserving denominators requires paired support")
     zero = zero * 0.0
     source_rows = [row for row in rows if row["source_samples"] > 0]
     target_rows = [row for row in rows if row["target_samples"] > 0]
@@ -9,15 +16,24 @@ def aggregate_conditional_class_losses(rows, zero, paired_support=False):
         if row["source_samples"] > 0 and row["target_samples"] > 0
     ]
 
-    active_source_rows = paired_rows if paired_support else source_rows
+    active_source_rows = (
+        source_rows
+        if preserve_denominator
+        else (paired_rows if paired_support else source_rows)
+    )
     active_target_rows = paired_rows if paired_support else target_rows
 
-    def mean_loss(active_rows, key):
-        if not active_rows:
+    source_denominator = len(active_source_rows)
+    target_denominator = (
+        len(target_rows) if preserve_denominator else len(active_target_rows)
+    )
+
+    def mean_loss(active_rows, key, denominator):
+        if not active_rows or denominator == 0:
             return zero
         return sum(
             row["class_weight"] * row[key] for row in active_rows
-        ) / len(active_rows)
+        ) / denominator
 
     forgotten_target_rows = [
         row
@@ -35,10 +51,16 @@ def aggregate_conditional_class_losses(rows, zero, paired_support=False):
     ) if forgotten_target_rows else zero
 
     return {
-        "source_loss": mean_loss(active_source_rows, "source_loss"),
-        "target_loss": mean_loss(active_target_rows, "target_loss"),
+        "source_loss": mean_loss(
+            active_source_rows, "source_loss", source_denominator
+        ),
+        "target_loss": mean_loss(
+            active_target_rows, "target_loss", target_denominator
+        ),
         "source_classes": len(active_source_rows),
         "target_classes": len(active_target_rows),
+        "source_denominator": source_denominator,
+        "target_denominator": target_denominator,
         "source_present_classes": len(source_rows),
         "target_present_classes": len(target_rows),
         "paired_classes": len(paired_rows),

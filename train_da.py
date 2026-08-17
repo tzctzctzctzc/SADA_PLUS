@@ -908,6 +908,13 @@ def create_argparser():
         ),
     )
     parser.add_argument(
+        '--conditional-paired-fixed-denominator', action='store_true',
+        help=(
+            'forget target classes without same-batch source support while '
+            'preserving the original source loss and target class denominator'
+        ),
+    )
+    parser.add_argument(
         '--diagnostic-action-levels', default=None,
         help='comma-separated aligned FPN levels that use action classes',
     )
@@ -1086,7 +1093,16 @@ if __name__ == '__main__':
             raise ValueError('Oracle forgetting requires VLM routing to be disabled')
         if 'conditional_rev' not in config_dict['model']['adv_method']:
             raise ValueError('Oracle forgetting requires conditional_rev training')
-    if args.conditional_paired_support:
+    paired_conditional = (
+        args.conditional_paired_support
+        or args.conditional_paired_fixed_denominator
+    )
+    if (
+        args.conditional_paired_support
+        and args.conditional_paired_fixed_denominator
+    ):
+        raise ValueError('paired conditional modes are mutually exclusive')
+    if paired_conditional:
         if 'conditional_rev' not in config_dict['model']['adv_method']:
             raise ValueError(
                 'paired conditional support requires conditional_rev training'
@@ -1215,12 +1231,15 @@ if __name__ == '__main__':
         'target_alignment': args.diagnostic_target_alignment,
         'class_support': (
             args.diagnostic_class_support
-            or args.conditional_paired_support
+            or paired_conditional
         ),
         'action_alignment_levels': diagnostic_action_levels,
         'background_alignment_levels': diagnostic_background_levels,
         'selective_alignment': args.selective_alignment,
         'conditional_paired_support': args.conditional_paired_support,
+        'conditional_paired_fixed_denominator': (
+            args.conditional_paired_fixed_denominator
+        ),
     }
 
     update_config_with_arguments(config_dict, args, ARGS_TYPES, ARGS_CONFIGPATH)

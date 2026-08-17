@@ -363,8 +363,24 @@ class SADA(nn.Module):
         self.diagnostic_class_support = bool(
             cfg.get('diagnostic', {}).get('class_support', False)
         )
-        self.conditional_paired_support = bool(
+        self.conditional_paired_renormalized = bool(
             diagnostic_cfg.get('conditional_paired_support', False)
+        )
+        self.conditional_paired_fixed_denominator = bool(
+            diagnostic_cfg.get(
+                'conditional_paired_fixed_denominator', False
+            )
+        )
+        if (
+            self.conditional_paired_renormalized
+            and self.conditional_paired_fixed_denominator
+        ):
+            raise ValueError(
+                'paired conditional modes are mutually exclusive'
+            )
+        self.conditional_paired_support = (
+            self.conditional_paired_renormalized
+            or self.conditional_paired_fixed_denominator
         )
         if self.conditional_paired_support:
             self.diagnostic_class_support = True
@@ -2783,6 +2799,9 @@ class SADA(nn.Module):
                                 loss_cond_reverse_level_source
                                 + loss_cond_reverse_level_target,
                                 paired_support=self.conditional_paired_support,
+                                preserve_denominator=(
+                                    self.conditional_paired_fixed_denominator
+                                ),
                             )
                         )
                         loss_cond_reverse_level_source = (
@@ -2805,6 +2824,14 @@ class SADA(nn.Module):
                         )
                         losses[diagnostic_prefix + 'target_classes'] = torch.tensor(
                             float(conditional_aggregation['target_classes']),
+                            device=self.device,
+                        )
+                        losses[diagnostic_prefix + 'source_denominator'] = torch.tensor(
+                            float(conditional_aggregation['source_denominator']),
+                            device=self.device,
+                        )
+                        losses[diagnostic_prefix + 'target_denominator'] = torch.tensor(
+                            float(conditional_aggregation['target_denominator']),
                             device=self.device,
                         )
                         losses[diagnostic_prefix + 'source_present_classes'] = torch.tensor(
@@ -2870,7 +2897,7 @@ class SADA(nn.Module):
                         if self.diagnostic_class_support:
                             zero = torch.tensor(0.0, device=self.device)
                             target_denominator = max(
-                                conditional_aggregation['target_classes'], 1
+                                conditional_aggregation['target_denominator'], 1
                             )
                             for row in class_support_rows:
                                 class_prefix = 'conditional_class_l{}_c{}_'.format(
