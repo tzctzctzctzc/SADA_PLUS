@@ -31,6 +31,9 @@ build_oracle_false_action_routing = (
 build_oracle_target_regression_mask = (
     stage1_utils.build_oracle_target_regression_mask
 )
+build_soft_selective_alignment_weights = (
+    stage1_utils.build_soft_selective_alignment_weights
+)
 context_view_on_cpu = stage1_utils.context_view_on_cpu
 interpolate_probabilities = stage1_utils.interpolate_probabilities
 shift_features = stage1_utils.shift_features
@@ -133,6 +136,17 @@ class Stage1UtilsTest(unittest.TestCase):
                 calibration_epoch=5,
             )
 
+    def test_stage1_resume_allows_explicit_late_calibration(self):
+        checkpoint = {"epoch": 10, "config": {}}
+        self.assertIsNone(validate_stage1_resume(
+            checkpoint,
+            current_enabled=True,
+            current_perturbation="shift",
+            current_alpha=0.6,
+            calibration_epoch=5,
+            allow_late_calibration=True,
+        ))
+
     def test_shift_has_no_wraparound(self):
         features = torch.arange(5).float().view(1, 5)
         mask = torch.ones(1, 5, dtype=torch.bool)
@@ -208,6 +222,27 @@ class Stage1UtilsTest(unittest.TestCase):
             + route["stable_background"].int()
             + route["ignore"].int()
             == 1
+        ))
+
+    def test_soft_selective_weights_follow_stability_and_ignore_is_zero(self):
+        route = {
+            'reliable_action': torch.tensor([[True, True, False]]),
+            'stable_background': torch.tensor([[False, False, True]]),
+            'action_std': torch.tensor([[0.0, 0.05, 0.0]]),
+            'background_std': torch.tensor([[0.0, 0.0, 0.02]]),
+        }
+        weights = build_soft_selective_alignment_weights(
+            route, tau_act=0.1, tau_bg=0.04
+        )
+        self.assertTrue(torch.allclose(
+            weights['action'], torch.tensor([[1.0, 0.625, 0.0]])
+        ))
+        self.assertTrue(torch.allclose(
+            weights['background'], torch.tensor([[0.0, 0.0, 0.625]])
+        ))
+        self.assertTrue(torch.equal(
+            weights['total'] > 0,
+            route['reliable_action'] | route['stable_background']
         ))
 
     def test_oracle_routes_isolate_the_three_diagnostics(self):

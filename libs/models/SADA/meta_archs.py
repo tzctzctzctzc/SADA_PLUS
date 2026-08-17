@@ -11,6 +11,7 @@ from .stage1_utils import (
     build_oracle_target_regression_mask,
     build_oracle_routing,
     build_routing_masks,
+    build_soft_selective_alignment_weights,
     context_view_on_cpu,
     erode_mask,
     interpolate_probabilities,
@@ -349,6 +350,15 @@ class SADA(nn.Module):
         self.diagnostic_target_alignment = cfg.get('diagnostic', {}).get(
             'target_alignment', 'both'
         )
+        self.selective_alignment_mode = diagnostic_cfg.get(
+            'selective_alignment', 'off'
+        )
+        if self.selective_alignment_mode not in ('off', 'soft'):
+            raise ValueError(
+                'unknown selective alignment mode: {}'.format(
+                    self.selective_alignment_mode
+                )
+            )
         self.diagnostic_class_support = bool(
             cfg.get('diagnostic', {}).get('class_support', False)
         )
@@ -488,6 +498,26 @@ class SADA(nn.Module):
         )
         if self.stage1_enabled:
             assert self.stage1_perturbation in ('shift', 'context')
+        if self.selective_alignment_mode != 'off':
+            if not self.stage1_enabled:
+                raise ValueError(
+                    'selective alignment requires source-calibrated Stage 1 routing'
+                )
+            if 'conditional_rev' not in cfg['model']['adv_method']:
+                raise ValueError(
+                    'selective alignment requires conditional_rev training'
+                )
+            if vlm_cfg.get('enabled', False):
+                raise ValueError(
+                    'selective alignment and VLM routing are mutually exclusive'
+                )
+            if (
+                self.oracle_forgetting_mode != 'off'
+                or self.oracle_routing_mode != 'off'
+            ):
+                raise ValueError(
+                    'selective alignment and Oracle routing are mutually exclusive'
+                )
             if (
                 self.oracle_routing_mode != 'off'
                 or self.oracle_target_regression_mode != 'off'
@@ -2194,6 +2224,7 @@ class SADA(nn.Module):
                         max_cls_idx_tgt, dtype=torch.bool
                     )
                     vlm_other_activity_classes = max_cls_idx_tgt
+                    target_alignment_weights = None
                     
                     # Apply thresholding to the maximum class probability
                     pseudo_gt_cls_target = torch.zeros_like(out_cls_logits_tgt2).detach()  # shape: B(T_l) x C or B(T_l) x C+1
@@ -2342,6 +2373,52 @@ class SADA(nn.Module):
                                 losses[metric_prefix + metric_name] = (
                                     route_l[metric_name].sum().float()
                                 )
+                    elif self.selective_alignment_mode != 'off':
+                        if stage1_routes is None:
+                            raise RuntimeError(
+                                'selective alignment requires calibrated Stage 1 routes'
+                            )
+                        route_l = stage1_routes[l]
+                        route_valid = fpn_masks_tgt[l]
+                        selected_anchors_mask = route_l['reliable_action'][route_valid]
+                        selected_classes = route_l['pseudo_class'][route_valid]
+                        pseudo_gt_cls_target[selected_anchors_mask] = F.one_hot(
+                            selected_classes[selected_anchors_mask],
+                            num_classes=self.num_classes,
+                        ).float()
+                        stage1_background_mask = route_l['stable_background'][route_valid]
+                        soft_weights = build_soft_selective_alignment_weights(
+                            route_l, self.stage1_tau_act, self.stage1_tau_bg
+                        )
+                        target_alignment_weights = soft_weights['total'][route_valid]
+                        metric_prefix = 'selective_l{}_'.format(l)
+                        losses[metric_prefix + 'valid'] = route_l['valid'].sum().float()
+                        losses[metric_prefix + 'action_candidate'] = route_l['action_candidate'].sum().float()
+                        losses[metric_prefix + 'class_consistent'] = route_l['class_consistent'].sum().float()
+                        losses[metric_prefix + 'action'] = route_l['reliable_action'].sum().float()
+                        losses[metric_prefix + 'background_candidate'] = route_l['background_candidate'].sum().float()
+                        losses[metric_prefix + 'all_view_low'] = route_l['all_view_low'].sum().float()
+                        losses[metric_prefix + 'background'] = route_l['stable_background'].sum().float()
+                        losses[metric_prefix + 'ignore'] = route_l['ignore'].sum().float()
+                        losses[metric_prefix + 'action_weight_sum'] = (
+                            soft_weights['action'][route_valid].sum()
+                        )
+                        losses[metric_prefix + 'background_weight_sum'] = (
+                            soft_weights['background'][route_valid].sum()
+                        )
+                        losses[metric_prefix + 'weight_sum'] = (
+                            target_alignment_weights.sum()
+                        )
+                        losses[metric_prefix + 'action_std'] = (
+                            route_l['action_std'][route_l['valid']].mean()
+                            if route_l['valid'].any()
+                            else route_l['action_std'].sum() * 0
+                        )
+                        losses[metric_prefix + 'background_std'] = (
+                            route_l['background_std'][route_l['valid']].mean()
+                            if route_l['valid'].any()
+                            else route_l['background_std'].sum() * 0
+                        )
                     elif stage1_routes is None:
                         selected_anchors_mask = max_cls_prob_tgt >= threshold[max_cls_idx_tgt]
                         pseudo_gt_cls_target[selected_anchors_mask] = F.one_hot(max_cls_idx_tgt[selected_anchors_mask], num_classes=self.num_classes).float()
@@ -2416,6 +2493,7 @@ class SADA(nn.Module):
                     target_class_losses = []
                     source_sample_count = 0
                     target_sample_count = 0
+                    target_weight_sum = 0.0
                     min_source_class_samples = None
                     min_target_class_samples = None
                     class_support_rows = []
@@ -2578,6 +2656,16 @@ class SADA(nn.Module):
                                     target_losses[selected_rescue_mask],
                                     self.vlm_residual_budget,
                                 )
+                            elif target_alignment_weights is not None:
+                                target_weights = target_alignment_weights[
+                                    class_c_mask_tgt
+                                ].detach()
+                                domain_loss_tgt = (
+                                    (target_losses * target_weights).sum()
+                                    / target_weights.sum().clamp_min(1e-6)
+                                    if target_losses.numel() > 0
+                                    else target_losses.sum() * 0.0
+                                )
                             else:
                                 domain_loss_tgt = (
                                     target_losses.mean()
@@ -2634,6 +2722,10 @@ class SADA(nn.Module):
                                 counter_tgt += 1
                                 class_samples = int(class_c_mask_tgt.sum().item())
                                 target_sample_count += class_samples
+                                if target_alignment_weights is not None:
+                                    target_weight_sum += target_alignment_weights[
+                                        class_c_mask_tgt
+                                    ].sum().item()
                                 min_target_class_samples = (
                                     class_samples if min_target_class_samples is None
                                     else min(min_target_class_samples, class_samples)
@@ -2680,6 +2772,9 @@ class SADA(nn.Module):
                         )
                         losses[diagnostic_prefix + 'target_samples'] = torch.tensor(
                             float(target_sample_count), device=self.device
+                        )
+                        losses[diagnostic_prefix + 'target_weight_sum'] = torch.tensor(
+                            float(target_weight_sum), device=self.device
                         )
                         losses[diagnostic_prefix + 'source_min_samples'] = torch.tensor(
                             float(min_source_class_samples or 0), device=self.device

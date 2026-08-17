@@ -431,7 +431,10 @@ class Trainer(BaseTrainerDA):
                     or raw_loss_name == 'oracle_forgetting_samples'
                 )
                 if (
-                    raw_loss_name.startswith('stage1_')
+                    (
+                        raw_loss_name.startswith('stage1_')
+                        or raw_loss_name.startswith('selective_')
+                    )
                     and not raw_loss_name.endswith('_std')
                 ) or count_oracle_forgetting:
                     key = 't_' + raw_loss_name + '_total'

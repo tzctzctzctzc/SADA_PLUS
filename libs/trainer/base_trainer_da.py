@@ -244,7 +244,15 @@ class BaseTrainerDA:
                 1, self.cfg['train_cfg'].get('warmup_adv', 0)
             )
             if (
-                epoch == calibration_epoch
+                (
+                    epoch == calibration_epoch
+                    or (
+                        self.cfg.get('diagnostic', {}).get(
+                            'selective_alignment', 'off'
+                        ) != 'off'
+                        and epoch >= calibration_epoch
+                    )
+                )
                 and self.cfg.get('stage1', {}).get('enabled', False)
                 and hasattr(self, '_calibrate_stage1')
                 and not self.model.stage1_calibrated
@@ -371,7 +379,7 @@ class BaseTrainerDA:
                     handle.write(json.dumps(log_data, ensure_ascii=False) + '\n')
                 stage1_values = {
                     key: value for key, value in log_data.items()
-                    if key == 'epoch' or 'stage1_' in key
+                    if key == 'epoch' or 'stage1_' in key or 'selective_' in key
                 }
                 if len(stage1_values) > 1:
                     stage1_csv = os.path.join(self.cfg.save_dir, 'stage1_epoch_metrics.csv')
@@ -536,6 +544,10 @@ class BaseTrainerDA:
             current_perturbation=self.model.stage1_perturbation,
             current_alpha=self.model.stage1_alpha,
             calibration_epoch=max(1, self.model.warmup_adv),
+            allow_late_calibration=(
+                self.cfg.get('diagnostic', {}).get('selective_alignment', 'off')
+                != 'off'
+            ),
         )
         if self.cfg.get('vlm_routing', {}).get('enabled', False):
             validate_vlm_resume(checkpoint, self.vlm_signature)

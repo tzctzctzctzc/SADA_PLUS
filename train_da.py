@@ -481,6 +481,10 @@ def main(cfg, resume, project_name='sada', debug=False):
                 current_perturbation=model.stage1_perturbation,
                 current_alpha=model.stage1_alpha,
                 calibration_epoch=max(1, model.warmup_adv),
+                allow_late_calibration=(
+                    cfg.get('diagnostic', {}).get('selective_alignment', 'off')
+                    != 'off'
+                ),
             )
             if cfg.get('vlm_routing', {}).get('enabled', False):
                 validate_vlm_resume(checkpoint, vlm_signature)
@@ -734,6 +738,13 @@ def create_argparser():
         help='independent perturbation RNG seed',
     )
     parser.add_argument(
+        '--selective-alignment', choices=['off', 'soft'], default='off',
+        help=(
+            'source-calibrated multi-view target routing for conditional alignment; '
+            'soft mode ignores unstable anchors and does not use negative classification'
+        ),
+    )
+    parser.add_argument(
         '--validity-head', choices=['off', 'train'], default='off',
         help='attach and source-supervise the integrated SADA FPN Validity Head',
     )
@@ -913,9 +924,12 @@ if __name__ == '__main__':
     # Read the configuration file
     config_path = args.config_path
     config_dict = read_yaml(config_path)
+    effective_stage1 = args.stage1
+    if args.selective_alignment != 'off' and effective_stage1 == 'off':
+        effective_stage1 = 'shift'
     config_dict['stage1'] = {
-        'enabled': args.stage1 != 'off',
-        'perturbation': args.stage1 if args.stage1 != 'off' else 'shift',
+        'enabled': effective_stage1 != 'off',
+        'perturbation': effective_stage1 if effective_stage1 != 'off' else 'shift',
         'seed': args.stage1_seed,
         'calibration_seed': args.stage1_seed + 1,
         'quantile': 0.90,
@@ -1039,10 +1053,10 @@ if __name__ == '__main__':
         ),
         'target_gt_usage': 'forbidden',
     }
-    if vlm_enabled and args.stage1 != 'off':
+    if vlm_enabled and effective_stage1 != 'off':
         raise ValueError('VLM routing and Stage 1 stability cannot both be enabled')
     if (
-        args.stage1 != 'off'
+        effective_stage1 != 'off'
         and (
             args.oracle_routing != 'off'
             or args.oracle_forgetting != 'off'
@@ -1177,6 +1191,7 @@ if __name__ == '__main__':
         'class_support': args.diagnostic_class_support,
         'action_alignment_levels': diagnostic_action_levels,
         'background_alignment_levels': diagnostic_background_levels,
+        'selective_alignment': args.selective_alignment,
     }
 
     update_config_with_arguments(config_dict, args, ARGS_TYPES, ARGS_CONFIGPATH)

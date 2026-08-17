@@ -129,6 +129,7 @@ def validate_stage1_resume(
     current_perturbation,
     current_alpha,
     calibration_epoch,
+    allow_late_calibration=False,
 ):
     """Reject checkpoint resumes which would silently change Stage 1 mode."""
     stage1 = checkpoint.get("stage1")
@@ -139,7 +140,11 @@ def validate_stage1_resume(
     checkpoint_model_cfg = checkpoint_config.get("model", {})
 
     if stage1 is None:
-        if current_enabled and checkpoint.get("epoch", 0) >= calibration_epoch:
+        if (
+            current_enabled
+            and checkpoint.get("epoch", 0) >= calibration_epoch
+            and not allow_late_calibration
+        ):
             raise ValueError(
                 "Stage 1 is enabled, but this checkpoint has no Stage 1 state "
                 "and has already reached the calibration epoch"
@@ -349,6 +354,38 @@ def build_routing_masks(
         "background_std": background_std,
         "score_original": score0,
         "score_perturbed": score1,
+    }
+
+
+def build_soft_selective_alignment_weights(
+    route, tau_act, tau_bg, floor=0.25
+):
+    """Turn calibrated Stage 1 stability into detached alignment weights."""
+    if not 0.0 < floor <= 1.0:
+        raise ValueError("soft alignment weight floor must be in (0, 1]")
+    if tau_act is None or tau_bg is None:
+        raise ValueError(
+            "soft alignment weights require calibrated stability thresholds"
+        )
+
+    action_scale = max(float(tau_act), 1e-6)
+    background_scale = max(float(tau_bg), 1e-6)
+    action_quality = (
+        1.0 - route["action_std"] / action_scale
+    ).clamp(0.0, 1.0)
+    background_quality = (
+        1.0 - route["background_std"] / background_scale
+    ).clamp(0.0, 1.0)
+    action_weight = route["reliable_action"].to(route["action_std"].dtype) * (
+        floor + (1.0 - floor) * action_quality
+    )
+    background_weight = route["stable_background"].to(
+        route["background_std"].dtype
+    ) * (floor + (1.0 - floor) * background_quality)
+    return {
+        "action": action_weight,
+        "background": background_weight,
+        "total": action_weight + background_weight,
     }
 
 
