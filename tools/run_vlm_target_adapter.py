@@ -64,6 +64,12 @@ Return exactly one JSON object and no other text:
 PROMPT_SHA256 = hashlib.sha256(PROMPT.encode()).hexdigest()
 
 
+class APIRequestError(RuntimeError):
+    def __init__(self, message, retry_after=0.0):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 def read_jsonl(path):
     return [
         json.loads(line)
@@ -162,8 +168,22 @@ def request_label(args, api_key, content):
         },
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=args.timeout) as response:
-        body = json.loads(response.read().decode())
+    try:
+        with urllib.request.urlopen(request, timeout=args.timeout) as response:
+            body = json.loads(response.read().decode())
+    except urllib.error.HTTPError as error:
+        details = error.read().decode(errors="replace")[:1000]
+        retry_after = error.headers.get("Retry-After", "0")
+        try:
+            retry_after = float(retry_after)
+        except ValueError:
+            retry_after = 0.0
+        raise APIRequestError(
+            "HTTP {} retry_after={} body={}".format(
+                error.code, retry_after, details
+            ),
+            retry_after=retry_after,
+        ) from error
     text = body["choices"][0]["message"]["content"].strip()
     parsed = json.loads(text)
     if set(parsed) != {"label"} or parsed["label"] not in LABELS:
@@ -237,11 +257,19 @@ def main():
                         "frame_timestamps_sec": [value for _, value in frames],
                     })
                     break
-                except (urllib.error.URLError, TimeoutError, ValueError) as error:
+                except (
+                    APIRequestError,
+                    urllib.error.URLError,
+                    TimeoutError,
+                    ValueError,
+                ) as error:
                     last_error = error
                     if attempt == args.max_retries:
                         raise
-                    time.sleep(2 ** attempt)
+                    delay = 2 ** attempt
+                    if isinstance(error, APIRequestError):
+                        delay = max(delay, error.retry_after)
+                    time.sleep(delay)
             if result["status"] != "ok":
                 raise last_error
         except Exception as error:
