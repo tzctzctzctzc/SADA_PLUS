@@ -114,7 +114,7 @@ def summarize(rows, manifest_count, thresholds):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", required=True)
-    parser.add_argument("--predictions", required=True)
+    parser.add_argument("--predictions", required=True, nargs="+")
     parser.add_argument("--output", required=True)
     parser.add_argument("--min-success-rate", type=float, default=0.95)
     parser.add_argument("--min-consensus-coverage", type=float, default=0.20)
@@ -123,11 +123,13 @@ def main():
     args = parser.parse_args()
 
     manifest = {row["candidate_id"]: row for row in read_jsonl(args.manifest)}
-    predictions = {
-        row["candidate_id"]: row
-        for row in read_jsonl(args.predictions)
+    prediction_rows = [
+        row
+        for path in args.predictions
+        for row in read_jsonl(path)
         if row.get("status") == "ok"
-    }
+    ]
+    predictions = {row["candidate_id"]: row for row in prediction_rows}
     rows = [
         {**row, "prediction": predictions[row_id]["prediction"]}
         for row_id, row in manifest.items()
