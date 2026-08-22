@@ -877,6 +877,22 @@ def create_argparser():
         help='comma-separated FPN levels for diagnostic target boundary loss',
     )
     parser.add_argument(
+        '--oracle-target-distillation', choices=['off', 'selected', 'full'],
+        default='off',
+        help=(
+            'diagnostic direct target classification using target GT; '
+            'not a UDA method'
+        ),
+    )
+    parser.add_argument(
+        '--oracle-target-distillation-budget', type=float, default=0.05,
+        help='maximum direct target/source-task loss ratio',
+    )
+    parser.add_argument(
+        '--oracle-target-distillation-levels', default='0,1,2',
+        help='comma-separated FPN levels for diagnostic target distillation',
+    )
+    parser.add_argument(
         '--diagnostic-no-ca', action='store_true',
         help='compute conditional alignment diagnostics but exclude it from updates',
     )
@@ -1075,6 +1091,7 @@ if __name__ == '__main__':
             args.oracle_routing != 'off'
             or args.oracle_forgetting != 'off'
             or args.oracle_target_regression != 'off'
+            or args.oracle_target_distillation != 'off'
         )
     ):
         raise ValueError('Stage 1 and Oracle diagnostics cannot both be enabled')
@@ -1093,6 +1110,23 @@ if __name__ == '__main__':
             raise ValueError('Oracle forgetting requires VLM routing to be disabled')
         if 'conditional_rev' not in config_dict['model']['adv_method']:
             raise ValueError('Oracle forgetting requires conditional_rev training')
+    if args.oracle_target_distillation != 'off':
+        if not 0.0 < args.oracle_target_distillation_budget <= 0.05:
+            raise ValueError(
+                'Oracle target distillation budget must be in (0, 0.05]'
+            )
+        if (
+            args.oracle_routing != 'off'
+            or args.oracle_forgetting != 'off'
+            or args.oracle_target_regression != 'off'
+            or args.binary_band_oracle != 'off'
+            or vlm_enabled
+            or args.conditional_paired_support
+            or args.conditional_paired_fixed_denominator
+        ):
+            raise ValueError(
+                'Oracle target distillation requires original SADA routing'
+            )
     paired_conditional = (
         args.conditional_paired_support
         or args.conditional_paired_fixed_denominator
@@ -1215,6 +1249,20 @@ if __name__ == '__main__':
         raise ValueError(
             'Oracle target regression levels must be unique values from 0 to 5'
         )
+    target_distillation_levels = [
+        int(level.strip())
+        for level in args.oracle_target_distillation_levels.split(',')
+        if level.strip()
+    ]
+    if (
+        not target_distillation_levels
+        or len(set(target_distillation_levels))
+        != len(target_distillation_levels)
+        or any(level < 0 or level > 5 for level in target_distillation_levels)
+    ):
+        raise ValueError(
+            'Oracle target distillation levels must be unique values from 0 to 5'
+        )
     config_dict['diagnostic'] = {
         'oracle_routing': args.oracle_routing,
         'oracle_forgetting': args.oracle_forgetting,
@@ -1225,6 +1273,11 @@ if __name__ == '__main__':
         'oracle_target_regression': args.oracle_target_regression,
         'oracle_target_regression_weight': args.oracle_target_regression_weight,
         'target_regression_levels': target_regression_levels,
+        'oracle_target_distillation': args.oracle_target_distillation,
+        'oracle_target_distillation_budget': (
+            args.oracle_target_distillation_budget
+        ),
+        'target_distillation_levels': target_distillation_levels,
         'stop_after_epoch': args.stop_after_epoch,
         'no_conditional_update': args.diagnostic_no_ca,
         'alignment_levels': diagnostic_levels,

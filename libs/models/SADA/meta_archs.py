@@ -39,6 +39,10 @@ from .vlm_residual import (
     bounded_residual_loss,
     select_supported_residual,
 )
+from .target_adapter import (
+    ORACLE_TARGET_DISTILLATION_MODES,
+    build_oracle_target_distillation,
+)
 from .conditional_alignment import aggregate_conditional_class_losses
 from libs.utils import batched_nms
 import einops
@@ -496,6 +500,41 @@ class SADA(nn.Module):
                    for level in self.oracle_target_regression_levels)
         ):
             raise ValueError('Oracle target regression levels are invalid')
+        self.oracle_target_distillation_mode = diagnostic_cfg.get(
+            'oracle_target_distillation', 'off'
+        )
+        if (
+            self.oracle_target_distillation_mode
+            not in ORACLE_TARGET_DISTILLATION_MODES
+        ):
+            raise ValueError(
+                'unknown Oracle target distillation mode: {}'.format(
+                    self.oracle_target_distillation_mode
+                )
+            )
+        self.oracle_target_distillation_budget = float(
+            diagnostic_cfg.get('oracle_target_distillation_budget', 0.05)
+        )
+        if not 0.0 < self.oracle_target_distillation_budget <= 0.05:
+            raise ValueError(
+                'Oracle target distillation budget must be in (0, 0.05]'
+            )
+        self.oracle_target_distillation_levels = tuple(
+            int(level)
+            for level in diagnostic_cfg.get(
+                'target_distillation_levels', [0, 1, 2]
+            )
+        )
+        if (
+            not self.oracle_target_distillation_levels
+            or len(set(self.oracle_target_distillation_levels))
+            != len(self.oracle_target_distillation_levels)
+            or any(
+                level < 0 or level >= self.n_levels
+                for level in self.oracle_target_distillation_levels
+            )
+        ):
+            raise ValueError('Oracle target distillation levels are invalid')
         stage1_cfg = cfg.get('stage1', {})
         self.stage1_enabled = stage1_cfg.get('enabled', False)
         self.stage1_perturbation = stage1_cfg.get('perturbation', 'shift')
@@ -573,6 +612,19 @@ class SADA(nn.Module):
                 )
             if 'conditional_rev' not in cfg['model']['adv_method']:
                 raise ValueError('Oracle forgetting requires conditional_rev training')
+        if self.oracle_target_distillation_mode != 'off':
+            if (
+                self.stage1_enabled
+                or vlm_cfg.get('enabled', False)
+                or self.conditional_paired_support
+                or self.oracle_routing_mode != 'off'
+                or self.oracle_forgetting_mode != 'off'
+                or self.oracle_target_regression_mode != 'off'
+                or self.binary_band_oracle_mode != 'off'
+            ):
+                raise ValueError(
+                    'Oracle target distillation requires original SADA routing'
+                )
         assert len(self.fpn_strides) == len(self.reg_range)
         self.scale_factor = scale_factor
         self.iou_weight_power = iou_weight_power
@@ -2109,6 +2161,67 @@ class SADA(nn.Module):
             + self.validity_head_loss_weight * validity_loss
         )
 
+        target_distill_zero = downstream_loss * 0.0
+        oracle_target_distill_raw_loss = target_distill_zero
+        oracle_target_distill_loss = target_distill_zero
+        oracle_target_distill_budget = target_distill_zero.detach()
+        oracle_target_distill_budget_excess = target_distill_zero.detach()
+        oracle_target_distill_samples = target_distill_zero.detach()
+        oracle_target_distill_foreground = target_distill_zero.detach()
+        oracle_target_distill_background = target_distill_zero.detach()
+        if (
+            mode == 'train'
+            and self.oracle_target_distillation_mode != 'off'
+        ):
+            target_logits = torch.cat(out_cls_logits_tgt, dim=1)
+            target_scores = target_logits.sigmoid().max(dim=-1).values
+            target_level_mask = torch.cat([
+                torch.full_like(
+                    fpn_masks_tgt[level],
+                    level in self.oracle_target_distillation_levels,
+                    dtype=torch.bool,
+                )
+                for level in range(self.n_levels)
+            ], dim=1)
+            target_distill = build_oracle_target_distillation(
+                target_scores,
+                gt_cls_tgt_full,
+                valid_mask_tgt,
+                target_level_mask,
+                self.cfg['model'].get('pl_threshold', 0.7),
+                self.oracle_target_distillation_mode,
+            )
+            selected = target_distill['selected']
+            oracle_target_distill_samples = selected.sum().float()
+            oracle_target_distill_foreground = (
+                target_distill['foreground'].sum().float()
+            )
+            oracle_target_distill_background = (
+                target_distill['background'].sum().float()
+            )
+            if selected.any():
+                target_distill_losses = sigmoid_focal_loss(
+                    target_logits[selected],
+                    target_distill['targets'][selected],
+                    reduction='none',
+                    alpha=0.25,
+                    gamma=self.cfg['model'].get('focal_loss_gamma', 2.0),
+                ).sum(dim=-1)
+                oracle_target_distill_raw_loss = target_distill_losses.mean()
+                (
+                    oracle_target_distill_loss,
+                    oracle_target_distill_budget_excess,
+                ) = bounded_extra_loss(
+                    downstream_loss.reshape(1),
+                    target_distill_losses,
+                    self.oracle_target_distillation_budget,
+                )
+                oracle_target_distill_budget = (
+                    self.oracle_target_distillation_budget
+                    * downstream_loss.detach()
+                )
+                downstream_loss = downstream_loss + oracle_target_distill_loss
+
         target_reg_loss = 0 * decoded_offsets.sum()
         target_reg_positive = 0 * decoded_offsets.sum()
         if self.oracle_target_regression_mode != 'off':
@@ -2163,6 +2276,13 @@ class SADA(nn.Module):
                    ),
                    'oracle_target_reg_loss': target_reg_loss,
                    'oracle_target_reg_positive': target_reg_positive,
+                   'oracle_target_distill_raw_loss': oracle_target_distill_raw_loss.detach(),
+                   'oracle_target_distill_loss': oracle_target_distill_loss,
+                   'oracle_target_distill_budget': oracle_target_distill_budget,
+                   'oracle_target_distill_budget_excess': oracle_target_distill_budget_excess,
+                   'oracle_target_distill_samples': oracle_target_distill_samples,
+                   'oracle_target_distill_foreground': oracle_target_distill_foreground,
+                   'oracle_target_distill_background': oracle_target_distill_background,
                    'downstream_loss': downstream_loss}
         
         
