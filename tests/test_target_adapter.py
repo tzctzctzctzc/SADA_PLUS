@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,8 @@ SPEC.loader.exec_module(target_adapter)
 build_oracle_target_distillation = (
     target_adapter.build_oracle_target_distillation
 )
+build_vlm_target_distillation = target_adapter.build_vlm_target_distillation
+load_vlm_target_adapter_cache = target_adapter.load_vlm_target_adapter_cache
 
 
 def test_selected_oracle_uses_only_high_confidence_enabled_anchors():
@@ -65,3 +68,90 @@ def test_oracle_rejects_bad_shapes_and_off_mode():
         build_oracle_target_distillation(
             values, labels, torch.ones(1, 3).bool(), values.bool(), 0.6, "full"
         )
+
+
+def adapter_payload(entries):
+    return {
+        "schema_version": "offline-vlm-target-adapter-v1",
+        "source": "offline_vlm_proposal_semantics",
+        "key_fields": ["video_id", "absolute_feature_index"],
+        "prompt_protocol": {"prompt_version": "test"},
+        "selection_teacher_provenance": {
+            "selection_teacher_checkpoint_sha256": "a" * 64,
+        },
+        "entries": entries,
+    }
+
+
+def test_vlm_target_cache_loads_known_classes_by_video(tmp_path):
+    path = tmp_path / "cache.json"
+    path.write_text(json.dumps(adapter_payload([{
+        "video_id": "P01_01",
+        "absolute_feature_index": 11,
+        "absolute_center_time": 2.0,
+        "source_fpn_levels": [0],
+        "semantic_label": "PUT",
+        "class_id": 1,
+    }])), encoding="utf-8")
+
+    cache, count, digest, payload = load_vlm_target_adapter_cache(path)
+
+    assert count == 1
+    assert len(digest) == 64
+    assert payload["schema_version"] == "offline-vlm-target-adapter-v1"
+    assert cache["P01_01"][11]["class_id"] == 1
+
+
+def test_vlm_target_distillation_requires_exact_index_score_and_agreement():
+    videos = [{
+        "metadata": {"video_id": "P01_01", "crop_start": 10}
+    }]
+    points = [torch.tensor([
+        [0.0, 0.0, 0.0, 1.0],
+        [1.0, 0.0, 0.0, 1.0],
+        [2.0, 0.0, 0.0, 1.0],
+    ])]
+    valid = [torch.tensor([[True, True, True]])]
+    logits = [torch.tensor([[
+        [0.0, 0.0, 0.0],
+        [0.0, 3.0, 0.0],
+        [0.0, 0.0, 3.0],
+    ]], requires_grad=True)]
+    cache = {"P01_01": {
+        11: {
+            "class_id": 1,
+            "semantic_label": "PUT",
+            "source_fpn_levels": (0,),
+            "absolute_center_time": 2.0,
+        },
+        12: {
+            "class_id": 1,
+            "semantic_label": "PUT",
+            "source_fpn_levels": (0,),
+            "absolute_center_time": 2.2,
+        },
+    }}
+
+    result = build_vlm_target_distillation(
+        videos, points, valid, logits, cache, (0,), 0.8
+    )
+
+    assert result["cache_hits"].tolist() == [[False, True, True]]
+    assert result["agreement"].tolist() == [[False, True, False]]
+    assert result["selected"].tolist() == [[False, True, False]]
+    assert result["targets"][0, 1].tolist() == [0.0, 1.0, 0.0]
+
+
+def test_vlm_target_cache_rejects_label_id_mismatch(tmp_path):
+    path = tmp_path / "bad.json"
+    path.write_text(json.dumps(adapter_payload([{
+        "video_id": "P01_01",
+        "absolute_feature_index": 11,
+        "absolute_center_time": 2.0,
+        "source_fpn_levels": [0],
+        "semantic_label": "TAKE",
+        "class_id": 1,
+    }])), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="differ"):
+        load_vlm_target_adapter_cache(path)

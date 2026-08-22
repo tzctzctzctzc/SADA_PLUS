@@ -33,6 +33,7 @@ from libs.models.SADA.vlm_routing import (
     validate_vlm_resume,
     validate_vlm_transition,
 )
+from libs.models.SADA.target_adapter import load_vlm_target_adapter_cache
 
 os.environ['NUMBA_NUM_THREADS'] = "8"
 
@@ -893,6 +894,18 @@ def create_argparser():
         help='comma-separated FPN levels for diagnostic target distillation',
     )
     parser.add_argument(
+        '--vlm-target-adapter-cache', default=None,
+        help='frozen proposal semantics for direct target task supervision',
+    )
+    parser.add_argument(
+        '--vlm-target-adapter-budget', type=float, default=0.05,
+        help='maximum VLM target adapter/source-task loss ratio',
+    )
+    parser.add_argument(
+        '--vlm-target-adapter-levels', default='0,1,2',
+        help='comma-separated FPN levels for VLM target supervision',
+    )
+    parser.add_argument(
         '--diagnostic-no-ca', action='store_true',
         help='compute conditional alignment diagnostics but exclude it from updates',
     )
@@ -1058,6 +1071,59 @@ if __name__ == '__main__':
         'forgetting_labels': ['TRUE_BACKGROUND'],
         'other_activity_class_negative': args.vlm_other_activity_class_negative,
     }
+    vlm_target_adapter_enabled = args.vlm_target_adapter_cache is not None
+    target_adapter_levels = [
+        int(level.strip())
+        for level in args.vlm_target_adapter_levels.split(',')
+        if level.strip()
+    ]
+    if (
+        not target_adapter_levels
+        or len(set(target_adapter_levels)) != len(target_adapter_levels)
+        or any(level < 0 or level > 5 for level in target_adapter_levels)
+    ):
+        raise ValueError(
+            'VLM target adapter levels must be unique values from 0 to 5'
+        )
+    if not 0.0 < args.vlm_target_adapter_budget <= 0.05:
+        raise ValueError('VLM target adapter budget must be in (0, 0.05]')
+    if vlm_target_adapter_enabled:
+        if args.resume is None:
+            raise ValueError('VLM target adapter requires --resume')
+        if (
+            vlm_enabled
+            or effective_stage1 != 'off'
+            or args.oracle_routing != 'off'
+            or args.oracle_forgetting != 'off'
+            or args.oracle_target_regression != 'off'
+            or args.oracle_target_distillation != 'off'
+            or args.binary_band_oracle != 'off'
+            or args.conditional_paired_support
+            or args.conditional_paired_fixed_denominator
+        ):
+            raise ValueError(
+                'VLM target adapter requires original SADA routing'
+            )
+        _, _, cache_sha256, cache_payload = load_vlm_target_adapter_cache(
+            args.vlm_target_adapter_cache
+        )
+        selection = cache_payload['selection_teacher_provenance']
+        if selection.get('selection_teacher_checkpoint_sha256') != file_sha256(
+            args.resume
+        ):
+            raise ValueError(
+                'VLM target adapter selection checkpoint differs from resume'
+            )
+    else:
+        cache_sha256 = None
+    config_dict['vlm_target_adapter'] = {
+        'enabled': vlm_target_adapter_enabled,
+        'cache_path': args.vlm_target_adapter_cache,
+        'cache_sha256': cache_sha256,
+        'budget': args.vlm_target_adapter_budget,
+        'levels': target_adapter_levels,
+        'selection_rule': 'known_class_and_current_teacher_top1_agreement',
+    }
     validity_head_enabled = args.validity_head == 'train'
     if args.validity_head_loss_weight < 0.0:
         raise ValueError('validity head loss weight must be non-negative')
@@ -1065,7 +1131,9 @@ if __name__ == '__main__':
         raise ValueError(
             '--validity-head-init-from-sada requires --validity-head train'
         )
-    if validity_head_enabled and vlm_enabled:
+    if validity_head_enabled and (
+        vlm_enabled or vlm_target_adapter_enabled
+    ):
         raise ValueError(
             'train the integrated Validity Head before enabling frozen VLM routing'
         )
@@ -1092,6 +1160,7 @@ if __name__ == '__main__':
             or args.oracle_forgetting != 'off'
             or args.oracle_target_regression != 'off'
             or args.oracle_target_distillation != 'off'
+            or vlm_target_adapter_enabled
         )
     ):
         raise ValueError('Stage 1 and Oracle diagnostics cannot both be enabled')
@@ -1121,6 +1190,7 @@ if __name__ == '__main__':
             or args.oracle_target_regression != 'off'
             or args.binary_band_oracle != 'off'
             or vlm_enabled
+            or vlm_target_adapter_enabled
             or args.conditional_paired_support
             or args.conditional_paired_fixed_denominator
         ):
@@ -1141,7 +1211,11 @@ if __name__ == '__main__':
             raise ValueError(
                 'paired conditional support requires conditional_rev training'
             )
-        if effective_stage1 != 'off' or vlm_enabled:
+        if (
+            effective_stage1 != 'off'
+            or vlm_enabled
+            or vlm_target_adapter_enabled
+        ):
             raise ValueError(
                 'paired conditional support requires original SADA routing'
             )

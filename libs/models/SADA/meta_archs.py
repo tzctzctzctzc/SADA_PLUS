@@ -42,6 +42,8 @@ from .vlm_residual import (
 from .target_adapter import (
     ORACLE_TARGET_DISTILLATION_MODES,
     build_oracle_target_distillation,
+    build_vlm_target_distillation,
+    load_vlm_target_adapter_cache,
 )
 from .conditional_alignment import aggregate_conditional_class_losses
 from libs.utils import batched_nms
@@ -535,6 +537,43 @@ class SADA(nn.Module):
             )
         ):
             raise ValueError('Oracle target distillation levels are invalid')
+        target_adapter_cfg = cfg.get('vlm_target_adapter', {})
+        self.vlm_target_adapter_enabled = bool(
+            target_adapter_cfg.get('enabled', False)
+        )
+        self.vlm_target_adapter_budget = float(
+            target_adapter_cfg.get('budget', 0.05)
+        )
+        if not 0.0 < self.vlm_target_adapter_budget <= 0.05:
+            raise ValueError('VLM target adapter budget must be in (0, 0.05]')
+        self.vlm_target_adapter_levels = tuple(
+            int(level)
+            for level in target_adapter_cfg.get('levels', [0, 1, 2])
+        )
+        if (
+            not self.vlm_target_adapter_levels
+            or len(set(self.vlm_target_adapter_levels))
+            != len(self.vlm_target_adapter_levels)
+            or any(
+                level < 0 or level >= self.n_levels
+                for level in self.vlm_target_adapter_levels
+            )
+        ):
+            raise ValueError('VLM target adapter levels are invalid')
+        self.vlm_target_adapter_cache = {}
+        self.vlm_target_adapter_entry_count = 0
+        self.vlm_target_adapter_cache_sha256 = None
+        self.vlm_target_adapter_payload = None
+        if self.vlm_target_adapter_enabled:
+            cache_path = target_adapter_cfg.get('cache_path')
+            if not cache_path:
+                raise ValueError('VLM target adapter requires a cache')
+            (
+                self.vlm_target_adapter_cache,
+                self.vlm_target_adapter_entry_count,
+                self.vlm_target_adapter_cache_sha256,
+                self.vlm_target_adapter_payload,
+            ) = load_vlm_target_adapter_cache(cache_path)
         stage1_cfg = cfg.get('stage1', {})
         self.stage1_enabled = stage1_cfg.get('enabled', False)
         self.stage1_perturbation = stage1_cfg.get('perturbation', 'shift')
@@ -616,6 +655,7 @@ class SADA(nn.Module):
             if (
                 self.stage1_enabled
                 or vlm_cfg.get('enabled', False)
+                or self.vlm_target_adapter_enabled
                 or self.conditional_paired_support
                 or self.oracle_routing_mode != 'off'
                 or self.oracle_forgetting_mode != 'off'
@@ -624,6 +664,20 @@ class SADA(nn.Module):
             ):
                 raise ValueError(
                     'Oracle target distillation requires original SADA routing'
+                )
+        if self.vlm_target_adapter_enabled:
+            if (
+                self.stage1_enabled
+                or vlm_cfg.get('enabled', False)
+                or self.conditional_paired_support
+                or self.oracle_routing_mode != 'off'
+                or self.oracle_forgetting_mode != 'off'
+                or self.oracle_target_regression_mode != 'off'
+                or self.oracle_target_distillation_mode != 'off'
+                or self.binary_band_oracle_mode != 'off'
+            ):
+                raise ValueError(
+                    'VLM target adapter requires original SADA routing'
                 )
         assert len(self.fpn_strides) == len(self.reg_range)
         self.scale_factor = scale_factor
@@ -1697,6 +1751,7 @@ class SADA(nn.Module):
             # compute the loss and return
             losses = self.losses(
                 fpn_masks,
+                points,
                 out_cls_logits, 
                 out_offsets,
                 out_actionness,
@@ -1713,6 +1768,7 @@ class SADA(nn.Module):
                 vlm_routes=vlm_routes,
                 out_validity_logits_src=out_validity_logits_src,
                 source_validity_cohorts=source_validity_cohorts,
+                video_list_tgt=video_list_tgt,
             )
             
             # Return the GTs of the target domain as well, to be used to compute the anchors
@@ -1940,7 +1996,7 @@ class SADA(nn.Module):
 
 
     def losses(
-            self, fpn_masks,
+            self, fpn_masks, points,
             out_cls_logits, 
             out_offsets,
             out_actionness,
@@ -1958,6 +2014,7 @@ class SADA(nn.Module):
             vlm_routes=None,
             out_validity_logits_src=None,
             source_validity_cohorts=None,
+            video_list_tgt=None,
     ):
         bs = int(fpn_masks[0].shape[0] / 2)
         
@@ -2222,6 +2279,53 @@ class SADA(nn.Module):
                 )
                 downstream_loss = downstream_loss + oracle_target_distill_loss
 
+        vlm_target_zero = downstream_loss * 0.0
+        vlm_target_raw_loss = vlm_target_zero
+        vlm_target_loss = vlm_target_zero
+        vlm_target_budget = vlm_target_zero.detach()
+        vlm_target_budget_excess = vlm_target_zero.detach()
+        vlm_target_cache_hits = vlm_target_zero.detach()
+        vlm_target_agreement = vlm_target_zero.detach()
+        vlm_target_samples = vlm_target_zero.detach()
+        if mode == 'train' and self.vlm_target_adapter_enabled:
+            if video_list_tgt is None:
+                raise ValueError('VLM target adapter requires target video metadata')
+            vlm_target = build_vlm_target_distillation(
+                video_list_tgt,
+                points,
+                fpn_masks_tgt,
+                out_cls_logits_tgt,
+                self.vlm_target_adapter_cache,
+                self.vlm_target_adapter_levels,
+                self.cfg['model'].get('pl_threshold', 0.7),
+            )
+            selected = vlm_target['selected']
+            vlm_target_cache_hits = vlm_target['cache_hits'].sum().float()
+            vlm_target_agreement = vlm_target['agreement'].sum().float()
+            vlm_target_samples = selected.sum().float()
+            if selected.any():
+                target_logits = torch.cat(out_cls_logits_tgt, dim=1)
+                target_losses = sigmoid_focal_loss(
+                    target_logits[selected],
+                    vlm_target['targets'][selected],
+                    reduction='none',
+                    alpha=0.25,
+                    gamma=self.cfg['model'].get('focal_loss_gamma', 2.0),
+                ).sum(dim=-1)
+                vlm_target_raw_loss = target_losses.mean()
+                (
+                    vlm_target_loss,
+                    vlm_target_budget_excess,
+                ) = bounded_extra_loss(
+                    downstream_loss.reshape(1),
+                    target_losses,
+                    self.vlm_target_adapter_budget,
+                )
+                vlm_target_budget = (
+                    self.vlm_target_adapter_budget * downstream_loss.detach()
+                )
+                downstream_loss = downstream_loss + vlm_target_loss
+
         target_reg_loss = 0 * decoded_offsets.sum()
         target_reg_positive = 0 * decoded_offsets.sum()
         if self.oracle_target_regression_mode != 'off':
@@ -2283,6 +2387,13 @@ class SADA(nn.Module):
                    'oracle_target_distill_samples': oracle_target_distill_samples,
                    'oracle_target_distill_foreground': oracle_target_distill_foreground,
                    'oracle_target_distill_background': oracle_target_distill_background,
+                   'vlm_target_raw_loss': vlm_target_raw_loss.detach(),
+                   'vlm_target_loss': vlm_target_loss,
+                   'vlm_target_budget': vlm_target_budget,
+                   'vlm_target_budget_excess': vlm_target_budget_excess,
+                   'vlm_target_cache_hits': vlm_target_cache_hits,
+                   'vlm_target_agreement': vlm_target_agreement,
+                   'vlm_target_samples': vlm_target_samples,
                    'downstream_loss': downstream_loss}
         
         
