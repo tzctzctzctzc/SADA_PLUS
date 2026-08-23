@@ -1,0 +1,490 @@
+import hashlib
+import json
+import math
+from pathlib import Path
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+PROPOSAL_SEMANTIC_MODES = (
+    "off",
+    "source",
+    "teacher",
+    "oracle_center",
+    "oracle_dominant",
+    "oracle_soft",
+    "vlm",
+)
+PROPOSAL_SEMANTIC_CACHE_SCHEMA = "proposal-semantic-evidence-v1"
+KNOWN_LABELS = (
+    "TAKE",
+    "PUT",
+    "WASH",
+    "OPEN",
+    "CLOSE",
+    "INSERT",
+    "TURN_ON",
+    "CUT",
+    "TURN_OFF",
+    "POUR",
+)
+SPECIAL_LABELS = ("UNKNOWN_ACTION", "BACKGROUND", "ABSTAIN")
+
+
+def load_proposal_semantic_cache(path, num_classes):
+    raw = Path(path).read_bytes()
+    payload = json.loads(raw.decode("utf-8"))
+    if payload.get("schema_version") != PROPOSAL_SEMANTIC_CACHE_SCHEMA:
+        raise ValueError("unsupported proposal semantic cache schema")
+    if payload.get("source") != "offline_vlm_proposal_semantics":
+        raise ValueError("invalid proposal semantic cache source")
+    if payload.get("domain") not in ("source", "target"):
+        raise ValueError("proposal semantic cache has an invalid domain")
+    if payload.get("split") not in ("train", "val"):
+        raise ValueError("proposal semantic cache has an invalid split")
+    if not isinstance(payload.get("selection_teacher_provenance"), dict):
+        raise ValueError("proposal semantic cache has no selection provenance")
+    if not isinstance(payload.get("prompt_protocol"), dict):
+        raise ValueError("proposal semantic cache has no prompt protocol")
+
+    by_video = {}
+    seen = set()
+    for entry in payload.get("entries", []):
+        if set(entry).intersection({
+            "gt_assigned_class_ids",
+            "center_all_gt_class_ids",
+            "semantic_gt_kind",
+        }):
+            raise ValueError("proposal semantic cache contains forbidden GT fields")
+        candidate_id = str(entry["candidate_id"])
+        if candidate_id in seen:
+            raise ValueError("duplicate proposal semantic candidate")
+        seen.add(candidate_id)
+        video_id = str(entry["video_id"])
+        start = float(entry["proposal_start_sec"])
+        end = float(entry["proposal_end_sec"])
+        center = float(entry["absolute_center_time"])
+        if not all(math.isfinite(value) for value in (start, end, center)):
+            raise ValueError("proposal semantic cache contains non-finite times")
+        if start < 0.0 or end <= start or not start <= center <= end:
+            raise ValueError("proposal semantic cache contains an invalid interval")
+        label = str(entry["semantic_label"])
+        if label not in KNOWN_LABELS[:num_classes] + SPECIAL_LABELS:
+            raise ValueError("proposal semantic cache contains an invalid label")
+        levels = tuple(int(level) for level in entry.get("source_fpn_levels", []))
+        if not levels or len(set(levels)) != len(levels) or any(
+            level < 0 for level in levels
+        ):
+            raise ValueError("proposal semantic cache contains invalid FPN levels")
+        by_video.setdefault(video_id, []).append({
+            "candidate_id": candidate_id,
+            "absolute_feature_index": int(entry["absolute_feature_index"]),
+            "proposal_start_sec": start,
+            "proposal_end_sec": end,
+            "absolute_center_time": center,
+            "semantic_label": label,
+            "source_fpn_levels": levels,
+        })
+    return by_video, len(seen), hashlib.sha256(raw).hexdigest(), payload
+
+
+def _temporal_iou(one, many):
+    left = torch.maximum(one[0], many[:, 0])
+    right = torch.minimum(one[1], many[:, 1])
+    intersection = (right - left).clamp(min=0)
+    union = (one[1] - one[0]) + (many[:, 1] - many[:, 0]) - intersection
+    return intersection / union.clamp(min=1e-6)
+
+
+def temporal_nms(segments, scores, max_proposals, iou_threshold):
+    if segments.numel() == 0:
+        return torch.empty(0, dtype=torch.long, device=segments.device)
+    order = scores.argsort(descending=True)
+    keep = []
+    while order.numel() and len(keep) < max_proposals:
+        current = order[0]
+        keep.append(current)
+        if order.numel() == 1:
+            break
+        rest = order[1:]
+        order = rest[_temporal_iou(segments[current], segments[rest]) <= iou_threshold]
+    return torch.stack(keep)
+
+
+def build_teacher_proposals(
+    points,
+    masks,
+    logits,
+    offsets,
+    levels,
+    score_threshold,
+    max_proposals,
+    nms_threshold,
+):
+    """Decode class-agnostic proposals from a frozen SADA teacher."""
+    enabled = set(int(level) for level in levels)
+    batch_size = logits[0].shape[0]
+    proposals = []
+    for batch_index in range(batch_size):
+        segments, scores, probabilities, proposal_levels = [], [], [], []
+        for level, (grid, valid, level_logits, level_offsets) in enumerate(
+            zip(points, masks, logits, offsets)
+        ):
+            if level not in enabled:
+                continue
+            valid = valid[batch_index].bool()
+            probs = level_logits[batch_index].sigmoid()
+            level_scores = probs.max(dim=-1).values
+            selected = valid & (level_scores >= score_threshold)
+            indices = torch.nonzero(selected).flatten()
+            if not indices.numel():
+                continue
+            centers = grid[indices, 0]
+            strides = grid[indices, 3]
+            decoded = level_offsets[batch_index, indices].detach()
+            level_segments = torch.stack(
+                (centers - decoded[:, 0] * strides,
+                 centers + decoded[:, 1] * strides),
+                dim=-1,
+            )
+            segments.append(level_segments)
+            scores.append(level_scores[indices])
+            probabilities.append(probs[indices])
+            proposal_levels.append(torch.full(
+                (indices.numel(),), level, dtype=torch.long, device=grid.device
+            ))
+        if not segments:
+            proposals.append({
+                "segments": logits[0].new_zeros((0, 2)),
+                "levels": torch.empty(0, dtype=torch.long, device=logits[0].device),
+                "evidence": logits[0].new_zeros((0, logits[0].shape[-1] + 4)),
+                "evidence_eligible": torch.empty(
+                    0, dtype=torch.bool, device=logits[0].device
+                ),
+            })
+            continue
+        segments = torch.cat(segments)
+        scores = torch.cat(scores)
+        probabilities = torch.cat(probabilities)
+        proposal_levels = torch.cat(proposal_levels)
+        keep = temporal_nms(segments, scores, max_proposals, nms_threshold)
+        probabilities = probabilities[keep]
+        probabilities = probabilities / probabilities.sum(dim=-1, keepdim=True).clamp(
+            min=1e-6
+        )
+        evidence = F.pad(probabilities, (0, 4))
+        proposals.append({
+            "segments": segments[keep].detach(),
+            "levels": proposal_levels[keep],
+            "evidence": evidence.detach(),
+            "evidence_eligible": torch.ones(
+                keep.numel(), dtype=torch.bool, device=segments.device
+            ),
+            "teacher_scores": scores[keep].detach(),
+        })
+    return proposals
+
+
+def evidence_vector(label, num_classes, device, dtype):
+    vector = torch.zeros(num_classes + 4, device=device, dtype=dtype)
+    if label in KNOWN_LABELS[:num_classes]:
+        vector[KNOWN_LABELS.index(label)] = 1.0
+    elif label == "UNKNOWN_ACTION":
+        vector[num_classes] = 1.0
+    elif label == "BACKGROUND":
+        vector[num_classes + 1] = 1.0
+    elif label == "ABSTAIN":
+        vector[num_classes + 2] = 1.0
+    else:
+        raise ValueError("unknown proposal semantic label")
+    return vector
+
+
+def cached_proposals_for_videos(cache, videos, num_classes, n_levels, device, dtype):
+    proposals = []
+    for video in videos:
+        metadata = video["metadata"]
+        video_id = str(metadata["video_id"])
+        crop_start = float(metadata.get("crop_start", 0))
+        crop_length = float(metadata.get("crop_feat_len", video["feats"].shape[-1]))
+        stride = float(metadata["feat_stride"])
+        frame_offset = 0.5 * float(metadata["feat_num_frames"])
+        fps = float(metadata["fps"])
+        rows = []
+        for entry in cache.get(video_id, []):
+            start = (entry["proposal_start_sec"] * fps - frame_offset) / stride
+            end = (entry["proposal_end_sec"] * fps - frame_offset) / stride
+            start -= crop_start
+            end -= crop_start
+            if end <= 0.0 or start >= crop_length:
+                continue
+            level = entry["source_fpn_levels"][0]
+            if level >= n_levels:
+                continue
+            rows.append((
+                max(start, 0.0), min(end, crop_length), level,
+                entry["semantic_label"], entry["candidate_id"],
+            ))
+        if rows:
+            segments = torch.tensor(
+                [[row[0], row[1]] for row in rows], device=device, dtype=dtype
+            )
+            levels = torch.tensor(
+                [row[2] for row in rows], device=device, dtype=torch.long
+            )
+            evidence = torch.stack([
+                evidence_vector(row[3], num_classes, device, dtype) for row in rows
+            ])
+            eligible = evidence[:, :num_classes].sum(dim=-1) > 0
+        else:
+            segments = torch.zeros((0, 2), device=device, dtype=dtype)
+            levels = torch.empty(0, device=device, dtype=torch.long)
+            evidence = torch.zeros((0, num_classes + 4), device=device, dtype=dtype)
+            eligible = torch.empty(0, device=device, dtype=torch.bool)
+        proposals.append({
+            "segments": segments,
+            "levels": levels,
+            "evidence": evidence,
+            "evidence_eligible": eligible,
+        })
+    return proposals
+
+
+def labels_for_proposals(proposals, gt_segments, gt_labels, num_classes, mode):
+    """Return observable proposal semantics; target GT is used only by Oracle modes."""
+    if mode not in ("center", "dominant", "soft"):
+        raise ValueError("unknown proposal label mode")
+    result = []
+    for proposal, segments, labels in zip(proposals, gt_segments, gt_labels):
+        targets = proposal["segments"].new_zeros(
+            (proposal["segments"].shape[0], num_classes)
+        )
+        if segments.numel():
+            for index, candidate in enumerate(proposal["segments"]):
+                if mode == "center":
+                    center = candidate.mean()
+                    weights = ((segments[:, 0] <= center) & (center <= segments[:, 1])).float()
+                else:
+                    left = torch.maximum(candidate[0], segments[:, 0])
+                    right = torch.minimum(candidate[1], segments[:, 1])
+                    weights = (right - left).clamp(min=0)
+                for class_id in range(num_classes):
+                    targets[index, class_id] = weights[labels == class_id].sum()
+                if mode == "dominant" and targets[index].sum() > 0:
+                    top = int(targets[index].argmax())
+                    targets[index].zero_()
+                    targets[index, top] = 1.0
+                elif targets[index].sum() > 0:
+                    targets[index] /= targets[index].sum()
+        result.append(targets)
+    return result
+
+
+def source_gt_proposals(videos, num_classes, n_levels, regression_ranges):
+    proposals = []
+    for video in videos:
+        segments = video["segments"]
+        labels = video["labels"]
+        levels = []
+        for segment in segments:
+            radius = float((segment[1] - segment[0]).clamp(min=1.0) / 2.0)
+            level = n_levels - 1
+            for candidate, bounds in enumerate(regression_ranges):
+                if float(bounds[0]) <= radius <= float(bounds[1]):
+                    level = candidate
+                    break
+            levels.append(level)
+        evidence = segments.new_zeros((segments.shape[0], num_classes + 4))
+        if segments.shape[0]:
+            evidence[:, -1] = 1.0
+        targets = segments.new_zeros((segments.shape[0], num_classes))
+        known = labels < num_classes
+        if known.any():
+            targets[known] = F.one_hot(labels[known], num_classes=num_classes).float()
+        proposals.append({
+            "segments": segments.detach(),
+            "levels": torch.tensor(levels, dtype=torch.long, device=segments.device),
+            "evidence": evidence,
+            "evidence_eligible": known,
+            "targets": targets,
+        })
+    return proposals
+
+
+def _sample_sequence(sequence, positions):
+    """Linearly sample a [C, T] sequence at feature-index positions."""
+    length = sequence.shape[-1]
+    positions = positions.clamp(0, max(length - 1, 0))
+    left = positions.floor().long()
+    right = (left + 1).clamp(max=max(length - 1, 0))
+    weight = (positions - left.float()).unsqueeze(0)
+    return sequence[:, left] * (1.0 - weight) + sequence[:, right] * weight
+
+
+class ProposalSemanticBranch(nn.Module):
+    def __init__(
+        self,
+        fpn_dim,
+        num_classes,
+        hidden_dim=256,
+        embedding_dim=128,
+        confidence_threshold=0.5,
+        entropy_threshold=0.75,
+        prototype_momentum=0.9,
+    ):
+        super().__init__()
+        self.num_classes = int(num_classes)
+        self.confidence_threshold = float(confidence_threshold)
+        self.entropy_threshold = float(entropy_threshold)
+        self.prototype_momentum = float(prototype_momentum)
+        input_dim = 5 * int(fpn_dim) + self.num_classes + self.num_classes + 4
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.GELU(),
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, embedding_dim),
+            nn.GELU(),
+            nn.LayerNorm(embedding_dim),
+        )
+        self.classifier = nn.Linear(embedding_dim, self.num_classes)
+        self.register_buffer(
+            "source_prototypes", torch.zeros(self.num_classes, embedding_dim)
+        )
+        self.register_buffer(
+            "source_prototype_ready", torch.zeros(self.num_classes, dtype=torch.bool)
+        )
+
+    def encode(self, fpn_feats, class_logits, proposals, fpn_strides):
+        rows = []
+        for batch_index, proposal in enumerate(proposals):
+            for segment, level, evidence in zip(
+                proposal["segments"], proposal["levels"], proposal["evidence"]
+            ):
+                level = int(level)
+                duration = (segment[1] - segment[0]).clamp(min=1.0)
+                positions = torch.stack((
+                    segment[0] - 0.25 * duration,
+                    segment[0],
+                    0.5 * (segment[0] + segment[1]),
+                    segment[1],
+                    segment[1] + 0.25 * duration,
+                )) / float(fpn_strides[level])
+                visual = _sample_sequence(
+                    fpn_feats[level][batch_index], positions
+                ).transpose(0, 1).reshape(-1)
+                sampled_logits = _sample_sequence(
+                    class_logits[level][batch_index].transpose(0, 1), positions
+                ).transpose(0, 1)
+                sada = sampled_logits.sigmoid().mean(dim=0)
+                sada = sada / sada.sum().clamp(min=1e-6)
+                if float(evidence[-1]) > 0.5:
+                    evidence = evidence.clone()
+                    evidence[:self.num_classes] = sada.detach()
+                    evidence[-1] = 0.0
+                rows.append(torch.cat((visual, sada, evidence)))
+        if not rows:
+            empty = fpn_feats[0].new_zeros((0, self.classifier.in_features))
+            return {
+                "embedding": empty,
+                "logits": fpn_feats[0].new_zeros((0, self.num_classes)),
+                "probabilities": fpn_feats[0].new_zeros((0, self.num_classes)),
+            }
+        embedding = self.encoder(torch.stack(rows))
+        logits = self.classifier(embedding)
+        return {
+            "embedding": F.normalize(embedding, dim=-1),
+            "logits": logits,
+            "probabilities": logits.softmax(dim=-1),
+        }
+
+    @staticmethod
+    def flatten_field(proposals, field):
+        values = [proposal[field] for proposal in proposals if proposal[field].numel()]
+        if not values:
+            return None
+        return torch.cat(values)
+
+    def source_loss(self, encoded, proposals):
+        targets = self.flatten_field(proposals, "targets")
+        if targets is None or not targets.numel():
+            return encoded["logits"].sum() * 0.0
+        known = targets.sum(dim=-1) > 0
+        if not known.any():
+            return encoded["logits"].sum() * 0.0
+        return -(targets[known] * encoded["logits"][known].log_softmax(dim=-1)).sum(
+            dim=-1
+        ).mean()
+
+    def select_target(self, encoded, proposals):
+        probabilities = encoded["probabilities"]
+        evidence_eligible = self.flatten_field(proposals, "evidence_eligible")
+        if evidence_eligible is None:
+            evidence_eligible = torch.empty(
+                0, dtype=torch.bool, device=probabilities.device
+            )
+        confidence = probabilities.max(dim=-1).values
+        entropy = -(
+            probabilities.clamp(min=1e-8).log() * probabilities
+        ).sum(dim=-1) / math.log(self.num_classes)
+        selected = (
+            evidence_eligible
+            & (confidence >= self.confidence_threshold)
+            & (entropy <= self.entropy_threshold)
+        )
+        return {
+            "q": probabilities.detach(),
+            "selected": selected,
+            "confidence": confidence.detach(),
+            "entropy": entropy.detach(),
+        }
+
+    def prototype_alignment(self, source, source_targets, target, target_selection):
+        zero = source["embedding"].sum() * 0.0 + target["embedding"].sum() * 0.0
+        if source_targets is None or not source_targets.numel():
+            return zero, 0
+        source_embedding = source["embedding"]
+        target_embedding = target["embedding"]
+        selected = target_selection["selected"]
+        if not selected.any():
+            self._update_source_prototypes(source_embedding, source_targets)
+            return zero, 0
+
+        q = target_selection["q"][selected]
+        target_embedding = target_embedding[selected]
+        losses = []
+        for class_id in range(self.num_classes):
+            source_weight = source_targets[:, class_id]
+            target_weight = q[:, class_id]
+            if float(target_weight.sum()) <= 1e-6:
+                continue
+            if float(source_weight.sum()) > 1e-6:
+                source_center = (
+                    source_embedding * source_weight[:, None]
+                ).sum(dim=0) / source_weight.sum()
+            elif bool(self.source_prototype_ready[class_id]):
+                source_center = self.source_prototypes[class_id].detach()
+            else:
+                continue
+            target_center = (
+                target_embedding * target_weight[:, None]
+            ).sum(dim=0) / target_weight.sum()
+            losses.append(F.mse_loss(target_center, source_center))
+        self._update_source_prototypes(source_embedding, source_targets)
+        return (torch.stack(losses).mean(), len(losses)) if losses else (zero, 0)
+
+    @torch.no_grad()
+    def _update_source_prototypes(self, embeddings, targets):
+        for class_id in range(self.num_classes):
+            weight = targets[:, class_id]
+            if float(weight.sum()) <= 1e-6:
+                continue
+            center = (embeddings.detach() * weight[:, None]).sum(dim=0) / weight.sum()
+            if self.source_prototype_ready[class_id]:
+                center = (
+                    self.prototype_momentum * self.source_prototypes[class_id]
+                    + (1.0 - self.prototype_momentum) * center
+                )
+            self.source_prototypes[class_id].copy_(F.normalize(center, dim=0))
+            self.source_prototype_ready[class_id] = True

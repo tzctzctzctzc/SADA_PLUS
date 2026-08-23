@@ -34,6 +34,7 @@ from libs.models.SADA.vlm_routing import (
     validate_vlm_transition,
 )
 from libs.models.SADA.target_adapter import load_vlm_target_adapter_cache
+from libs.models.SADA.proposal_semantic import load_proposal_semantic_cache
 
 os.environ['NUMBA_NUM_THREADS'] = "8"
 
@@ -356,6 +357,73 @@ def main(cfg, resume, project_name='sada', debug=False):
         
 
     """4. Resume from model / Misc"""
+    if args.proposal_semantic_init_from_sada:
+        initialization_path = args.proposal_semantic_init_from_sada
+        if not os.path.isfile(initialization_path):
+            raise ValueError(
+                'SADA proposal-semantic initialization checkpoint not found: {}'.format(
+                    initialization_path
+                )
+            )
+        checkpoint = torch.load(initialization_path, map_location=device)
+        initialization_state_key = (
+            'ema_state_dict'
+            if args.proposal_semantic_init_weights == 'ema'
+            else 'state_dict'
+        )
+        if initialization_state_key not in checkpoint:
+            raise ValueError(
+                'SADA checkpoint has no {}'.format(initialization_state_key)
+            )
+        incompatible = model.load_state_dict(
+            checkpoint[initialization_state_key], strict=False
+        )
+        invalid_missing = [
+            key for key in incompatible.missing_keys
+            if not key.startswith('proposal_semantic_branch.')
+        ]
+        if invalid_missing or incompatible.unexpected_keys:
+            raise ValueError(
+                'proposal-semantic initialization differs outside the new branch: '
+                'missing={} unexpected={}'.format(
+                    invalid_missing, incompatible.unexpected_keys
+                )
+            )
+        if not incompatible.missing_keys:
+            raise ValueError(
+                'initialization checkpoint already contains proposal semantics; '
+                'use --resume instead'
+            )
+        if use_ema:
+            ema_incompatible = model_ema.module.load_state_dict(
+                checkpoint[initialization_state_key], strict=False
+            )
+            ema_invalid_missing = [
+                key for key in ema_incompatible.missing_keys
+                if not key.startswith('proposal_semantic_branch.')
+            ]
+            if ema_invalid_missing or ema_incompatible.unexpected_keys:
+                raise ValueError(
+                    'EMA proposal-semantic initialization differs outside the new branch'
+                )
+            model_ema.module.proposal_semantic_branch.load_state_dict(
+                model.proposal_semantic_branch.state_dict()
+            )
+        cfg.config['proposal_semantic']['initialization'] = {
+            'checkpoint': initialization_path,
+            'checkpoint_sha256': file_sha256(initialization_path),
+            'checkpoint_epoch': int(checkpoint.get('epoch', -1)),
+            'weights': args.proposal_semantic_init_weights,
+            'trajectory': 'new_optimizer_and_scheduler_from_pretrained_weights',
+        }
+        args.start_epoch = 1
+        print(
+            "=> initialized proposal semantics from '{}' {} weights".format(
+                initialization_path, args.proposal_semantic_init_weights
+            )
+        )
+        del checkpoint
+
     if args.validity_head_init_from_sada:
         initialization_path = args.validity_head_init_from_sada
         if not os.path.isfile(initialization_path):
@@ -724,6 +792,13 @@ def create_argparser():
             'optimizer and scheduler start a new controlled fine-tuning run'
         ),
     )
+    start_group.add_argument(
+        '--proposal-semantic-init-from-sada', default=None, type=str,
+        help=(
+            'initialize the proposal semantic branch from ordinary SADA weights; '
+            'optimizer and scheduler start a new fine-tuning run'
+        ),
+    )
     parser.add_argument('-s', '--seed', default=DEFAULT_SEED, type=int,
                         help='random seed')
     parser.add_argument('-i', '--gpu', default=GPU, type=int,
@@ -905,6 +980,31 @@ def create_argparser():
         '--vlm-target-adapter-levels', default='0,1,2',
         help='comma-separated FPN levels for VLM target supervision',
     )
+    parser.add_argument(
+        '--proposal-semantic-mode',
+        choices=[
+            'off', 'source', 'teacher', 'oracle_center',
+            'oracle_dominant', 'oracle_soft', 'vlm',
+        ],
+        default='off',
+        help='proposal-level dataset semantics and source-target alignment mode',
+    )
+    parser.add_argument('--proposal-semantic-source-cache', default=None)
+    parser.add_argument('--proposal-semantic-target-cache', default=None)
+    parser.add_argument(
+        '--proposal-semantic-init-weights',
+        choices=['student', 'ema'],
+        default='ema',
+    )
+    parser.add_argument('--proposal-semantic-source-weight', type=float, default=1.0)
+    parser.add_argument('--proposal-semantic-alignment-weight', type=float, default=0.1)
+    parser.add_argument('--proposal-semantic-target-start-epoch', type=int, default=5)
+    parser.add_argument('--proposal-semantic-levels', default='0,1,2')
+    parser.add_argument('--proposal-semantic-score-threshold', type=float, default=0.3)
+    parser.add_argument('--proposal-semantic-max-proposals', type=int, default=8)
+    parser.add_argument('--proposal-semantic-nms-threshold', type=float, default=0.5)
+    parser.add_argument('--proposal-semantic-confidence', type=float, default=0.5)
+    parser.add_argument('--proposal-semantic-entropy', type=float, default=0.75)
     parser.add_argument(
         '--diagnostic-no-ca', action='store_true',
         help='compute conditional alignment diagnostics but exclude it from updates',
@@ -1123,6 +1223,161 @@ if __name__ == '__main__':
         'budget': args.vlm_target_adapter_budget,
         'levels': target_adapter_levels,
         'selection_rule': 'known_class_and_current_teacher_top1_agreement',
+    }
+    proposal_semantic_enabled = args.proposal_semantic_mode != 'off'
+    proposal_levels = [
+        int(level.strip())
+        for level in args.proposal_semantic_levels.split(',')
+        if level.strip()
+    ]
+    if (
+        not proposal_levels
+        or len(set(proposal_levels)) != len(proposal_levels)
+        or any(level < 0 or level > 5 for level in proposal_levels)
+    ):
+        raise ValueError(
+            'proposal semantic levels must be unique values from 0 to 5'
+        )
+    if proposal_semantic_enabled:
+        if (
+            config_dict.get('dataset_name') != 'epic'
+            or config_dict['dataset'].get('action_subsampling')
+            != '10_majority_classes'
+        ):
+            raise ValueError(
+                'proposal semantics currently require EPIC 10-majority-classes'
+            )
+        if args.resume is None and args.proposal_semantic_init_from_sada is None:
+            raise ValueError(
+                'a proposal semantic run requires --proposal-semantic-init-from-sada '
+                'or --resume'
+            )
+        if (
+            args.proposal_semantic_source_weight < 0.0
+            or args.proposal_semantic_alignment_weight < 0.0
+            or args.proposal_semantic_target_start_epoch < 1
+            or not 0.0 < args.proposal_semantic_score_threshold <= 1.0
+            or args.proposal_semantic_max_proposals < 1
+            or not 0.0 <= args.proposal_semantic_nms_threshold <= 1.0
+            or not 0.0 < args.proposal_semantic_confidence <= 1.0
+            or not 0.0 <= args.proposal_semantic_entropy <= 1.0
+        ):
+            raise ValueError('proposal semantic hyperparameters are invalid')
+        if args.proposal_semantic_mode != 'source' and not config_dict[
+            'train_cfg'
+        ].get('ema_active', False):
+            raise ValueError('target proposal semantics require EMA')
+        if args.proposal_semantic_mode == 'vlm' and not (
+            args.proposal_semantic_target_cache
+        ):
+            raise ValueError('VLM proposal semantics require a target cache')
+        if args.proposal_semantic_mode == 'vlm' and not (
+            args.proposal_semantic_source_cache
+        ):
+            raise ValueError(
+                'VLM proposal semantics require source VLM evidence to train '
+                'the dataset-semantic adapter'
+            )
+        if (
+            vlm_enabled
+            or vlm_target_adapter_enabled
+            or effective_stage1 != 'off'
+            or args.validity_head != 'off'
+            or args.oracle_routing != 'off'
+            or args.oracle_forgetting != 'off'
+            or args.oracle_target_regression != 'off'
+            or args.oracle_target_distillation != 'off'
+            or args.binary_band_oracle != 'off'
+            or args.conditional_paired_support
+            or args.conditional_paired_fixed_denominator
+        ):
+            raise ValueError(
+                'proposal semantics require an otherwise original SADA run'
+            )
+    elif (
+        args.proposal_semantic_init_from_sada
+        or args.proposal_semantic_source_cache
+        or args.proposal_semantic_target_cache
+    ):
+        raise ValueError('proposal semantic inputs require a non-off mode')
+
+    effective_num_classes = (
+        10
+        if config_dict['dataset'].get('action_subsampling')
+        == '10_majority_classes'
+        else int(config_dict['dataset']['num_classes'])
+    )
+    source_cache_sha256 = None
+    target_cache_sha256 = None
+    source_cache_payload = None
+    target_cache_payload = None
+    if args.proposal_semantic_source_cache:
+        _, source_cache_count, source_cache_sha256, source_cache_payload = (
+            load_proposal_semantic_cache(
+                args.proposal_semantic_source_cache, effective_num_classes
+            )
+        )
+        if (
+            not source_cache_count
+            or source_cache_payload['domain'] != 'source'
+            or source_cache_payload['split'] != 'train'
+        ):
+            raise ValueError(
+                'proposal semantic source cache must be non-empty source train'
+            )
+    if args.proposal_semantic_target_cache:
+        _, target_cache_count, target_cache_sha256, target_cache_payload = (
+            load_proposal_semantic_cache(
+                args.proposal_semantic_target_cache, effective_num_classes
+            )
+        )
+        if (
+            not target_cache_count
+            or target_cache_payload['domain'] != 'target'
+            or target_cache_payload['split'] != 'train'
+        ):
+            raise ValueError(
+                'proposal semantic target cache must be non-empty target train'
+            )
+    if args.proposal_semantic_init_from_sada:
+        expected_selection_checkpoint = file_sha256(
+            args.proposal_semantic_init_from_sada
+        )
+        for payload in (source_cache_payload, target_cache_payload):
+            if payload is None:
+                continue
+            actual = payload['selection_teacher_provenance'].get(
+                'selection_teacher_checkpoint_sha256'
+            )
+            if actual != expected_selection_checkpoint:
+                raise ValueError(
+                    'proposal semantic cache selection teacher differs from '
+                    'the initialization SADA checkpoint'
+                )
+    config_dict['proposal_semantic'] = {
+        'mode': args.proposal_semantic_mode,
+        'source_cache_path': args.proposal_semantic_source_cache,
+        'target_cache_path': args.proposal_semantic_target_cache,
+        'source_cache_sha256': source_cache_sha256,
+        'target_cache_sha256': target_cache_sha256,
+        'source_weight': args.proposal_semantic_source_weight,
+        'alignment_weight': args.proposal_semantic_alignment_weight,
+        'target_start_epoch': args.proposal_semantic_target_start_epoch,
+        'levels': proposal_levels,
+        'score_threshold': args.proposal_semantic_score_threshold,
+        'max_proposals': args.proposal_semantic_max_proposals,
+        'nms_threshold': args.proposal_semantic_nms_threshold,
+        'confidence_threshold': args.proposal_semantic_confidence,
+        'entropy_threshold': args.proposal_semantic_entropy,
+        'hidden_dim': 256,
+        'embedding_dim': 128,
+        'prototype_momentum': 0.9,
+        'source_supervision': 'gt_segments_plus_optional_vlm_proposals',
+        'target_gt_usage': (
+            'diagnostic_only'
+            if args.proposal_semantic_mode.startswith('oracle_')
+            else 'forbidden'
+        ),
     }
     validity_head_enabled = args.validity_head == 'train'
     if args.validity_head_loss_weight < 0.0:

@@ -46,6 +46,15 @@ from .target_adapter import (
     load_vlm_target_adapter_cache,
 )
 from .conditional_alignment import aggregate_conditional_class_losses
+from .proposal_semantic import (
+    PROPOSAL_SEMANTIC_MODES,
+    ProposalSemanticBranch,
+    build_teacher_proposals,
+    cached_proposals_for_videos,
+    labels_for_proposals,
+    load_proposal_semantic_cache,
+    source_gt_proposals,
+)
 from libs.utils import batched_nms
 import einops
 import copy
@@ -574,6 +583,94 @@ class SADA(nn.Module):
                 self.vlm_target_adapter_cache_sha256,
                 self.vlm_target_adapter_payload,
             ) = load_vlm_target_adapter_cache(cache_path)
+        proposal_cfg = cfg.get('proposal_semantic', {})
+        self.proposal_semantic_mode = proposal_cfg.get('mode', 'off')
+        if self.proposal_semantic_mode not in PROPOSAL_SEMANTIC_MODES:
+            raise ValueError(
+                'unknown proposal semantic mode: {}'.format(
+                    self.proposal_semantic_mode
+                )
+            )
+        self.proposal_semantic_enabled = self.proposal_semantic_mode != 'off'
+        self.proposal_semantic_source_weight = float(
+            proposal_cfg.get('source_weight', 1.0)
+        )
+        self.proposal_semantic_alignment_weight = float(
+            proposal_cfg.get('alignment_weight', 0.1)
+        )
+        self.proposal_semantic_target_start_epoch = int(
+            proposal_cfg.get('target_start_epoch', 5)
+        )
+        self.proposal_semantic_levels = tuple(
+            int(level) for level in proposal_cfg.get('levels', [0, 1, 2])
+        )
+        self.proposal_semantic_score_threshold = float(
+            proposal_cfg.get('score_threshold', 0.3)
+        )
+        self.proposal_semantic_max_proposals = int(
+            proposal_cfg.get('max_proposals', 8)
+        )
+        self.proposal_semantic_nms_threshold = float(
+            proposal_cfg.get('nms_threshold', 0.5)
+        )
+        if self.proposal_semantic_enabled:
+            if (
+                self.proposal_semantic_source_weight < 0.0
+                or self.proposal_semantic_alignment_weight < 0.0
+                or self.proposal_semantic_target_start_epoch < 1
+                or not self.proposal_semantic_levels
+                or len(set(self.proposal_semantic_levels))
+                != len(self.proposal_semantic_levels)
+                or any(level < 0 or level >= self.n_levels
+                       for level in self.proposal_semantic_levels)
+                or not 0.0 < self.proposal_semantic_score_threshold <= 1.0
+                or self.proposal_semantic_max_proposals < 1
+                or not 0.0 <= self.proposal_semantic_nms_threshold <= 1.0
+            ):
+                raise ValueError('proposal semantic configuration is invalid')
+        self.proposal_semantic_source_cache = {}
+        self.proposal_semantic_target_cache = {}
+        self.proposal_semantic_cache_metadata = {}
+        source_cache_path = proposal_cfg.get('source_cache_path')
+        target_cache_path = proposal_cfg.get('target_cache_path')
+        if source_cache_path:
+            (
+                self.proposal_semantic_source_cache,
+                source_count,
+                source_sha256,
+                source_payload,
+            ) = load_proposal_semantic_cache(source_cache_path, num_classes)
+            if (
+                source_payload['domain'] != 'source'
+                or source_payload['split'] != 'train'
+            ):
+                raise ValueError(
+                    'proposal semantic source cache must be source train'
+                )
+            self.proposal_semantic_cache_metadata['source_count'] = source_count
+            self.proposal_semantic_cache_metadata['source_sha256'] = source_sha256
+        if target_cache_path:
+            (
+                self.proposal_semantic_target_cache,
+                target_count,
+                target_sha256,
+                target_payload,
+            ) = load_proposal_semantic_cache(target_cache_path, num_classes)
+            if (
+                target_payload['domain'] != 'target'
+                or target_payload['split'] != 'train'
+            ):
+                raise ValueError(
+                    'proposal semantic target cache must be target train'
+                )
+            self.proposal_semantic_cache_metadata['target_count'] = target_count
+            self.proposal_semantic_cache_metadata['target_sha256'] = target_sha256
+        if self.proposal_semantic_mode == 'vlm' and not target_cache_path:
+            raise ValueError('VLM proposal semantics require a target cache')
+        if self.proposal_semantic_mode == 'vlm' and not source_cache_path:
+            raise ValueError(
+                'VLM proposal semantics require a source cache for adapter training'
+            )
         stage1_cfg = cfg.get('stage1', {})
         self.stage1_enabled = stage1_cfg.get('enabled', False)
         self.stage1_perturbation = stage1_cfg.get('perturbation', 'shift')
@@ -679,6 +776,21 @@ class SADA(nn.Module):
                 raise ValueError(
                     'VLM target adapter requires original SADA routing'
                 )
+        if self.proposal_semantic_enabled and (
+            self.stage1_enabled
+            or vlm_cfg.get('enabled', False)
+            or self.vlm_target_adapter_enabled
+            or self.conditional_paired_support
+            or self.oracle_routing_mode != 'off'
+            or self.oracle_forgetting_mode != 'off'
+            or self.oracle_target_regression_mode != 'off'
+            or self.oracle_target_distillation_mode != 'off'
+            or self.binary_band_oracle_mode != 'off'
+            or cfg.get('validity_head', {}).get('enabled', False)
+        ):
+            raise ValueError(
+                'proposal semantics require an otherwise original SADA run'
+            )
         assert len(self.fpn_strides) == len(self.reg_range)
         self.scale_factor = scale_factor
         self.iou_weight_power = iou_weight_power
@@ -1007,6 +1119,22 @@ class SADA(nn.Module):
                 detach_fpn=validity_head_cfg.get('detach_fpn', False),
                 detach_geometry=validity_head_cfg.get(
                     'detach_geometry', True
+                ),
+            )
+
+        self.proposal_semantic_branch = None
+        if self.proposal_semantic_enabled:
+            self.proposal_semantic_branch = ProposalSemanticBranch(
+                fpn_dim=fpn_dim,
+                num_classes=self.num_class_orig,
+                hidden_dim=proposal_cfg.get('hidden_dim', 256),
+                embedding_dim=proposal_cfg.get('embedding_dim', 128),
+                confidence_threshold=proposal_cfg.get(
+                    'confidence_threshold', 0.5
+                ),
+                entropy_threshold=proposal_cfg.get('entropy_threshold', 0.75),
+                prototype_momentum=proposal_cfg.get(
+                    'prototype_momentum', 0.9
                 ),
             )
 
@@ -1501,6 +1629,171 @@ class SADA(nn.Module):
         )
 
     @torch.no_grad()
+    def build_frozen_proposal_teacher(self, video_list_tgt):
+        """Decode proposal geometry and soft semantics from the EMA teacher."""
+        if not self.proposal_semantic_enabled:
+            raise ValueError('proposal semantic teacher is disabled')
+        if self.training:
+            raise ValueError('proposal semantic teacher must remain in eval mode')
+        if self.use_trident_head:
+            raise ValueError('proposal semantic teacher requires direct offsets')
+        inputs, masks = self.preprocessing(video_list_tgt, mode='validation')
+        feats, backbone_masks, _ = self.backbone_target(inputs, masks)
+        fpn_feats, fpn_masks = self.neck_target(feats, backbone_masks)
+        logits, _ = self.cls_head_target(fpn_feats, fpn_masks)
+        offsets, _ = self.reg_head_target(fpn_feats, fpn_masks)
+        points = self.point_generator(fpn_feats)
+        return build_teacher_proposals(
+            points,
+            [mask.squeeze(1) for mask in fpn_masks],
+            [value.permute(0, 2, 1) for value in logits],
+            [value.permute(0, 2, 1) for value in offsets],
+            self.proposal_semantic_levels,
+            self.proposal_semantic_score_threshold,
+            self.proposal_semantic_max_proposals,
+            self.proposal_semantic_nms_threshold,
+        )
+
+    @staticmethod
+    def _merge_proposals(primary, extra):
+        keys = ('segments', 'levels', 'evidence', 'evidence_eligible', 'targets')
+        merged = []
+        for first, second in zip(primary, extra):
+            row = dict(first)
+            for key in keys:
+                if key in first and key in second:
+                    row[key] = torch.cat((first[key], second[key]), dim=0)
+            merged.append(row)
+        return merged
+
+    def _cached_semantic_proposals(self, cache, videos):
+        proposals = cached_proposals_for_videos(
+            cache,
+            videos,
+            self.num_class_orig,
+            self.n_levels,
+            self.device,
+            videos[0]['feats'].dtype,
+        )
+        for proposal in proposals:
+            if proposal['segments'].shape[0] > self.proposal_semantic_max_proposals:
+                for key in ('segments', 'levels', 'evidence', 'evidence_eligible'):
+                    proposal[key] = proposal[key][
+                        :self.proposal_semantic_max_proposals
+                    ]
+        return proposals
+
+    def _proposal_semantic_losses(
+        self,
+        video_list_src,
+        video_list_tgt,
+        fpn_feats_src,
+        fpn_feats_tgt,
+        out_cls_logits_src,
+        out_cls_logits_tgt,
+        proposal_teacher,
+        curr_epoch,
+    ):
+        branch = self.proposal_semantic_branch
+        source = source_gt_proposals(
+            video_list_src,
+            self.num_class_orig,
+            self.n_levels,
+            self.reg_range,
+        )
+        if self.proposal_semantic_source_cache:
+            cached_source = self._cached_semantic_proposals(
+                self.proposal_semantic_source_cache, video_list_src
+            )
+            cached_targets = labels_for_proposals(
+                cached_source,
+                [video['segments'] for video in video_list_src],
+                [video['labels'] for video in video_list_src],
+                self.num_class_orig,
+                'soft',
+            )
+            for proposal, targets in zip(cached_source, cached_targets):
+                proposal['targets'] = targets
+            source = self._merge_proposals(source, cached_source)
+
+        encoded_source = branch.encode(
+            fpn_feats_src, out_cls_logits_src, source, self.fpn_strides
+        )
+        source_targets = branch.flatten_field(source, 'targets')
+        source_loss = branch.source_loss(encoded_source, source)
+        zero = source_loss * 0.0
+        alignment_loss = zero
+        target_count = 0
+        selected_count = 0
+        aligned_classes = 0
+        entropy = zero.detach()
+        confidence = zero.detach()
+
+        target_active = (
+            self.proposal_semantic_mode not in ('off', 'source')
+            and curr_epoch >= self.proposal_semantic_target_start_epoch
+        )
+        if target_active:
+            if self.proposal_semantic_mode == 'vlm':
+                target = self._cached_semantic_proposals(
+                    self.proposal_semantic_target_cache, video_list_tgt
+                )
+            else:
+                if proposal_teacher is None:
+                    raise ValueError(
+                        'proposal semantic target mode requires an EMA teacher'
+                    )
+                target = proposal_teacher
+            if self.proposal_semantic_mode.startswith('oracle_'):
+                oracle_mode = self.proposal_semantic_mode.split('_', 1)[1]
+                targets = labels_for_proposals(
+                    target,
+                    [video['segments'] for video in video_list_tgt],
+                    [video['labels'] for video in video_list_tgt],
+                    self.num_class_orig,
+                    oracle_mode,
+                )
+                for proposal, labels in zip(target, targets):
+                    proposal['evidence'] = F.pad(labels, (0, 4))
+                    proposal['evidence_eligible'] = labels.sum(dim=-1) > 0
+
+            encoded_target = branch.encode(
+                fpn_feats_tgt, out_cls_logits_tgt, target, self.fpn_strides
+            )
+            selection = branch.select_target(encoded_target, target)
+            alignment_loss, aligned_classes = branch.prototype_alignment(
+                encoded_source, source_targets, encoded_target, selection
+            )
+            target_count = int(encoded_target['embedding'].shape[0])
+            selected_count = int(selection['selected'].sum())
+            if target_count:
+                entropy = selection['entropy'].mean()
+                confidence = selection['confidence'].mean()
+        else:
+            branch._update_source_prototypes(
+                encoded_source['embedding'], source_targets
+            )
+
+        return {
+            'proposal_semantic_source_loss': source_loss,
+            'proposal_semantic_alignment_loss': alignment_loss,
+            'proposal_semantic_source_count': torch.tensor(
+                float(encoded_source['embedding'].shape[0]), device=self.device
+            ),
+            'proposal_semantic_target_count': torch.tensor(
+                float(target_count), device=self.device
+            ),
+            'proposal_semantic_selected_count': torch.tensor(
+                float(selected_count), device=self.device
+            ),
+            'proposal_semantic_aligned_classes': torch.tensor(
+                float(aligned_classes), device=self.device
+            ),
+            'proposal_semantic_mean_entropy': entropy,
+            'proposal_semantic_mean_confidence': confidence,
+        }
+
+    @torch.no_grad()
     def _source_validity_cohorts(
         self,
         points,
@@ -1535,6 +1828,7 @@ class SADA(nn.Module):
         cls_static_anchors=None,
         mean_class_conf=None,
         vlm_routes=None,
+        proposal_teacher=None,
     ):
         
         # Note: The domain is by default src, which indicates in the case of training that we care about applying supervision on the source domain (upper part of the architecture)
@@ -1770,6 +2064,25 @@ class SADA(nn.Module):
                 source_validity_cohorts=source_validity_cohorts,
                 video_list_tgt=video_list_tgt,
             )
+            if mode == 'train' and self.proposal_semantic_enabled:
+                proposal_losses = self._proposal_semantic_losses(
+                    video_list_src,
+                    video_list_tgt,
+                    fpn_feats_src,
+                    fpn_feats_tgt,
+                    [value.permute(0, 2, 1) for value in out_cls_logits_src],
+                    [value.permute(0, 2, 1) for value in out_cls_logits_tgt],
+                    proposal_teacher,
+                    curr_epoch,
+                )
+                losses.update(proposal_losses)
+                losses['downstream_loss'] = (
+                    losses['downstream_loss']
+                    + self.proposal_semantic_source_weight
+                    * proposal_losses['proposal_semantic_source_loss']
+                    + self.proposal_semantic_alignment_weight
+                    * proposal_losses['proposal_semantic_alignment_loss']
+                )
             
             # Return the GTs of the target domain as well, to be used to compute the anchors
             gt_tgt_cls = torch.stack(gt_cls_labels[bs:])   # shape: List of B elements B x FT x C

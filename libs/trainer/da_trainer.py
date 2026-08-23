@@ -321,13 +321,34 @@ class Trainer(BaseTrainerDA):
                 vlm_routes = self.routing_teacher.build_frozen_vlm_routes(
                     video_list_tgt
                 )
+            proposal_teacher = None
+            proposal_mode = self.cfg.get('proposal_semantic', {}).get(
+                'mode', 'off'
+            )
+            if (
+                proposal_mode in (
+                    'teacher', 'oracle_center', 'oracle_dominant', 'oracle_soft'
+                )
+                and curr_epoch >= self.model.proposal_semantic_target_start_epoch
+            ):
+                if self.model_ema is None:
+                    raise ValueError(
+                        'proposal semantic target modes require EMA to be enabled'
+                    )
+                self.model_ema.module.eval()
+                proposal_teacher = (
+                    self.model_ema.module.build_frozen_proposal_teacher(
+                        video_list_tgt
+                    )
+                )
             losses, _, _, _, _, _, _ = self.model(video_list_src = video_list_src,
                                 video_list_tgt = video_list_tgt,
                                 mode='train',
                                 curr_epoch=curr_epoch,
                                 cls_static_anchors=cls_static_anchors,
                                 mean_class_conf=mean_class_conf,
-                                vlm_routes=vlm_routes)
+                                vlm_routes=vlm_routes,
+                                proposal_teacher=proposal_teacher)
 
             # Update the final loss with the adversarial loss
             
