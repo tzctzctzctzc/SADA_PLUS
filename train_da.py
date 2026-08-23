@@ -1630,6 +1630,7 @@ if __name__ == '__main__':
     # Override the configurations
     args.start_epoch = 1
     args.print_freq = 20    # print every 20 batches
+    config_dict["init_rand_seed"] = args.seed
     config_dict["seed"] = args.seed
     config_dict["config_path"] = args.config_path
     config_dict["name"] = args.name
