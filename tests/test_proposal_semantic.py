@@ -187,6 +187,32 @@ def test_prototype_memory_is_stable_across_batches_until_backward():
     assert branch.source_prototype_ready.tolist() == [True, True]
 
 
+def test_prototype_alignment_excludes_softmax_tail_classes():
+    branch = proposal_semantic.ProposalSemanticBranch(
+        fpn_dim=1,
+        num_classes=2,
+        hidden_dim=4,
+        embedding_dim=2,
+    )
+    source_embedding = torch.tensor(
+        [[1.0, 0.0], [0.0, 1.0]], requires_grad=True
+    )
+    target_embedding = torch.tensor([[0.5, 0.5]], requires_grad=True)
+    loss, classes = branch.prototype_alignment(
+        {"embedding": source_embedding},
+        torch.eye(2),
+        {"embedding": target_embedding},
+        {
+            "q": torch.tensor([[0.95, 0.05]]),
+            "selected": torch.tensor([True]),
+        },
+    )
+    loss.backward()
+
+    assert classes == 1
+    assert target_embedding.grad is not None
+
+
 def test_cache_loader_keeps_only_semantics_and_proposal_geometry(tmp_path):
     payload = {
         "schema_version": "proposal-semantic-evidence-v1",

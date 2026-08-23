@@ -459,6 +459,9 @@ class ProposalSemanticBranch(nn.Module):
         for class_id in range(self.num_classes):
             source_weight = source_targets[:, class_id]
             target_weight = q[:, class_id]
+            target_weight = target_weight * (
+                target_weight > 1.0 / self.num_classes
+            )
             if float(target_weight.sum()) <= 1e-6:
                 continue
             if float(source_weight.sum()) > 1e-6:
