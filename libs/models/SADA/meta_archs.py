@@ -1717,7 +1717,10 @@ class SADA(nn.Module):
             source = self._merge_proposals(source, cached_source)
 
         encoded_source = branch.encode(
-            fpn_feats_src, out_cls_logits_src, source, self.fpn_strides
+            [feature.detach() for feature in fpn_feats_src],
+            [logits.detach() for logits in out_cls_logits_src],
+            source,
+            self.fpn_strides,
         )
         source_targets = branch.flatten_field(source, 'targets')
         source_loss = branch.source_loss(encoded_source, source)

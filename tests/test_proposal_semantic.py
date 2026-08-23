@@ -153,7 +153,7 @@ def test_prototype_alignment_uses_soft_q_and_source_memory_without_q_gradient():
     loss.backward()
 
     assert classes == 1
-    assert source_embedding.grad is not None
+    assert source_embedding.grad is None
     assert target_embedding.grad is not None
     assert q.grad is None
     assert branch.source_prototype_ready.tolist() == [True, False]

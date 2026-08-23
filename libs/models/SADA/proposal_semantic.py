@@ -463,6 +463,7 @@ class ProposalSemanticBranch(nn.Module):
                 source_center = (
                     source_embedding * source_weight[:, None]
                 ).sum(dim=0) / source_weight.sum()
+                source_center = source_center.detach()
             elif bool(self.source_prototype_ready[class_id]):
                 source_center = self.source_prototypes[class_id].detach()
             else:
