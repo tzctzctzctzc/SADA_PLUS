@@ -159,6 +159,34 @@ def test_prototype_alignment_uses_soft_q_and_source_memory_without_q_gradient():
     assert branch.source_prototype_ready.tolist() == [True, False]
 
 
+def test_prototype_memory_is_stable_across_batches_until_backward():
+    branch = proposal_semantic.ProposalSemanticBranch(
+        fpn_dim=1,
+        num_classes=2,
+        hidden_dim=4,
+        embedding_dim=2,
+    )
+    branch.prototype_alignment(
+        {"embedding": torch.tensor([[1.0, 0.0]])},
+        torch.tensor([[1.0, 0.0]]),
+        {"embedding": torch.tensor([[0.0, 1.0]])},
+        {"q": torch.tensor([[1.0, 0.0]]), "selected": torch.tensor([False])},
+    )
+
+    target_embedding = torch.tensor([[0.0, 1.0]], requires_grad=True)
+    loss, classes = branch.prototype_alignment(
+        {"embedding": torch.tensor([[0.0, 1.0]], requires_grad=True)},
+        torch.tensor([[0.0, 1.0]]),
+        {"embedding": target_embedding},
+        {"q": torch.tensor([[1.0, 0.0]]), "selected": torch.tensor([True])},
+    )
+    loss.backward()
+
+    assert classes == 1
+    assert target_embedding.grad is not None
+    assert branch.source_prototype_ready.tolist() == [True, True]
+
+
 def test_cache_loader_keeps_only_semantics_and_proposal_geometry(tmp_path):
     payload = {
         "schema_version": "proposal-semantic-evidence-v1",

@@ -453,6 +453,8 @@ class ProposalSemanticBranch(nn.Module):
 
         q = target_selection["q"][selected]
         target_embedding = target_embedding[selected]
+        source_prototypes = self.source_prototypes.detach().clone()
+        source_prototype_ready = self.source_prototype_ready.clone()
         losses = []
         for class_id in range(self.num_classes):
             source_weight = source_targets[:, class_id]
@@ -464,8 +466,8 @@ class ProposalSemanticBranch(nn.Module):
                     source_embedding * source_weight[:, None]
                 ).sum(dim=0) / source_weight.sum()
                 source_center = source_center.detach()
-            elif bool(self.source_prototype_ready[class_id]):
-                source_center = self.source_prototypes[class_id].detach()
+            elif bool(source_prototype_ready[class_id]):
+                source_center = source_prototypes[class_id]
             else:
                 continue
             target_center = (
