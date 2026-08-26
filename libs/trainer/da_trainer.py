@@ -355,8 +355,18 @@ class Trainer(BaseTrainerDA):
                     no_conditional_update = self.cfg.get(
                         'diagnostic', {}
                     ).get('no_conditional_update', False)
-                    if adv_disc and not no_conditional_update:
+                    if (
+                        adv_disc
+                        and not no_conditional_update
+                        and self.model.transport_alignment_mode
+                        in ('off', 'adapter_grl')
+                    ):
                         final_loss += weight_adv * losses['loss_conditional_adv_rev']  
+                if self.model.transport_alignment_mode in ('uot', 'uot_adapter'):
+                    final_loss += (
+                        self.model.transport_loss_weight
+                        * losses['loss_transport_alignment']
+                    )
                 if 'None' in adv_method:
                     pass
                 

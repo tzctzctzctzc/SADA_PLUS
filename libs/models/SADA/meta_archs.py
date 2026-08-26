@@ -40,6 +40,10 @@ from .vlm_residual import (
     select_supported_residual,
 )
 from .conditional_alignment import aggregate_conditional_class_losses
+from .transport_alignment import (
+    ResidualAdapter,
+    joint_unbalanced_ot_loss,
+)
 from libs.utils import batched_nms
 import einops
 import copy
@@ -299,6 +303,42 @@ class SADA(nn.Module):
         self.fpn_strides = [scale_factor ** i for i in range(backbone_arch[-1] + 1)]
 
         self.input_noise = cfg['model']['input_noise']
+
+        transport_cfg = cfg.get('transport_alignment', {})
+        self.transport_alignment_mode = transport_cfg.get('mode', 'off')
+        if self.transport_alignment_mode not in (
+            'off', 'uot', 'adapter_grl', 'uot_adapter'
+        ):
+            raise ValueError(
+                'unknown transport alignment mode: {}'.format(
+                    self.transport_alignment_mode
+                )
+            )
+        self.transport_alignment_levels = tuple(
+            int(level) for level in transport_cfg.get('levels', [0, 1, 2])
+        )
+        if any(level < 0 or level >= len(self.fpn_strides)
+               for level in self.transport_alignment_levels):
+            raise ValueError('transport alignment levels are invalid')
+        self.transport_feature_weight = float(
+            transport_cfg.get('feature_weight', 1.0)
+        )
+        self.transport_label_weight = float(
+            transport_cfg.get('label_weight', 1.0)
+        )
+        self.transport_epsilon = float(transport_cfg.get('epsilon', 0.1))
+        self.transport_marginal_relaxation = float(
+            transport_cfg.get('marginal_relaxation', 0.5)
+        )
+        self.transport_sinkhorn_iterations = int(
+            transport_cfg.get('sinkhorn_iterations', 30)
+        )
+        self.transport_max_points = int(
+            transport_cfg.get('max_points', 256)
+        )
+        self.transport_loss_weight = float(
+            transport_cfg.get('loss_weight', 1.0)
+        )
 
         self.reg_range = cfg['model']['regression_range']
         self.n_levels = len(self.fpn_strides)
@@ -799,6 +839,18 @@ class SADA(nn.Module):
         self.neck_source = copy.deepcopy(self.neck)
         self.backbone_target = self.backbone_source
         self.neck_target = self.neck_source
+
+        self.transport_source_adapters = nn.ModuleList()
+        self.transport_target_adapters = nn.ModuleList()
+        if self.transport_alignment_mode in ('adapter_grl', 'uot_adapter'):
+            bottleneck = int(transport_cfg.get('adapter_bottleneck', 64))
+            for _ in range(len(self.fpn_strides)):
+                self.transport_source_adapters.append(
+                    ResidualAdapter(fpn_dim, bottleneck)
+                )
+                self.transport_target_adapters.append(
+                    ResidualAdapter(fpn_dim, bottleneck)
+                )
         
         # location generator: points
         self.point_generator = make_generator(
@@ -1458,6 +1510,22 @@ class SADA(nn.Module):
         feats_tgt, masks_tgt, _ = self.backbone_target(batched_inputs_tgt, batched_masks_tgt)
         fpn_feats_tgt, fpn_masks_tgt = self.neck_target(feats_tgt, masks_tgt)  # Maintains the same shape as its input
 
+        raw_fpn_feats_src = fpn_feats_src
+        raw_fpn_feats_tgt = fpn_feats_tgt
+        if self.transport_alignment_mode in ('adapter_grl', 'uot_adapter'):
+            fpn_feats_src = [
+                adapter(features)
+                for adapter, features in zip(
+                    self.transport_source_adapters, raw_fpn_feats_src
+                )
+            ]
+            fpn_feats_tgt = [
+                adapter(features)
+                for adapter, features in zip(
+                    self.transport_target_adapters, raw_fpn_feats_tgt
+                )
+            ]
+
         if self.vlm_routing_enabled:
             # VLM routing comes from the external frozen teacher. Keep the
             # legacy return contract without a second stochastic student pass.
@@ -1636,21 +1704,41 @@ class SADA(nn.Module):
                 start_idx += points_per_level[l_idx]
             
             
-            dom_inv_feats = fpn_feats
-                
+            if self.transport_alignment_mode in ('adapter_grl', 'uot_adapter'):
+                # Domain loss must not update the shared detector in adapter modes.
+                transport_feats = [
+                    torch.cat([
+                        source_adapter(source_features.detach()).detach(),
+                        target_adapter(target_features.detach()),
+                    ], dim=0)
+                    for source_adapter, target_adapter, source_features, target_features in zip(
+                        self.transport_source_adapters,
+                        self.transport_target_adapters,
+                        raw_fpn_feats_src,
+                        raw_fpn_feats_tgt,
+                    )
+                ]
+            else:
+                transport_feats = fpn_feats
+            dom_inv_feats = transport_feats
+
             beta = self.cfg['model'].get('beta', 1)
-            pred_domain_all = self.compute_dom_preds(dom_inv_feats, fpn_masks, curr_epoch, beta=beta)
-            
-            
+            if self.transport_alignment_mode in ('uot', 'uot_adapter'):
+                pred_domain_all = []
+            else:
+                pred_domain_all = self.compute_dom_preds(
+                    dom_inv_feats, fpn_masks, curr_epoch, beta=beta
+                )
+
             # compute the loss and return
             losses = self.losses(
                 fpn_masks,
-                out_cls_logits, 
+                out_cls_logits,
                 out_offsets,
                 out_actionness,
                 gt_cls_labels, gt_offsets,
                 out_lb_logits, out_rb_logits,
-                pred_domain_all, 
+                pred_domain_all,
                 dom_inv_feats,  # These are the domain invariant features that we want to apply supervision on for the semantic loss
                 gts_cls_per_level_src,
                 gts_cls_per_level_tgt,
@@ -1662,11 +1750,11 @@ class SADA(nn.Module):
                 out_validity_logits_src=out_validity_logits_src,
                 source_validity_cohorts=source_validity_cohorts,
             )
-            
+
             # Return the GTs of the target domain as well, to be used to compute the anchors
             gt_tgt_cls = torch.stack(gt_cls_labels[bs:])   # shape: List of B elements B x FT x C
             gt_tgt_cls = gt_tgt_cls[valid_mask_tgt_pl]  # T' x C
-            
+
             gt_tgt_offsets = torch.stack(gt_offsets[bs:])   # shape: List of B elements B x FT x 2
             gt_tgt_offsets = gt_tgt_offsets[valid_mask_tgt_pl]  # T' x 2
 
@@ -1674,11 +1762,11 @@ class SADA(nn.Module):
             points = points.unsqueeze(0).repeat(bs, 1, 1) # shape: B x T_i x 4
             masked_points = points[valid_mask_tgt_pl] # shape: B(T_i)F x 4
 
-            return (losses, 
-                   torch.cat(out_cls_logits_tgt_pl, dim=1)[valid_mask_tgt_pl], 
-                   gt_tgt_cls, 
-                   torch.cat(out_offsets_tgt_pl, dim=1)[valid_mask_tgt_pl], 
-                   gt_tgt_offsets, 
+            return (losses,
+                   torch.cat(out_cls_logits_tgt_pl, dim=1)[valid_mask_tgt_pl],
+                   gt_tgt_cls,
+                   torch.cat(out_offsets_tgt_pl, dim=1)[valid_mask_tgt_pl],
+                   gt_tgt_offsets,
                    masked_points,    # T' x 4
                    torch.cat(out_actionness_tgt_pl, dim=1)[valid_mask_tgt_pl]    # T' x 1
             )
@@ -2164,6 +2252,63 @@ class SADA(nn.Module):
                    'oracle_target_reg_loss': target_reg_loss,
                    'oracle_target_reg_positive': target_reg_positive,
                    'downstream_loss': downstream_loss}
+
+        transport_loss = losses['downstream_loss'] * 0.0
+        transport_mass = losses['downstream_loss'] * 0.0
+        transport_rejected_mass = losses['downstream_loss'] * 0.0
+        transport_levels_used = 0
+        if (
+            mode == 'train'
+            and curr_epoch >= self.warmup_adv
+            and self.transport_alignment_mode in ('uot', 'uot_adapter')
+        ):
+            level_losses = []
+            for level in self.transport_alignment_levels:
+                source_mask = fpn_masks_src[level]
+                target_mask = fpn_masks_tgt[level]
+                source_features = einops.rearrange(
+                    dom_inv_feats[level][:bs], 'b c t -> b t c'
+                )[source_mask]
+                target_features = einops.rearrange(
+                    dom_inv_feats[level][bs:], 'b c t -> b t c'
+                )[target_mask]
+                source_labels = gts_per_level_src[level][source_mask]
+                target_probs = out_cls_logits_tgt[level][target_mask].sigmoid()
+                if self.transport_alignment_mode == 'uot_adapter':
+                    target_probs = target_probs.detach()
+                level_loss, level_stats = joint_unbalanced_ot_loss(
+                    source_features,
+                    target_features,
+                    source_labels,
+                    target_probs,
+                    feature_weight=self.transport_feature_weight,
+                    label_weight=self.transport_label_weight,
+                    epsilon=self.transport_epsilon,
+                    marginal_relaxation=self.transport_marginal_relaxation,
+                    iterations=self.transport_sinkhorn_iterations,
+                    max_points=self.transport_max_points,
+                )
+                level_losses.append(level_loss)
+                transport_mass = transport_mass + level_stats['transport_mass']
+                transport_rejected_mass = (
+                    transport_rejected_mass + level_stats['rejected_mass']
+                )
+                transport_levels_used += 1
+                losses['transport_l{}_source_points'.format(level)] = torch.tensor(
+                    float(level_stats['source_points']), device=self.device
+                )
+                losses['transport_l{}_target_points'.format(level)] = torch.tensor(
+                    float(level_stats['target_points']), device=self.device
+                )
+            if level_losses:
+                transport_loss = sum(level_losses) / len(level_losses)
+
+        losses['loss_transport_alignment'] = transport_loss
+        losses['transport_mass'] = transport_mass
+        losses['transport_rejected_mass'] = transport_rejected_mass
+        losses['transport_levels_used'] = torch.tensor(
+            float(transport_levels_used), device=self.device
+        )
         
         
         # Set a threshold for the confidence of the pseudo-labels
@@ -2224,7 +2369,11 @@ class SADA(nn.Module):
             
             # -------------------------------
             # Implementation of the conditional adversarial loss, where we try to fool the discriminator while it knows to which action class this belong (source), or the action class that we infer (target)
-            if 'conditional_rev' in self.cfg['model']['adv_method'] and curr_epoch >= self.cfg['train_cfg'].get('warmup_adv', 0):
+            if (
+                'conditional_rev' in self.cfg['model']['adv_method']
+                and curr_epoch >= self.cfg['train_cfg'].get('warmup_adv', 0)
+                and self.transport_alignment_mode in ('off', 'adapter_grl')
+            ):
                 # For this loss, apply the discriminator to the source and target embeddings, but including the information of the class that it belongs (or that we infer)
                 # This will condition the prediction, and "tell" the discriminator that what we want is to fool it class-wise (e.g., class 1 of source and target,...)
                 

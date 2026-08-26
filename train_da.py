@@ -252,6 +252,7 @@ def main(cfg, resume, project_name='sada', debug=False):
         ).to(device)
         
         model_ema = ModelEma2(new_model, decay=cfg['train_cfg']['ema_decay']).to(device)
+
         if cfg.get('vlm_routing', {}).get('enabled', False):
             teacher_cfg = copy.deepcopy(cfg.config)
             teacher_cfg['vlm_routing']['load_evidence'] = True
@@ -352,6 +353,48 @@ def main(cfg, resume, project_name='sada', debug=False):
         raise ValueError(
             'frozen VLM routing currently requires train_cfg.ema_active=true'
         )
+
+    if args.transport_init_from_sada is not None:
+        initialization_path = args.transport_init_from_sada
+        if not os.path.isfile(initialization_path):
+            raise ValueError(
+                'transport initialization checkpoint not found: {}'.format(
+                    initialization_path
+                )
+            )
+        checkpoint = torch.load(initialization_path, map_location=device)
+        if 'state_dict' not in checkpoint:
+            raise ValueError('transport initialization checkpoint has no state_dict')
+
+        def load_transport_state(module, state):
+            incompatible = module.load_state_dict(state, strict=False)
+            invalid_missing = [
+                key for key in incompatible.missing_keys
+                if not key.startswith('transport_source_adapters.')
+                and not key.startswith('transport_target_adapters.')
+            ]
+            if invalid_missing or incompatible.unexpected_keys:
+                raise ValueError(
+                    'transport initialization state differs outside adapters: '
+                    'missing={} unexpected={}'.format(
+                        invalid_missing, incompatible.unexpected_keys
+                    )
+                )
+
+        load_transport_state(model, checkpoint['state_dict'])
+        if use_ema:
+            ema_state_key = (
+                'ema_state_dict'
+                if 'ema_state_dict' in checkpoint else 'state_dict'
+            )
+            load_transport_state(model_ema.module, checkpoint[ema_state_key])
+        args.start_epoch = int(checkpoint.get('epoch', 0)) + 1
+        print(
+            "=> initialized transport alignment from '{}' at epoch {}".format(
+                initialization_path, args.start_epoch - 1
+            )
+        )
+        del checkpoint
         
 
     """4. Resume from model / Misc"""
@@ -723,6 +766,13 @@ def create_argparser():
             'optimizer and scheduler start a new controlled fine-tuning run'
         ),
     )
+    start_group.add_argument(
+        '--transport-init-from-sada', default=None, type=str,
+        help=(
+            'initialize transport alignment from a SADA checkpoint; '
+            'only transport adapter parameters may be absent'
+        ),
+    )
     parser.add_argument('-s', '--seed', default=DEFAULT_SEED, type=int,
                         help='random seed')
     parser.add_argument('-i', '--gpu', default=GPU, type=int,
@@ -915,6 +965,39 @@ def create_argparser():
         ),
     )
     parser.add_argument(
+        '--transport-alignment',
+        choices=['off', 'uot', 'adapter_grl', 'uot_adapter'],
+        default='off',
+        help=(
+            'replace conditional alignment with joint unbalanced OT and/or '
+            'route domain gradients through isolated residual adapters'
+        ),
+    )
+    parser.add_argument(
+        '--transport-levels', default='0,1,2',
+        help='comma-separated FPN levels for transport alignment',
+    )
+    parser.add_argument(
+        '--transport-loss-weight', type=float, default=1.0,
+        help='weight for the joint unbalanced OT loss',
+    )
+    parser.add_argument(
+        '--transport-adapter-bottleneck', type=int, default=64,
+        help='bottleneck width of each residual transport adapter',
+    )
+    parser.add_argument(
+        '--transport-epsilon', type=float, default=0.1,
+        help='entropic regularization for unbalanced OT',
+    )
+    parser.add_argument(
+        '--transport-marginal-relaxation', type=float, default=0.5,
+        help='KL marginal relaxation for unbalanced OT',
+    )
+    parser.add_argument(
+        '--transport-max-points', type=int, default=256,
+        help='maximum deterministic anchors per domain and FPN level',
+    )
+    parser.add_argument(
         '--diagnostic-action-levels', default=None,
         help='comma-separated aligned FPN levels that use action classes',
     )
@@ -958,6 +1041,63 @@ if __name__ == '__main__':
     )
     if args.vlm_crop_alignment <= 0:
         raise ValueError('VLM crop alignment must be positive')
+    transport_levels = [
+        int(level.strip())
+        for level in args.transport_levels.split(',')
+        if level.strip()
+    ]
+    if (
+        not transport_levels
+        or len(set(transport_levels)) != len(transport_levels)
+        or any(level < 0 or level >= 6 for level in transport_levels)
+    ):
+        raise ValueError('transport levels must be unique values from 0 to 5')
+    config_dict['transport_alignment'] = {
+        'mode': args.transport_alignment,
+        'levels': transport_levels,
+        'loss_weight': args.transport_loss_weight,
+        'adapter_bottleneck': args.transport_adapter_bottleneck,
+        'epsilon': args.transport_epsilon,
+        'marginal_relaxation': args.transport_marginal_relaxation,
+        'max_points': args.transport_max_points,
+        'feature_weight': 1.0,
+        'label_weight': 1.0,
+        'sinkhorn_iterations': 30,
+    }
+    if args.transport_alignment != 'off':
+        if (
+            effective_stage1 != 'off'
+            or vlm_enabled
+            or args.selective_alignment != 'off'
+            or args.validity_head == 'train'
+            or args.oracle_routing != 'off'
+            or args.oracle_forgetting != 'off'
+            or args.oracle_target_regression != 'off'
+            or args.binary_band_oracle != 'off'
+            or args.conditional_paired_support
+            or args.conditional_paired_fixed_denominator
+        ):
+            raise ValueError(
+                'transport alignment requires a clean SADA baseline run'
+            )
+        if 'conditional_rev' not in config_dict['model']['adv_method']:
+            raise ValueError(
+                'transport alignment requires conditional_rev in adv_method'
+            )
+        if args.transport_loss_weight <= 0.0:
+            raise ValueError('transport loss weight must be positive')
+        if args.transport_adapter_bottleneck <= 0:
+            raise ValueError('transport adapter bottleneck must be positive')
+        if args.transport_epsilon <= 0.0:
+            raise ValueError('transport epsilon must be positive')
+        if args.transport_marginal_relaxation <= 0.0:
+            raise ValueError('transport marginal relaxation must be positive')
+        if args.transport_max_points <= 0:
+            raise ValueError('transport max points must be positive')
+    elif args.transport_init_from_sada is not None:
+        raise ValueError(
+            '--transport-init-from-sada requires --transport-alignment'
+        )
     if args.vlm_soft_residual:
         if not vlm_enabled or args.vlm_routing_mode != 'semantic_only':
             raise ValueError(
