@@ -49,10 +49,12 @@ from .conditional_alignment import aggregate_conditional_class_losses
 from .proposal_semantic import (
     PROPOSAL_SEMANTIC_MODES,
     ProposalSemanticBranch,
+    ProposalTargetAdapter,
     build_teacher_proposals,
     cached_proposals_for_videos,
     labels_for_proposals,
     load_proposal_semantic_cache,
+    proposal_detection_loss,
     source_gt_proposals,
 )
 from libs.utils import batched_nms
@@ -598,6 +600,9 @@ class SADA(nn.Module):
         self.proposal_semantic_alignment_weight = float(
             proposal_cfg.get('alignment_weight', 0.1)
         )
+        self.proposal_semantic_direct_weight = float(
+            proposal_cfg.get('direct_weight', 1.0)
+        )
         self.proposal_semantic_target_start_epoch = int(
             proposal_cfg.get('target_start_epoch', 5)
         )
@@ -617,6 +622,7 @@ class SADA(nn.Module):
             if (
                 self.proposal_semantic_source_weight < 0.0
                 or self.proposal_semantic_alignment_weight < 0.0
+                or self.proposal_semantic_direct_weight < 0.0
                 or self.proposal_semantic_target_start_epoch < 1
                 or not self.proposal_semantic_levels
                 or len(set(self.proposal_semantic_levels))
@@ -1123,6 +1129,7 @@ class SADA(nn.Module):
             )
 
         self.proposal_semantic_branch = None
+        self.proposal_target_adapters = nn.ModuleList()
         if self.proposal_semantic_enabled:
             self.proposal_semantic_branch = ProposalSemanticBranch(
                 fpn_dim=fpn_dim,
@@ -1137,6 +1144,16 @@ class SADA(nn.Module):
                     'prototype_momentum', 0.9
                 ),
             )
+            if self.proposal_semantic_mode.startswith('oracle_adapter_'):
+                bottleneck = int(proposal_cfg.get('adapter_bottleneck', 64))
+                if bottleneck <= 0:
+                    raise ValueError('proposal target adapter bottleneck must be positive')
+                enabled_levels = set(self.proposal_semantic_levels)
+                self.proposal_target_adapters = nn.ModuleList([
+                    ProposalTargetAdapter(fpn_dim, bottleneck)
+                    if level in enabled_levels else nn.Identity()
+                    for level in range(self.n_levels)
+                ])
 
         # maintain an EMA of #foreground to stabilize the loss normalizer
         # useful for small mini-batch training
@@ -1729,6 +1746,7 @@ class SADA(nn.Module):
         target_count = 0
         selected_count = 0
         aligned_classes = 0
+        direct_loss = zero
         entropy = zero.detach()
         confidence = zero.detach()
 
@@ -1749,6 +1767,8 @@ class SADA(nn.Module):
                 target = proposal_teacher
             if self.proposal_semantic_mode.startswith('oracle_'):
                 oracle_mode = self.proposal_semantic_mode.split('_', 1)[1]
+                if oracle_mode.startswith('adapter_'):
+                    oracle_mode = oracle_mode.split('_', 1)[1]
                 targets = labels_for_proposals(
                     target,
                     [video['segments'] for video in video_list_tgt],
@@ -1760,18 +1780,26 @@ class SADA(nn.Module):
                     proposal['evidence'] = F.pad(labels, (0, 4))
                     proposal['evidence_eligible'] = labels.sum(dim=-1) > 0
 
-            encoded_target = branch.encode(
-                fpn_feats_tgt, out_cls_logits_tgt, target, self.fpn_strides
-            )
-            selection = branch.select_target(encoded_target, target)
-            alignment_loss, aligned_classes = branch.prototype_alignment(
-                encoded_source, source_targets, encoded_target, selection
-            )
-            target_count = int(encoded_target['embedding'].shape[0])
-            selected_count = int(selection['selected'].sum())
-            if target_count:
-                entropy = selection['entropy'].mean()
-                confidence = selection['confidence'].mean()
+            if self.proposal_semantic_mode.startswith('oracle_adapter_'):
+                direct_loss, selected_count = proposal_detection_loss(
+                    out_cls_logits_tgt, target, self.fpn_strides
+                )
+                target_count = sum(
+                    int(proposal['segments'].shape[0]) for proposal in target
+                )
+            else:
+                encoded_target = branch.encode(
+                    fpn_feats_tgt, out_cls_logits_tgt, target, self.fpn_strides
+                )
+                selection = branch.select_target(encoded_target, target)
+                alignment_loss, aligned_classes = branch.prototype_alignment(
+                    encoded_source, source_targets, encoded_target, selection
+                )
+                target_count = int(encoded_target['embedding'].shape[0])
+                selected_count = int(selection['selected'].sum())
+                if target_count:
+                    entropy = selection['entropy'].mean()
+                    confidence = selection['confidence'].mean()
         else:
             branch._update_source_prototypes(
                 encoded_source['embedding'], source_targets
@@ -1780,6 +1808,7 @@ class SADA(nn.Module):
         return {
             'proposal_semantic_source_loss': source_loss,
             'proposal_semantic_alignment_loss': alignment_loss,
+            'proposal_semantic_direct_loss': direct_loss,
             'proposal_semantic_source_count': torch.tensor(
                 float(encoded_source['embedding'].shape[0]), device=self.device
             ),
@@ -1861,6 +1890,15 @@ class SADA(nn.Module):
         feats_tgt, masks_tgt, _ = self.backbone_target(batched_inputs_tgt, batched_masks_tgt)
         fpn_feats_tgt, fpn_masks_tgt = self.neck_target(feats_tgt, masks_tgt)  # Maintains the same shape as its input
 
+        fpn_feats_tgt_cls = fpn_feats_tgt
+        if self.proposal_semantic_mode.startswith('oracle_adapter_'):
+            fpn_feats_tgt_cls = [
+                adapter(features.detach())
+                for adapter, features in zip(
+                    self.proposal_target_adapters, fpn_feats_tgt
+                )
+            ]
+
         if self.vlm_routing_enabled:
             # VLM routing comes from the external frozen teacher. Keep the
             # legacy return contract without a second stochastic student pass.
@@ -1912,7 +1950,9 @@ class SADA(nn.Module):
         
         # out_cls: List[B, #cls + 1, T_i]
         out_cls_logits_src, _ = self.cls_head(fpn_feats_src, fpn_masks_src)
-        out_cls_logits_tgt, _ = self.cls_head_target(fpn_feats_tgt, fpn_masks_tgt)
+        out_cls_logits_tgt, _ = self.cls_head_target(
+            fpn_feats_tgt_cls, fpn_masks_tgt
+        )
         
         out_cls_logits = [torch.cat((out_cls_logits_src[i], out_cls_logits_tgt[i]), dim=0) for i in range(len(out_cls_logits_src))]
 
@@ -2085,6 +2125,8 @@ class SADA(nn.Module):
                     * proposal_losses['proposal_semantic_source_loss']
                     + self.proposal_semantic_alignment_weight
                     * proposal_losses['proposal_semantic_alignment_loss']
+                    + self.proposal_semantic_direct_weight
+                    * proposal_losses['proposal_semantic_direct_loss']
                 )
             
             # Return the GTs of the target domain as well, to be used to compute the anchors

@@ -14,6 +14,35 @@ proposal_semantic = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(proposal_semantic)
 
 
+def test_target_adapter_is_identity_at_initialization():
+    adapter = proposal_semantic.ProposalTargetAdapter(4, bottleneck=2)
+    features = torch.randn(2, 4, 8)
+
+    output = adapter(features)
+
+    assert torch.equal(output, features)
+
+
+def test_proposal_detection_loss_supervises_detector_logits_only():
+    logits = [torch.zeros(1, 8, 2, requires_grad=True)]
+    targets = torch.tensor([[0.0, 1.0]], requires_grad=True)
+    proposals = [{
+        "segments": torch.tensor([[2.0, 6.0]]),
+        "levels": torch.tensor([0]),
+        "targets": targets,
+    }]
+
+    loss, count = proposal_semantic.proposal_detection_loss(
+        logits, proposals, (1,)
+    )
+    loss.backward()
+
+    assert count == 1
+    assert logits[0].grad is not None
+    assert logits[0].grad.abs().sum() > 0
+    assert targets.grad is None
+
+
 def test_teacher_proposals_decode_geometry_and_apply_class_agnostic_nms():
     points = [torch.tensor([
         [1.0, 0.0, 0.0, 1.0],

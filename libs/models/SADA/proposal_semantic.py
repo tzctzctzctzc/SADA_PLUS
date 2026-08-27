@@ -15,6 +15,9 @@ PROPOSAL_SEMANTIC_MODES = (
     "oracle_center",
     "oracle_dominant",
     "oracle_soft",
+    "oracle_adapter_center",
+    "oracle_adapter_dominant",
+    "oracle_adapter_soft",
     "vlm",
 )
 PROPOSAL_SEMANTIC_CACHE_SCHEMA = "proposal-semantic-evidence-v1"
@@ -321,6 +324,57 @@ def _sample_sequence(sequence, positions):
     right = (left + 1).clamp(max=max(length - 1, 0))
     weight = (positions - left.float()).unsqueeze(0)
     return sequence[:, left] * (1.0 - weight) + sequence[:, right] * weight
+
+
+class ProposalTargetAdapter(nn.Module):
+    """Zero-initialized target residual used only on classification features."""
+
+    def __init__(self, channels, bottleneck=64):
+        super().__init__()
+        self.down = nn.Conv1d(channels, bottleneck, kernel_size=1)
+        self.activation = nn.ReLU()
+        self.up = nn.Conv1d(bottleneck, channels, kernel_size=1)
+        nn.init.zeros_(self.up.weight)
+        nn.init.zeros_(self.up.bias)
+
+    def forward(self, features):
+        return features + self.up(self.activation(self.down(features)))
+
+
+def proposal_detection_loss(class_logits, proposals, fpn_strides):
+    """Supervise the detector through proposal-average class logits."""
+    pooled_logits = []
+    pooled_targets = []
+    for batch_index, proposal in enumerate(proposals):
+        targets = proposal.get("targets")
+        if targets is None:
+            continue
+        for segment, level, target in zip(
+            proposal["segments"], proposal["levels"], targets
+        ):
+            if float(target.sum()) <= 0.0:
+                continue
+            level = int(level)
+            duration = (segment[1] - segment[0]).clamp(min=1.0)
+            positions = torch.stack((
+                segment[0],
+                segment[0] + 0.25 * duration,
+                0.5 * (segment[0] + segment[1]),
+                segment[1] - 0.25 * duration,
+                segment[1],
+            )) / float(fpn_strides[level])
+            sampled = _sample_sequence(
+                class_logits[level][batch_index].transpose(0, 1), positions
+            ).transpose(0, 1)
+            pooled_logits.append(sampled.mean(dim=0))
+            pooled_targets.append(target.detach())
+    if not pooled_logits:
+        zero = sum(logits.sum() * 0.0 for logits in class_logits)
+        return zero, 0
+    logits = torch.stack(pooled_logits)
+    targets = torch.stack(pooled_targets)
+    loss = F.binary_cross_entropy_with_logits(logits, targets, reduction="none")
+    return loss.sum(dim=-1).mean(), logits.shape[0]
 
 
 class ProposalSemanticBranch(nn.Module):

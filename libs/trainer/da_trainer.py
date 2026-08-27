@@ -326,8 +326,9 @@ class Trainer(BaseTrainerDA):
                 'mode', 'off'
             )
             if (
-                proposal_mode in (
-                    'teacher', 'oracle_center', 'oracle_dominant', 'oracle_soft'
+                (
+                    proposal_mode == 'teacher'
+                    or proposal_mode.startswith('oracle_')
                 )
                 and curr_epoch >= self.model.proposal_semantic_target_start_epoch
             ):

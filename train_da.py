@@ -177,6 +177,20 @@ def main(cfg, resume, project_name='sada', debug=False):
 
     #model = make_meta_arch(cfg['model_name'], **cfg['model'])
     model = make_meta_arch(cfg['model_name'], cfg, device = device)
+    if cfg.get('proposal_semantic', {}).get('adapter_only', False):
+        model.requires_grad_(False)
+        model.proposal_target_adapters.requires_grad_(True)
+        trainable = [
+            name for name, parameter in model.named_parameters()
+            if parameter.requires_grad
+        ]
+        if not trainable or any(
+            not name.startswith('proposal_target_adapters.')
+            for name in trainable
+        ):
+            raise ValueError(
+                'proposal Oracle adapter isolation failed: {}'.format(trainable)
+            )
     
     # Optimizer hyperaparameters
     weight_decay=1e-3
@@ -378,9 +392,13 @@ def main(cfg, resume, project_name='sada', debug=False):
         incompatible = model.load_state_dict(
             checkpoint[initialization_state_key], strict=False
         )
+        allowed_missing_prefixes = (
+            'proposal_semantic_branch.',
+            'proposal_target_adapters.',
+        )
         invalid_missing = [
             key for key in incompatible.missing_keys
-            if not key.startswith('proposal_semantic_branch.')
+            if not key.startswith(allowed_missing_prefixes)
         ]
         if invalid_missing or incompatible.unexpected_keys:
             raise ValueError(
@@ -400,7 +418,7 @@ def main(cfg, resume, project_name='sada', debug=False):
             )
             ema_invalid_missing = [
                 key for key in ema_incompatible.missing_keys
-                if not key.startswith('proposal_semantic_branch.')
+                if not key.startswith(allowed_missing_prefixes)
             ]
             if ema_invalid_missing or ema_incompatible.unexpected_keys:
                 raise ValueError(
@@ -408,6 +426,9 @@ def main(cfg, resume, project_name='sada', debug=False):
                 )
             model_ema.module.proposal_semantic_branch.load_state_dict(
                 model.proposal_semantic_branch.state_dict()
+            )
+            model_ema.module.proposal_target_adapters.load_state_dict(
+                model.proposal_target_adapters.state_dict()
             )
         cfg.config['proposal_semantic']['initialization'] = {
             'checkpoint': initialization_path,
@@ -984,7 +1005,8 @@ def create_argparser():
         '--proposal-semantic-mode',
         choices=[
             'off', 'source', 'teacher', 'oracle_center',
-            'oracle_dominant', 'oracle_soft', 'vlm',
+            'oracle_dominant', 'oracle_soft', 'oracle_adapter_center',
+            'oracle_adapter_dominant', 'oracle_adapter_soft', 'vlm',
         ],
         default='off',
         help='proposal-level dataset semantics and source-target alignment mode',
@@ -998,6 +1020,8 @@ def create_argparser():
     )
     parser.add_argument('--proposal-semantic-source-weight', type=float, default=1.0)
     parser.add_argument('--proposal-semantic-alignment-weight', type=float, default=0.1)
+    parser.add_argument('--proposal-semantic-direct-weight', type=float, default=1.0)
+    parser.add_argument('--proposal-semantic-adapter-bottleneck', type=int, default=64)
     parser.add_argument('--proposal-semantic-target-start-epoch', type=int, default=5)
     parser.add_argument('--proposal-semantic-levels', default='0,1,2')
     parser.add_argument('--proposal-semantic-score-threshold', type=float, default=0.3)
@@ -1255,6 +1279,8 @@ if __name__ == '__main__':
         if (
             args.proposal_semantic_source_weight < 0.0
             or args.proposal_semantic_alignment_weight < 0.0
+            or args.proposal_semantic_direct_weight < 0.0
+            or args.proposal_semantic_adapter_bottleneck <= 0
             or args.proposal_semantic_target_start_epoch < 1
             or not 0.0 < args.proposal_semantic_score_threshold <= 1.0
             or args.proposal_semantic_max_proposals < 1
@@ -1362,6 +1388,11 @@ if __name__ == '__main__':
         'target_cache_sha256': target_cache_sha256,
         'source_weight': args.proposal_semantic_source_weight,
         'alignment_weight': args.proposal_semantic_alignment_weight,
+        'direct_weight': args.proposal_semantic_direct_weight,
+        'adapter_bottleneck': args.proposal_semantic_adapter_bottleneck,
+        'adapter_only': args.proposal_semantic_mode.startswith(
+            'oracle_adapter_'
+        ),
         'target_start_epoch': args.proposal_semantic_target_start_epoch,
         'levels': proposal_levels,
         'score_threshold': args.proposal_semantic_score_threshold,
