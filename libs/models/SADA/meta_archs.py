@@ -1779,6 +1779,10 @@ class SADA(nn.Module):
                 for proposal, labels in zip(target, targets):
                     proposal['evidence'] = F.pad(labels, (0, 4))
                     proposal['evidence_eligible'] = labels.sum(dim=-1) > 0
+                    if self.proposal_semantic_mode.startswith(
+                        'oracle_adapter_'
+                    ):
+                        proposal['targets'] = labels
 
             if self.proposal_semantic_mode.startswith('oracle_adapter_'):
                 direct_loss, selected_count = proposal_detection_loss(

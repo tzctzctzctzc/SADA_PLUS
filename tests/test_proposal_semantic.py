@@ -43,6 +43,31 @@ def test_proposal_detection_loss_supervises_detector_logits_only():
     assert targets.grad is None
 
 
+def test_observable_oracle_labels_feed_proposal_detection_loss():
+    proposals = [{
+        "segments": torch.tensor([[0.0, 4.0], [6.0, 8.0]]),
+        "levels": torch.tensor([0, 0]),
+        "evidence": torch.zeros(2, 6),
+        "evidence_eligible": torch.ones(2, dtype=torch.bool),
+    }]
+    targets = proposal_semantic.labels_for_proposals(
+        proposals,
+        [torch.tensor([[1.0, 5.0]])],
+        [torch.tensor([1])],
+        2,
+        "soft",
+    )
+    proposals[0]["targets"] = targets[0]
+    logits = [torch.zeros(1, 10, 2, requires_grad=True)]
+
+    loss, count = proposal_semantic.proposal_detection_loss(
+        logits, proposals, (1,)
+    )
+
+    assert count == 1
+    assert loss.item() > 0
+
+
 def test_teacher_proposals_decode_geometry_and_apply_class_agnostic_nms():
     points = [torch.tensor([
         [1.0, 0.0, 0.0, 1.0],
