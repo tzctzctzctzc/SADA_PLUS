@@ -42,7 +42,7 @@ PROMPT_SHA256 = hashlib.sha256(
     ).encode()
 ).hexdigest()
 EPIC_55_BASE_URL = "https://data.bris.ac.uk/datasets/3h91syskeag5572hl6tvuovwv4d"
-EPIC_100_BASE_URL = "https://data.bris.ac.uk/datasets/2g1n6qdydwaa9u22shpxqzp0t8m"
+EPIC_100_BASE_URL = "https://data.bris.ac.uk/datasets/2g1n6qdydwa9u22shpxqzp0t8m"
 
 
 def read_jsonl(path):
