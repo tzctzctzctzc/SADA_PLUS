@@ -60,6 +60,11 @@ def main():
     parser.add_argument("--config", required=True)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--video-root", required=True)
+    parser.add_argument(
+        "--include-missing-videos",
+        action="store_true",
+        help="export from feature files even when raw MP4s will be streamed later",
+    )
     parser.add_argument("--output", required=True)
     parser.add_argument("--domain", choices=("source", "target"), required=True)
     parser.add_argument("--split", choices=("train", "val"), required=True)
@@ -98,9 +103,13 @@ def main():
     )
     available = video_ids_in(args.video_root)
     expected_videos = len(dataset.data_list)
-    dataset.data_list = tuple(
-        item for item in dataset.data_list if item["id"] in available
+    available_dataset_videos = sum(
+        item["id"] in available for item in dataset.data_list
     )
+    if not args.include_missing_videos:
+        dataset.data_list = tuple(
+            item for item in dataset.data_list if item["id"] in available
+        )
     if not dataset.data_list:
         raise RuntimeError("no dataset video has a matching MP4")
 
@@ -248,7 +257,8 @@ def main():
         ],
         "selection_teacher_provenance": provenance,
         "expected_videos": expected_videos,
-        "available_videos": len(dataset),
+        "available_videos": available_dataset_videos,
+        "video_filter_applied": not args.include_missing_videos,
         "proposals_before_budget": before_limit,
         "selected_proposals": len(rows),
         "max_per_video": args.max_per_video,
