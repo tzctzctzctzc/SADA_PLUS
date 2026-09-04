@@ -7,8 +7,12 @@ import torch
 
 
 ORACLE_TARGET_DISTILLATION_MODES = ("off", "selected", "full")
-VLM_TARGET_ADAPTER_SCHEMA_VERSION = "offline-vlm-target-adapter-v1"
+VLM_TARGET_ADAPTER_SCHEMA_VERSIONS = (
+    "offline-vlm-target-adapter-v1",
+    "offline-clip-target-adapter-v2",
+)
 VLM_TARGET_ADAPTER_SOURCE = "offline_vlm_proposal_semantics"
+VLM_TARGET_ADAPTER_POLICIES = ("verify", "hard", "soft")
 TARGET_CLASS_NAMES = (
     "TAKE",
     "PUT",
@@ -62,7 +66,8 @@ def build_oracle_target_distillation(
 def load_vlm_target_adapter_cache(path):
     raw = Path(path).read_bytes()
     payload = json.loads(raw.decode("utf-8"))
-    if payload.get("schema_version") != VLM_TARGET_ADAPTER_SCHEMA_VERSION:
+    schema_version = payload.get("schema_version")
+    if schema_version not in VLM_TARGET_ADAPTER_SCHEMA_VERSIONS:
         raise ValueError("unsupported VLM target adapter cache schema")
     if payload.get("source") != VLM_TARGET_ADAPTER_SOURCE:
         raise ValueError("invalid VLM target adapter cache source")
@@ -109,11 +114,31 @@ def load_vlm_target_adapter_cache(path):
         absolute_time = float(entry["absolute_center_time"])
         if not math.isfinite(absolute_time) or absolute_time < 0:
             raise ValueError("invalid VLM target adapter center time")
+        probabilities = entry.get("class_probabilities")
+        confidence = float(entry.get("confidence", 1.0))
+        if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+            raise ValueError("invalid VLM target adapter confidence")
+        if probabilities is not None:
+            probabilities = tuple(float(value) for value in probabilities)
+            if (
+                len(probabilities) != len(TARGET_CLASS_NAMES)
+                or any(not math.isfinite(value) or value < 0.0 for value in probabilities)
+                or abs(sum(probabilities) - 1.0) > 1e-4
+            ):
+                raise ValueError("invalid VLM target adapter probabilities")
+            if max(range(len(probabilities)), key=probabilities.__getitem__) != class_id:
+                raise ValueError("VLM target adapter probabilities and class id differ")
+            if abs(max(probabilities) - confidence) > 1e-4:
+                raise ValueError("VLM target adapter probabilities and confidence differ")
+        elif schema_version == "offline-clip-target-adapter-v2":
+            raise ValueError("CLIP target adapter entry has no probabilities")
         by_video.setdefault(video_id, {})[absolute_index] = {
             "class_id": class_id,
             "semantic_label": TARGET_CLASS_NAMES[class_id],
             "source_fpn_levels": levels,
             "absolute_center_time": absolute_time,
+            "class_probabilities": probabilities,
+            "confidence": confidence,
         }
 
     return (
@@ -132,10 +157,16 @@ def build_vlm_target_distillation(
     cache_by_video,
     enabled_levels,
     alpha,
+    policy="verify",
+    confidence_threshold=0.0,
 ):
-    """Match frozen proposal semantics and keep current teacher agreement only."""
+    """Match frozen proposal semantics under a fixed class-assistance policy."""
     if not 0.0 < float(alpha) <= 1.0:
         raise ValueError("VLM target adapter alpha must be in (0, 1]")
+    if policy not in VLM_TARGET_ADAPTER_POLICIES:
+        raise ValueError("unknown VLM target adapter policy: {}".format(policy))
+    if not 0.0 <= float(confidence_threshold) <= 1.0:
+        raise ValueError("VLM target adapter confidence threshold must be in [0, 1]")
     enabled_levels = set(int(level) for level in enabled_levels)
     batch_size = len(video_list)
     num_classes = logits[0].shape[-1]
@@ -143,6 +174,8 @@ def build_vlm_target_distillation(
     target_levels = []
     hit_levels = []
     agreement_levels = []
+    confidence_levels = []
+    weight_levels = []
 
     for level, (point_grid, valid, level_logits) in enumerate(
         zip(points, valid_masks, logits)
@@ -150,6 +183,8 @@ def build_vlm_target_distillation(
         selected = torch.zeros_like(valid, dtype=torch.bool)
         hits = torch.zeros_like(valid, dtype=torch.bool)
         agreement = torch.zeros_like(valid, dtype=torch.bool)
+        confidence = torch.zeros_like(valid, dtype=level_logits.dtype)
+        weights = torch.zeros_like(valid, dtype=level_logits.dtype)
         targets = torch.zeros_like(level_logits)
         if level in enabled_levels:
             coordinates = [int(round(value)) for value in point_grid[:, 0].tolist()]
@@ -180,21 +215,49 @@ def build_vlm_target_distillation(
                         continue
                     hits[batch_index, local_index] = True
                     class_id = evidence["class_id"]
-                    targets[batch_index, local_index, class_id] = 1.0
+                    probabilities = evidence.get("class_probabilities")
+                    if policy == "soft":
+                        if probabilities is None:
+                            raise ValueError("soft CLIP policy requires class probabilities")
+                        targets[
+                            batch_index,
+                            local_index,
+                            :len(TARGET_CLASS_NAMES),
+                        ] = torch.as_tensor(
+                            probabilities,
+                            dtype=targets.dtype,
+                            device=targets.device,
+                        )
+                    else:
+                        targets[batch_index, local_index, class_id] = 1.0
+                    clip_confidence = float(evidence.get("confidence", 1.0))
+                    confidence[batch_index, local_index] = clip_confidence
                     agrees = int(classes[batch_index, local_index]) == class_id
                     agreement[batch_index, local_index] = agrees
-                    selected[batch_index, local_index] = (
-                        agrees
-                        and float(scores[batch_index, local_index]) >= float(alpha)
+                    confident = clip_confidence >= float(confidence_threshold)
+                    if policy == "verify":
+                        selected[batch_index, local_index] = (
+                            confident
+                            and agrees
+                            and float(scores[batch_index, local_index]) >= float(alpha)
+                        )
+                    else:
+                        selected[batch_index, local_index] = confident
+                    weights[batch_index, local_index] = (
+                        clip_confidence if policy == "soft" and confident else float(confident)
                     )
         selected_levels.append(selected)
         target_levels.append(targets)
         hit_levels.append(hits)
         agreement_levels.append(agreement)
+        confidence_levels.append(confidence)
+        weight_levels.append(weights)
 
     return {
         "selected": torch.cat(selected_levels, dim=1),
         "targets": torch.cat(target_levels, dim=1),
         "cache_hits": torch.cat(hit_levels, dim=1),
         "agreement": torch.cat(agreement_levels, dim=1),
+        "confidence": torch.cat(confidence_levels, dim=1),
+        "weights": torch.cat(weight_levels, dim=1),
     }

@@ -33,8 +33,6 @@ def main():
     gate = json.loads(Path(args.source_gate_report).read_text(encoding="utf-8"))
     if gate.get("gate_version") != "vlm-target-adapter-source-gate-v1":
         raise ValueError("invalid source gate report")
-    if not gate.get("adapter_pass"):
-        raise ValueError("source VLM target adapter gate did not pass")
     manifest_rows = read_jsonl(args.manifest)
     manifest = {row["candidate_id"]: row for row in manifest_rows}
     if len(manifest) != len(manifest_rows):
@@ -59,6 +57,9 @@ def main():
     if len(protocols) != 1:
         raise ValueError("target VLM predictions use mixed protocols")
     prompt_version, prompt_sha256, model, wire_api = protocols.pop()
+    is_clip = wire_api == "openai-clip"
+    if not gate.get("adapter_pass") and not is_clip:
+        raise ValueError("source VLM target adapter gate did not pass")
     meta = json.loads(
         Path(args.manifest + ".meta.json").read_text(encoding="utf-8")
     )
@@ -70,16 +71,28 @@ def main():
         label = predictions[candidate_id]["prediction"]
         if label not in KNOWN:
             continue
-        entries.append({
+        entry = {
             "video_id": row["video_id"],
             "absolute_feature_index": row["absolute_feature_index"],
             "absolute_center_time": row["absolute_center_time"],
             "source_fpn_levels": row["source_fpn_levels"],
             "semantic_label": label,
             "class_id": KNOWN.index(label),
-        })
+        }
+        if is_clip:
+            prediction = predictions[candidate_id]
+            probabilities = prediction.get("class_probabilities")
+            if not isinstance(probabilities, list) or len(probabilities) != len(KNOWN):
+                raise ValueError("CLIP prediction has invalid class probabilities")
+            entry["class_probabilities"] = probabilities
+            entry["confidence"] = prediction.get("confidence")
+            entry["margin"] = prediction.get("margin")
+        entries.append(entry)
     payload = {
-        "schema_version": "offline-vlm-target-adapter-v1",
+        "schema_version": (
+            "offline-clip-target-adapter-v2"
+            if is_clip else "offline-vlm-target-adapter-v1"
+        ),
         "source": "offline_vlm_proposal_semantics",
         "key_fields": ["video_id", "absolute_feature_index"],
         "selection_teacher_provenance": meta["selection_teacher_provenance"],
@@ -89,13 +102,17 @@ def main():
             "model": model,
             "wire_api": wire_api,
         },
-        "training_policy": "known_class_and_current_teacher_top1_agreement",
+        "training_policy": (
+            "runtime_selectable_clip_class_policy"
+            if is_clip else "known_class_and_current_teacher_top1_agreement"
+        ),
         "background_enabled": False,
         "entries": entries,
         "provenance": {
             "manifest_sha256": sha256(args.manifest),
             "prediction_sha256": [sha256(path) for path in args.predictions],
             "source_gate_report_sha256": sha256(args.source_gate_report),
+            "source_gate_pass": bool(gate.get("adapter_pass")),
         },
         "counts": {
             "manifest": len(manifest),

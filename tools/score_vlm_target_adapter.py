@@ -120,7 +120,11 @@ def main():
     parser.add_argument("--min-consensus-coverage", type=float, default=0.20)
     parser.add_argument("--min-precision-gain", type=float, default=0.03)
     parser.add_argument("--min-background-precision", type=float, default=0.80)
+    parser.add_argument("--min-confidence", type=float, default=0.0)
     args = parser.parse_args()
+
+    if not 0.0 <= args.min_confidence <= 1.0:
+        raise ValueError("minimum confidence must be in [0, 1]")
 
     manifest = {row["candidate_id"]: row for row in read_jsonl(args.manifest)}
     prediction_rows = [
@@ -131,7 +135,18 @@ def main():
     ]
     predictions = {row["candidate_id"]: row for row in prediction_rows}
     rows = [
-        {**row, "prediction": predictions[row_id]["prediction"]}
+        {
+            **row,
+            "prediction": (
+                predictions[row_id]["prediction"]
+                if float(predictions[row_id].get("confidence", 1.0))
+                >= args.min_confidence
+                else "ABSTAIN"
+            ),
+            "vlm_confidence": float(
+                predictions[row_id].get("confidence", 1.0)
+            ),
+        }
         for row_id, row in manifest.items()
         if row_id in predictions
     ]
@@ -145,6 +160,7 @@ def main():
             "min_precision_gain": args.min_precision_gain,
             "min_background_precision": args.min_background_precision,
     })
+    result["vlm_confidence_threshold"] = args.min_confidence
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")

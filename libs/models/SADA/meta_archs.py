@@ -557,6 +557,18 @@ class SADA(nn.Module):
         )
         if not 0.0 < self.vlm_target_adapter_budget <= 0.05:
             raise ValueError('VLM target adapter budget must be in (0, 0.05]')
+        self.vlm_target_adapter_policy = target_adapter_cfg.get(
+            'policy', 'verify'
+        )
+        if self.vlm_target_adapter_policy not in ('verify', 'hard', 'soft'):
+            raise ValueError('unknown VLM target adapter policy')
+        self.vlm_target_adapter_confidence_threshold = float(
+            target_adapter_cfg.get('confidence_threshold', 0.0)
+        )
+        if not 0.0 <= self.vlm_target_adapter_confidence_threshold <= 1.0:
+            raise ValueError(
+                'VLM target adapter confidence threshold must be in [0, 1]'
+            )
         self.vlm_target_adapter_levels = tuple(
             int(level)
             for level in target_adapter_cfg.get('levels', [0, 1, 2])
@@ -2649,6 +2661,7 @@ class SADA(nn.Module):
         vlm_target_cache_hits = vlm_target_zero.detach()
         vlm_target_agreement = vlm_target_zero.detach()
         vlm_target_samples = vlm_target_zero.detach()
+        vlm_target_weight_sum = vlm_target_zero.detach()
         if mode == 'train' and self.vlm_target_adapter_enabled:
             if video_list_tgt is None:
                 raise ValueError('VLM target adapter requires target video metadata')
@@ -2660,11 +2673,14 @@ class SADA(nn.Module):
                 self.vlm_target_adapter_cache,
                 self.vlm_target_adapter_levels,
                 self.cfg['model'].get('pl_threshold', 0.7),
+                self.vlm_target_adapter_policy,
+                self.vlm_target_adapter_confidence_threshold,
             )
             selected = vlm_target['selected']
             vlm_target_cache_hits = vlm_target['cache_hits'].sum().float()
             vlm_target_agreement = vlm_target['agreement'].sum().float()
             vlm_target_samples = selected.sum().float()
+            vlm_target_weight_sum = vlm_target['weights'][selected].sum()
             if selected.any():
                 target_logits = torch.cat(out_cls_logits_tgt, dim=1)
                 target_losses = sigmoid_focal_loss(
@@ -2674,6 +2690,7 @@ class SADA(nn.Module):
                     alpha=0.25,
                     gamma=self.cfg['model'].get('focal_loss_gamma', 2.0),
                 ).sum(dim=-1)
+                target_losses = target_losses * vlm_target['weights'][selected]
                 vlm_target_raw_loss = target_losses.mean()
                 (
                     vlm_target_loss,
@@ -2756,6 +2773,7 @@ class SADA(nn.Module):
                    'vlm_target_cache_hits': vlm_target_cache_hits,
                    'vlm_target_agreement': vlm_target_agreement,
                    'vlm_target_samples': vlm_target_samples,
+                   'vlm_target_weight_sum': vlm_target_weight_sum,
                    'downstream_loss': downstream_loss}
         
         

@@ -155,3 +155,74 @@ def test_vlm_target_cache_rejects_label_id_mismatch(tmp_path):
 
     with pytest.raises(ValueError, match="differ"):
         load_vlm_target_adapter_cache(path)
+
+
+def test_clip_cache_loads_probabilities_and_confidence(tmp_path):
+    payload = adapter_payload([{
+        "video_id": "P01_01",
+        "absolute_feature_index": 11,
+        "absolute_center_time": 2.0,
+        "source_fpn_levels": [0],
+        "semantic_label": "PUT",
+        "class_id": 1,
+        "class_probabilities": [0.1, 0.9] + [0.0] * 8,
+        "confidence": 0.9,
+    }])
+    payload["schema_version"] = "offline-clip-target-adapter-v2"
+    path = tmp_path / "clip.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    cache, count, _, _ = load_vlm_target_adapter_cache(path)
+
+    assert count == 1
+    assert cache["P01_01"][11]["class_probabilities"][1] == 0.9
+    assert cache["P01_01"][11]["confidence"] == 0.9
+
+
+def test_hard_clip_policy_uses_confident_class_without_teacher_agreement():
+    videos = [{"metadata": {"video_id": "P01_01", "crop_start": 10}}]
+    points = [torch.tensor([[0.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0]])]
+    valid = [torch.tensor([[True, True]])]
+    logits = [torch.tensor([[[3.0, 0.0], [3.0, 0.0]]])]
+    cache = {"P01_01": {11: {
+        "class_id": 1,
+        "semantic_label": "PUT",
+        "source_fpn_levels": (0,),
+        "absolute_center_time": 2.0,
+        "class_probabilities": (0.1, 0.9) + (0.0,) * 8,
+        "confidence": 0.9,
+    }}}
+
+    result = build_vlm_target_distillation(
+        videos, points, valid, logits, cache, (0,), 0.8,
+        policy="hard", confidence_threshold=0.8,
+    )
+
+    assert result["agreement"].tolist() == [[False, False]]
+    assert result["selected"].tolist() == [[False, True]]
+    assert result["targets"][0, 1].tolist() == [0.0, 1.0]
+
+
+def test_soft_clip_policy_uses_distribution_and_confidence_weight():
+    videos = [{"metadata": {"video_id": "P01_01", "crop_start": 10}}]
+    points = [torch.tensor([[0.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0]])]
+    valid = [torch.tensor([[True, True]])]
+    logits = [torch.tensor([[[0.0] * 10, [3.0] + [0.0] * 9]])]
+    probabilities = (0.7, 0.3) + (0.0,) * 8
+    cache = {"P01_01": {11: {
+        "class_id": 0,
+        "semantic_label": "TAKE",
+        "source_fpn_levels": (0,),
+        "absolute_center_time": 2.0,
+        "class_probabilities": probabilities,
+        "confidence": 0.7,
+    }}}
+
+    result = build_vlm_target_distillation(
+        videos, points, valid, logits, cache, (0,), 0.8,
+        policy="soft", confidence_threshold=0.6,
+    )
+
+    assert result["selected"].tolist() == [[False, True]]
+    assert result["targets"][0, 1].tolist() == pytest.approx(probabilities)
+    assert result["weights"][0, 1].item() == pytest.approx(0.7)

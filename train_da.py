@@ -1002,6 +1002,15 @@ def create_argparser():
         help='comma-separated FPN levels for VLM target supervision',
     )
     parser.add_argument(
+        '--vlm-target-adapter-policy', choices=['verify', 'hard', 'soft'],
+        default='verify',
+        help='how frozen VLM classes supervise target proposals',
+    )
+    parser.add_argument(
+        '--vlm-target-adapter-confidence-threshold', type=float, default=0.0,
+        help='source-calibrated minimum VLM class confidence',
+    )
+    parser.add_argument(
         '--proposal-semantic-mode',
         choices=[
             'off', 'source', 'teacher', 'oracle_center',
@@ -1211,6 +1220,10 @@ if __name__ == '__main__':
         )
     if not 0.0 < args.vlm_target_adapter_budget <= 0.05:
         raise ValueError('VLM target adapter budget must be in (0, 0.05]')
+    if not 0.0 <= args.vlm_target_adapter_confidence_threshold <= 1.0:
+        raise ValueError(
+            'VLM target adapter confidence threshold must be in [0, 1]'
+        )
     if vlm_target_adapter_enabled:
         if args.resume is None:
             raise ValueError('VLM target adapter requires --resume')
@@ -1246,7 +1259,9 @@ if __name__ == '__main__':
         'cache_sha256': cache_sha256,
         'budget': args.vlm_target_adapter_budget,
         'levels': target_adapter_levels,
-        'selection_rule': 'known_class_and_current_teacher_top1_agreement',
+        'policy': args.vlm_target_adapter_policy,
+        'confidence_threshold': args.vlm_target_adapter_confidence_threshold,
+        'selection_rule': args.vlm_target_adapter_policy,
     }
     proposal_semantic_enabled = args.proposal_semantic_mode != 'off'
     proposal_levels = [
