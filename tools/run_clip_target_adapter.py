@@ -98,19 +98,35 @@ def epic_video_url(video_id, old_splits):
     )
 
 
-def download_video(video_id, old_splits, output, retries=3):
+def download_video(video_id, old_splits, output, retries=3, connections=8):
     url = epic_video_url(video_id, old_splits)
     output = Path(output)
     partial = output.with_suffix(output.suffix + ".part")
     for attempt in range(retries + 1):
         try:
-            with urllib.request.urlopen(url, timeout=180) as source, partial.open("wb") as sink:
-                shutil.copyfileobj(source, sink, length=1024 * 1024)
-            partial.replace(output)
+            if shutil.which("aria2c"):
+                subprocess.run(
+                    [
+                        "aria2c", "--quiet=true", "--allow-overwrite=true",
+                        "--auto-file-renaming=false", "--file-allocation=none",
+                        "--max-connection-per-server={}".format(connections),
+                        "--split={}".format(connections),
+                        "--min-split-size=1M", "--dir", str(output.parent),
+                        "--out", output.name, url,
+                    ],
+                    check=True,
+                )
+            else:
+                with urllib.request.urlopen(url, timeout=180) as source, partial.open("wb") as sink:
+                    shutil.copyfileobj(source, sink, length=1024 * 1024)
+                partial.replace(output)
             return output
         except Exception:
             if partial.exists():
                 partial.unlink()
+            control = Path(str(output) + ".aria2")
+            if control.exists():
+                control.unlink()
             if attempt == retries:
                 raise
             time.sleep(2 ** attempt)
@@ -218,6 +234,7 @@ def main():
     parser.add_argument("--download-missing", action="store_true")
     parser.add_argument("--epic55-splits", default=None)
     parser.add_argument("--download-retries", type=int, default=3)
+    parser.add_argument("--download-connections", type=int, default=8)
     parser.add_argument("--model", default="ViT-B/16")
     parser.add_argument("--model-cache", default=None)
     parser.add_argument("--device", default="cuda:0")
@@ -230,8 +247,12 @@ def main():
 
     if not 0 <= args.shard_index < args.shard_count:
         raise ValueError("invalid shard")
-    if args.frame_count <= 0 or args.image_batch_size <= 0:
-        raise ValueError("frame count and batch size must be positive")
+    if (
+        args.frame_count <= 0
+        or args.image_batch_size <= 0
+        or args.download_connections <= 0
+    ):
+        raise ValueError("frame count, batch size, and connections must be positive")
     if args.download_missing and args.epic55_splits is None:
         raise ValueError("downloading requires --epic55-splits")
 
@@ -284,6 +305,7 @@ def main():
                         old_splits,
                         Path(temporary) / (video_id + ".MP4"),
                         retries=args.download_retries,
+                        connections=args.download_connections,
                     )
                     downloaded = True
                 prepared = []
