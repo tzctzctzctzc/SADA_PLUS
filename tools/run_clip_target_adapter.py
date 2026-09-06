@@ -41,7 +41,7 @@ PROMPT_SHA256 = hashlib.sha256(
         sort_keys=True,
     ).encode()
 ).hexdigest()
-EPIC_55_BASE_URL = "https://data.bris.ac.uk/datasets/3h91syskeag5572hl6tvuovwv4d"
+EPIC_55_BASE_URL = "https://data.bris.ac.uk/datasets/3h91syskeag572hl6tvuovwv4d"
 EPIC_100_BASE_URL = "https://data.bris.ac.uk/datasets/2g1n6qdydwa9u22shpxqzp0t8m"
 
 

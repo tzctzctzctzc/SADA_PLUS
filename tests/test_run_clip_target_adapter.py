@@ -36,5 +36,11 @@ def test_epic_video_url_handles_old_and_extension_videos():
     old = epic_video_url("P01_01", {"P01_01": "train"})
     new = epic_video_url("P01_101", {})
 
-    assert old.endswith("/videos/train/P01/P01_01.MP4")
-    assert new.endswith("/P01/videos/P01_101.MP4")
+    assert old == (
+        "https://data.bris.ac.uk/datasets/3h91syskeag572hl6tvuovwv4d/"
+        "videos/train/P01/P01_01.MP4"
+    )
+    assert new == (
+        "https://data.bris.ac.uk/datasets/2g1n6qdydwa9u22shpxqzp0t8m/"
+        "P01/videos/P01_101.MP4"
+    )
