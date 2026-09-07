@@ -28,6 +28,11 @@ def main():
     parser.add_argument("--predictions", required=True, nargs="+")
     parser.add_argument("--source-gate-report", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--allow-gate-failure",
+        action="store_true",
+        help="explicitly build a diagnostic cache when a non-CLIP source gate fails",
+    )
     args = parser.parse_args()
 
     gate = json.loads(Path(args.source_gate_report).read_text(encoding="utf-8"))
@@ -59,7 +64,7 @@ def main():
         raise ValueError("target VLM predictions use mixed protocols")
     prompt_version, prompt_sha256, model, wire_api = protocols.pop()
     is_clip = wire_api == "openai-clip"
-    if not gate.get("adapter_pass") and not is_clip:
+    if not gate.get("adapter_pass") and not is_clip and not args.allow_gate_failure:
         raise ValueError("source VLM target adapter gate did not pass")
     meta = json.loads(
         Path(args.manifest + ".meta.json").read_text(encoding="utf-8")
@@ -114,6 +119,7 @@ def main():
             "prediction_sha256": [sha256(path) for path in args.predictions],
             "source_gate_report_sha256": sha256(args.source_gate_report),
             "source_gate_pass": bool(gate.get("adapter_pass")),
+            "source_gate_override": bool(args.allow_gate_failure and not gate.get("adapter_pass")),
         },
         "counts": {
             "manifest": len(manifest),
