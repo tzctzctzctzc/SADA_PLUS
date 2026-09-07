@@ -272,19 +272,27 @@ def infer_one(runtime, sheet, prompt, max_new_tokens, temperature):
         [stop_str], tokenizer, input_ids
     )
     with torch.inference_mode():
+        generate_kwargs = {
+            "input_ids": input_ids,
+            "images": image_tensor,
+            "do_sample": temperature > 0,
+            "max_new_tokens": max_new_tokens,
+            "use_cache": True,
+            "stopping_criteria": [stopping],
+        }
+        if temperature > 0:
+            generate_kwargs["temperature"] = temperature
         output_ids = model.generate(
-            input_ids,
-            images=image_tensor,
-            do_sample=temperature > 0,
-            temperature=temperature,
-            max_new_tokens=max_new_tokens,
-            use_cache=True,
-            stopping_criteria=[stopping],
+            **generate_kwargs,
         )
-    text = tokenizer.decode(
-        output_ids[0, input_ids.shape[1]:],
-        skip_special_tokens=True,
-    ).strip()
+    # LLaVA-NeXT with newer Transformers may return only newly generated
+    # tokens, while older versions return prompt+completion.  Support both.
+    generated = (
+        output_ids[0, input_ids.shape[1]:]
+        if output_ids.shape[1] > input_ids.shape[1]
+        else output_ids[0]
+    )
+    text = tokenizer.decode(generated, skip_special_tokens=True).strip()
     return text
 
 
