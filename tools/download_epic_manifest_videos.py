@@ -4,38 +4,62 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from tools.run_clip_target_adapter import download_video, epic_55_splits, video_path
+from tools.run_clip_target_adapter import (
+    download_video,
+    epic_55_splits,
+    prepare_frames,
+    video_path,
+)
 from tools.run_clip_then_llava import read_jsonl
 
 
 SHIFT_NAMES = ("S1", "S2", "S3", "S4", "S5", "S6")
 
 
-def manifest_video_ids(root, shifts):
-    video_ids = set()
+def manifest_rows(root, shifts):
+    rows_by_video = {}
     root = Path(root)
     for shift in shifts:
-        for filename in ("source_val_manifest.jsonl", "target_train_manifest.jsonl"):
-            video_ids.update(
-                row["video_id"] for row in read_jsonl(root / shift / filename)
-            )
-    return sorted(video_ids)
-
-
-def download_one(video_id, output_root, old_splits, retries, connections):
-    existing = video_path(output_root, video_id)
-    if existing is not None:
-        return video_id, "cached", Path(existing).stat().st_size, None
-    output = Path(output_root) / (video_id + ".MP4")
-    try:
-        path = download_video(
-            video_id,
-            old_splits,
-            output,
-            retries=retries,
-            connections=connections,
+        manifests = (
+            ("source_val_manifest.jsonl", "source", "{}_source".format(shift.lower())),
+            ("target_train_manifest.jsonl", "target", shift.lower()),
         )
-        return video_id, "downloaded", Path(path).stat().st_size, None
+        for filename, scope, namespace in manifests:
+            for row in read_jsonl(root / shift / filename):
+                rows_by_video.setdefault(row["video_id"], []).append(
+                    (row, scope, namespace)
+                )
+    return rows_by_video
+
+
+def download_one(video_id, rows, output_root, old_splits, retries, connections,
+                 frame_cache, frame_count):
+    existing = video_path(output_root, video_id)
+    control = Path(str(existing) + ".aria2") if existing is not None else None
+    try:
+        if existing is not None and not control.exists():
+            path = Path(existing)
+            status = "cached"
+        else:
+            path = download_video(
+                video_id,
+                old_splits,
+                Path(output_root) / (video_id + ".MP4"),
+                retries=retries,
+                connections=connections,
+            )
+            status = "downloaded"
+        if frame_cache:
+            for row, scope, namespace in rows:
+                prepare_frames(
+                    row,
+                    path,
+                    Path(frame_cache) / scope,
+                    namespace,
+                    frame_count,
+                )
+            status += "+frames"
+        return video_id, status, Path(path).stat().st_size, None
     except Exception as error:
         return video_id, "failed", 0, "{}: {}".format(type(error).__name__, error)
 
@@ -50,17 +74,20 @@ def parse_args():
     parser.add_argument("--connections", type=int, default=4)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--limit-videos", type=int, default=0)
+    parser.add_argument("--frame-cache", default=None)
+    parser.add_argument("--frame-count", type=int, default=8)
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    if args.workers <= 0 or args.connections <= 0:
-        raise ValueError("workers and connections must be positive")
+    if args.workers <= 0 or args.connections <= 0 or args.frame_count <= 0:
+        raise ValueError("workers, connections, and frame count must be positive")
     output_root = Path(args.video_root)
     output_root.mkdir(parents=True, exist_ok=True)
     old_splits = epic_55_splits(args.epic55_splits)
-    video_ids = manifest_video_ids(args.scenario_root, args.shifts)
+    rows_by_video = manifest_rows(args.scenario_root, args.shifts)
+    video_ids = sorted(rows_by_video)
     if args.limit_videos > 0:
         video_ids = video_ids[:args.limit_videos]
 
@@ -71,10 +98,13 @@ def main():
             executor.submit(
                 download_one,
                 video_id,
+                rows_by_video[video_id],
                 output_root,
                 old_splits,
                 args.retries,
                 args.connections,
+                args.frame_cache,
+                args.frame_count,
             )
             for video_id in video_ids
         ]
