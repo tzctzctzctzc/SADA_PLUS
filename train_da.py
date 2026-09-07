@@ -830,6 +830,10 @@ def create_argparser():
     parser.add_argument('-d', '--debug', action='store_true',
                         help='debug flag')
     parser.add_argument(
+        '--trident-head', action='store_true',
+        help='use the TriDet class-conditioned boundary and offset heads',
+    )
+    parser.add_argument(
         '--stage1', choices=['off', 'shift', 'context'], default='off',
         help='enable Stage 1 target routing perturbation',
     )
@@ -1685,6 +1689,9 @@ if __name__ == '__main__':
     }
 
     update_config_with_arguments(config_dict, args, ARGS_TYPES, ARGS_CONFIGPATH)
+    if args.trident_head:
+        config_dict['model']['backbone_type'] = 'SGP'
+        config_dict['model']['use_trident_head'] = True
     _update_config(config_dict) # Done basically for TriDet and Actionformer, to add some basic parameters in the model config instead of dataset
     
     # Override the configurations

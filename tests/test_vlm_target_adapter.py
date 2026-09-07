@@ -1,4 +1,10 @@
-from tools.export_vlm_target_adapter_proposals import limit_per_video
+import pytest
+import torch
+
+from tools.export_vlm_target_adapter_proposals import (
+    limit_per_video,
+    trident_neighbour_logits,
+)
 from tools.run_vlm_target_adapter import proposal_timestamps
 from tools.score_vlm_target_adapter import summarize
 
@@ -17,6 +23,19 @@ def test_proposal_budget_is_deterministic_and_video_balanced():
     assert len(first) == 4
     assert sum(row["video_id"] == "a" for row in first) == 2
     assert sum(row["video_id"] == "b" for row in first) == 2
+
+
+def test_trident_neighbour_logits_match_boundary_windows():
+    logits = torch.tensor([[1.0, 2.0, 3.0, 4.0]])
+
+    start = trident_neighbour_logits(logits, num_bins=2, side="start")
+    end = trident_neighbour_logits(logits, num_bins=2, side="end")
+
+    assert start.tolist() == [[[0.0, 0.0, 1.0], [0.0, 1.0, 2.0], [1.0, 2.0, 3.0], [2.0, 3.0, 4.0]]]
+    assert end.tolist() == [[[1.0, 2.0, 3.0], [2.0, 3.0, 4.0], [3.0, 4.0, 0.0], [4.0, 0.0, 0.0]]]
+
+    with pytest.raises(ValueError, match="side must be start or end"):
+        trident_neighbour_logits(logits, num_bins=2, side="middle")
 
 
 def test_proposal_timestamps_have_context_and_seven_inside_frames():

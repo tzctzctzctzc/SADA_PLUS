@@ -55,6 +55,25 @@ def center_annotations(database, video_id, center_sec):
     return sorted(set(labels))
 
 
+def trident_neighbour_logits(boundary_logits, num_bins, side):
+    """Arrange boundary logits exactly as TriDet inference does."""
+    import torch.nn.functional as F
+
+    if side == "start":
+        padded = F.pad(boundary_logits, (num_bins, 0), value=0)
+    elif side == "end":
+        padded = F.pad(boundary_logits, (0, num_bins), value=0)
+    else:
+        raise ValueError("side must be start or end")
+    padded = padded.unsqueeze(-1)
+    size = list(padded.size())
+    size[-1] = num_bins + 1
+    size[-2] -= num_bins
+    stride = list(padded.stride())
+    stride[-2] = stride[-1]
+    return padded.as_strided(size=size, stride=stride)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
@@ -70,6 +89,11 @@ def main():
     parser.add_argument("--split", choices=("train", "val"), required=True)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--weights", choices=("student", "ema"), default="ema")
+    parser.add_argument(
+        "--trident-head",
+        action="store_true",
+        help="export proposals from a checkpoint trained with the TriDet head",
+    )
     parser.add_argument("--levels", type=int, nargs="+", default=(0, 1, 2))
     parser.add_argument("--max-per-video", type=int, default=30)
     parser.add_argument("--max-proposals", type=int, default=200)
@@ -94,6 +118,9 @@ def main():
     cfg["stage1"] = {"enabled": False, "perturbation": "shift"}
     cfg["vlm_routing"] = {"enabled": False}
     cfg["vlm_target_adapter"] = {"enabled": False}
+    if args.trident_head:
+        cfg["model"]["backbone_type"] = "SGP"
+        cfg["model"]["use_trident_head"] = True
     _update_config(cfg)
     split_key = "{}_{}_split".format(
         "src" if args.domain == "source" else "tgt", args.split
@@ -125,8 +152,6 @@ def main():
     state_dict = checkpoint.get(state_key, checkpoint)
     model.load_state_dict(state_dict)
     model.eval()
-    if model.use_trident_head:
-        raise ValueError("target adapter exporter currently requires direct offsets")
     provenance = {
         "selection_teacher_checkpoint_sha256": file_sha256(args.checkpoint),
         "selection_teacher_state_sha256": model_state_sha256(model),
@@ -147,6 +172,12 @@ def main():
             fpn, fpn_masks = model.neck_target(backbone, backbone_masks)
             logits, _ = model.cls_head_target(fpn, fpn_masks)
             offsets, _ = model.reg_head_target(fpn, fpn_masks)
+            if model.use_trident_head:
+                start_logits, _ = model.start_head(fpn, fpn_masks)
+                end_logits, _ = model.end_head(fpn, fpn_masks)
+            else:
+                start_logits = (None,) * len(offsets)
+                end_logits = (None,) * len(offsets)
             points = model.point_generator(fpn)
             gt_cls = None
             if args.domain == "source":
@@ -161,8 +192,10 @@ def main():
             fps = float(metadata["fps"])
             duration = float(metadata["duration"])
             start = 0
-            for level, (grid, mask, raw_logits, raw_offsets) in enumerate(
-                zip(points, fpn_masks, logits, offsets)
+            for level, (
+                grid, mask, raw_logits, raw_offsets, raw_start, raw_end
+            ) in enumerate(
+                zip(points, fpn_masks, logits, offsets, start_logits, end_logits)
             ):
                 length = grid.shape[0]
                 if level not in levels:
@@ -172,7 +205,22 @@ def main():
                 scores, classes = probabilities.max(dim=-1)
                 valid = mask[0, 0].bool()
                 selected = valid & (scores >= provenance["selection_alpha"])
-                decoded = raw_offsets[0].transpose(0, 1)
+                raw_offsets = raw_offsets[0].transpose(0, 1)
+                if model.use_trident_head:
+                    start_neighbours = trident_neighbour_logits(
+                        raw_start[0], model.num_bins, "start"
+                    )
+                    end_neighbours = trident_neighbour_logits(
+                        raw_end[0], model.num_bins, "end"
+                    )
+                    decoded = model.decode_offset(
+                        raw_offsets,
+                        start_neighbours,
+                        end_neighbours,
+                        mode="test",
+                    )
+                else:
+                    decoded = raw_offsets
                 for index in torch.nonzero(selected).flatten().tolist():
                     coordinate = float(grid[index, 0])
                     absolute_index = int(round(coordinate))
@@ -182,8 +230,12 @@ def main():
                         max((absolute_index * feat_stride + frame_offset) / fps, 0.0),
                         duration,
                     )
-                    left_grid = coordinate - float(decoded[index, 0]) * float(grid[index, 3])
-                    right_grid = coordinate + float(decoded[index, 1]) * float(grid[index, 3])
+                    if model.use_trident_head:
+                        proposal_offset = decoded[int(classes[index]), index]
+                    else:
+                        proposal_offset = decoded[index]
+                    left_grid = coordinate - float(proposal_offset[0]) * float(grid[index, 3])
+                    right_grid = coordinate + float(proposal_offset[1]) * float(grid[index, 3])
                     proposal_start = min(
                         max((left_grid * feat_stride + frame_offset) / fps, 0.0),
                         duration,
