@@ -1,7 +1,9 @@
 """Extract one shared chronological JPEG cache for all three VLM runners."""
 
 import argparse
+import os
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import defaultdict
 from pathlib import Path
 
@@ -53,6 +55,149 @@ def prepare_manifest(manifest_path, frame_cache, namespace, args, old_splits):
     return complete
 
 
+def _frame_dir_complete(directory, frame_count):
+    directory = Path(directory)
+    return directory.is_dir() and all(
+        (directory / "frame_{:02d}.jpg".format(index)).is_file()
+        and (directory / "frame_{:02d}.jpg".format(index)).stat().st_size
+        for index in range(1, frame_count + 1)
+    )
+
+
+def _build_reuse_index(roots, frame_count):
+    """Index old proposal caches so already extracted JPEGs are reused."""
+    index = {}
+    for root in roots:
+        root = Path(root)
+        if not root.exists():
+            continue
+        for marker in root.rglob("frame_01.jpg"):
+            directory = marker.parent
+            candidate_id = directory.name
+            if candidate_id not in index and _frame_dir_complete(directory, frame_count):
+                index[candidate_id] = directory
+    return index
+
+
+def _link_reused_frames(source, destination):
+    destination = Path(destination)
+    if destination.exists() or destination.is_symlink():
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    os.symlink(Path(source), destination, target_is_directory=True)
+
+
+def _prepare_video(video_id, rows, frame_cache, args, old_splits):
+    """Download one video, extract all requested proposals, then delete it."""
+    complete = 0
+    with tempfile.TemporaryDirectory(prefix="vlm-frame-video-") as temporary:
+        local_video = video_path(args.video_root, video_id)
+        downloaded = False
+        try:
+            if local_video is None:
+                local_video = download_video(
+                    video_id,
+                    old_splits,
+                    Path(temporary) / (video_id + ".MP4"),
+                    retries=args.download_retries,
+                    connections=args.download_connections,
+                )
+                downloaded = True
+            for row, namespace in rows:
+                prepare_frames(
+                    row,
+                    local_video,
+                    frame_cache,
+                    namespace,
+                    args.frame_count,
+                )
+                complete += 1
+            return video_id, complete, None
+        except Exception as error:
+            return video_id, complete, "{}: {}".format(type(error).__name__, error)
+        finally:
+            if downloaded and local_video is not None and Path(local_video).exists():
+                Path(local_video).unlink()
+
+
+def prepare_all_manifests(scenario_root, frame_cache, args, old_splits):
+    """Prepare S1--S6 once per unique video, with bounded concurrency."""
+    manifests = []
+    for shift in SHIFT_NAMES:
+        root = Path(scenario_root) / shift
+        manifests.append(
+            (
+                root / "source_val_manifest.jsonl",
+                Path(frame_cache) / "source",
+                "{}_source".format(shift.lower()),
+            ),
+        )
+        manifests.append(
+            (
+                root / "target_train_manifest.jsonl",
+                Path(frame_cache) / "target",
+                shift.lower(),
+            ),
+        )
+
+    reuse_index = _build_reuse_index(args.reuse_root, args.frame_count)
+    jobs = defaultdict(list)
+    total_rows = 0
+    reused = 0
+    for manifest_path, cache_root, namespace in manifests:
+        for row in read_jsonl(manifest_path):
+            total_rows += 1
+            destination = Path(cache_root) / namespace / row["candidate_id"]
+            if _frame_dir_complete(destination, args.frame_count):
+                continue
+            old_frames = reuse_index.get(row["candidate_id"])
+            if old_frames is not None:
+                _link_reused_frames(old_frames, destination)
+                reused += 1
+                continue
+            jobs[row["video_id"]].append((row, namespace))
+
+    print(
+        "{} proposals, reused {}, need {} unique videos".format(
+            total_rows, reused, len(jobs)
+        ),
+        flush=True,
+    )
+    prepared = reused
+    workers = max(1, args.workers)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [
+            executor.submit(
+                _prepare_video,
+                video_id,
+                rows,
+                Path(frame_cache),
+                args,
+                old_splits,
+            )
+            for video_id, rows in sorted(jobs.items())
+        ]
+        for number, future in enumerate(as_completed(futures), 1):
+            video_id, count, error = future.result()
+            prepared += count
+            if error:
+                print(
+                    "video {}/{} {} failed after {} proposals: {}".format(
+                        number, len(futures), video_id, count, error
+                    ),
+                    flush=True,
+                )
+            else:
+                print(
+                    "video {}/{} {} ready ({} proposals; total {})".format(
+                        number, len(futures), video_id, count, prepared
+                    ),
+                    flush=True,
+                )
+    print("prepared {} / {} proposals".format(prepared, total_rows), flush=True)
+    return prepared
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenario-root", required=True)
@@ -62,6 +207,13 @@ def parse_args():
     parser.add_argument("--frame-count", type=int, default=8)
     parser.add_argument("--download-retries", type=int, default=3)
     parser.add_argument("--download-connections", type=int, default=8)
+    parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument(
+        "--reuse-root",
+        action="append",
+        default=[],
+        help="old frame-cache root(s) to reuse by candidate_id",
+    )
     return parser.parse_args()
 
 
@@ -71,24 +223,9 @@ def main():
         raise ValueError("frame count must be positive")
     Path(args.video_root).mkdir(parents=True, exist_ok=True)
     old_splits = epic_55_splits(args.epic55_splits)
-    total = 0
-    for shift in SHIFT_NAMES:
-        root = Path(args.scenario_root) / shift
-        total += prepare_manifest(
-            root / "source_val_manifest.jsonl",
-            Path(args.frame_cache) / "source",
-            "{}_source".format(shift.lower()),
-            args,
-            old_splits,
-        )
-        total += prepare_manifest(
-            root / "target_train_manifest.jsonl",
-            Path(args.frame_cache) / "target",
-            shift.lower(),
-            args,
-            old_splits,
-        )
-    print("prepared {} proposals".format(total), flush=True)
+    if args.workers <= 0:
+        raise ValueError("workers must be positive")
+    prepare_all_manifests(args.scenario_root, args.frame_cache, args, old_splits)
     return 0
 
 
