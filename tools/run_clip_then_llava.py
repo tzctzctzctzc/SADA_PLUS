@@ -213,15 +213,18 @@ def load_llava(args):
     # expected by the LLaVA builder's dispatch logic.
     if args.model_name is None and "llava-v1.5" in model_path.lower():
         model_name = "llava-v1.5-7b"
+    device_map = None if args.device_map == "none" else args.device_map
     tokenizer, model, image_processor, _ = load_pretrained_model(
         model_path,
         None,
         model_name,
         load_4bit=args.load_4bit,
         load_8bit=args.load_8bit,
-        device_map="auto",
+        device_map=device_map,
         attn_implementation=args.attn_implementation,
     )
+    if device_map is None:
+        model.to("cuda")
     model.eval()
     conv_mode = args.conv_mode or ("llava_v1" if "v1" in model_name.lower() else "llava_v0")
     if conv_mode not in conv_templates:
@@ -405,6 +408,7 @@ def parse_args():
     parser.add_argument("--load-8bit", action="store_true")
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--attn-implementation", default="eager")
+    parser.add_argument("--device-map", choices=("none", "auto"), default="none")
     parser.add_argument("--frame-count", type=int, default=8)
     parser.add_argument("--grid-columns", type=int, default=4)
     parser.add_argument("--tile-width", type=int, default=320)
