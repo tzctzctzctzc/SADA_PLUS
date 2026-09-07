@@ -28,11 +28,10 @@ PROMPT_SHA256 = hashlib.sha256(
 DEFAULT_PROMPT = (
     "You are labeling one temporal action proposal from an egocentric video. "
     "The image is a contact sheet: panels are ordered from earliest to latest "
-    "and are marked FRAME 1, FRAME 2, etc. Choose exactly one action from this "
-    "closed set: TAKE, PUT, WASH, OPEN, CLOSE, INSERT, TURN_ON, CUT, "
-    "TURN_OFF, POUR. Return only one JSON object with this schema: "
-    '{"label":"TAKE","confidence":0.0,"reason":"short evidence"}. '
-    "Confidence must be a number between 0 and 1. Do not return markdown."
+    "and are marked FRAME 1, FRAME 2, etc. Decide the single dominant action. "
+    "Your final answer must be exactly one uppercase label, with no JSON, "
+    "explanation, punctuation, or extra words. The allowed labels are: "
+    "CLOSE, CUT, INSERT, OPEN, POUR, PUT, TAKE, TURN_OFF, TURN_ON, WASH."
 )
 
 
@@ -142,6 +141,19 @@ def parse_model_output(text):
                 "parse_mode": "json",
             }
     upper = text.upper().replace("-", "_")
+    directed = re.search(
+        r"(?:FINAL\s+ANSWER|ANSWER|LABEL)\s*[:=\-]\s*([A-Z_]+)",
+        upper,
+    )
+    if directed and directed.group(1) in LABEL_TO_ID:
+        label = directed.group(1)
+        return {
+            "prediction": label,
+            "class_id": LABEL_TO_ID[label],
+            "confidence": 0.0,
+            "reason": text[:500],
+            "parse_mode": "directed_label_fallback",
+        }
     matches = [label for label in LABELS if re.search(r"\b{}\b".format(label), upper)]
     if len(matches) == 1:
         return {

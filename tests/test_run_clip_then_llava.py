@@ -24,6 +24,12 @@ def test_parse_label_fallback_is_conservative():
     assert result["confidence"] == 0.0
 
 
+def test_parse_directed_label_fallback():
+    result = parse_model_output("Final answer: TURN_OFF")
+    assert result["prediction"] == "TURN_OFF"
+    assert result["parse_mode"] == "directed_label_fallback"
+
+
 def test_frame_paths_and_contact_sheet(tmp_path):
     root = tmp_path / "frames"
     directory = root / "s5" / "candidate"
