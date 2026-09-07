@@ -1018,6 +1018,13 @@ def create_argparser():
         help='source-calibrated minimum VLM class confidence',
     )
     parser.add_argument(
+        '--vlm-target-adapter-external-selection', action='store_true',
+        help=(
+            'consume a frozen adapter cache selected by a different TAL teacher; '
+            'intended for controlled cross-architecture comparisons'
+        ),
+    )
+    parser.add_argument(
         '--proposal-semantic-mode',
         choices=[
             'off', 'source', 'teacher', 'oracle_center',
@@ -1252,25 +1259,46 @@ if __name__ == '__main__':
             args.vlm_target_adapter_cache
         )
         selection = cache_payload['selection_teacher_provenance']
-        if selection.get('selection_teacher_checkpoint_sha256') != file_sha256(
-            args.resume
-        ):
+        selection_matches_resume = (
+            selection.get('selection_teacher_checkpoint_sha256')
+            == file_sha256(args.resume)
+        )
+        selection_mode = 'matching_resume'
+        if not selection_matches_resume:
             resume_checkpoint = torch.load(args.resume, map_location='cpu')
-            validate_vlm_target_adapter_resume(
-                resume_checkpoint,
-                {
-                    'cache_sha256': cache_sha256,
-                    'budget': args.vlm_target_adapter_budget,
-                    'levels': target_adapter_levels,
-                    'policy': args.vlm_target_adapter_policy,
-                    'confidence_threshold': (
-                        args.vlm_target_adapter_confidence_threshold
-                    ),
-                },
+            prior_adapter = resume_checkpoint.get('config', {}).get(
+                'vlm_target_adapter', {}
             )
+            if prior_adapter.get('enabled'):
+                validate_vlm_target_adapter_resume(
+                    resume_checkpoint,
+                    {
+                        'cache_sha256': cache_sha256,
+                        'budget': args.vlm_target_adapter_budget,
+                        'levels': target_adapter_levels,
+                        'policy': args.vlm_target_adapter_policy,
+                        'confidence_threshold': (
+                            args.vlm_target_adapter_confidence_threshold
+                        ),
+                    },
+                )
+                selection_mode = 'adapter_continuation'
+            elif args.vlm_target_adapter_external_selection:
+                selection_mode = 'fixed_external_teacher'
+            else:
+                raise ValueError(
+                    'VLM target adapter selection checkpoint differs from resume; '
+                    'use --vlm-target-adapter-external-selection only for a '
+                    'controlled cross-architecture comparison'
+                )
             del resume_checkpoint
     else:
         cache_sha256 = None
+        selection_mode = None
+        if args.vlm_target_adapter_external_selection:
+            raise ValueError(
+                '--vlm-target-adapter-external-selection requires an adapter cache'
+            )
     config_dict['vlm_target_adapter'] = {
         'enabled': vlm_target_adapter_enabled,
         'cache_path': args.vlm_target_adapter_cache,
@@ -1280,6 +1308,7 @@ if __name__ == '__main__':
         'policy': args.vlm_target_adapter_policy,
         'confidence_threshold': args.vlm_target_adapter_confidence_threshold,
         'selection_rule': args.vlm_target_adapter_policy,
+        'selection_provenance_mode': selection_mode,
     }
     proposal_semantic_enabled = args.proposal_semantic_mode != 'off'
     proposal_levels = [
