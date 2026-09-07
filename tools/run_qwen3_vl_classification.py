@@ -20,6 +20,7 @@ from tools.run_clip_then_llava import frame_paths, read_jsonl, write_json
 LABEL_TO_ID = {label: index for index, label in enumerate(LABELS)}
 DIGITS = tuple(str(index) for index in range(len(LABELS)))
 PROMPT_VERSION = "qwen3-vl-8b-ordered-images-digit-logits-v1"
+WIRE_API = "qwen3-vl-next-token-classification"
 PROMPT_SHA256 = hashlib.sha256(
     json.dumps(
         {
@@ -215,7 +216,7 @@ def prediction_is_current(row, args):
         and row.get("model") == args.model_path
         and row.get("prompt_version") == PROMPT_VERSION
         and row.get("prompt_sha256") == prompt_sha256(candidate_id)
-        and row.get("wire_api") == "qwen3-vl-next-token-classification"
+        and row.get("wire_api") == WIRE_API
     )
 
 
@@ -248,7 +249,7 @@ def score_manifest(runtime, manifest_path, output_path, frame_cache,
                 "status": "ok",
                 "model": args.model_path,
                 "model_revision": runtime["model_revision"],
-                "wire_api": "qwen3-vl-next-token-classification",
+                "wire_api": WIRE_API,
                 "prompt_version": PROMPT_VERSION,
                 "base_prompt_sha256": PROMPT_SHA256,
                 "frame_count": args.frame_count,
