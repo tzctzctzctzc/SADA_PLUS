@@ -85,11 +85,17 @@ def main():
             "semantic_label": label,
             "class_id": KNOWN.index(label),
         }
-        if is_clip:
-            prediction = predictions[candidate_id]
-            probabilities = prediction.get("class_probabilities")
+        prediction = predictions[candidate_id]
+        probabilities = prediction.get("class_probabilities")
+        if probabilities is not None:
             if not isinstance(probabilities, list) or len(probabilities) != len(KNOWN):
-                raise ValueError("CLIP prediction has invalid class probabilities")
+                raise ValueError("VLM prediction has invalid class probabilities")
+            if any(not isinstance(value, (int, float)) or value < 0.0 for value in probabilities):
+                raise ValueError("VLM prediction has invalid class probabilities")
+            if abs(sum(probabilities) - 1.0) > 1e-4:
+                raise ValueError("VLM prediction probabilities must sum to one")
+            if max(range(len(probabilities)), key=probabilities.__getitem__) != entry["class_id"]:
+                raise ValueError("VLM prediction probabilities and class id differ")
             entry["class_probabilities"] = probabilities
             entry["confidence"] = prediction.get("confidence")
             entry["margin"] = prediction.get("margin")
