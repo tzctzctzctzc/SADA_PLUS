@@ -34,12 +34,13 @@ while true; do
         | awk -F, '$2 + 0 < 1000 && $3 + 0 < 10 {gsub(/ /, "", $1); print $1}' \
         | head -4 | paste -sd, -
     )
-    if [[ $(awk -F, '{print NF}' <<<"$gpu_csv") -eq 4 ]]; then
+    gpu_count=$(awk -F, '{print NF}' <<<"$gpu_csv")
+    if [[ "$gpu_count" -ge 3 ]]; then
         break
     fi
     sleep 30
 done
-echo "selected_gpus=$gpu_csv"
+echo "selected_gpus=$gpu_csv count=$gpu_count"
 
 CUDA_VISIBLE_DEVICES="$gpu_csv" PYTHONPATH=. "$qwen_python" -u \
     tools/run_qwen_vl_matrix.py \
