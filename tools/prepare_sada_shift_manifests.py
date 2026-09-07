@@ -73,6 +73,7 @@ def parse_args():
     parser.add_argument("--python", dest="python_executable", default="python")
     parser.add_argument("--reuse-s5", action="store_true")
     parser.add_argument("--existing-s5-root", default=None)
+    parser.add_argument("--shifts", nargs="+", choices=tuple(SCENARIOS), default=tuple(SCENARIOS))
     return parser.parse_args()
 
 
@@ -81,7 +82,9 @@ def main():
     repo_root = Path(args.repo_root).resolve()
     output_root = Path(args.output_root).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
-    for shift, (config, checkpoint) in SCENARIOS.items():
+    Path(args.video_root).mkdir(parents=True, exist_ok=True)
+    for shift in args.shifts:
+        config, checkpoint = SCENARIOS[shift]
         shift_root = output_root / shift
         shift_root.mkdir(parents=True, exist_ok=True)
         if shift == "S5" and args.reuse_s5:
