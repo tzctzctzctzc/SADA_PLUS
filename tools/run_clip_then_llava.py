@@ -192,6 +192,9 @@ def load_llava(args):
     if repo.is_dir():
         sys.path.insert(0, str(repo))
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    if args.offline:
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
     from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN
     from llava.conversation import conv_templates, SeparatorStyle
     from llava.mm_utils import (
@@ -205,7 +208,11 @@ def load_llava(args):
 
     disable_torch_init()
     model_path = os.path.expanduser(args.model_path)
-    model_name = get_model_name_from_path(model_path)
+    model_name = args.model_name or get_model_name_from_path(model_path)
+    # A Hugging Face cache snapshot ends in a hash, which hides the model name
+    # expected by the LLaVA builder's dispatch logic.
+    if args.model_name is None and "llava-v1.5" in model_path.lower():
+        model_name = "llava-v1.5-7b"
     tokenizer, model, image_processor, _ = load_pretrained_model(
         model_path,
         None,
@@ -213,6 +220,7 @@ def load_llava(args):
         load_4bit=args.load_4bit,
         load_8bit=args.load_8bit,
         device_map="auto",
+        attn_implementation=args.attn_implementation,
     )
     model.eval()
     conv_mode = args.conv_mode or ("llava_v1" if "v1" in model_name.lower() else "llava_v0")
@@ -390,10 +398,13 @@ def parse_args():
     parser.add_argument("--target-output", required=True)
     parser.add_argument("--source-gate-output", required=True)
     parser.add_argument("--model-path", default="liuhaotian/llava-v1.5-7b")
+    parser.add_argument("--model-name", default=None)
     parser.add_argument("--llava-repo", required=True)
     parser.add_argument("--conv-mode", default=None)
     parser.add_argument("--load-4bit", action="store_true")
     parser.add_argument("--load-8bit", action="store_true")
+    parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--attn-implementation", default="eager")
     parser.add_argument("--frame-count", type=int, default=8)
     parser.add_argument("--grid-columns", type=int, default=4)
     parser.add_argument("--tile-width", type=int, default=320)
