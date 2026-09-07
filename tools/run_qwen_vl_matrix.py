@@ -87,6 +87,9 @@ def parse_args():
     parser.add_argument("--min-confidence", type=float, default=0.0)
     parser.add_argument("--min-candidate-mass", type=float, default=0.50)
     parser.add_argument("--max-prediction-share", type=float, default=0.60)
+    parser.add_argument(
+        "--shifts", nargs="+", choices=SHIFT_NAMES, default=list(SHIFT_NAMES)
+    )
     return parser.parse_args()
 
 
@@ -99,7 +102,7 @@ def main():
     base.PROMPT_SHA256 = prompt_sha
     base.WIRE_API = wire_api
     runtime = load_runtime(args)
-    for shift in SHIFT_NAMES:
+    for shift in args.shifts:
         current = shift_args(args, shift)
         Path(current.output_root).joinpath(shift).mkdir(parents=True, exist_ok=True)
         base.score_manifest(

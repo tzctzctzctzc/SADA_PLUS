@@ -14,11 +14,12 @@ from tools.run_clip_target_adapter import (
     download_video,
     epic_55_splits,
     prepare_frames,
+    proposal_timestamps,
     score_rows,
     shard_for_video,
     video_path,
 )
-from tools.run_clip_then_llava import read_jsonl
+from tools.run_clip_then_llava import frame_paths, read_jsonl
 
 
 SHIFT_NAMES = ("S1", "S2", "S3", "S4", "S5", "S6")
@@ -44,10 +45,28 @@ def score_manifest(model, preprocess, args, manifest_path, output_path,
             ]
             if not pending:
                 continue
-            local_video = video_path(args.video_root, video_id)
+            prepared_by_id = {}
+            rows_needing_video = []
+            for row in pending:
+                try:
+                    prepared_by_id[row["candidate_id"]] = (
+                        row,
+                        frame_paths(
+                            frame_cache,
+                            cache_namespace,
+                            row["candidate_id"],
+                            frame_count=args.frame_count,
+                        ),
+                        proposal_timestamps(row, args.frame_count),
+                    )
+                except FileNotFoundError:
+                    rows_needing_video.append(row)
+            local_video = None
             downloaded = False
             try:
-                if local_video is None:
+                if rows_needing_video:
+                    local_video = video_path(args.video_root, video_id)
+                if rows_needing_video and local_video is None:
                     if not args.download_missing:
                         raise FileNotFoundError("video not found: {}".format(video_id))
                     local_video = download_video(
@@ -58,8 +77,8 @@ def score_manifest(model, preprocess, args, manifest_path, output_path,
                         connections=args.download_connections,
                     )
                     downloaded = True
-                prepared = [
-                    (
+                for row in rows_needing_video:
+                    prepared_by_id[row["candidate_id"]] = (
                         row,
                         *prepare_frames(
                             row,
@@ -69,8 +88,7 @@ def score_manifest(model, preprocess, args, manifest_path, output_path,
                             args.frame_count,
                         ),
                     )
-                    for row in pending
-                ]
+                prepared = [prepared_by_id[row["candidate_id"]] for row in pending]
                 scores = score_rows(
                     model,
                     preprocess,
@@ -152,6 +170,9 @@ def parse_args():
     parser.add_argument("--download-missing", action="store_true")
     parser.add_argument("--download-retries", type=int, default=3)
     parser.add_argument("--download-connections", type=int, default=8)
+    parser.add_argument(
+        "--shifts", nargs="+", choices=SHIFT_NAMES, default=list(SHIFT_NAMES)
+    )
     return parser.parse_args()
 
 
@@ -172,7 +193,7 @@ def main():
         model, clip, args.device
     )
     old_splits = epic_55_splits(args.epic55_splits)
-    for shift in SHIFT_NAMES:
+    for shift in args.shifts:
         root = Path(args.scenario_root) / shift
         out = Path(args.output_root) / shift
         source_output = out / "source_predictions.jsonl"
