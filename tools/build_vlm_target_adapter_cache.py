@@ -49,7 +49,8 @@ def main():
         raise ValueError("target VLM predictions are incomplete")
     protocols = {
         (
-            row["prompt_version"], row["prompt_sha256"],
+            row["prompt_version"],
+            row.get("base_prompt_sha256", row["prompt_sha256"]),
             row["model"], row["wire_api"],
         )
         for row in predictions.values()
