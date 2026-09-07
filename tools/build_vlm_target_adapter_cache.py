@@ -3,6 +3,11 @@ import hashlib
 import json
 from pathlib import Path
 
+from tools.calibrate_vlm_temperature import (
+    SCHEMA_VERSION as TEMPERATURE_CALIBRATION_SCHEMA_VERSION,
+    temperature_scaled_probabilities,
+)
+
 
 KNOWN = (
     "TAKE", "PUT", "WASH", "OPEN", "CLOSE", "INSERT", "TURN_ON",
@@ -28,6 +33,7 @@ def main():
     parser.add_argument("--predictions", required=True, nargs="+")
     parser.add_argument("--source-gate-report", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--temperature-calibration-report")
     parser.add_argument(
         "--allow-gate-failure",
         action="store_true",
@@ -72,6 +78,26 @@ def main():
     if meta.get("domain") != "target" or meta.get("selection_uses_gt") is not False:
         raise ValueError("training cache requires a GT-free target manifest")
 
+    calibration = None
+    calibration_path = args.temperature_calibration_report
+    if calibration_path:
+        calibration = json.loads(Path(calibration_path).read_text(encoding="utf-8"))
+        if calibration.get("schema_version") != TEMPERATURE_CALIBRATION_SCHEMA_VERSION:
+            raise ValueError("invalid temperature calibration report")
+        if calibration.get("selection_uses_target_gt") is not False:
+            raise ValueError("temperature calibration must be source-only")
+        expected_protocol = {
+            "model": model,
+            "prompt_version": prompt_version,
+            "prompt_sha256": prompt_sha256,
+            "wire_api": wire_api,
+        }
+        if calibration.get("source_protocol") != expected_protocol:
+            raise ValueError("temperature calibration protocol differs from target predictions")
+        temperature = float(calibration["temperature"])
+        if temperature <= 0:
+            raise ValueError("temperature calibration must be positive")
+
     entries = []
     for candidate_id, row in manifest.items():
         label = predictions[candidate_id]["prediction"]
@@ -87,6 +113,10 @@ def main():
         }
         prediction = predictions[candidate_id]
         probabilities = prediction.get("class_probabilities")
+        if calibration is not None:
+            probabilities = temperature_scaled_probabilities(
+                prediction.get("class_logits", []), temperature
+            )
         if probabilities is not None:
             if not isinstance(probabilities, list) or len(probabilities) != len(KNOWN):
                 raise ValueError("VLM prediction has invalid class probabilities")
@@ -97,8 +127,9 @@ def main():
             if max(range(len(probabilities)), key=probabilities.__getitem__) != entry["class_id"]:
                 raise ValueError("VLM prediction probabilities and class id differ")
             entry["class_probabilities"] = probabilities
-            entry["confidence"] = prediction.get("confidence")
-            entry["margin"] = prediction.get("margin")
+            order = sorted(probabilities, reverse=True)
+            entry["confidence"] = order[0]
+            entry["margin"] = order[0] - order[1]
         entries.append(entry)
     payload = {
         "schema_version": (
@@ -126,6 +157,9 @@ def main():
             "source_gate_report_sha256": sha256(args.source_gate_report),
             "source_gate_pass": bool(gate.get("adapter_pass")),
             "source_gate_override": bool(args.allow_gate_failure and not gate.get("adapter_pass")),
+            "temperature_calibration_report_sha256": (
+                sha256(calibration_path) if calibration_path else None
+            ),
         },
         "counts": {
             "manifest": len(manifest),
@@ -133,6 +167,15 @@ def main():
             "abstained_entries": len(manifest) - len(entries),
         },
     }
+    if calibration is not None:
+        payload["probability_calibration"] = {
+            "schema_version": calibration["schema_version"],
+            "source_predictions_sha256": calibration["source_predictions_sha256"],
+            "known_action_rows": calibration["known_action_rows"],
+            "temperature": calibration["temperature"],
+            "before": calibration["before"],
+            "after": calibration["after"],
+        }
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
