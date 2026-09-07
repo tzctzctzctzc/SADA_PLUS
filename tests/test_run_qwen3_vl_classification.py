@@ -12,6 +12,7 @@ from tools.run_qwen3_vl_classification import (
     prompt_sha256,
     resolve_digit_token_ids,
 )
+from tools.run_qwen_vl_matrix import protocol
 
 
 class FakeTokenizer:
@@ -80,3 +81,11 @@ def test_resume_requires_matching_model_and_prompt_contract():
     assert prediction_is_current(row, args)
     assert not prediction_is_current({**row, "prompt_sha256": "stale"}, args)
     assert not prediction_is_current({**row, "model": "other"}, args)
+
+
+def test_qwen3_8b_and_32b_use_the_same_wire_protocol():
+    version_8b, wire_8b, _ = protocol("qwen3-8b")
+    version_32b, wire_32b, _ = protocol("qwen3-32b")
+    assert version_8b.startswith("qwen3-vl-8b-")
+    assert version_32b.startswith("qwen3-vl-32b-")
+    assert wire_8b == wire_32b == "qwen3-vl-next-token-classification"

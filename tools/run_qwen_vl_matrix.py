@@ -16,6 +16,9 @@ def protocol(model_family):
     if model_family == "qwen3-8b":
         version = "qwen3-vl-8b-ordered-images-digit-logits-v1"
         wire_api = "qwen3-vl-next-token-classification"
+    elif model_family == "qwen3-32b":
+        version = "qwen3-vl-32b-ordered-images-digit-logits-v1"
+        wire_api = "qwen3-vl-next-token-classification"
     elif model_family == "qwen3.8-27b":
         version = "qwen3.8-27b-ordered-images-digit-logits-v1"
         wire_api = "qwen3.8-vl-next-token-classification"
@@ -35,7 +38,7 @@ def protocol(model_family):
 
 
 def load_runtime(args):
-    if args.model_family == "qwen3-8b":
+    if args.model_family in ("qwen3-8b", "qwen3-32b"):
         return base.load_qwen3(args)
     from tools.run_qwen38_vl_classification import load_qwen38
 
@@ -65,7 +68,9 @@ def parse_args():
     parser.add_argument("--frame-cache", required=True)
     parser.add_argument("--output-root", required=True)
     parser.add_argument(
-        "--model-family", choices=("qwen3-8b", "qwen3.8-27b"), required=True
+        "--model-family",
+        choices=("qwen3-8b", "qwen3-32b", "qwen3.8-27b"),
+        required=True,
     )
     parser.add_argument("--model-path", required=True)
     parser.add_argument("--offline", action="store_true")
