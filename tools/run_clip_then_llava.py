@@ -273,7 +273,9 @@ def infer_one(runtime, sheet, prompt, max_new_tokens, temperature):
     )
     with torch.inference_mode():
         generate_kwargs = {
-            "input_ids": input_ids,
+            # LLaVA's generate override calls this argument ``inputs``; using
+            # ``input_ids`` leaves its multimodal input as None.
+            "inputs": input_ids,
             "images": image_tensor,
             "do_sample": temperature > 0,
             "max_new_tokens": max_new_tokens,
