@@ -10,12 +10,12 @@ SCENARIOS = {
     "S1": (
         "configs/dark_vs_all_old_videos_full/version_final_ckpt.yaml",
         "/home1/gyy/vlms/SADA_OFFICIAL_AUDIT_20260730/checkpoints/"
-        "best_ckpt_dark_vs_all_old/saved_ckpt/best_ckpt/checkpoint-epoch8.pt",
+        "best_ckpt_dark_vs_all_old/saved_ckpt/best_ckpt/checkpoint-epoch8-weights.pth",
     ),
     "S2": (
         "configs/white_vs_all_old_videos_full/version_final_ckpt.yaml",
         "/home1/gyy/vlms/SADA_OFFICIAL_AUDIT_20260730/checkpoints/"
-        "best_ckpt_white_vs_all_old/saved_ckpt/best_ckpt/checkpoint-epoch10.pt",
+        "best_ckpt_white_vs_all_old/saved_ckpt/best_ckpt/checkpoint-epoch10-weights.pth",
     ),
     "S3": (
         "configs/dark_vs_all_new_videos_full/version_final_ckpt.yaml",
@@ -26,12 +26,12 @@ SCENARIOS = {
     "S4": (
         "configs/white_vs_all_new_videos_full/version_final_ckpt.yaml",
         "/home1/gyy/vlms/SADA_OFFICIAL_AUDIT_20260730/checkpoints/"
-        "best_ckpt_white_all_vs_new/saved_ckpt/best_ckpt/checkpoint-epoch18.pt",
+        "best_ckpt_white_all_vs_new/saved_ckpt/best_ckpt/checkpoint-epoch18-weights.pth",
     ),
     "S5": (
         "configs/old_vs_new/version_final_ckpt.yaml",
         "/home1/gyy/vlms/SADA_OFFICIAL_AUDIT_20260730/checkpoints/"
-        "best_ckpt_old_vs_new/saved_ckpt/best_ckpt/checkpoint-epoch10.pt",
+        "best_ckpt_old_vs_new/saved_ckpt/best_ckpt/checkpoint-epoch10-weights.pth",
     ),
     "S6": (
         "configs/new_vs_old/version_paper_s6_dim512.yaml",

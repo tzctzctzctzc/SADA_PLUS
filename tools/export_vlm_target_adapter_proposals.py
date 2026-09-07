@@ -114,9 +114,16 @@ def main():
         raise RuntimeError("no dataset video has a matching MP4")
 
     model = make_meta_arch(cfg["model_name"], cfg, device=args.device).to(args.device)
-    checkpoint = torch.load(args.checkpoint, map_location=args.device)
+    try:
+        checkpoint = torch.load(
+            args.checkpoint, map_location=args.device, weights_only=True
+        )
+    except Exception:
+        # Older checkpoints may contain optimizer objects from legacy modules.
+        checkpoint = torch.load(args.checkpoint, map_location=args.device)
     state_key = "ema_state_dict" if args.weights == "ema" else "state_dict"
-    model.load_state_dict(checkpoint[state_key])
+    state_dict = checkpoint.get(state_key, checkpoint)
+    model.load_state_dict(state_dict)
     model.eval()
     if model.use_trident_head:
         raise ValueError("target adapter exporter currently requires direct offsets")
