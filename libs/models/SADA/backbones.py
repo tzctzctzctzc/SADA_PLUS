@@ -2,7 +2,10 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from .blocks import (get_sinusoid_encoding, MaskedConv1D, ConvBlock, LayerNorm, SGPBlock)
+from .blocks import (
+    ActionFormerBlock, ConvBlock, LayerNorm, MaskedConv1D, SGPBlock,
+    get_sinusoid_encoding,
+)
 from .models import register_backbone
 
 
@@ -132,6 +135,100 @@ class SGPBackbone(nn.Module):
             out_feats += (x,)
             out_masks += (mask,)
 
+        return out_feats, out_masks, emb_net_output
+
+
+@register_backbone("convTransformer")
+class ActionFormerBackbone(nn.Module):
+    """ActionFormer convolutional embedding plus local-attention pyramid."""
+
+    def __init__(
+            self,
+            n_in,
+            n_embd,
+            n_head,
+            n_embd_ks,
+            max_len,
+            arch=(2, 2, 5),
+            mha_win_size=(9, 9, 9, 9, 9, 9),
+            scale_factor=2,
+            with_ln=False,
+            attn_pdrop=0.0,
+            proj_pdrop=0.0,
+            path_pdrop=0.0,
+            use_abs_pe=False,
+    ):
+        super().__init__()
+        if len(arch) != 3 or len(mha_win_size) != 1 + arch[-1]:
+            raise ValueError('invalid ActionFormer architecture or window sizes')
+        self.max_len = max_len
+        self.use_abs_pe = use_abs_pe
+        self.relu = nn.ReLU(inplace=True)
+        self.embd = nn.ModuleList()
+        self.embd_norm = nn.ModuleList()
+        for index in range(arch[0]):
+            self.embd.append(MaskedConv1D(
+                n_in if index == 0 else n_embd,
+                n_embd,
+                n_embd_ks,
+                stride=1,
+                padding=n_embd_ks // 2,
+                bias=not with_ln,
+            ))
+            self.embd_norm.append(LayerNorm(n_embd) if with_ln else nn.Identity())
+        if use_abs_pe:
+            encoding = get_sinusoid_encoding(max_len, n_embd) / (n_embd ** 0.5)
+            self.register_buffer('pos_embd', encoding, persistent=False)
+        self.stem = nn.ModuleList([
+            ActionFormerBlock(
+                n_embd, n_head,
+                attn_pdrop=attn_pdrop,
+                proj_pdrop=proj_pdrop,
+                path_pdrop=path_pdrop,
+                mha_win_size=mha_win_size[0],
+            )
+            for _ in range(arch[1])
+        ])
+        self.branch = nn.ModuleList([
+            ActionFormerBlock(
+                n_embd, n_head,
+                n_ds_strides=(scale_factor, scale_factor),
+                attn_pdrop=attn_pdrop,
+                proj_pdrop=proj_pdrop,
+                path_pdrop=path_pdrop,
+                mha_win_size=mha_win_size[index + 1],
+            )
+            for index in range(arch[2])
+        ])
+        self.apply(self.__init_weights__)
+
+    @staticmethod
+    def __init_weights__(module):
+        if isinstance(module, (nn.Linear, nn.Conv1d)) and module.bias is not None:
+            torch.nn.init.constant_(module.bias, 0.0)
+
+    def forward(self, x, mask):
+        for conv, norm in zip(self.embd, self.embd_norm):
+            x, mask = conv(x, mask)
+            x = self.relu(norm(x))
+        emb_net_output = x.clone()
+        if self.use_abs_pe:
+            if self.training and x.shape[-1] > self.max_len:
+                raise ValueError('ActionFormer input exceeds maximum training length')
+            position = self.pos_embd
+            if not self.training and x.shape[-1] >= self.max_len:
+                position = F.interpolate(
+                    position, x.shape[-1], mode='linear', align_corners=False
+                )
+            x = x + position[:, :, :x.shape[-1]] * mask.to(x.dtype)
+        for block in self.stem:
+            x, mask = block(x, mask)
+        out_feats = (x,)
+        out_masks = (mask,)
+        for block in self.branch:
+            x, mask = block(x, mask)
+            out_feats += (x,)
+            out_masks += (mask,)
         return out_feats, out_masks, emb_net_output
 
 

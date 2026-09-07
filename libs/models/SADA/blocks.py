@@ -368,3 +368,142 @@ class AffineDropPath(nn.Module):
 
     def forward(self, x):
         return drop_path(self.scale * x, self.drop_prob, self.training)
+
+
+class LocalMaskedMHCA(nn.Module):
+    """ActionFormer local multi-head convolutional self-attention."""
+
+    def __init__(
+            self,
+            n_embd,
+            n_head,
+            window_size,
+            n_qx_stride=1,
+            n_kv_stride=1,
+            attn_pdrop=0.0,
+            proj_pdrop=0.0,
+    ):
+        super().__init__()
+        if n_embd % n_head:
+            raise ValueError('embedding dimension must be divisible by heads')
+        if window_size <= 1 or window_size % 2 == 0:
+            raise ValueError('local attention window must be odd and greater than one')
+        self.n_head = n_head
+        self.head_dim = n_embd // n_head
+        self.scale = self.head_dim ** -0.5
+        self.window_size = window_size
+
+        def depthwise(stride):
+            kernel_size = stride + 1 if stride > 1 else 3
+            return MaskedConv1D(
+                n_embd, n_embd, kernel_size,
+                stride=stride, padding=kernel_size // 2,
+                groups=n_embd, bias=False,
+            )
+
+        self.query_conv = depthwise(n_qx_stride)
+        self.key_conv = depthwise(n_kv_stride)
+        self.value_conv = depthwise(n_kv_stride)
+        self.query_norm = LayerNorm(n_embd)
+        self.key_norm = LayerNorm(n_embd)
+        self.value_norm = LayerNorm(n_embd)
+        self.query = nn.Conv1d(n_embd, n_embd, 1)
+        self.key = nn.Conv1d(n_embd, n_embd, 1)
+        self.value = nn.Conv1d(n_embd, n_embd, 1)
+        self.proj = nn.Conv1d(n_embd, n_embd, 1)
+        self.attn_drop = nn.Dropout(attn_pdrop)
+        self.proj_drop = nn.Dropout(proj_pdrop)
+
+    def _split_heads(self, value):
+        batch, channels, length = value.shape
+        return value.view(
+            batch, self.n_head, self.head_dim, length
+        ).permute(0, 1, 3, 2)
+
+    def forward(self, x, mask):
+        query, query_mask = self.query_conv(x, mask)
+        key, key_mask = self.key_conv(x, mask)
+        value, _ = self.value_conv(x, mask)
+        query = self._split_heads(self.query(self.query_norm(query)))
+        key = self._split_heads(self.key(self.key_norm(key)))
+        value = self._split_heads(self.value(self.value_norm(value)))
+
+        pad = self.window_size // 2
+        key_windows = F.pad(key, (0, 0, pad, pad)).unfold(
+            2, self.window_size, 1
+        ).transpose(-1, -2)
+        value_windows = F.pad(value, (0, 0, pad, pad)).unfold(
+            2, self.window_size, 1
+        ).transpose(-1, -2)
+        mask_windows = F.pad(key_mask, (pad, pad), value=False).unfold(
+            2, self.window_size, 1
+        )
+        attention = (query.unsqueeze(-2) * key_windows).sum(-1) * self.scale
+        attention = attention.masked_fill(
+            ~mask_windows, float('-inf')
+        )
+        attention = torch.softmax(attention, dim=-1).nan_to_num(0.0)
+        attention = self.attn_drop(attention)
+        output = (attention.unsqueeze(-1) * value_windows).sum(-2)
+        output = output.permute(0, 1, 3, 2).reshape(
+            x.shape[0], -1, query.shape[2]
+        )
+        output = self.proj_drop(self.proj(output))
+        output = output * query_mask.to(output.dtype)
+        return output, query_mask
+
+
+class ActionFormerBlock(nn.Module):
+    """Pre-norm local attention block used by ActionFormer."""
+
+    def __init__(
+            self,
+            n_embd,
+            n_head,
+            n_ds_strides=(1, 1),
+            n_hidden=None,
+            attn_pdrop=0.0,
+            proj_pdrop=0.0,
+            path_pdrop=0.0,
+            mha_win_size=9,
+    ):
+        super().__init__()
+        self.ln1 = LayerNorm(n_embd)
+        self.ln2 = LayerNorm(n_embd)
+        self.attn = LocalMaskedMHCA(
+            n_embd, n_head, mha_win_size,
+            n_qx_stride=n_ds_strides[0],
+            n_kv_stride=n_ds_strides[1],
+            attn_pdrop=attn_pdrop,
+            proj_pdrop=proj_pdrop,
+        )
+        if n_ds_strides[0] > 1:
+            stride = n_ds_strides[0]
+            self.pool_skip = nn.MaxPool1d(
+                stride + 1, stride=stride, padding=(stride + 1) // 2
+            )
+        else:
+            self.pool_skip = nn.Identity()
+        hidden = n_hidden or 4 * n_embd
+        self.mlp = nn.Sequential(
+            nn.Conv1d(n_embd, hidden, 1),
+            nn.GELU(),
+            nn.Dropout(proj_pdrop),
+            nn.Conv1d(hidden, n_embd, 1),
+            nn.Dropout(proj_pdrop),
+        )
+        if path_pdrop > 0:
+            self.drop_path_attn = AffineDropPath(n_embd, path_pdrop)
+            self.drop_path_mlp = AffineDropPath(n_embd, path_pdrop)
+        else:
+            self.drop_path_attn = nn.Identity()
+            self.drop_path_mlp = nn.Identity()
+
+    def forward(self, x, mask):
+        attended, out_mask = self.attn(self.ln1(x), mask)
+        mask_float = out_mask.to(attended.dtype)
+        output = self.pool_skip(x) * mask_float + self.drop_path_attn(attended)
+        output = output + self.drop_path_mlp(
+            self.mlp(self.ln2(output)) * mask_float
+        )
+        return output, out_mask

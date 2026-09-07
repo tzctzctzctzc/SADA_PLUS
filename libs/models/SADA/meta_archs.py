@@ -980,7 +980,7 @@ class SADA(nn.Module):
         
         # we will need a better way to dispatch the params to backbones / necks
         # backbone network: conv + transformer
-        assert backbone_type in ['SGP', 'conv']
+        assert backbone_type in ['SGP', 'conv', 'convTransformer']
         if self.cfg['model'].get('use_finetune_feature_extractor', False):
             input_dim_backbone = embd_dim
         else:
@@ -1005,7 +1005,7 @@ class SADA(nn.Module):
                     'init_conv_vars': init_conv_vars
                 }
             )
-        else:
+        elif backbone_type == 'conv':
             self.backbone = make_backbone(
                 'conv',
                 **{
@@ -1015,6 +1015,31 @@ class SADA(nn.Module):
                     'arch': backbone_arch,
                     'scale_factor': scale_factor,
                     'with_ln': embd_with_ln
+                }
+            )
+        else:
+            actionformer_heads = int(cfg['model'].get('actionformer_heads', 4))
+            actionformer_window = int(
+                cfg['model'].get('actionformer_window_size', 9)
+            )
+            self.backbone = make_backbone(
+                'convTransformer',
+                **{
+                    'n_in': input_dim_backbone,
+                    'n_embd': embd_dim,
+                    'n_head': actionformer_heads,
+                    'n_embd_ks': embd_kernel_size,
+                    'max_len': self.max_seq_len,
+                    'arch': backbone_arch,
+                    'mha_win_size': [actionformer_window] * (
+                        1 + backbone_arch[-1]
+                    ),
+                    'scale_factor': scale_factor,
+                    'with_ln': embd_with_ln,
+                    'attn_pdrop': self.train_dropout,
+                    'proj_pdrop': self.train_dropout,
+                    'path_pdrop': self.train_droppath,
+                    'use_abs_pe': use_abs_pe,
                 }
             )
             
