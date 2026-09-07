@@ -21,6 +21,9 @@ build_oracle_target_distillation = (
 )
 build_vlm_target_distillation = target_adapter.build_vlm_target_distillation
 load_vlm_target_adapter_cache = target_adapter.load_vlm_target_adapter_cache
+validate_vlm_target_adapter_resume = (
+    target_adapter.validate_vlm_target_adapter_resume
+)
 
 
 def test_selected_oracle_uses_only_high_confidence_enabled_anchors():
@@ -81,6 +84,41 @@ def adapter_payload(entries):
         },
         "entries": entries,
     }
+
+
+def test_vlm_target_adapter_resume_accepts_exact_continuation():
+    adapter = {
+        "enabled": True,
+        "cache_sha256": "b" * 64,
+        "budget": 0.05,
+        "levels": [0, 1, 2],
+        "policy": "hard",
+        "confidence_threshold": 0.0,
+    }
+
+    validate_vlm_target_adapter_resume(
+        {"config": {"vlm_target_adapter": adapter}}, adapter
+    )
+
+
+def test_vlm_target_adapter_resume_rejects_changed_cache_or_policy():
+    adapter = {
+        "enabled": True,
+        "cache_sha256": "b" * 64,
+        "budget": 0.05,
+        "levels": [0, 1, 2],
+        "policy": "hard",
+        "confidence_threshold": 0.0,
+    }
+    checkpoint = {"config": {"vlm_target_adapter": dict(adapter)}}
+
+    changed_cache = dict(adapter, cache_sha256="c" * 64)
+    with pytest.raises(ValueError, match="settings differ"):
+        validate_vlm_target_adapter_resume(checkpoint, changed_cache)
+
+    changed_policy = dict(adapter, policy="verify")
+    with pytest.raises(ValueError, match="settings differ"):
+        validate_vlm_target_adapter_resume(checkpoint, changed_policy)
 
 
 def test_vlm_target_cache_loads_known_classes_by_video(tmp_path):

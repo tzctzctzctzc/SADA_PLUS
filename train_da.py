@@ -33,7 +33,10 @@ from libs.models.SADA.vlm_routing import (
     validate_vlm_resume,
     validate_vlm_transition,
 )
-from libs.models.SADA.target_adapter import load_vlm_target_adapter_cache
+from libs.models.SADA.target_adapter import (
+    load_vlm_target_adapter_cache,
+    validate_vlm_target_adapter_resume,
+)
 from libs.models.SADA.proposal_semantic import load_proposal_semantic_cache
 
 os.environ['NUMBA_NUM_THREADS'] = "8"
@@ -1248,9 +1251,20 @@ if __name__ == '__main__':
         if selection.get('selection_teacher_checkpoint_sha256') != file_sha256(
             args.resume
         ):
-            raise ValueError(
-                'VLM target adapter selection checkpoint differs from resume'
+            resume_checkpoint = torch.load(args.resume, map_location='cpu')
+            validate_vlm_target_adapter_resume(
+                resume_checkpoint,
+                {
+                    'cache_sha256': cache_sha256,
+                    'budget': args.vlm_target_adapter_budget,
+                    'levels': target_adapter_levels,
+                    'policy': args.vlm_target_adapter_policy,
+                    'confidence_threshold': (
+                        args.vlm_target_adapter_confidence_threshold
+                    ),
+                },
             )
+            del resume_checkpoint
     else:
         cache_sha256 = None
     config_dict['vlm_target_adapter'] = {

@@ -27,6 +27,27 @@ TARGET_CLASS_NAMES = (
 )
 
 
+def validate_vlm_target_adapter_resume(checkpoint, expected):
+    """Require a continuation checkpoint to use the exact same adapter setup."""
+    config = checkpoint.get("config")
+    actual = config.get("vlm_target_adapter") if config is not None else None
+    if not isinstance(actual, dict) or not actual.get("enabled"):
+        raise ValueError(
+            "VLM target adapter selection checkpoint differs from resume"
+        )
+    fields = (
+        "cache_sha256",
+        "budget",
+        "levels",
+        "policy",
+        "confidence_threshold",
+    )
+    if any(actual.get(field) != expected.get(field) for field in fields):
+        raise ValueError(
+            "VLM target adapter continuation settings differ from resume"
+        )
+
+
 def build_oracle_target_distillation(
     scores,
     gt_labels,
