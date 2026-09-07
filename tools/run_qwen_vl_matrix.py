@@ -74,7 +74,9 @@ def parse_args():
     )
     parser.add_argument("--model-path", required=True)
     parser.add_argument("--offline", action="store_true")
-    parser.add_argument("--device-map", choices=("none", "auto"), default="none")
+    parser.add_argument(
+        "--device-map", choices=("none", "auto", "balanced"), default="none"
+    )
     parser.add_argument("--attn-implementation", default="sdpa")
     parser.add_argument(
         "--dtype", choices=("auto", "bfloat16", "float16"), default="bfloat16"
