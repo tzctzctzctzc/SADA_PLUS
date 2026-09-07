@@ -7,7 +7,7 @@ import os
 from tools import run_qwen3_vl_classification as base
 
 
-PROMPT_VERSION = "qwen3.8-27b-ordered-images-digit-logits-v1"
+PROMPT_VERSION = "qwen3.8-27b-ordered-images-digit-logits-direct-v2"
 WIRE_API = "qwen3.8-vl-next-token-classification"
 PROMPT_SHA256 = hashlib.sha256(
     json.dumps(
@@ -55,6 +55,10 @@ def load_qwen38(args):
         "digit_token_ids": base.resolve_digit_token_ids(processor.tokenizer),
         "device": model.device,
         "model_revision": getattr(model.config, "_commit_hash", None),
+        # Qwen3.8's chat template defaults to xhigh reasoning and appends
+        # <think>; scoring that position measures reasoning-token logits rather
+        # than the requested class digit.  Force direct answers for classification.
+        "chat_template_kwargs": {"enable_thinking": False},
     }
 
 

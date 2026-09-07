@@ -168,8 +168,12 @@ def infer_one(runtime, paths, candidate_id, args):
     prompt = build_prompt(candidate_id)
     mapping = digit_to_label(candidate_id)
     messages = build_messages(paths, prompt, args.min_pixels, args.max_pixels)
+    chat_template_kwargs = runtime.get("chat_template_kwargs", {})
     text = runtime["processor"].apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+        **chat_template_kwargs
     )
     image_inputs, video_inputs = runtime["process_vision_info"](
         messages, image_patch_size=16
