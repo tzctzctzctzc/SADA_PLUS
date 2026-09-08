@@ -1164,6 +1164,13 @@ def create_argparser():
     parser.add_argument('--proposal-semantic-source-cache', default=None)
     parser.add_argument('--proposal-semantic-target-cache', default=None)
     parser.add_argument(
+        '--proposal-semantic-external-selection', action='store_true',
+        help=(
+            'consume proposal semantics selected by a different frozen TAL '
+            'teacher for controlled cross-architecture comparisons'
+        ),
+    )
+    parser.add_argument(
         '--proposal-semantic-init-weights',
         choices=['student', 'ema'],
         default='ema',
@@ -1769,10 +1776,12 @@ if __name__ == '__main__':
         args.proposal_semantic_init_from_sada
         or args.proposal_semantic_continue_from_sada
     )
+    proposal_selection_mode = None
     if proposal_semantic_selection_checkpoint:
         expected_selection_checkpoint = file_sha256(
             proposal_semantic_selection_checkpoint
         )
+        proposal_selection_mode = 'matching_checkpoint'
         for payload in (source_cache_payload, target_cache_payload):
             if payload is None:
                 continue
@@ -1780,16 +1789,29 @@ if __name__ == '__main__':
                 'selection_teacher_checkpoint_sha256'
             )
             if actual != expected_selection_checkpoint:
-                raise ValueError(
-                    'proposal semantic cache selection teacher differs from '
-                    'the initialization SADA checkpoint'
-                )
+                if not args.proposal_semantic_external_selection:
+                    raise ValueError(
+                        'proposal semantic cache selection teacher differs '
+                        'from the initialization SADA checkpoint; use '
+                        '--proposal-semantic-external-selection only for a '
+                        'controlled cross-architecture comparison'
+                    )
+                proposal_selection_mode = 'fixed_external_teacher'
+    if args.proposal_semantic_external_selection and not (
+        proposal_semantic_selection_checkpoint
+        and (source_cache_payload is not None or target_cache_payload is not None)
+    ):
+        raise ValueError(
+            '--proposal-semantic-external-selection requires a proposal '
+            'semantic cache and an initialization checkpoint'
+        )
     config_dict['proposal_semantic'] = {
         'mode': args.proposal_semantic_mode,
         'source_cache_path': args.proposal_semantic_source_cache,
         'target_cache_path': args.proposal_semantic_target_cache,
         'source_cache_sha256': source_cache_sha256,
         'target_cache_sha256': target_cache_sha256,
+        'selection_provenance_mode': proposal_selection_mode,
         'source_weight': args.proposal_semantic_source_weight,
         'alignment_weight': args.proposal_semantic_alignment_weight,
         'direct_weight': args.proposal_semantic_direct_weight,
