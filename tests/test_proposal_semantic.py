@@ -147,6 +147,32 @@ def test_background_anchor_excludes_vlm_positive_bag_and_invalid_time():
     assert loss.item() == pytest.approx(1.0)
 
 
+def test_class_balance_upweights_rare_labels_and_preserves_mean_scale():
+    entries = [
+        {
+            "semantic_label": label,
+            "class_probabilities": probabilities,
+        }
+        for label, probabilities in (
+            [("TAKE", [0.8, 0.2])] * 4
+            + [("PUT", [0.1, 0.9])]
+            + [("OPEN", [0.6, 0.4])]
+        )
+    ]
+
+    weights, counts = proposal_semantic.proposal_class_balance_weights(
+        entries,
+        num_classes=2,
+        confidence_threshold=0.7,
+        power=0.5,
+        max_weight=2.0,
+    )
+
+    assert counts.tolist() == [4.0, 1.0]
+    assert weights[1] > weights[0]
+    assert float((weights * counts).sum() / counts.sum()) == pytest.approx(1.0)
+
+
 def test_vlm_proposal_agreement_gate_uses_frozen_base_logits():
     logits = [torch.tensor([[
         [4.0, 0.0], [4.0, 0.0], [0.0, 4.0], [0.0, 4.0]

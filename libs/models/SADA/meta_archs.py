@@ -57,6 +57,7 @@ from .proposal_semantic import (
     labels_for_proposals,
     load_proposal_semantic_cache,
     prepare_vlm_proposal_targets,
+    proposal_class_balance_weights,
     proposal_detection_loss,
     proposal_background_anchor_loss,
     source_gt_proposals,
@@ -687,6 +688,12 @@ class SADA(nn.Module):
         self.proposal_direct_pooling = proposal_cfg.get(
             'direct_pooling', 'mean'
         )
+        self.proposal_direct_class_balance_power = float(
+            proposal_cfg.get('direct_class_balance_power', 0.0)
+        )
+        self.proposal_direct_class_balance_max_weight = float(
+            proposal_cfg.get('direct_class_balance_max_weight', 2.0)
+        )
         self.proposal_logit_shared_levels = bool(
             proposal_cfg.get('logit_shared_levels', False)
         )
@@ -719,6 +726,8 @@ class SADA(nn.Module):
                     'bce', 'soft_ce', 'positive_bce'
                 )
                 or self.proposal_direct_pooling not in ('mean', 'top2')
+                or not 0.0 <= self.proposal_direct_class_balance_power <= 1.0
+                or self.proposal_direct_class_balance_max_weight < 1.0
                 or self.proposal_logit_kernel_size not in (1, 3, 5)
                 or self.proposal_background_anchor_weight < 0.0
                 or not 0.0 <= self.proposal_background_anchor_confidence <= 1.0
@@ -727,6 +736,7 @@ class SADA(nn.Module):
         self.proposal_semantic_source_cache = {}
         self.proposal_semantic_target_cache = {}
         self.proposal_semantic_cache_metadata = {}
+        self.proposal_direct_class_weights = None
         source_cache_path = proposal_cfg.get('source_cache_path')
         target_cache_path = proposal_cfg.get('target_cache_path')
         if source_cache_path:
@@ -761,6 +771,20 @@ class SADA(nn.Module):
                 )
             self.proposal_semantic_cache_metadata['target_count'] = target_count
             self.proposal_semantic_cache_metadata['target_sha256'] = target_sha256
+            if self.proposal_direct_class_balance_power > 0.0:
+                weights, counts = proposal_class_balance_weights(
+                    target_payload['entries'],
+                    self.num_class_orig,
+                    self.proposal_semantic_confidence_threshold,
+                    power=self.proposal_direct_class_balance_power,
+                    max_weight=(
+                        self.proposal_direct_class_balance_max_weight
+                    ),
+                )
+                self.proposal_direct_class_weights = weights
+                self.proposal_semantic_cache_metadata[
+                    'target_confident_class_counts'
+                ] = counts.tolist()
         if self.proposal_semantic_mode.startswith('vlm') and not target_cache_path:
             raise ValueError('VLM proposal semantics require a target cache')
         stage1_cfg = cfg.get('stage1', {})
@@ -1870,6 +1894,7 @@ class SADA(nn.Module):
                 self.fpn_strides,
                 loss_type=self.proposal_direct_loss_type,
                 pooling=self.proposal_direct_pooling,
+                class_weights=self.proposal_direct_class_weights,
             )
             if self.proposal_background_anchor_weight > 0.0:
                 background_loss, background_count = (

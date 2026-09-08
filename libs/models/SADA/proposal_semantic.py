@@ -466,12 +466,45 @@ def prepare_vlm_proposal_targets(
     }
 
 
+def proposal_class_balance_weights(
+    entries,
+    num_classes,
+    confidence_threshold,
+    power=0.5,
+    max_weight=2.0,
+):
+    """Macro-oriented weights from observable cached VLM label frequencies."""
+    counts = torch.zeros(int(num_classes), dtype=torch.float32)
+    known_label_count = min(int(num_classes), len(KNOWN_LABELS))
+    for entry in entries:
+        label = entry.get("semantic_label")
+        if label not in KNOWN_LABELS[:known_label_count]:
+            continue
+        probabilities = entry.get("class_probabilities")
+        confidence = max(probabilities) if probabilities else 1.0
+        if confidence >= float(confidence_threshold):
+            counts[KNOWN_LABELS.index(label)] += 1.0
+    supported = counts > 0
+    weights = torch.zeros_like(counts)
+    if supported.any():
+        mean_count = counts[supported].mean()
+        weights[supported] = (mean_count / counts[supported]).pow(float(power))
+        weights.clamp_(max=float(max_weight))
+        normalizer = (
+            (weights[supported] * counts[supported]).sum()
+            / counts[supported].sum()
+        )
+        weights[supported] /= normalizer.clamp(min=1e-6)
+    return weights, counts
+
+
 def proposal_detection_loss(
     class_logits,
     proposals,
     fpn_strides,
     loss_type="bce",
     pooling="mean",
+    class_weights=None,
 ):
     """Supervise the detector through proposal-average class logits."""
     if loss_type not in ("bce", "soft_ce", "positive_bce"):
@@ -524,6 +557,12 @@ def proposal_detection_loss(
         loss = F.binary_cross_entropy_with_logits(
             logits, targets, reduction="none"
         ).sum(dim=-1)
+    if class_weights is not None:
+        top_classes = targets.argmax(dim=-1)
+        weights = torch.as_tensor(
+            class_weights, device=loss.device, dtype=loss.dtype
+        )
+        loss = loss * weights[top_classes]
     return loss.mean(), logits.shape[0]
 
 

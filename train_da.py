@@ -1192,6 +1192,17 @@ def create_argparser():
         help='temporal multiple-instance pooling for proposal supervision',
     )
     parser.add_argument(
+        '--proposal-semantic-direct-class-balance-power',
+        type=float,
+        default=0.0,
+        help='inverse-frequency power for macro-oriented VLM supervision',
+    )
+    parser.add_argument(
+        '--proposal-semantic-direct-class-balance-max-weight',
+        type=float,
+        default=2.0,
+    )
+    parser.add_argument(
         '--proposal-semantic-share-logit-adapter', action='store_true',
         help='share one target semantic residual expert across FPN levels',
     )
@@ -1767,6 +1778,12 @@ if __name__ == '__main__':
         'logit_gate': args.proposal_semantic_logit_gate,
         'direct_loss_type': args.proposal_semantic_direct_loss,
         'direct_pooling': args.proposal_semantic_direct_pooling,
+        'direct_class_balance_power': (
+            args.proposal_semantic_direct_class_balance_power
+        ),
+        'direct_class_balance_max_weight': (
+            args.proposal_semantic_direct_class_balance_max_weight
+        ),
         'logit_shared_levels': args.proposal_semantic_share_logit_adapter,
         'logit_kernel_size': args.proposal_semantic_logit_kernel_size,
         'background_anchor_weight': (
