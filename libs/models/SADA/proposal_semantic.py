@@ -44,7 +44,10 @@ def load_proposal_semantic_cache(path, num_classes):
     payload = json.loads(raw.decode("utf-8"))
     if payload.get("schema_version") != PROPOSAL_SEMANTIC_CACHE_SCHEMA:
         raise ValueError("unsupported proposal semantic cache schema")
-    if payload.get("source") != "offline_vlm_proposal_semantics":
+    if payload.get("source") not in (
+        "offline_vlm_proposal_semantics",
+        "offline_vlm_consensus_proposal_semantics",
+    ):
         raise ValueError("invalid proposal semantic cache source")
     if payload.get("domain") not in ("source", "target"):
         raise ValueError("proposal semantic cache has an invalid domain")

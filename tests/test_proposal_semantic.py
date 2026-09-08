@@ -270,11 +270,17 @@ def test_cached_vlm_probability_vector_is_used_as_semantic_embedding():
     assert result["evidence_eligible"].tolist() == [True]
 
 
-def test_loader_accepts_ten_vlm_classes_with_original_tal_class_count(tmp_path):
+@pytest.mark.parametrize("source", [
+    "offline_vlm_proposal_semantics",
+    "offline_vlm_consensus_proposal_semantics",
+])
+def test_loader_accepts_ten_vlm_classes_with_original_tal_class_count(
+    tmp_path, source
+):
     path = tmp_path / "proposal_semantic.json"
     path.write_text(json.dumps({
         "schema_version": "proposal-semantic-evidence-v1",
-        "source": "offline_vlm_proposal_semantics",
+        "source": source,
         "domain": "target",
         "split": "train",
         "selection_teacher_provenance": {},
