@@ -232,6 +232,34 @@ def test_inner_outer_ranking_penalizes_temporal_leakage():
     assert localized_loss < leaked_loss
 
 
+def test_language_advantage_focuses_gradient_on_base_model_blind_spot():
+    adapted = [torch.zeros(2, 5, 1, requires_grad=True)]
+    base = [torch.tensor([
+        [[-4.0], [-4.0], [-4.0], [-4.0], [-4.0]],
+        [[4.0], [4.0], [4.0], [4.0], [4.0]],
+    ])]
+    proposals = [{
+        "segments": torch.tensor([[1.0, 2.0]]),
+        "levels": torch.tensor([0]),
+        "targets": torch.tensor([[1.0]]),
+    } for _ in range(2)]
+
+    loss, _ = proposal_semantic.proposal_detection_loss(
+        adapted,
+        proposals,
+        (1,),
+        loss_type="positive_bce_rank_advantage",
+        pooling="top1",
+        base_logits=base,
+    )
+    loss.backward()
+
+    blind_spot_gradient = adapted[0].grad[0].abs().sum()
+    already_solved_gradient = adapted[0].grad[1].abs().sum()
+    assert blind_spot_gradient > 0
+    assert blind_spot_gradient > 20 * already_solved_gradient
+
+
 def test_outer_anchor_penalizes_only_residual_leakage():
     base = [torch.zeros(1, 5, 1)]
     localized = [base[0].clone()]

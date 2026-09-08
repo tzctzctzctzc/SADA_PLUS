@@ -739,7 +739,8 @@ class SADA(nn.Module):
                 or self.proposal_direct_loss_type not in (
                     'bce', 'soft_ce', 'known_soft_ce',
                     'known_top1_ce', 'positive_bce',
-                    'positive_bce_rank', 'positive_bce_outer_anchor',
+                    'positive_bce_rank', 'positive_bce_rank_advantage',
+                    'positive_bce_outer_anchor',
                     'top2_positive_bce',
                     'soft_positive_bce'
                 )
