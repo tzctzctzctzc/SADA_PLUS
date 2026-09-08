@@ -723,7 +723,8 @@ class SADA(nn.Module):
                 or self.proposal_logit_max_delta <= 0.0
                 or self.proposal_logit_gate not in ('none', 'base_confidence')
                 or self.proposal_direct_loss_type not in (
-                    'bce', 'soft_ce', 'positive_bce'
+                    'bce', 'soft_ce', 'positive_bce',
+                    'top2_positive_bce', 'soft_positive_bce'
                 )
                 or self.proposal_direct_pooling not in ('mean', 'top2')
                 or not 0.0 <= self.proposal_direct_class_balance_power <= 1.0

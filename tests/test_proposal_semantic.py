@@ -98,6 +98,23 @@ def test_positive_proposal_loss_does_not_update_unselected_classes():
     assert torch.equal(logits[0].grad[0, 0, 1:], torch.zeros(2))
 
 
+def test_top2_positive_loss_keeps_uncertainty_without_negative_gradients():
+    logits = [torch.zeros(1, 1, 3, requires_grad=True)]
+    proposals = [{
+        "segments": torch.tensor([[0.0, 0.0]]),
+        "levels": torch.tensor([0]),
+        "targets": torch.tensor([[0.6, 0.3, 0.1]]),
+    }]
+
+    loss, _ = proposal_semantic.proposal_detection_loss(
+        logits, proposals, (1,), loss_type="top2_positive_bce"
+    )
+    loss.backward()
+
+    assert torch.all(logits[0].grad[0, 0, :2] < 0)
+    assert logits[0].grad[0, 0, 2] == 0
+
+
 def test_top2_pooling_treats_a_proposal_as_a_temporal_bag():
     logits = [torch.tensor([[[-4.0], [4.0], [3.0], [-4.0], [-4.0]]])]
     proposals = [{

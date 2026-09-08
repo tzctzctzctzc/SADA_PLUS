@@ -1181,7 +1181,10 @@ def create_argparser():
     )
     parser.add_argument(
         '--proposal-semantic-direct-loss',
-        choices=['bce', 'soft_ce', 'positive_bce'],
+        choices=[
+            'bce', 'soft_ce', 'positive_bce',
+            'top2_positive_bce', 'soft_positive_bce',
+        ],
         default='bce',
         help='proposal-level VLM distribution distillation objective',
     )
