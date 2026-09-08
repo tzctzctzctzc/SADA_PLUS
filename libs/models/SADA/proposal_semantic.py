@@ -509,6 +509,7 @@ def proposal_detection_loss(
     loss_type="bce",
     pooling="mean",
     class_weights=None,
+    base_logits=None,
 ):
     """Supervise the detector through proposal-average class logits."""
     if loss_type not in (
@@ -518,6 +519,7 @@ def proposal_detection_loss(
         "known_top1_ce",
         "positive_bce",
         "positive_bce_rank",
+        "positive_bce_outer_anchor",
         "top2_positive_bce",
         "soft_positive_bce",
     ):
@@ -526,6 +528,7 @@ def proposal_detection_loss(
         raise ValueError("unknown proposal detection pooling")
     pooled_logits = []
     pooled_outer_logits = []
+    pooled_outer_delta_sq = []
     pooled_targets = []
     for batch_index, proposal in enumerate(proposals):
         targets = proposal.get("targets")
@@ -555,7 +558,9 @@ def proposal_detection_loss(
             else:
                 pooled = sampled.mean(dim=0)
             pooled_logits.append(pooled)
-            if loss_type == "positive_bce_rank":
+            if loss_type in (
+                "positive_bce_rank", "positive_bce_outer_anchor"
+            ):
                 outer_positions = torch.stack((
                     segment[0] - 0.50 * duration,
                     segment[0] - 0.25 * duration,
@@ -569,6 +574,18 @@ def proposal_detection_loss(
                 pooled_outer_logits.append(
                     outer_sampled.max(dim=0).values
                 )
+                if loss_type == "positive_bce_outer_anchor":
+                    if base_logits is None:
+                        raise ValueError(
+                            "outer anchor requires frozen base logits"
+                        )
+                    outer_base = _sample_sequence(
+                        base_logits[level][batch_index].transpose(0, 1),
+                        outer_positions,
+                    ).transpose(0, 1)
+                    pooled_outer_delta_sq.append(
+                        (outer_sampled - outer_base.detach()).pow(2).mean(dim=0)
+                    )
             pooled_targets.append(target.detach())
     if not pooled_logits:
         zero = sum(logits.sum() * 0.0 for logits in class_logits)
@@ -602,7 +619,9 @@ def proposal_detection_loss(
         loss = (
             F.softplus(-top_logits) * top_targets.detach()
         ).sum(dim=-1)
-    elif loss_type in ("positive_bce", "positive_bce_rank"):
+    elif loss_type in (
+        "positive_bce", "positive_bce_rank", "positive_bce_outer_anchor"
+    ):
         top_targets, top_classes = targets.max(dim=-1)
         top_logits = logits.gather(1, top_classes.unsqueeze(1)).squeeze(1)
         loss = F.softplus(-top_logits) * top_targets.detach()
@@ -612,6 +631,11 @@ def proposal_detection_loss(
             ).squeeze(1)
             rank_loss = F.softplus(outer_logits - top_logits)
             loss = 0.5 * (loss + rank_loss * top_targets.detach())
+        elif loss_type == "positive_bce_outer_anchor":
+            outer_anchor = torch.stack(pooled_outer_delta_sq).gather(
+                1, top_classes.unsqueeze(1)
+            ).squeeze(1)
+            loss = loss + outer_anchor
     else:
         loss = F.binary_cross_entropy_with_logits(
             logits, targets, reduction="none"

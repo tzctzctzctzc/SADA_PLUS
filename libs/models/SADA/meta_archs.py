@@ -732,7 +732,8 @@ class SADA(nn.Module):
                 or self.proposal_direct_loss_type not in (
                     'bce', 'soft_ce', 'known_soft_ce',
                     'known_top1_ce', 'positive_bce',
-                    'positive_bce_rank', 'top2_positive_bce',
+                    'positive_bce_rank', 'positive_bce_outer_anchor',
+                    'top2_positive_bce',
                     'soft_positive_bce'
                 )
                 or self.proposal_direct_pooling not in ('mean', 'top2')
@@ -1910,6 +1911,7 @@ class SADA(nn.Module):
                 loss_type=self.proposal_direct_loss_type,
                 pooling=self.proposal_direct_pooling,
                 class_weights=self.proposal_direct_class_weights,
+                base_logits=out_cls_logits_tgt_base,
             )
             if self.proposal_background_anchor_weight > 0.0:
                 background_loss, background_count = (

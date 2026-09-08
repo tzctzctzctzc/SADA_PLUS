@@ -214,6 +214,38 @@ def test_inner_outer_ranking_penalizes_temporal_leakage():
     assert localized_loss < leaked_loss
 
 
+def test_outer_anchor_penalizes_only_residual_leakage():
+    base = [torch.zeros(1, 5, 1)]
+    localized = [base[0].clone()]
+    localized[0][0, 1:3, 0] = 4.0
+    leaked = [localized[0].clone()]
+    leaked[0][0, (0, 3, 4), 0] = 1.0
+    proposals = [{
+        "segments": torch.tensor([[1.0, 2.0]]),
+        "levels": torch.tensor([0]),
+        "targets": torch.tensor([[1.0]]),
+    }]
+
+    localized_loss, _ = proposal_semantic.proposal_detection_loss(
+        localized,
+        proposals,
+        (1,),
+        loss_type="positive_bce_outer_anchor",
+        pooling="top2",
+        base_logits=base,
+    )
+    leaked_loss, _ = proposal_semantic.proposal_detection_loss(
+        leaked,
+        proposals,
+        (1,),
+        loss_type="positive_bce_outer_anchor",
+        pooling="top2",
+        base_logits=base,
+    )
+
+    assert localized_loss < leaked_loss
+
+
 def test_background_anchor_excludes_vlm_positive_bag_and_invalid_time():
     base = [torch.full((1, 4, 2), -10.0)]
     adapted = [base[0] + 1.0]
