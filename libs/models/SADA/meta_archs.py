@@ -686,10 +686,6 @@ class SADA(nn.Module):
             self.proposal_semantic_cache_metadata['target_sha256'] = target_sha256
         if self.proposal_semantic_mode == 'vlm' and not target_cache_path:
             raise ValueError('VLM proposal semantics require a target cache')
-        if self.proposal_semantic_mode == 'vlm' and not source_cache_path:
-            raise ValueError(
-                'VLM proposal semantics require a source cache for adapter training'
-            )
         stage1_cfg = cfg.get('stage1', {})
         self.stage1_enabled = stage1_cfg.get('enabled', False)
         self.stage1_perturbation = stage1_cfg.get('perturbation', 'shift')
