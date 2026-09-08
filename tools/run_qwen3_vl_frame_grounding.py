@@ -184,8 +184,7 @@ def frame_timestamp(row, frame_index):
 
 
 def grounding_audit(rows, database):
-    def hits(row, frame_index):
-        timestamp = frame_timestamp(row, frame_index)
+    def hits_at(row, timestamp):
         class_id = LABEL_TO_ID[row["prediction"]]
         return any(
             int(annotation["label_id"]) == class_id
@@ -195,23 +194,47 @@ def grounding_audit(rows, database):
         )
 
     eligible = [row for row in rows if row["video_id"] in database]
-    midpoint_index = lambda row: (int(row["frame_count"]) - 1) // 2
-    peak_hits = sum(hits(row, int(row["peak_frame_index"])) for row in eligible)
-    midpoint_hits = sum(hits(row, midpoint_index(row)) for row in eligible)
-    oracle_hits = sum(
-        any(hits(row, index) for index in range(int(row["frame_count"])))
-        for row in eligible
-    )
-    count = len(eligible)
-    return {
-        "count": count,
-        "peak_hit_rate": peak_hits / count if count else None,
-        "midpoint_hit_rate": midpoint_hits / count if count else None,
-        "peak_gain_vs_midpoint": (
-            (peak_hits - midpoint_hits) / count if count else None
-        ),
-        "oracle_frame_hit_rate": oracle_hits / count if count else None,
-    }
+
+    def summarize(selected):
+        peak_hits = sum(
+            hits_at(row, frame_timestamp(row, int(row["peak_frame_index"])))
+            for row in selected
+        )
+        midpoint_hits = sum(
+            hits_at(
+                row,
+                0.5 * (
+                    float(row["proposal_start_sec"])
+                    + float(row["proposal_end_sec"])
+                ),
+            )
+            for row in selected
+        )
+        oracle_hits = sum(
+            any(
+                hits_at(row, frame_timestamp(row, index))
+                for index in range(int(row["frame_count"]))
+            )
+            for row in selected
+        )
+        count = len(selected)
+        return {
+            "count": count,
+            "peak_hit_rate": peak_hits / count if count else None,
+            "midpoint_hit_rate": midpoint_hits / count if count else None,
+            "peak_gain_vs_midpoint": (
+                (peak_hits - midpoint_hits) / count if count else None
+            ),
+            "oracle_frame_hit_rate": oracle_hits / count if count else None,
+        }
+
+    result = summarize(eligible)
+    class_correct = [
+        row for row in eligible
+        if LABEL_TO_ID[row["prediction"]] in row.get("gt_assigned_class_ids", [])
+    ]
+    result["class_correct"] = summarize(class_correct)
+    return result
 
 
 def parse_args():

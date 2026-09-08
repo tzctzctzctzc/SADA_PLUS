@@ -30,6 +30,7 @@ def test_grounding_audit_compares_peak_with_fixed_midpoint():
         "proposal_end_sec": 8.0,
         "frame_count": 8,
         "peak_frame_index": 6,
+        "gt_assigned_class_ids": [0],
     }]
     database = {"video": {"annotations": [{
         "label_id": 0,
@@ -41,3 +42,4 @@ def test_grounding_audit_compares_peak_with_fixed_midpoint():
     assert result["peak_hit_rate"] == pytest.approx(1.0)
     assert result["midpoint_hit_rate"] == pytest.approx(0.0)
     assert result["peak_gain_vs_midpoint"] == pytest.approx(1.0)
+    assert result["class_correct"]["peak_hit_rate"] == pytest.approx(1.0)
