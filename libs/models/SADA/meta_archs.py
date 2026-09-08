@@ -700,6 +700,9 @@ class SADA(nn.Module):
         self.proposal_logit_input = proposal_cfg.get(
             'logit_input', 'feature'
         )
+        self.proposal_logit_bias = bool(
+            proposal_cfg.get('logit_bias', True)
+        )
         self.proposal_logit_kernel_size = int(
             proposal_cfg.get('logit_kernel_size', 1)
         )
@@ -1296,6 +1299,7 @@ class SADA(nn.Module):
                         self.num_class_orig,
                         self.proposal_logit_max_delta,
                         self.proposal_logit_kernel_size,
+                        self.proposal_logit_bias,
                     )
                     for _ in range(
                         1 if self.proposal_logit_shared_levels else self.n_levels

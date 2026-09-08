@@ -75,6 +75,18 @@ def test_logit_adapter_can_learn_confusion_correction_from_base_logits():
     assert base_logits.grad is None
 
 
+def test_logit_adapter_can_disable_global_class_bias():
+    adapter = proposal_semantic.ProposalLogitAdapter(
+        4, 2, max_delta=1.0, bias=False
+    )
+
+    assert adapter.bias is None
+    assert torch.equal(
+        adapter(torch.randn(2, 4, 5)),
+        torch.zeros(2, 2, 5),
+    )
+
+
 def test_proposal_detection_soft_ce_prefers_matching_distribution():
     logits = [torch.tensor([[[4.0, -2.0], [-2.0, 4.0]]])]
     proposals = [{

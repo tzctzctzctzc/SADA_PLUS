@@ -1217,6 +1217,10 @@ def create_argparser():
         help='learn the residual from FPN features or frozen SADA logits',
     )
     parser.add_argument(
+        '--proposal-semantic-logit-no-bias', action='store_true',
+        help='force the VLM residual to depend on visual content',
+    )
+    parser.add_argument(
         '--proposal-semantic-logit-kernel-size',
         type=int,
         choices=[1, 3, 5],
@@ -1796,6 +1800,7 @@ if __name__ == '__main__':
         ),
         'logit_shared_levels': args.proposal_semantic_share_logit_adapter,
         'logit_input': args.proposal_semantic_logit_input,
+        'logit_bias': not args.proposal_semantic_logit_no_bias,
         'logit_kernel_size': args.proposal_semantic_logit_kernel_size,
         'background_anchor_weight': (
             args.proposal_semantic_background_anchor_weight

@@ -381,7 +381,9 @@ class ProposalTargetAdapter(nn.Module):
 class ProposalLogitAdapter(nn.Module):
     """Small target-only classifier residual with an exact identity start."""
 
-    def __init__(self, channels, num_classes, max_delta=2.0, kernel_size=1):
+    def __init__(
+        self, channels, num_classes, max_delta=2.0, kernel_size=1, bias=True
+    ):
         super().__init__()
         self.max_delta = float(max_delta)
         self.kernel_size = int(kernel_size)
@@ -392,7 +394,9 @@ class ProposalLogitAdapter(nn.Module):
         self.weight = nn.Parameter(torch.zeros(
             num_classes, channels, self.kernel_size
         ))
-        self.bias = nn.Parameter(torch.zeros(num_classes))
+        self.bias = (
+            nn.Parameter(torch.zeros(num_classes)) if bias else None
+        )
 
     def forward(self, features):
         residual = F.conv1d(
