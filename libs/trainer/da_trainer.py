@@ -21,6 +21,7 @@ from libs.models.SADA.anchor_validity import (
 )
 from .gradient_harmonization import (
     blockwise_task_protected_gradients,
+    componentwise_task_protected_gradients,
     task_protected_gradients,
 )
 
@@ -100,7 +101,7 @@ class Trainer(BaseTrainerDA):
         harmonization_cfg = self.cfg.get('gradient_harmonization', {})
         self.gradient_harmonization_mode = harmonization_cfg.get('mode', 'off')
         if self.gradient_harmonization_mode not in (
-            'off', 'task_protect', 'block_task_protect'
+            'off', 'task_protect', 'block_task_protect', 'level_task_protect'
         ):
             raise ValueError(
                 'unknown gradient harmonization mode: {}'.format(
@@ -125,6 +126,13 @@ class Trainer(BaseTrainerDA):
             and not self.gradient_harmonization_parameters
         ):
             raise ValueError('gradient harmonization found no shared feature parameters')
+        if (
+            self.gradient_harmonization_mode == 'level_task_protect'
+            and set(self.cfg['model']['adv_method']) != {'conditional_rev'}
+        ):
+            raise ValueError(
+                'level task protection currently requires conditional_rev only'
+            )
 
     @staticmethod
     def _gradient_harmonization_block(parameter_name):
@@ -402,6 +410,7 @@ class Trainer(BaseTrainerDA):
             final_loss = torch.tensor(0.0, requires_grad=True).to(self.model.device)
             task_loss = losses['downstream_loss'] * 0.0
             alignment_loss = losses['downstream_loss'] * 0.0
+            alignment_components = []
             if curr_epoch < warmup_adv:
                 # Apply the source only training 
                 task_loss = losses['downstream_loss']
@@ -432,6 +441,19 @@ class Trainer(BaseTrainerDA):
                             alignment_loss
                             + weight_adv * losses['loss_conditional_adv_rev']
                         )
+                        semantic_levels = self.cfg['model'].get(
+                            'semantic_alignment_levels', range(self.model.n_levels)
+                        )
+                        for level in semantic_levels:
+                            level_weight = self.cfg['model'].get(
+                                'weight_level_' + str(level), 1.0
+                            )
+                            alignment_components.append(
+                                weight_adv
+                                * level_weight
+                                * losses['loss_conditional_adv_rev_' + str(level)]
+                                / len(semantic_levels)
+                            )
                 if self.model.transport_alignment_mode in ('uot', 'uot_adapter'):
                     alignment_loss = alignment_loss + (
                         self.model.transport_loss_weight
@@ -466,6 +488,18 @@ class Trainer(BaseTrainerDA):
                     None if parameter.grad is None else parameter.grad.detach().clone()
                     for parameter in self.gradient_harmonization_parameters
                 ]
+                component_gradient_lists = []
+                if self.gradient_harmonization_mode == 'level_task_protect':
+                    for component in alignment_components:
+                        component_gradient_lists.append([
+                            None if gradient is None else gradient.detach()
+                            for gradient in torch.autograd.grad(
+                                component,
+                                self.gradient_harmonization_parameters,
+                                retain_graph=True,
+                                allow_unused=True,
+                            )
+                        ])
                 alignment_loss.backward()
                 alignment_gradients = []
                 for parameter, task_gradient in zip(
@@ -479,7 +513,13 @@ class Trainer(BaseTrainerDA):
                         alignment_gradients.append(
                             parameter.grad.detach().clone() - task_gradient
                         )
-                if self.gradient_harmonization_mode == 'block_task_protect':
+                if self.gradient_harmonization_mode == 'level_task_protect':
+                    combined_gradients, harmonization_stats = (
+                        componentwise_task_protected_gradients(
+                            task_gradients, component_gradient_lists
+                        )
+                    )
+                elif self.gradient_harmonization_mode == 'block_task_protect':
                     combined_gradients, harmonization_stats = (
                         blockwise_task_protected_gradients(
                             task_gradients,

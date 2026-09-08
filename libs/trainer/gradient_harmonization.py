@@ -144,3 +144,85 @@ def blockwise_task_protected_gradients(
         "block_conflict_fraction": (conflicts / paired_blocks.clamp_min(1.0)).detach(),
         "paired_blocks": paired_blocks,
     }
+
+
+def componentwise_task_protected_gradients(
+    task_gradients, component_gradient_lists, eps=1e-12
+):
+    """Protect the source task from each alignment-loss component separately."""
+    if any(len(component) != len(task_gradients) for component in component_gradient_lists):
+        raise ValueError("all gradient lists must have the same length")
+    if not component_gradient_lists:
+        return task_protected_gradients(
+            task_gradients, [None] * len(task_gradients), eps=eps
+        )
+
+    combined = [None if task is None else task.clone() for task in task_gradients]
+    component_stats = []
+    for component_gradients in component_gradient_lists:
+        protected, stats = task_protected_gradients(
+            task_gradients, component_gradients, eps=eps
+        )
+        if stats["paired_parameters"].item() > 0:
+            component_stats.append(stats)
+        for index, (task, gradient) in enumerate(zip(task_gradients, protected)):
+            if gradient is None:
+                continue
+            contribution = gradient if task is None else gradient - task
+            combined[index] = (
+                contribution
+                if combined[index] is None
+                else combined[index] + contribution
+            )
+
+    summed_alignment = []
+    for gradients in zip(*component_gradient_lists):
+        available = [gradient for gradient in gradients if gradient is not None]
+        summed_alignment.append(sum(available) if available else None)
+
+    paired = [
+        (task, alignment)
+        for task, alignment in zip(task_gradients, summed_alignment)
+        if task is not None and alignment is not None
+    ]
+    if not paired:
+        zero = torch.tensor(0.0)
+        return combined, {
+            "task_norm": zero,
+            "alignment_norm": zero,
+            "projected_alignment_norm": zero,
+            "cosine": zero,
+            "conflict": zero,
+            "paired_parameters": zero,
+            "component_conflict_fraction": zero,
+            "paired_components": zero,
+        }
+
+    device = paired[0][0].device
+    task_norm_sq = sum((task.float() ** 2).sum() for task, _ in paired)
+    alignment_norm_sq = sum(
+        (alignment.float() ** 2).sum() for _, alignment in paired
+    )
+    dot = sum(
+        (task.float() * alignment.float()).sum() for task, alignment in paired
+    )
+    projected_alignment_norm_sq = task_norm_sq * 0.0
+    for task, gradient in zip(task_gradients, combined):
+        if task is not None and gradient is not None:
+            projected_alignment_norm_sq += ((gradient - task).float() ** 2).sum()
+
+    denominator = (task_norm_sq * alignment_norm_sq).sqrt().clamp_min(eps)
+    conflicts = sum(stats["conflict"] for stats in component_stats)
+    paired_components = torch.tensor(float(len(component_stats)), device=device)
+    return combined, {
+        "task_norm": task_norm_sq.sqrt().detach().to(device),
+        "alignment_norm": alignment_norm_sq.sqrt().detach().to(device),
+        "projected_alignment_norm": projected_alignment_norm_sq.sqrt().detach().to(device),
+        "cosine": (dot / denominator).detach().to(device),
+        "conflict": torch.tensor(float(dot.detach().item() < 0.0), device=device),
+        "paired_parameters": torch.tensor(float(len(paired)), device=device),
+        "component_conflict_fraction": (
+            conflicts / paired_components.clamp_min(1.0)
+        ).detach(),
+        "paired_components": paired_components,
+    }

@@ -2,6 +2,7 @@ import torch
 
 from libs.trainer.gradient_harmonization import (
     blockwise_task_protected_gradients,
+    componentwise_task_protected_gradients,
     task_protected_gradients,
 )
 
@@ -54,3 +55,20 @@ def test_blockwise_protection_prevents_cross_block_conflict_cancellation():
     assert torch.equal(block_combined[1], torch.tensor([3.0]))
     assert stats['block_conflict_fraction'].item() == 0.5
     assert stats['paired_blocks'].item() == 2.0
+
+
+def test_componentwise_protection_prevents_cross_loss_cancellation():
+    task = [torch.tensor([1.0])]
+    components = [[torch.tensor([-2.0])], [torch.tensor([2.0])]]
+
+    global_combined, _ = task_protected_gradients(
+        task, [components[0][0] + components[1][0]]
+    )
+    component_combined, stats = componentwise_task_protected_gradients(
+        task, components
+    )
+
+    assert torch.equal(global_combined[0], torch.tensor([1.0]))
+    assert torch.equal(component_combined[0], torch.tensor([3.0]))
+    assert stats['component_conflict_fraction'].item() == 0.5
+    assert stats['paired_components'].item() == 2.0
