@@ -736,7 +736,9 @@ class SADA(nn.Module):
                     'top2_positive_bce',
                     'soft_positive_bce'
                 )
-                or self.proposal_direct_pooling not in ('mean', 'top2')
+                or self.proposal_direct_pooling not in (
+                    'mean', 'top1', 'top2', 'top3'
+                )
                 or not 0.0 <= self.proposal_direct_class_balance_power <= 1.0
                 or self.proposal_direct_class_balance_max_weight < 1.0
                 or self.proposal_logit_kernel_size not in (1, 3, 5)

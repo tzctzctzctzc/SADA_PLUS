@@ -1192,7 +1192,7 @@ def create_argparser():
     )
     parser.add_argument(
         '--proposal-semantic-direct-pooling',
-        choices=['mean', 'top2'],
+        choices=['mean', 'top1', 'top2', 'top3'],
         default='mean',
         help='temporal multiple-instance pooling for proposal supervision',
     )

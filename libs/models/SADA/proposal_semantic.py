@@ -524,7 +524,7 @@ def proposal_detection_loss(
         "soft_positive_bce",
     ):
         raise ValueError("unknown proposal detection loss")
-    if pooling not in ("mean", "top2"):
+    if pooling not in ("mean", "top1", "top2", "top3"):
         raise ValueError("unknown proposal detection pooling")
     pooled_logits = []
     pooled_outer_logits = []
@@ -551,9 +551,10 @@ def proposal_detection_loss(
             sampled = _sample_sequence(
                 class_logits[level][batch_index].transpose(0, 1), positions
             ).transpose(0, 1)
-            if pooling == "top2":
+            if pooling.startswith("top"):
+                top_k = int(pooling[-1])
                 pooled = sampled.topk(
-                    k=min(2, sampled.shape[0]), dim=0
+                    k=min(top_k, sampled.shape[0]), dim=0
                 ).values.mean(dim=0)
             else:
                 pooled = sampled.mean(dim=0)

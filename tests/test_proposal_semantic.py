@@ -187,6 +187,24 @@ def test_top2_pooling_treats_a_proposal_as_a_temporal_bag():
     assert top2_loss < mean_loss
 
 
+def test_topk_pooling_controls_number_of_positive_instances():
+    logits = [torch.tensor([[[-4.0], [4.0], [3.0], [2.0], [-4.0]]])]
+    proposals = [{
+        "segments": torch.tensor([[0.0, 4.0]]),
+        "levels": torch.tensor([0]),
+        "targets": torch.tensor([[1.0]]),
+    }]
+
+    top1, _ = proposal_semantic.proposal_detection_loss(
+        logits, proposals, (1,), loss_type="positive_bce", pooling="top1"
+    )
+    top3, _ = proposal_semantic.proposal_detection_loss(
+        logits, proposals, (1,), loss_type="positive_bce", pooling="top3"
+    )
+
+    assert top1 < top3
+
+
 def test_inner_outer_ranking_penalizes_temporal_leakage():
     localized = [torch.tensor([[[-4.0], [4.0], [4.0], [-4.0], [-4.0]]])]
     leaked = [torch.tensor([[[4.0], [4.0], [4.0], [4.0], [4.0]]])]
