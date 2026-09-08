@@ -67,7 +67,8 @@ def build_cache(manifest_path, prediction_paths, temperature=None):
         protocols.add((
             prediction["model"],
             prediction["prompt_version"],
-            prediction["prompt_sha256"],
+            prediction.get("base_prompt_sha256", prediction["prompt_sha256"]),
+            prediction.get("wire_api"),
         ))
         entry = {
             "candidate_id": candidate_id,
@@ -101,7 +102,7 @@ def build_cache(manifest_path, prediction_paths, temperature=None):
         entries.append(entry)
     if len(protocols) > 1:
         raise ValueError("VLM prediction shards use different prompt protocols")
-    protocol = next(iter(protocols), (None, None, None))
+    protocol = next(iter(protocols), (None, None, None, None))
     metadata_path = Path(str(manifest_path) + ".meta.json")
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     return {
@@ -118,6 +119,7 @@ def build_cache(manifest_path, prediction_paths, temperature=None):
             "model": protocol[0],
             "prompt_version": protocol[1],
             "prompt_sha256": protocol[2],
+            "wire_api": protocol[3],
         },
         "manifest_candidates": len(manifest),
         "successful_predictions": len(entries),

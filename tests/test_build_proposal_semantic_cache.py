@@ -25,33 +25,60 @@ def write_jsonl(path, rows):
 
 def test_builder_retains_frozen_geometry_and_drops_manifest_gt(tmp_path):
     manifest = tmp_path / "source_train_manifest.jsonl"
-    write_jsonl(manifest, [{
-        "candidate_id": "v-p1",
-        "video_id": "v",
-        "absolute_feature_index": 11,
-        "absolute_center_time": 1.5,
-        "proposal_start_sec": 1.0,
-        "proposal_end_sec": 2.0,
-        "source_fpn_levels": [0],
-        "gt_assigned_class_ids": [3],
-        "semantic_gt_kind": "KNOWN_ACTION",
-    }])
+    write_jsonl(manifest, [
+        {
+            "candidate_id": "v-p1",
+            "video_id": "v",
+            "absolute_feature_index": 11,
+            "absolute_center_time": 1.5,
+            "proposal_start_sec": 1.0,
+            "proposal_end_sec": 2.0,
+            "source_fpn_levels": [0],
+            "gt_assigned_class_ids": [3],
+            "semantic_gt_kind": "KNOWN_ACTION",
+        },
+        {
+            "candidate_id": "v-p2",
+            "video_id": "v",
+            "absolute_feature_index": 12,
+            "absolute_center_time": 2.5,
+            "proposal_start_sec": 2.0,
+            "proposal_end_sec": 3.0,
+            "source_fpn_levels": [0],
+        },
+    ])
     (tmp_path / "source_train_manifest.jsonl.meta.json").write_text(json.dumps({
         "domain": "source",
         "selection_teacher_provenance": {"weights": "ema"}
     }), encoding="utf-8")
     predictions = tmp_path / "predictions.jsonl"
-    write_jsonl(predictions, [{
-        "candidate_id": "v-p1",
-        "video_id": "v",
-        "absolute_feature_index": 11,
-        "status": "ok",
-        "prediction": "OPEN",
-        "model": "test-vlm",
-        "prompt_version": "v1",
-        "prompt_sha256": "a" * 64,
-        "class_probabilities": [0.01, 0.01, 0.01, 0.91] + [0.01] * 6,
-    }])
+    write_jsonl(predictions, [
+        {
+            "candidate_id": "v-p1",
+            "video_id": "v",
+            "absolute_feature_index": 11,
+            "status": "ok",
+            "prediction": "OPEN",
+            "model": "test-vlm",
+            "prompt_version": "v1",
+            "prompt_sha256": "a" * 64,
+            "base_prompt_sha256": "b" * 64,
+            "wire_api": "test-api",
+            "class_probabilities": [0.01, 0.01, 0.01, 0.91] + [0.01] * 6,
+        },
+        {
+            "candidate_id": "v-p2",
+            "video_id": "v",
+            "absolute_feature_index": 12,
+            "status": "ok",
+            "prediction": "PUT",
+            "model": "test-vlm",
+            "prompt_version": "v1",
+            "prompt_sha256": "c" * 64,
+            "base_prompt_sha256": "b" * 64,
+            "wire_api": "test-api",
+        },
+    ])
 
     payload = build_cache(manifest, [predictions])
 
@@ -63,6 +90,12 @@ def test_builder_retains_frozen_geometry_and_drops_manifest_gt(tmp_path):
     assert payload["entries"][0]["class_probabilities"][3] == pytest.approx(0.91)
     assert payload["entries"][0]["confidence"] == pytest.approx(0.91)
     assert "gt_assigned_class_ids" not in payload["entries"][0]
+    assert payload["prompt_protocol"] == {
+        "model": "test-vlm",
+        "prompt_version": "v1",
+        "prompt_sha256": "b" * 64,
+        "wire_api": "test-api",
+    }
 
 
 def test_builder_rejects_prediction_identity_mismatch(tmp_path):
