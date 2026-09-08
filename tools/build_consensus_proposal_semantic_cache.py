@@ -11,6 +11,11 @@ def _entries_by_id(payload):
 def build_consensus(payloads, min_confidence=0.5):
     if len(payloads) < 2:
         raise ValueError("consensus requires at least two caches")
+    reference = payloads[0]
+    for payload in payloads[1:]:
+        for field in ("domain", "split", "selection_teacher_provenance"):
+            if payload.get(field) != reference.get(field):
+                raise ValueError("consensus caches use different protocols")
     indexed = [_entries_by_id(payload) for payload in payloads]
     shared_ids = set(indexed[0])
     for entries in indexed[1:]:

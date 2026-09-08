@@ -8,6 +8,9 @@ from tools.build_consensus_proposal_semantic_cache import build_consensus
 def _payload(rows, model):
     return {
         "source": "offline_vlm_proposal_semantics",
+        "domain": "target",
+        "split": "train",
+        "selection_teacher_provenance": {"state": "same"},
         "prompt_protocol": {"model": model},
         "entries": rows,
         "successful_predictions": len(rows),
