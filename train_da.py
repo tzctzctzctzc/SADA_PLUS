@@ -1201,6 +1201,10 @@ def create_argparser():
         help='compute conditional alignment diagnostics but exclude it from updates',
     )
     parser.add_argument(
+        '--diagnostic-test-target-val-only', action='store_true',
+        help='skip three auxiliary mAP passes during fast target-val screening',
+    )
+    parser.add_argument(
         '--diagnostic-alignment-levels', default=None,
         help='comma-separated FPN levels used only for diagnostic runs',
     )
@@ -1755,6 +1759,9 @@ if __name__ == '__main__':
             else 'forbidden'
         ),
     }
+    config_dict['train_cfg']['test_target_val_only'] = (
+        args.diagnostic_test_target_val_only
+    )
     validity_head_enabled = args.validity_head == 'train'
     if args.validity_head_loss_weight < 0.0:
         raise ValueError('validity head loss weight must be non-negative')

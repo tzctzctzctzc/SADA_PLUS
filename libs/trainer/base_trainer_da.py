@@ -76,6 +76,9 @@ class BaseTrainerDA:
         
         self.valid_freq = cfg['train_cfg']['valid_freq']
         self.test_freq = cfg['train_cfg']['test_freq']
+        self.test_target_val_only = cfg['train_cfg'].get(
+            'test_target_val_only', False
+        )
         
         self.metrics = cfg['opt']['epochs']
         self.epochs = cfg['opt']['epochs']
@@ -436,20 +439,31 @@ class BaseTrainerDA:
 
             # Evaluate the model (for debugging purposes)
             if (self.test_freq != -1 and epoch % self.test_freq == 0):
-                # Evaluate on the train split of the source domain (Used during supervision of training)
-                source_metrics_train = self._test_epoch(epoch, self.train_loader_src2, 'train', domain='src')  
-                source_metrics_train = {'t_src_'+k : v for k, v in list(source_metrics_train.items())}
-                wandb.log(source_metrics_train, step=epoch)
-                
-                # Evaluate on the val split of the source domain (Not seen during training)
-                source_metrics_val = self._test_epoch(epoch, self.val_loader_src, 'test', domain='src')  
-                source_metrics_val = {'v_src_'+k : v for k, v in list(source_metrics_val.items())}
-                wandb.log(source_metrics_val, step=epoch)
-                
-                # Evaluate on the train split of the target domain (Aligned during training)
-                target_metrics_train = self._test_epoch(epoch, self.train_loader_tgt2, 'train', domain='tgt')
-                target_metrics_train = {'t_tgt_'+k : v for k, v in list(target_metrics_train.items())}
-                wandb.log(target_metrics_train, step=epoch)
+                if not self.test_target_val_only:
+                    # Full protocol retained for final reporting runs.
+                    source_metrics_train = self._test_epoch(
+                        epoch, self.train_loader_src2, 'train', domain='src'
+                    )
+                    source_metrics_train = {
+                        't_src_'+k: v for k, v in source_metrics_train.items()
+                    }
+                    wandb.log(source_metrics_train, step=epoch)
+
+                    source_metrics_val = self._test_epoch(
+                        epoch, self.val_loader_src, 'test', domain='src'
+                    )
+                    source_metrics_val = {
+                        'v_src_'+k: v for k, v in source_metrics_val.items()
+                    }
+                    wandb.log(source_metrics_val, step=epoch)
+
+                    target_metrics_train = self._test_epoch(
+                        epoch, self.train_loader_tgt2, 'train', domain='tgt'
+                    )
+                    target_metrics_train = {
+                        't_tgt_'+k: v for k, v in target_metrics_train.items()
+                    }
+                    wandb.log(target_metrics_train, step=epoch)
                 
                 # Evaluate on the test split of the target domain (Not seen during training)
                 target_metrics_val = self._test_epoch(epoch, self.val_loader_tgt, 'test', domain='tgt')
