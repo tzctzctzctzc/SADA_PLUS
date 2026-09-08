@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root=/home1/gyy/vlms/SADA_CLIP_BENCH_20260904_r1
+root=${SADA_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 python=/home1/gyy/vlms/SADA_STAGE2_20260727/env/sada/bin/python
 manifest=artifacts/matrix_manifests/S5/target_train_manifest.jsonl
 output_root=artifacts/s5_strategy_matrix/caches
@@ -53,4 +53,3 @@ for model in clip qwen8 qwen32; do
         --temperature-calibration-report "$temperature" \
         --output "$output_root/${model}_proposal_semantic.json"
 done
-

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root=/home1/gyy/vlms/SADA_CLIP_BENCH_20260904_r1
+root=${SADA_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 python=/home1/gyy/vlms/SADA_STAGE2_20260727/env/sada/bin/python
 parent=/home1/gyy/vlms/SADA_VALIDITY_HEAD_20260808/artifacts/oracle_forgetting_20260817/s2_official_epoch10_normalized.pt
 config=configs/old_vs_new/version_final_ckpt.yaml
@@ -88,4 +88,3 @@ for index in "${!gpus[@]}"; do
 done
 printf '%s\n' "${worker_pids[@]}" >"$artifact_root/pids/workers.pid"
 wait "${worker_pids[@]}"
-
