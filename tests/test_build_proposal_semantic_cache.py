@@ -24,7 +24,7 @@ def write_jsonl(path, rows):
 
 
 def test_builder_retains_frozen_geometry_and_drops_manifest_gt(tmp_path):
-    manifest = tmp_path / "manifest.jsonl"
+    manifest = tmp_path / "source_train_manifest.jsonl"
     write_jsonl(manifest, [{
         "candidate_id": "v-p1",
         "video_id": "v",
@@ -36,9 +36,8 @@ def test_builder_retains_frozen_geometry_and_drops_manifest_gt(tmp_path):
         "gt_assigned_class_ids": [3],
         "semantic_gt_kind": "KNOWN_ACTION",
     }])
-    (tmp_path / "manifest.jsonl.meta.json").write_text(json.dumps({
+    (tmp_path / "source_train_manifest.jsonl.meta.json").write_text(json.dumps({
         "domain": "source",
-        "split": "train",
         "selection_teacher_provenance": {"weights": "ema"}
     }), encoding="utf-8")
     predictions = tmp_path / "predictions.jsonl"

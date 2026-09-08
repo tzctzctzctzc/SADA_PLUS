@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 from pathlib import Path
 
 from tools.calibrate_vlm_temperature import (
@@ -13,6 +14,16 @@ KNOWN_LABELS = (
     "TURN_ON", "CUT", "TURN_OFF", "POUR",
 )
 VALID_LABELS = KNOWN_LABELS + ("UNKNOWN_ACTION", "BACKGROUND", "ABSTAIN")
+
+
+def manifest_split(manifest_path, metadata):
+    if metadata.get("split"):
+        return metadata["split"]
+    name_tokens = set(re.split(r"[^a-z0-9]+", Path(manifest_path).name.lower()))
+    for split in ("train", "val", "test"):
+        if split in name_tokens:
+            return split
+    raise ValueError("manifest metadata is missing split and filename cannot infer it")
 
 
 def read_jsonl(path):
@@ -97,7 +108,7 @@ def build_cache(manifest_path, prediction_paths, temperature=None):
         "schema_version": "proposal-semantic-evidence-v1",
         "source": "offline_vlm_proposal_semantics",
         "domain": metadata["domain"],
-        "split": metadata["split"],
+        "split": manifest_split(manifest_path, metadata),
         "key_fields": ["candidate_id"],
         "selection_uses_gt": False,
         "selection_teacher_provenance": metadata[
