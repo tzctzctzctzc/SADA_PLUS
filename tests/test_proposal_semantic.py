@@ -33,7 +33,18 @@ def test_logit_adapter_is_zero_at_initialization_and_detaches_features():
 
     assert torch.equal(residual, torch.zeros_like(residual))
     assert features.grad is None
-    assert adapter.projection.weight.grad is not None
+    assert adapter.weight.grad is not None
+
+
+def test_logit_adapter_construction_does_not_consume_rng_state():
+    torch.manual_seed(123)
+    expected = torch.rand(4)
+    torch.manual_seed(123)
+
+    proposal_semantic.ProposalLogitAdapter(4, 2)
+    actual = torch.rand(4)
+
+    assert torch.equal(actual, expected)
 
 
 def test_vlm_proposal_agreement_gate_uses_frozen_base_logits():

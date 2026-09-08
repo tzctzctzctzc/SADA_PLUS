@@ -381,12 +381,13 @@ class ProposalLogitAdapter(nn.Module):
     def __init__(self, channels, num_classes, max_delta=2.0):
         super().__init__()
         self.max_delta = float(max_delta)
-        self.projection = nn.Conv1d(channels, num_classes, kernel_size=1)
-        nn.init.zeros_(self.projection.weight)
-        nn.init.zeros_(self.projection.bias)
+        # Construct parameters directly at zero so adding this branch does not
+        # consume RNG state and perturb the matched SADA continuation trajectory.
+        self.weight = nn.Parameter(torch.zeros(num_classes, channels, 1))
+        self.bias = nn.Parameter(torch.zeros(num_classes))
 
     def forward(self, features):
-        residual = self.projection(features.detach())
+        residual = F.conv1d(features.detach(), self.weight, self.bias)
         return self.max_delta * torch.tanh(residual)
 
 
