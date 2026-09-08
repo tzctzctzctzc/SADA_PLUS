@@ -51,7 +51,10 @@ def row_class_logits(row):
         return None
     if (
         len(probabilities) != len(CLASS_NAMES)
-        or any(float(value) < 0.0 for value in probabilities)
+        or any(
+            not math.isfinite(float(value)) or float(value) < 0.0
+            for value in probabilities
+        )
         or abs(sum(float(value) for value in probabilities) - 1.0) > 1e-4
     ):
         raise ValueError("invalid class probabilities")

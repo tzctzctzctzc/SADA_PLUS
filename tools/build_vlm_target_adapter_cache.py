@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 
 from tools.calibrate_vlm_temperature import (
@@ -123,7 +124,12 @@ def main():
         if probabilities is not None:
             if not isinstance(probabilities, list) or len(probabilities) != len(KNOWN):
                 raise ValueError("VLM prediction has invalid class probabilities")
-            if any(not isinstance(value, (int, float)) or value < 0.0 for value in probabilities):
+            if any(
+                not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or value < 0.0
+                for value in probabilities
+            ):
                 raise ValueError("VLM prediction has invalid class probabilities")
             if abs(sum(probabilities) - 1.0) > 1e-4:
                 raise ValueError("VLM prediction probabilities must sum to one")

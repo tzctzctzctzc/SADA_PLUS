@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import re
 from pathlib import Path
 
@@ -93,7 +94,10 @@ def build_cache(manifest_path, prediction_paths, temperature=None):
                 probabilities = [float(value) for value in probabilities]
                 if (
                     len(probabilities) != len(KNOWN_LABELS)
-                    or any(value < 0.0 for value in probabilities)
+                    or any(
+                        not math.isfinite(value) or value < 0.0
+                        for value in probabilities
+                    )
                     or abs(sum(probabilities) - 1.0) > 1e-4
                 ):
                     raise ValueError("invalid VLM class probabilities")

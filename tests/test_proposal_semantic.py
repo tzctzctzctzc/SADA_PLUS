@@ -185,6 +185,43 @@ def test_cached_vlm_probability_vector_is_used_as_semantic_embedding():
     assert result["evidence_eligible"].tolist() == [True]
 
 
+def test_loader_accepts_ten_vlm_classes_with_original_tal_class_count(tmp_path):
+    path = tmp_path / "proposal_semantic.json"
+    path.write_text(json.dumps({
+        "schema_version": "proposal-semantic-evidence-v1",
+        "source": "offline_vlm_proposal_semantics",
+        "domain": "target",
+        "split": "train",
+        "selection_teacher_provenance": {},
+        "prompt_protocol": {},
+        "entries": [{
+            "candidate_id": "video-p1",
+            "video_id": "video",
+            "absolute_feature_index": 10,
+            "absolute_center_time": 1.5,
+            "proposal_start_sec": 1.0,
+            "proposal_end_sec": 2.0,
+            "semantic_label": "TAKE",
+            "source_fpn_levels": [0],
+            "class_probabilities": [0.1] * 10,
+        }],
+    }), encoding="utf-8")
+
+    cache, count, _, _ = proposal_semantic.load_proposal_semantic_cache(
+        path, 97
+    )
+
+    assert count == 1
+    assert cache["video"][0]["class_probabilities"] == pytest.approx(
+        (0.1,) * 10
+    )
+    vector = proposal_semantic.evidence_vector(
+        "TAKE", 97, "cpu", torch.float32, (0.1,) * 10
+    )
+    assert vector.shape == (101,)
+    assert vector[:10].tolist() == pytest.approx([0.1] * 10)
+
+
 def test_branch_preserves_temporal_order_and_detaches_target_q():
     branch = proposal_semantic.ProposalSemanticBranch(
         fpn_dim=2,

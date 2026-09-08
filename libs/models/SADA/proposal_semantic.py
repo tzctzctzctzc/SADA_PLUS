@@ -52,6 +52,7 @@ def load_proposal_semantic_cache(path, num_classes):
     if not isinstance(payload.get("prompt_protocol"), dict):
         raise ValueError("proposal semantic cache has no prompt protocol")
 
+    known_label_count = min(int(num_classes), len(KNOWN_LABELS))
     by_video = {}
     seen = set()
     for entry in payload.get("entries", []):
@@ -74,7 +75,7 @@ def load_proposal_semantic_cache(path, num_classes):
         if start < 0.0 or end <= start or not start <= center <= end:
             raise ValueError("proposal semantic cache contains an invalid interval")
         label = str(entry["semantic_label"])
-        if label not in KNOWN_LABELS[:num_classes] + SPECIAL_LABELS:
+        if label not in KNOWN_LABELS[:known_label_count] + SPECIAL_LABELS:
             raise ValueError("proposal semantic cache contains an invalid label")
         levels = tuple(int(level) for level in entry.get("source_fpn_levels", []))
         if not levels or len(set(levels)) != len(levels) or any(
@@ -85,12 +86,14 @@ def load_proposal_semantic_cache(path, num_classes):
         if probabilities is not None:
             probabilities = tuple(float(value) for value in probabilities)
             if (
-                len(probabilities) != num_classes
+                # VLM predictions use the fixed ten-class benchmark vocabulary;
+                # TAL may still be configured with the original 97 classes.
+                len(probabilities) != len(KNOWN_LABELS)
                 or any(not math.isfinite(value) or value < 0.0 for value in probabilities)
                 or abs(sum(probabilities) - 1.0) > 1e-4
             ):
                 raise ValueError("proposal semantic cache has invalid probabilities")
-            if label not in KNOWN_LABELS[:num_classes]:
+            if label not in KNOWN_LABELS[:known_label_count]:
                 raise ValueError("special proposal label cannot have class probabilities")
         by_video.setdefault(video_id, []).append({
             "candidate_id": candidate_id,
@@ -204,11 +207,19 @@ def build_teacher_proposals(
 
 def evidence_vector(label, num_classes, device, dtype, probabilities=None):
     vector = torch.zeros(num_classes + 4, device=device, dtype=dtype)
-    if label in KNOWN_LABELS[:num_classes]:
+    known_label_count = min(int(num_classes), len(KNOWN_LABELS))
+    if label in KNOWN_LABELS[:known_label_count]:
         if probabilities is None:
             vector[KNOWN_LABELS.index(label)] = 1.0
         else:
-            vector[:num_classes] = torch.as_tensor(
+            probabilities = tuple(float(value) for value in probabilities)
+            if len(probabilities) == known_label_count:
+                probabilities = probabilities
+            elif len(probabilities) == len(KNOWN_LABELS):
+                probabilities = probabilities[:known_label_count]
+            else:
+                raise ValueError("VLM class probabilities have an invalid size")
+            vector[:known_label_count] = torch.as_tensor(
                 probabilities, device=device, dtype=dtype
             )
     elif label == "UNKNOWN_ACTION":
