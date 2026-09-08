@@ -49,12 +49,14 @@ from .target_adapter import (
 from .conditional_alignment import aggregate_conditional_class_losses
 from .proposal_semantic import (
     PROPOSAL_SEMANTIC_MODES,
+    ProposalLogitAdapter,
     ProposalSemanticBranch,
     ProposalTargetAdapter,
     build_teacher_proposals,
     cached_proposals_for_videos,
     labels_for_proposals,
     load_proposal_semantic_cache,
+    prepare_vlm_proposal_targets,
     proposal_detection_loss,
     source_gt_proposals,
 )
@@ -671,6 +673,12 @@ class SADA(nn.Module):
         self.proposal_semantic_nms_threshold = float(
             proposal_cfg.get('nms_threshold', 0.5)
         )
+        self.proposal_semantic_confidence_threshold = float(
+            proposal_cfg.get('confidence_threshold', 0.5)
+        )
+        self.proposal_logit_max_delta = float(
+            proposal_cfg.get('logit_max_delta', 2.0)
+        )
         if self.proposal_semantic_enabled:
             if (
                 self.proposal_semantic_source_weight < 0.0
@@ -685,6 +693,7 @@ class SADA(nn.Module):
                 or not 0.0 < self.proposal_semantic_score_threshold <= 1.0
                 or self.proposal_semantic_max_proposals < 1
                 or not 0.0 <= self.proposal_semantic_nms_threshold <= 1.0
+                or self.proposal_logit_max_delta <= 0.0
             ):
                 raise ValueError('proposal semantic configuration is invalid')
         self.proposal_semantic_source_cache = {}
@@ -724,7 +733,7 @@ class SADA(nn.Module):
                 )
             self.proposal_semantic_cache_metadata['target_count'] = target_count
             self.proposal_semantic_cache_metadata['target_sha256'] = target_sha256
-        if self.proposal_semantic_mode == 'vlm' and not target_cache_path:
+        if self.proposal_semantic_mode.startswith('vlm') and not target_cache_path:
             raise ValueError('VLM proposal semantics require a target cache')
         stage1_cfg = cfg.get('stage1', {})
         self.stage1_enabled = stage1_cfg.get('enabled', False)
@@ -1216,20 +1225,31 @@ class SADA(nn.Module):
 
         self.proposal_semantic_branch = None
         self.proposal_target_adapters = nn.ModuleList()
+        self.proposal_logit_adapters = nn.ModuleList()
         if self.proposal_semantic_enabled:
-            self.proposal_semantic_branch = ProposalSemanticBranch(
-                fpn_dim=fpn_dim,
-                num_classes=self.num_class_orig,
-                hidden_dim=proposal_cfg.get('hidden_dim', 256),
-                embedding_dim=proposal_cfg.get('embedding_dim', 128),
-                confidence_threshold=proposal_cfg.get(
-                    'confidence_threshold', 0.5
-                ),
-                entropy_threshold=proposal_cfg.get('entropy_threshold', 0.75),
-                prototype_momentum=proposal_cfg.get(
-                    'prototype_momentum', 0.9
-                ),
-            )
+            if self.proposal_semantic_mode.startswith('vlm_logit_'):
+                self.proposal_logit_adapters = nn.ModuleList([
+                    ProposalLogitAdapter(
+                        fpn_dim,
+                        self.num_class_orig,
+                        self.proposal_logit_max_delta,
+                    )
+                    for _ in range(self.n_levels)
+                ])
+            else:
+                self.proposal_semantic_branch = ProposalSemanticBranch(
+                    fpn_dim=fpn_dim,
+                    num_classes=self.num_class_orig,
+                    hidden_dim=proposal_cfg.get('hidden_dim', 256),
+                    embedding_dim=proposal_cfg.get('embedding_dim', 128),
+                    confidence_threshold=(
+                        self.proposal_semantic_confidence_threshold
+                    ),
+                    entropy_threshold=proposal_cfg.get('entropy_threshold', 0.75),
+                    prototype_momentum=proposal_cfg.get(
+                        'prototype_momentum', 0.9
+                    ),
+                )
             if self.proposal_semantic_mode.startswith('oracle_adapter_'):
                 bottleneck = int(proposal_cfg.get('adapter_bottleneck', 64))
                 if bottleneck <= 0:
@@ -1796,7 +1816,49 @@ class SADA(nn.Module):
         out_cls_logits_tgt,
         proposal_teacher,
         curr_epoch,
+        out_cls_logits_tgt_base=None,
     ):
+        if self.proposal_semantic_mode.startswith('vlm_logit_'):
+            target = self._cached_semantic_proposals(
+                self.proposal_semantic_target_cache, video_list_tgt
+            )
+            policy = self.proposal_semantic_mode[len('vlm_logit_'):]
+            stats = prepare_vlm_proposal_targets(
+                out_cls_logits_tgt_base,
+                target,
+                self.fpn_strides,
+                policy=policy,
+                confidence_threshold=(
+                    self.proposal_semantic_confidence_threshold
+                ),
+            )
+            direct_loss, selected_count = proposal_detection_loss(
+                out_cls_logits_tgt, target, self.fpn_strides
+            )
+            zero = direct_loss * 0.0
+            return {
+                'proposal_semantic_source_loss': zero,
+                'proposal_semantic_alignment_loss': zero,
+                'proposal_semantic_direct_loss': direct_loss,
+                'proposal_semantic_source_count': zero.detach(),
+                'proposal_semantic_target_count': zero.new_tensor(float(
+                    sum(int(item['segments'].shape[0]) for item in target)
+                )),
+                'proposal_semantic_selected_count': zero.new_tensor(
+                    float(selected_count)
+                ),
+                'proposal_semantic_aligned_classes': zero.detach(),
+                'proposal_semantic_mean_entropy': zero.detach(),
+                'proposal_semantic_mean_confidence': stats[
+                    'mean_confidence'
+                ].detach(),
+                'proposal_semantic_eligible_count': zero.new_tensor(
+                    float(stats['eligible_count'])
+                ),
+                'proposal_semantic_agreement_count': zero.new_tensor(
+                    float(stats['agreement_count'])
+                ),
+            }
         branch = self.proposal_semantic_branch
         source = source_gt_proposals(
             video_list_src,
@@ -2059,6 +2121,16 @@ class SADA(nn.Module):
         out_cls_logits_tgt, _ = self.cls_head_target(
             fpn_feats_tgt_cls, fpn_masks_tgt
         )
+        out_cls_logits_tgt_detection = out_cls_logits_tgt
+        if self.proposal_semantic_mode.startswith('vlm_logit_'):
+            enabled_levels = set(self.proposal_semantic_levels)
+            out_cls_logits_tgt_detection = [
+                logits + self.proposal_logit_adapters[level](features)
+                if level in enabled_levels else logits
+                for level, (features, logits) in enumerate(zip(
+                    fpn_feats_tgt, out_cls_logits_tgt
+                ))
+            ]
         
         out_cls_logits = [torch.cat((out_cls_logits_src[i], out_cls_logits_tgt[i]), dim=0) for i in range(len(out_cls_logits_src))]
 
@@ -2114,6 +2186,9 @@ class SADA(nn.Module):
         # permute the outputs
         # out_cls: F List[B, #cls, T_i] -> F List[B, T_i, #cls]
         out_cls_logits = [x.permute(0, 2, 1) for x in out_cls_logits]
+        out_cls_logits_tgt_detection = [
+            x.permute(0, 2, 1) for x in out_cls_logits_tgt_detection
+        ]
         out_cls_logits_tgt_pl = [x.permute(0, 2, 1) for x in out_cls_logits_tgt_pl]
         
         # out_offset: F List[B, 2 (xC), T_i] -> F List[B, T_i, 2 (xC)]
@@ -2255,9 +2330,13 @@ class SADA(nn.Module):
                     fpn_feats_src,
                     fpn_feats_tgt,
                     [value.permute(0, 2, 1) for value in out_cls_logits_src],
-                    [value.permute(0, 2, 1) for value in out_cls_logits_tgt],
+                    out_cls_logits_tgt_detection,
                     proposal_teacher,
                     curr_epoch,
+                    out_cls_logits_tgt_base=[
+                        value.permute(0, 2, 1)
+                        for value in out_cls_logits_tgt
+                    ],
                 )
                 losses.update(proposal_losses)
                 losses['downstream_loss'] = (
@@ -2298,6 +2377,8 @@ class SADA(nn.Module):
             # Separate all the tensors into source and target
             out_cls_logits_src = [x[:bs] for x in out_cls_logits]
             out_cls_logits_tgt = [x[bs:] for x in out_cls_logits]
+            if self.proposal_semantic_mode.startswith('vlm_logit_'):
+                out_cls_logits_tgt = out_cls_logits_tgt_detection
             
             out_offsets_src = [x[:bs] for x in out_offsets]
             out_offsets_tgt = [x[bs:] for x in out_offsets]

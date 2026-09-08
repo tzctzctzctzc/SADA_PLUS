@@ -19,6 +19,9 @@ PROPOSAL_SEMANTIC_MODES = (
     "oracle_adapter_dominant",
     "oracle_adapter_soft",
     "vlm",
+    "vlm_logit_soft",
+    "vlm_logit_confident",
+    "vlm_logit_agree",
 )
 PROPOSAL_SEMANTIC_CACHE_SCHEMA = "proposal-semantic-evidence-v1"
 KNOWN_LABELS = (
@@ -370,6 +373,83 @@ class ProposalTargetAdapter(nn.Module):
 
     def forward(self, features):
         return features + self.up(self.activation(self.down(features)))
+
+
+class ProposalLogitAdapter(nn.Module):
+    """Small target-only classifier residual with an exact identity start."""
+
+    def __init__(self, channels, num_classes, max_delta=2.0):
+        super().__init__()
+        self.max_delta = float(max_delta)
+        self.projection = nn.Conv1d(channels, num_classes, kernel_size=1)
+        nn.init.zeros_(self.projection.weight)
+        nn.init.zeros_(self.projection.bias)
+
+    def forward(self, features):
+        residual = self.projection(features.detach())
+        return self.max_delta * torch.tanh(residual)
+
+
+def prepare_vlm_proposal_targets(
+    class_logits,
+    proposals,
+    fpn_strides,
+    policy="soft",
+    confidence_threshold=0.5,
+):
+    """Attach observable VLM targets and optionally gate them with frozen TAL logits."""
+    if policy not in ("soft", "confident", "agree"):
+        raise ValueError("unknown VLM proposal target policy")
+    selected_count = 0
+    eligible_count = 0
+    agreement_count = 0
+    selected_confidence = []
+    for batch_index, proposal in enumerate(proposals):
+        targets = proposal["evidence"][:, :class_logits[0].shape[-1]].clone()
+        eligible = proposal["evidence_eligible"].clone()
+        confidence = (
+            targets.max(dim=-1).values if targets.numel() else targets.new_zeros(0)
+        )
+        eligible_count += int(eligible.sum())
+        if policy in ("confident", "agree"):
+            eligible &= confidence >= float(confidence_threshold)
+        if policy == "agree":
+            agreement = torch.zeros_like(eligible)
+            for index in torch.nonzero(eligible).flatten().tolist():
+                segment = proposal["segments"][index]
+                level = int(proposal["levels"][index])
+                duration = (segment[1] - segment[0]).clamp(min=1.0)
+                positions = torch.stack((
+                    segment[0],
+                    segment[0] + 0.25 * duration,
+                    0.5 * (segment[0] + segment[1]),
+                    segment[1] - 0.25 * duration,
+                    segment[1],
+                )) / float(fpn_strides[level])
+                sampled = _sample_sequence(
+                    class_logits[level][batch_index].detach().transpose(0, 1),
+                    positions,
+                ).transpose(0, 1)
+                agreement[index] = (
+                    sampled.mean(dim=0).argmax() == targets[index].argmax()
+                )
+            agreement_count += int((eligible & agreement).sum())
+            eligible &= agreement
+        targets[~eligible] = 0.0
+        proposal["targets"] = targets
+        selected_count += int(eligible.sum())
+        if eligible.any():
+            selected_confidence.append(confidence[eligible])
+    if selected_confidence:
+        mean_confidence = torch.cat(selected_confidence).mean()
+    else:
+        mean_confidence = class_logits[0].new_tensor(0.0)
+    return {
+        "eligible_count": eligible_count,
+        "selected_count": selected_count,
+        "agreement_count": agreement_count,
+        "mean_confidence": mean_confidence,
+    }
 
 
 def proposal_detection_loss(class_logits, proposals, fpn_strides):

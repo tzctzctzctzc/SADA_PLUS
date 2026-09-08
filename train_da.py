@@ -455,12 +455,15 @@ def main(cfg, resume, project_name='sada', debug=False):
             raise ValueError(
                 'SADA checkpoint has no {}'.format(initialization_state_key)
             )
+        continuing = args.proposal_semantic_continue_from_sada is not None
+        model_state_key = 'state_dict' if continuing else initialization_state_key
         incompatible = model.load_state_dict(
-            checkpoint[initialization_state_key], strict=False
+            checkpoint[model_state_key], strict=False
         )
         allowed_missing_prefixes = (
             'proposal_semantic_branch.',
             'proposal_target_adapters.',
+            'proposal_logit_adapters.',
         )
         invalid_missing = [
             key for key in incompatible.missing_keys
@@ -479,8 +482,11 @@ def main(cfg, resume, project_name='sada', debug=False):
                 'use --resume instead'
             )
         if use_ema:
+            ema_state_key = (
+                'ema_state_dict' if continuing else initialization_state_key
+            )
             ema_incompatible = model_ema.module.load_state_dict(
-                checkpoint[initialization_state_key], strict=False
+                checkpoint[ema_state_key], strict=False
             )
             ema_invalid_missing = [
                 key for key in ema_incompatible.missing_keys
@@ -490,20 +496,27 @@ def main(cfg, resume, project_name='sada', debug=False):
                 raise ValueError(
                     'EMA proposal-semantic initialization differs outside the new branch'
                 )
-            model_ema.module.proposal_semantic_branch.load_state_dict(
-                model.proposal_semantic_branch.state_dict()
-            )
+            if model.proposal_semantic_branch is not None:
+                model_ema.module.proposal_semantic_branch.load_state_dict(
+                    model.proposal_semantic_branch.state_dict()
+                )
             model_ema.module.proposal_target_adapters.load_state_dict(
                 model.proposal_target_adapters.state_dict()
             )
-        continuing = args.proposal_semantic_continue_from_sada is not None
+            model_ema.module.proposal_logit_adapters.load_state_dict(
+                model.proposal_logit_adapters.state_dict()
+            )
         if continuing:
             args.start_epoch = int(checkpoint['epoch']) + 1
             restore_training_trajectory_with_added_parameters(
                 checkpoint,
                 num_iters_epoch,
                 model,
-                ('proposal_semantic_branch.', 'proposal_target_adapters.'),
+                (
+                    'proposal_semantic_branch.',
+                    'proposal_target_adapters.',
+                    'proposal_logit_adapters.',
+                ),
                 optimizer_gen_source,
                 optimizer_gen_source_alignment,
                 optimizer_disc,
@@ -1132,6 +1145,7 @@ def create_argparser():
             'off', 'source', 'teacher', 'oracle_center',
             'oracle_dominant', 'oracle_soft', 'oracle_adapter_center',
             'oracle_adapter_dominant', 'oracle_adapter_soft', 'vlm',
+            'vlm_logit_soft', 'vlm_logit_confident', 'vlm_logit_agree',
         ],
         default='off',
         help='proposal-level dataset semantics and source-target alignment mode',
@@ -1147,6 +1161,7 @@ def create_argparser():
     parser.add_argument('--proposal-semantic-alignment-weight', type=float, default=0.1)
     parser.add_argument('--proposal-semantic-direct-weight', type=float, default=1.0)
     parser.add_argument('--proposal-semantic-adapter-bottleneck', type=int, default=64)
+    parser.add_argument('--proposal-semantic-logit-max-delta', type=float, default=2.0)
     parser.add_argument('--proposal-semantic-target-start-epoch', type=int, default=5)
     parser.add_argument('--proposal-semantic-levels', default='0,1,2')
     parser.add_argument('--proposal-semantic-score-threshold', type=float, default=0.3)
@@ -1574,6 +1589,7 @@ if __name__ == '__main__':
             or args.proposal_semantic_alignment_weight < 0.0
             or args.proposal_semantic_direct_weight < 0.0
             or args.proposal_semantic_adapter_bottleneck <= 0
+            or args.proposal_semantic_logit_max_delta <= 0.0
             or args.proposal_semantic_target_start_epoch < 1
             or not 0.0 < args.proposal_semantic_score_threshold <= 1.0
             or args.proposal_semantic_max_proposals < 1
@@ -1586,7 +1602,7 @@ if __name__ == '__main__':
             'train_cfg'
         ].get('ema_active', False):
             raise ValueError('target proposal semantics require EMA')
-        if args.proposal_semantic_mode == 'vlm' and not (
+        if args.proposal_semantic_mode.startswith('vlm') and not (
             args.proposal_semantic_target_cache
         ):
             raise ValueError('VLM proposal semantics require a target cache')
@@ -1681,6 +1697,7 @@ if __name__ == '__main__':
         'alignment_weight': args.proposal_semantic_alignment_weight,
         'direct_weight': args.proposal_semantic_direct_weight,
         'adapter_bottleneck': args.proposal_semantic_adapter_bottleneck,
+        'logit_max_delta': args.proposal_semantic_logit_max_delta,
         'adapter_only': args.proposal_semantic_mode.startswith(
             'oracle_adapter_'
         ),

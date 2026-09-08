@@ -24,6 +24,44 @@ def test_target_adapter_is_identity_at_initialization():
     assert torch.equal(output, features)
 
 
+def test_logit_adapter_is_zero_at_initialization_and_detaches_features():
+    adapter = proposal_semantic.ProposalLogitAdapter(4, 2, max_delta=1.5)
+    features = torch.randn(2, 4, 8, requires_grad=True)
+
+    residual = adapter(features)
+    residual.sum().backward()
+
+    assert torch.equal(residual, torch.zeros_like(residual))
+    assert features.grad is None
+    assert adapter.projection.weight.grad is not None
+
+
+def test_vlm_proposal_agreement_gate_uses_frozen_base_logits():
+    logits = [torch.tensor([[
+        [4.0, 0.0], [4.0, 0.0], [0.0, 4.0], [0.0, 4.0]
+    ]])]
+    proposals = [{
+        "segments": torch.tensor([[0.0, 1.0], [2.0, 3.0]]),
+        "levels": torch.tensor([0, 0]),
+        "evidence": torch.tensor([
+            [0.8, 0.2, 0.0, 0.0, 0.0, 0.0],
+            [0.9, 0.1, 0.0, 0.0, 0.0, 0.0],
+        ]),
+        "evidence_eligible": torch.tensor([True, True]),
+    }]
+
+    stats = proposal_semantic.prepare_vlm_proposal_targets(
+        logits, proposals, (1,), policy="agree", confidence_threshold=0.5
+    )
+
+    assert stats["eligible_count"] == 2
+    assert stats["selected_count"] == 1
+    assert torch.allclose(
+        proposals[0]["targets"],
+        torch.tensor([[0.8, 0.2], [0.0, 0.0]]),
+    )
+
+
 def test_proposal_detection_loss_supervises_detector_logits_only():
     logits = [torch.zeros(1, 8, 2, requires_grad=True)]
     targets = torch.tensor([[0.0, 1.0]], requires_grad=True)
