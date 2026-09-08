@@ -264,6 +264,7 @@ def cached_proposals_for_videos(cache, videos, num_classes, n_levels, device, dt
                 max(start, 0.0), min(end, crop_length), level,
                 entry["semantic_label"], entry["candidate_id"],
                 entry.get("class_probabilities"),
+                entry.get("teacher_score", 1.0),
             ))
         if rows:
             segments = torch.tensor(
@@ -278,16 +279,21 @@ def cached_proposals_for_videos(cache, videos, num_classes, n_levels, device, dt
                 ) for row in rows
             ])
             eligible = evidence[:, :num_classes].sum(dim=-1) > 0
+            teacher_scores = torch.tensor(
+                [row[6] for row in rows], device=device, dtype=dtype
+            )
         else:
             segments = torch.zeros((0, 2), device=device, dtype=dtype)
             levels = torch.empty(0, device=device, dtype=torch.long)
             evidence = torch.zeros((0, num_classes + 4), device=device, dtype=dtype)
             eligible = torch.empty(0, device=device, dtype=torch.bool)
+            teacher_scores = torch.empty(0, device=device, dtype=dtype)
         proposals.append({
             "segments": segments,
             "levels": levels,
             "evidence": evidence,
             "evidence_eligible": eligible,
+            "teacher_scores": teacher_scores,
         })
     return proposals
 
@@ -614,6 +620,7 @@ def proposal_detection_loss(
         "positive_bce",
         "positive_bce_rank",
         "positive_bce_rank_advantage",
+        "positive_bce_rank_teacher_score",
         "positive_bce_outer_anchor",
         "top2_positive_bce",
         "soft_positive_bce",
@@ -625,13 +632,17 @@ def proposal_detection_loss(
     pooled_outer_logits = []
     pooled_outer_delta_sq = []
     pooled_base_logits = []
+    pooled_teacher_scores = []
     pooled_targets = []
     for batch_index, proposal in enumerate(proposals):
         targets = proposal.get("targets")
         if targets is None:
             continue
-        for segment, level, target in zip(
-            proposal["segments"], proposal["levels"], targets
+        teacher_scores = proposal.get("teacher_scores")
+        if teacher_scores is None:
+            teacher_scores = targets.new_ones(targets.shape[0])
+        for segment, level, target, teacher_score in zip(
+            proposal["segments"], proposal["levels"], targets, teacher_scores
         ):
             if float(target.sum()) <= 0.0:
                 continue
@@ -655,8 +666,10 @@ def proposal_detection_loss(
             else:
                 pooled = sampled.mean(dim=0)
             pooled_logits.append(pooled)
+            pooled_teacher_scores.append(teacher_score.detach())
             if loss_type in (
                 "positive_bce_rank", "positive_bce_rank_advantage",
+                "positive_bce_rank_teacher_score",
                 "positive_bce_outer_anchor"
             ):
                 outer_positions = torch.stack((
@@ -734,13 +747,15 @@ def proposal_detection_loss(
         ).sum(dim=-1)
     elif loss_type in (
         "positive_bce", "positive_bce_rank",
-        "positive_bce_rank_advantage", "positive_bce_outer_anchor"
+        "positive_bce_rank_advantage", "positive_bce_rank_teacher_score",
+        "positive_bce_outer_anchor"
     ):
         top_targets, top_classes = targets.max(dim=-1)
         top_logits = logits.gather(1, top_classes.unsqueeze(1)).squeeze(1)
         loss = F.softplus(-top_logits) * top_targets.detach()
         if loss_type in (
-            "positive_bce_rank", "positive_bce_rank_advantage"
+            "positive_bce_rank", "positive_bce_rank_advantage",
+            "positive_bce_rank_teacher_score"
         ):
             outer_logits = torch.stack(pooled_outer_logits).gather(
                 1, top_classes.unsqueeze(1)
@@ -756,6 +771,12 @@ def proposal_detection_loss(
                 ).clamp(min=0.0)
                 advantage = advantage / advantage.mean().clamp(min=1e-6)
                 loss = loss * advantage.detach()
+            elif loss_type == "positive_bce_rank_teacher_score":
+                teacher_weights = torch.stack(pooled_teacher_scores)
+                teacher_weights = teacher_weights / teacher_weights.mean().clamp(
+                    min=1e-6
+                )
+                loss = loss * teacher_weights.detach()
         elif loss_type == "positive_bce_outer_anchor":
             outer_anchor = torch.stack(pooled_outer_delta_sq).gather(
                 1, top_classes.unsqueeze(1)

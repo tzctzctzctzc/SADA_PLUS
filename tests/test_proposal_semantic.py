@@ -279,6 +279,30 @@ def test_language_advantage_focuses_gradient_on_base_model_blind_spot():
     assert blind_spot_gradient > 20 * already_solved_gradient
 
 
+def test_teacher_score_continuously_reweights_without_dropping_proposals():
+    adapted = [torch.zeros(2, 5, 1, requires_grad=True)]
+    proposals = [{
+        "segments": torch.tensor([[1.0, 2.0]]),
+        "levels": torch.tensor([0]),
+        "targets": torch.tensor([[1.0]]),
+        "teacher_scores": torch.tensor([score]),
+    } for score in (0.2, 0.8)]
+
+    loss, count = proposal_semantic.proposal_detection_loss(
+        adapted,
+        proposals,
+        (1,),
+        loss_type="positive_bce_rank_teacher_score",
+        pooling="top1",
+    )
+    loss.backward()
+
+    low_gradient = adapted[0].grad[0].abs().sum()
+    high_gradient = adapted[0].grad[1].abs().sum()
+    assert count == 2
+    assert high_gradient > 3 * low_gradient
+
+
 def test_outer_anchor_penalizes_only_residual_leakage():
     base = [torch.zeros(1, 5, 1)]
     localized = [base[0].clone()]

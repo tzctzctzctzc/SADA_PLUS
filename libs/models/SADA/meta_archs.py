@@ -744,6 +744,7 @@ class SADA(nn.Module):
                     'bce', 'soft_ce', 'known_soft_ce',
                     'known_top1_ce', 'positive_bce',
                     'positive_bce_rank', 'positive_bce_rank_advantage',
+                    'positive_bce_rank_teacher_score',
                     'positive_bce_outer_anchor',
                     'top2_positive_bce',
                     'soft_positive_bce'
