@@ -517,6 +517,63 @@ def proposal_detection_loss(
     return loss.mean(), logits.shape[0]
 
 
+def proposal_background_anchor_loss(
+    adapted_logits,
+    base_logits,
+    masks,
+    proposals,
+    fpn_strides,
+    confidence_threshold=0.05,
+):
+    """Keep VLM residuals zero on confident SADA background outside its bags."""
+    protected = [
+        torch.zeros(
+            logits.shape[:2], dtype=torch.bool, device=logits.device
+        )
+        for logits in adapted_logits
+    ]
+    for batch_index, proposal in enumerate(proposals):
+        targets = proposal.get("targets")
+        if targets is None:
+            continue
+        for segment, level, target in zip(
+            proposal["segments"], proposal["levels"], targets
+        ):
+            if float(target.sum()) <= 0.0:
+                continue
+            level = int(level)
+            positions = torch.arange(
+                adapted_logits[level].shape[1],
+                device=segment.device,
+                dtype=segment.dtype,
+            )
+            start, end = segment / float(fpn_strides[level])
+            protected[level][batch_index] |= (
+                (positions >= start) & (positions <= end)
+            )
+
+    total = adapted_logits[0].new_tensor(0.0)
+    count = 0
+    for adapted, base, mask, positive in zip(
+        adapted_logits, base_logits, masks, protected
+    ):
+        valid = mask.squeeze(1).bool() if mask.ndim == 3 else mask.bool()
+        base_confidence = base.detach().sigmoid().amax(dim=-1)
+        selected = (
+            valid
+            & ~positive
+            & (base_confidence <= float(confidence_threshold))
+        )
+        if selected.any():
+            residual = adapted - base.detach()
+            per_position = residual[selected].pow(2).mean(dim=-1)
+            total = total + per_position.sum()
+            count += int(per_position.numel())
+    if not count:
+        return sum(logits.sum() * 0.0 for logits in adapted_logits), 0
+    return total / count, count
+
+
 class ProposalSemanticBranch(nn.Module):
     def __init__(
         self,

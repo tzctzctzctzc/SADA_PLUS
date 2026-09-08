@@ -58,6 +58,7 @@ from .proposal_semantic import (
     load_proposal_semantic_cache,
     prepare_vlm_proposal_targets,
     proposal_detection_loss,
+    proposal_background_anchor_loss,
     source_gt_proposals,
 )
 from .transport_alignment import (
@@ -689,6 +690,12 @@ class SADA(nn.Module):
         self.proposal_logit_shared_levels = bool(
             proposal_cfg.get('logit_shared_levels', False)
         )
+        self.proposal_background_anchor_weight = float(
+            proposal_cfg.get('background_anchor_weight', 0.0)
+        )
+        self.proposal_background_anchor_confidence = float(
+            proposal_cfg.get('background_anchor_confidence', 0.05)
+        )
         if self.proposal_semantic_enabled:
             if (
                 self.proposal_semantic_source_weight < 0.0
@@ -709,6 +716,8 @@ class SADA(nn.Module):
                     'bce', 'soft_ce', 'positive_bce'
                 )
                 or self.proposal_direct_pooling not in ('mean', 'top2')
+                or self.proposal_background_anchor_weight < 0.0
+                or not 0.0 <= self.proposal_background_anchor_confidence <= 1.0
             ):
                 raise ValueError('proposal semantic configuration is invalid')
         self.proposal_semantic_source_cache = {}
@@ -1834,6 +1843,7 @@ class SADA(nn.Module):
         proposal_teacher,
         curr_epoch,
         out_cls_logits_tgt_base=None,
+        fpn_masks_tgt=None,
     ):
         if self.proposal_semantic_mode.startswith('vlm_logit_'):
             target = self._cached_semantic_proposals(
@@ -1856,11 +1866,31 @@ class SADA(nn.Module):
                 loss_type=self.proposal_direct_loss_type,
                 pooling=self.proposal_direct_pooling,
             )
+            if self.proposal_background_anchor_weight > 0.0:
+                background_loss, background_count = (
+                    proposal_background_anchor_loss(
+                        out_cls_logits_tgt,
+                        out_cls_logits_tgt_base,
+                        fpn_masks_tgt,
+                        target,
+                        self.fpn_strides,
+                        confidence_threshold=(
+                            self.proposal_background_anchor_confidence
+                        ),
+                    )
+                )
+            else:
+                background_loss = direct_loss * 0.0
+                background_count = 0
             zero = direct_loss * 0.0
             return {
                 'proposal_semantic_source_loss': zero,
                 'proposal_semantic_alignment_loss': zero,
                 'proposal_semantic_direct_loss': direct_loss,
+                'proposal_semantic_background_anchor_loss': background_loss,
+                'proposal_semantic_background_anchor_count': zero.new_tensor(
+                    float(background_count)
+                ),
                 'proposal_semantic_source_count': zero.detach(),
                 'proposal_semantic_target_count': zero.new_tensor(float(
                     sum(int(item['segments'].shape[0]) for item in target)
@@ -2367,6 +2397,7 @@ class SADA(nn.Module):
                         value.permute(0, 2, 1)
                         for value in out_cls_logits_tgt
                     ],
+                    fpn_masks_tgt=fpn_masks_tgt,
                 )
                 losses.update(proposal_losses)
                 losses['downstream_loss'] = (
@@ -2377,6 +2408,11 @@ class SADA(nn.Module):
                     * proposal_losses['proposal_semantic_alignment_loss']
                     + self.proposal_semantic_direct_weight
                     * proposal_losses['proposal_semantic_direct_loss']
+                    + self.proposal_background_anchor_weight
+                    * proposal_losses.get(
+                        'proposal_semantic_background_anchor_loss',
+                        losses['downstream_loss'] * 0.0,
+                    )
                 )
             
             # Return the GTs of the target domain as well, to be used to compute the anchors

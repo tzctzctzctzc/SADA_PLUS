@@ -1196,6 +1196,17 @@ def create_argparser():
         help='share one target semantic residual expert across FPN levels',
     )
     parser.add_argument(
+        '--proposal-semantic-background-anchor-weight',
+        type=float,
+        default=0.0,
+        help='preserve frozen SADA logits on confident background outside VLM bags',
+    )
+    parser.add_argument(
+        '--proposal-semantic-background-anchor-confidence',
+        type=float,
+        default=0.05,
+    )
+    parser.add_argument(
         '--proposal-semantic-freeze-base', action='store_true',
         help='freeze the official EMA detector and train only proposal adapters',
     )
@@ -1750,6 +1761,12 @@ if __name__ == '__main__':
         'direct_loss_type': args.proposal_semantic_direct_loss,
         'direct_pooling': args.proposal_semantic_direct_pooling,
         'logit_shared_levels': args.proposal_semantic_share_logit_adapter,
+        'background_anchor_weight': (
+            args.proposal_semantic_background_anchor_weight
+        ),
+        'background_anchor_confidence': (
+            args.proposal_semantic_background_anchor_confidence
+        ),
         'adapter_only': args.proposal_semantic_mode.startswith(
             'oracle_adapter_'
         ) or args.proposal_semantic_freeze_base,

@@ -109,6 +109,29 @@ def test_top2_pooling_treats_a_proposal_as_a_temporal_bag():
     assert top2_loss < mean_loss
 
 
+def test_background_anchor_excludes_vlm_positive_bag_and_invalid_time():
+    base = [torch.full((1, 4, 2), -10.0)]
+    adapted = [base[0] + 1.0]
+    masks = [torch.tensor([[[True, True, True, False]]])]
+    proposals = [{
+        "segments": torch.tensor([[1.0, 2.0]]),
+        "levels": torch.tensor([0]),
+        "targets": torch.tensor([[1.0, 0.0]]),
+    }]
+
+    loss, count = proposal_semantic.proposal_background_anchor_loss(
+        adapted,
+        base,
+        masks,
+        proposals,
+        (1,),
+        confidence_threshold=0.05,
+    )
+
+    assert count == 1
+    assert loss.item() == pytest.approx(1.0)
+
+
 def test_vlm_proposal_agreement_gate_uses_frozen_base_logits():
     logits = [torch.tensor([[
         [4.0, 0.0], [4.0, 0.0], [0.0, 4.0], [0.0, 4.0]
