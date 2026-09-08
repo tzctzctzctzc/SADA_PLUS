@@ -106,6 +106,27 @@ def test_proposal_detection_soft_ce_prefers_matching_distribution():
     assert matching < reversed_loss
 
 
+def test_known_class_ce_does_not_suppress_unqueried_classes():
+    class_count = len(proposal_semantic.KNOWN_LABELS) + 1
+    logits = [torch.zeros(1, 1, class_count, requires_grad=True)]
+    targets = torch.zeros(1, class_count)
+    targets[0, 0] = 0.8
+    targets[0, 1] = 0.2
+    proposals = [{
+        "segments": torch.tensor([[0.0, 0.0]]),
+        "levels": torch.tensor([0]),
+        "targets": targets,
+    }]
+
+    loss, _ = proposal_semantic.proposal_detection_loss(
+        logits, proposals, (1,), loss_type="known_soft_ce"
+    )
+    loss.backward()
+
+    assert torch.count_nonzero(logits[0].grad[..., :-1]) > 0
+    assert logits[0].grad[..., -1].item() == 0.0
+
+
 def test_positive_proposal_loss_does_not_update_unselected_classes():
     logits = [torch.zeros(1, 1, 3, requires_grad=True)]
     proposals = [{

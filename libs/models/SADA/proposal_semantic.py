@@ -514,6 +514,8 @@ def proposal_detection_loss(
     if loss_type not in (
         "bce",
         "soft_ce",
+        "known_soft_ce",
+        "known_top1_ce",
         "positive_bce",
         "positive_bce_rank",
         "top2_positive_bce",
@@ -573,7 +575,22 @@ def proposal_detection_loss(
         return zero, 0
     logits = torch.stack(pooled_logits)
     targets = torch.stack(pooled_targets)
-    if loss_type == "soft_ce":
+    if loss_type in ("known_soft_ce", "known_top1_ce"):
+        known_count = min(logits.shape[-1], len(KNOWN_LABELS))
+        known_logits = logits[:, :known_count]
+        known_targets = targets[:, :known_count]
+        if loss_type == "known_soft_ce":
+            loss = -(
+                known_targets.detach()
+                * F.log_softmax(known_logits, dim=-1)
+            ).sum(dim=-1)
+        else:
+            loss = F.cross_entropy(
+                known_logits,
+                known_targets.argmax(dim=-1),
+                reduction="none",
+            )
+    elif loss_type == "soft_ce":
         loss = -(targets * F.log_softmax(logits, dim=-1)).sum(dim=-1)
     elif loss_type == "soft_positive_bce":
         loss = (F.softplus(-logits) * targets.detach()).sum(dim=-1)

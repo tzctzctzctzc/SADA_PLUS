@@ -1182,7 +1182,7 @@ def create_argparser():
     parser.add_argument(
         '--proposal-semantic-direct-loss',
         choices=[
-            'bce', 'soft_ce', 'positive_bce',
+            'bce', 'soft_ce', 'known_soft_ce', 'known_top1_ce',
             'positive_bce_rank', 'top2_positive_bce',
             'soft_positive_bce',
         ],

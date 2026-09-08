@@ -730,7 +730,8 @@ class SADA(nn.Module):
                 or self.proposal_logit_gate not in ('none', 'base_confidence')
                 or self.proposal_logit_input not in ('feature', 'base_logits')
                 or self.proposal_direct_loss_type not in (
-                    'bce', 'soft_ce', 'positive_bce',
+                    'bce', 'soft_ce', 'known_soft_ce',
+                    'known_top1_ce', 'positive_bce',
                     'positive_bce_rank', 'top2_positive_bce',
                     'soft_positive_bce'
                 )
