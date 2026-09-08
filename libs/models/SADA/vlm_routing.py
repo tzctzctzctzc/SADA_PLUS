@@ -205,6 +205,67 @@ def restore_training_trajectory(
     return completed_steps
 
 
+def restore_training_trajectory_with_added_parameters(
+    checkpoint,
+    num_iters_epoch,
+    model,
+    added_prefixes,
+    optimizer_gen_source,
+    optimizer_gen_source_alignment,
+    optimizer_disc,
+    scheduler_gen_source,
+    scheduler_gen_source_alignment,
+    scheduler_disc,
+):
+    """Restore a SADA trajectory while leaving newly added branch state fresh."""
+    name_by_parameter = {id(parameter): name for name, parameter in model.named_parameters()}
+
+    def load_base_state(optimizer, saved):
+        current = optimizer.state_dict()
+        if len(current["param_groups"]) != len(saved["param_groups"]):
+            raise ValueError("optimizer group count changed during branch continuation")
+        merged_state = {}
+        merged_groups = []
+        for live_group, current_group, saved_group in zip(
+            optimizer.param_groups, current["param_groups"], saved["param_groups"]
+        ):
+            current_names = [name_by_parameter[id(parameter)] for parameter in live_group["params"]]
+            base_names = [
+                name for name in current_names
+                if not name.startswith(tuple(added_prefixes))
+            ]
+            if len(base_names) != len(saved_group["params"]):
+                raise ValueError("base optimizer parameter set changed during branch continuation")
+            saved_by_name = dict(zip(base_names, saved_group["params"]))
+            current_by_name = dict(zip(current_names, current_group["params"]))
+            for name in base_names:
+                saved_id = saved_by_name[name]
+                if saved_id in saved["state"]:
+                    merged_state[current_by_name[name]] = saved["state"][saved_id]
+            merged_group = dict(saved_group)
+            merged_group["params"] = list(current_group["params"])
+            merged_groups.append(merged_group)
+        optimizer.load_state_dict({"state": merged_state, "param_groups": merged_groups})
+
+    load_base_state(optimizer_gen_source, checkpoint["optimizer_gen_source"])
+    load_base_state(
+        optimizer_gen_source_alignment,
+        checkpoint["optimizer_gen_source_alignment"],
+    )
+    optimizer_disc.load_state_dict(checkpoint["optimizer_disc"])
+    completed_steps = int(checkpoint["epoch"]) * int(num_iters_epoch)
+    for scheduler, optimizer in (
+        (scheduler_gen_source, optimizer_gen_source),
+        (scheduler_gen_source_alignment, optimizer_gen_source_alignment),
+        (scheduler_disc, optimizer_disc),
+    ):
+        if scheduler is not None:
+            scheduler.last_epoch = completed_steps
+            scheduler._step_count = completed_steps + 1
+            scheduler._last_lr = [group["lr"] for group in optimizer.param_groups]
+    return completed_steps
+
+
 def build_vlm_transition(
     parent_sada_checkpoint_sha256,
     parent_epoch,

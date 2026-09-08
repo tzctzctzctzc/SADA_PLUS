@@ -9,10 +9,12 @@ import torch
 ORACLE_TARGET_DISTILLATION_MODES = ("off", "selected", "full")
 VLM_TARGET_ADAPTER_SCHEMA_VERSIONS = (
     "offline-vlm-target-adapter-v1",
+    "offline-vlm-target-adapter-v2",
     "offline-clip-target-adapter-v2",
+    "offline-clip-target-adapter-v3",
 )
 VLM_TARGET_ADAPTER_SOURCE = "offline_vlm_proposal_semantics"
-VLM_TARGET_ADAPTER_POLICIES = ("verify", "hard", "soft")
+VLM_TARGET_ADAPTER_POLICIES = ("verify", "hard", "soft", "soft_boundary")
 TARGET_CLASS_NAMES = (
     "TAKE",
     "PUT",
@@ -151,8 +153,23 @@ def load_vlm_target_adapter_cache(path):
                 raise ValueError("VLM target adapter probabilities and class id differ")
             if abs(max(probabilities) - confidence) > 1e-4:
                 raise ValueError("VLM target adapter probabilities and confidence differ")
-        elif schema_version == "offline-clip-target-adapter-v2":
+        elif schema_version.startswith("offline-clip-target-adapter-"):
             raise ValueError("CLIP target adapter entry has no probabilities")
+        proposal_start = entry.get("proposal_start_sec")
+        proposal_end = entry.get("proposal_end_sec")
+        if proposal_start is not None or proposal_end is not None:
+            if proposal_start is None or proposal_end is None:
+                raise ValueError("incomplete VLM target adapter proposal interval")
+            proposal_start = float(proposal_start)
+            proposal_end = float(proposal_end)
+            if (
+                not math.isfinite(proposal_start)
+                or not math.isfinite(proposal_end)
+                or proposal_start < 0.0
+                or proposal_end <= proposal_start
+                or not proposal_start <= absolute_time <= proposal_end
+            ):
+                raise ValueError("invalid VLM target adapter proposal interval")
         by_video.setdefault(video_id, {})[absolute_index] = {
             "class_id": class_id,
             "semantic_label": TARGET_CLASS_NAMES[class_id],
@@ -160,6 +177,8 @@ def load_vlm_target_adapter_cache(path):
             "absolute_center_time": absolute_time,
             "class_probabilities": probabilities,
             "confidence": confidence,
+            "proposal_start_sec": proposal_start,
+            "proposal_end_sec": proposal_end,
         }
 
     return (
@@ -189,6 +208,8 @@ def build_vlm_target_distillation(
     if not 0.0 <= float(confidence_threshold) <= 1.0:
         raise ValueError("VLM target adapter confidence threshold must be in [0, 1]")
     enabled_levels = set(int(level) for level in enabled_levels)
+    uses_soft_targets = policy in ("soft", "soft_boundary")
+    uses_boundary = policy == "soft_boundary"
     batch_size = len(video_list)
     num_classes = logits[0].shape[-1]
     selected_levels = []
@@ -197,6 +218,8 @@ def build_vlm_target_distillation(
     agreement_levels = []
     confidence_levels = []
     weight_levels = []
+    boundary_target_levels = []
+    boundary_available_levels = []
 
     for level, (point_grid, valid, level_logits) in enumerate(
         zip(points, valid_masks, logits)
@@ -207,6 +230,8 @@ def build_vlm_target_distillation(
         confidence = torch.zeros_like(valid, dtype=level_logits.dtype)
         weights = torch.zeros_like(valid, dtype=level_logits.dtype)
         targets = torch.zeros_like(level_logits)
+        boundary_targets = level_logits.new_zeros((*level_logits.shape[:-1], 2))
+        boundary_available = torch.zeros_like(valid, dtype=torch.bool)
         if level in enabled_levels:
             coordinates = [int(round(value)) for value in point_grid[:, 0].tolist()]
             if any(
@@ -237,7 +262,7 @@ def build_vlm_target_distillation(
                     hits[batch_index, local_index] = True
                     class_id = evidence["class_id"]
                     probabilities = evidence.get("class_probabilities")
-                    if policy == "soft":
+                    if uses_soft_targets:
                         if probabilities is None:
                             raise ValueError("soft CLIP policy requires class probabilities")
                         targets[
@@ -265,14 +290,39 @@ def build_vlm_target_distillation(
                     else:
                         selected[batch_index, local_index] = confident
                     weights[batch_index, local_index] = (
-                        clip_confidence if policy == "soft" and confident else float(confident)
+                        clip_confidence if uses_soft_targets and confident else float(confident)
                     )
+                    if uses_boundary:
+                        start_sec = evidence.get("proposal_start_sec")
+                        end_sec = evidence.get("proposal_end_sec")
+                        if start_sec is None or end_sec is None:
+                            raise ValueError(
+                                "soft_boundary policy requires proposal intervals"
+                            )
+                        fps = float(metadata["fps"])
+                        feat_stride = float(metadata["feat_stride"])
+                        frame_offset = 0.5 * float(metadata["feat_num_frames"])
+                        start = (float(start_sec) * fps - frame_offset) / feat_stride
+                        end = (float(end_sec) * fps - frame_offset) / feat_stride
+                        start -= crop_start
+                        end -= crop_start
+                        center = float(point_grid[local_index, 0])
+                        stride = float(point_grid[local_index, 3])
+                        boundary_targets[batch_index, local_index] = torch.tensor(
+                            [max((center - start) / stride, 0.0),
+                             max((end - center) / stride, 0.0)],
+                            dtype=boundary_targets.dtype,
+                            device=boundary_targets.device,
+                        )
+                        boundary_available[batch_index, local_index] = True
         selected_levels.append(selected)
         target_levels.append(targets)
         hit_levels.append(hits)
         agreement_levels.append(agreement)
         confidence_levels.append(confidence)
         weight_levels.append(weights)
+        boundary_target_levels.append(boundary_targets)
+        boundary_available_levels.append(boundary_available)
 
     return {
         "selected": torch.cat(selected_levels, dim=1),
@@ -281,4 +331,6 @@ def build_vlm_target_distillation(
         "agreement": torch.cat(agreement_levels, dim=1),
         "confidence": torch.cat(confidence_levels, dim=1),
         "weights": torch.cat(weight_levels, dim=1),
+        "boundary_targets": torch.cat(boundary_target_levels, dim=1),
+        "boundary_available": torch.cat(boundary_available_levels, dim=1),
     }

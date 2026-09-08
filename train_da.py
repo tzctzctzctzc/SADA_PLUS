@@ -28,6 +28,7 @@ from libs.models.SADA.vlm_routing import (
     build_vlm_signature,
     file_sha256,
     restore_training_trajectory,
+    restore_training_trajectory_with_added_parameters,
     validate_sada_continuation_checkpoint,
     validate_semantic_selection_provenance,
     validate_vlm_resume,
@@ -374,8 +375,12 @@ def main(cfg, resume, project_name='sada', debug=False):
         
 
     """4. Resume from model / Misc"""
-    if args.proposal_semantic_init_from_sada:
-        initialization_path = args.proposal_semantic_init_from_sada
+    proposal_semantic_parent = (
+        args.proposal_semantic_init_from_sada
+        or args.proposal_semantic_continue_from_sada
+    )
+    if proposal_semantic_parent:
+        initialization_path = proposal_semantic_parent
         if not os.path.isfile(initialization_path):
             raise ValueError(
                 'SADA proposal-semantic initialization checkpoint not found: {}'.format(
@@ -433,14 +438,34 @@ def main(cfg, resume, project_name='sada', debug=False):
             model_ema.module.proposal_target_adapters.load_state_dict(
                 model.proposal_target_adapters.state_dict()
             )
+        continuing = args.proposal_semantic_continue_from_sada is not None
+        if continuing:
+            args.start_epoch = int(checkpoint['epoch']) + 1
+            restore_training_trajectory_with_added_parameters(
+                checkpoint,
+                num_iters_epoch,
+                model,
+                ('proposal_semantic_branch.', 'proposal_target_adapters.'),
+                optimizer_gen_source,
+                optimizer_gen_source_alignment,
+                optimizer_disc,
+                scheduler_gen_source,
+                scheduler_gen_source_alignment,
+                scheduler_disc,
+            )
+        else:
+            args.start_epoch = 1
         cfg.config['proposal_semantic']['initialization'] = {
             'checkpoint': initialization_path,
             'checkpoint_sha256': file_sha256(initialization_path),
             'checkpoint_epoch': int(checkpoint.get('epoch', -1)),
             'weights': args.proposal_semantic_init_weights,
-            'trajectory': 'new_optimizer_and_scheduler_from_pretrained_weights',
+            'trajectory': (
+                'continued_optimizer_scheduler_and_epoch'
+                if continuing
+                else 'new_optimizer_and_scheduler_from_pretrained_weights'
+            ),
         }
-        args.start_epoch = 1
         print(
             "=> initialized proposal semantics from '{}' {} weights".format(
                 initialization_path, args.proposal_semantic_init_weights
@@ -1013,7 +1038,8 @@ def create_argparser():
         help='comma-separated FPN levels for VLM target supervision',
     )
     parser.add_argument(
-        '--vlm-target-adapter-policy', choices=['verify', 'hard', 'soft'],
+        '--vlm-target-adapter-policy',
+        choices=['verify', 'hard', 'soft', 'soft_boundary'],
         default='verify',
         help='how frozen VLM classes supervise target proposals',
     )
@@ -1026,6 +1052,13 @@ def create_argparser():
         help=(
             'consume a frozen adapter cache selected by a different TAL teacher; '
             'intended for controlled cross-architecture comparisons'
+        ),
+    )
+    start_group.add_argument(
+        '--proposal-semantic-continue-from-sada', default=None, type=str,
+        help=(
+            'continue optimizer, scheduler, and epoch from ordinary SADA while '
+            'initializing only the new proposal-semantic branch'
         ),
     )
     parser.add_argument(
@@ -1337,10 +1370,14 @@ if __name__ == '__main__':
             raise ValueError(
                 'proposal semantics currently require EPIC 10-majority-classes'
             )
-        if args.resume is None and args.proposal_semantic_init_from_sada is None:
+        if (
+            args.resume is None
+            and args.proposal_semantic_init_from_sada is None
+            and args.proposal_semantic_continue_from_sada is None
+        ):
             raise ValueError(
-                'a proposal semantic run requires --proposal-semantic-init-from-sada '
-                'or --resume'
+                'a proposal semantic run requires a proposal-semantic start '
+                'checkpoint or --resume'
             )
         if (
             args.proposal_semantic_source_weight < 0.0
@@ -1363,13 +1400,6 @@ if __name__ == '__main__':
             args.proposal_semantic_target_cache
         ):
             raise ValueError('VLM proposal semantics require a target cache')
-        if args.proposal_semantic_mode == 'vlm' and not (
-            args.proposal_semantic_source_cache
-        ):
-            raise ValueError(
-                'VLM proposal semantics require source VLM evidence to train '
-                'the dataset-semantic adapter'
-            )
         if (
             vlm_enabled
             or vlm_target_adapter_enabled
@@ -1388,6 +1418,7 @@ if __name__ == '__main__':
             )
     elif (
         args.proposal_semantic_init_from_sada
+        or args.proposal_semantic_continue_from_sada
         or args.proposal_semantic_source_cache
         or args.proposal_semantic_target_cache
     ):
@@ -1431,9 +1462,13 @@ if __name__ == '__main__':
             raise ValueError(
                 'proposal semantic target cache must be non-empty target train'
             )
-    if args.proposal_semantic_init_from_sada:
+    proposal_semantic_selection_checkpoint = (
+        args.proposal_semantic_init_from_sada
+        or args.proposal_semantic_continue_from_sada
+    )
+    if proposal_semantic_selection_checkpoint:
         expected_selection_checkpoint = file_sha256(
-            args.proposal_semantic_init_from_sada
+            proposal_semantic_selection_checkpoint
         )
         for payload in (source_cache_payload, target_cache_payload):
             if payload is None:

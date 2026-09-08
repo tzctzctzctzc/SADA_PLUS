@@ -41,11 +41,30 @@ def temperature_scaled_probabilities(logits, temperature):
     return [math.exp(value - normalizer) for value in scaled]
 
 
+def row_class_logits(row):
+    """Return comparable closed-set logits for generative VLMs and CLIP."""
+    logits = row.get("class_logits")
+    if logits is not None:
+        return [float(value) for value in logits]
+    probabilities = row.get("class_probabilities")
+    if probabilities is None:
+        return None
+    if (
+        len(probabilities) != len(CLASS_NAMES)
+        or any(float(value) < 0.0 for value in probabilities)
+        or abs(sum(float(value) for value in probabilities) - 1.0) > 1e-4
+    ):
+        raise ValueError("invalid class probabilities")
+    # Temperature scaling is invariant to an additive logit constant, so
+    # log-probabilities are sufficient when CLIP's raw logits were not stored.
+    return [math.log(max(float(value), 1e-12)) for value in probabilities]
+
+
 def calibration_rows(rows):
     selected = []
     for row in rows:
         labels = row.get("gt_assigned_class_ids") or []
-        logits = row.get("class_logits")
+        logits = row_class_logits(row)
         if row.get("status") != "ok" or not labels or logits is None:
             continue
         labels = sorted({int(label) for label in labels})
@@ -118,7 +137,7 @@ def protocol(rows):
         (
             row.get("model"),
             row.get("prompt_version"),
-            row.get("base_prompt_sha256"),
+            row.get("base_prompt_sha256", row.get("prompt_sha256")),
             row.get("wire_api"),
         )
         for row in rows if row.get("status") == "ok"

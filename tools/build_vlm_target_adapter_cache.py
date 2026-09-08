@@ -5,6 +5,7 @@ from pathlib import Path
 
 from tools.calibrate_vlm_temperature import (
     SCHEMA_VERSION as TEMPERATURE_CALIBRATION_SCHEMA_VERSION,
+    row_class_logits,
     temperature_scaled_probabilities,
 )
 
@@ -107,6 +108,8 @@ def main():
             "video_id": row["video_id"],
             "absolute_feature_index": row["absolute_feature_index"],
             "absolute_center_time": row["absolute_center_time"],
+            "proposal_start_sec": row["proposal_start_sec"],
+            "proposal_end_sec": row["proposal_end_sec"],
             "source_fpn_levels": row["source_fpn_levels"],
             "semantic_label": label,
             "class_id": KNOWN.index(label),
@@ -115,7 +118,7 @@ def main():
         probabilities = prediction.get("class_probabilities")
         if calibration is not None:
             probabilities = temperature_scaled_probabilities(
-                prediction.get("class_logits", []), temperature
+                row_class_logits(prediction), temperature
             )
         if probabilities is not None:
             if not isinstance(probabilities, list) or len(probabilities) != len(KNOWN):
@@ -133,8 +136,8 @@ def main():
         entries.append(entry)
     payload = {
         "schema_version": (
-            "offline-clip-target-adapter-v2"
-            if is_clip else "offline-vlm-target-adapter-v1"
+            "offline-clip-target-adapter-v3"
+            if is_clip else "offline-vlm-target-adapter-v2"
         ),
         "source": "offline_vlm_proposal_semantics",
         "key_fields": ["video_id", "absolute_feature_index"],

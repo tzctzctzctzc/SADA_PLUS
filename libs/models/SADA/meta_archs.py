@@ -41,6 +41,7 @@ from .vlm_residual import (
 )
 from .target_adapter import (
     ORACLE_TARGET_DISTILLATION_MODES,
+    VLM_TARGET_ADAPTER_POLICIES,
     build_oracle_target_distillation,
     build_vlm_target_distillation,
     load_vlm_target_adapter_cache,
@@ -560,7 +561,7 @@ class SADA(nn.Module):
         self.vlm_target_adapter_policy = target_adapter_cfg.get(
             'policy', 'verify'
         )
-        if self.vlm_target_adapter_policy not in ('verify', 'hard', 'soft'):
+        if self.vlm_target_adapter_policy not in VLM_TARGET_ADAPTER_POLICIES:
             raise ValueError('unknown VLM target adapter policy')
         self.vlm_target_adapter_confidence_threshold = float(
             target_adapter_cfg.get('confidence_threshold', 0.0)
@@ -2687,6 +2688,8 @@ class SADA(nn.Module):
         vlm_target_agreement = vlm_target_zero.detach()
         vlm_target_samples = vlm_target_zero.detach()
         vlm_target_weight_sum = vlm_target_zero.detach()
+        vlm_target_boundary_raw_loss = vlm_target_zero
+        vlm_target_boundary_samples = vlm_target_zero.detach()
         if mode == 'train' and self.vlm_target_adapter_enabled:
             if video_list_tgt is None:
                 raise ValueError('VLM target adapter requires target video metadata')
@@ -2717,12 +2720,35 @@ class SADA(nn.Module):
                 ).sum(dim=-1)
                 target_losses = target_losses * vlm_target['weights'][selected]
                 vlm_target_raw_loss = target_losses.mean()
+                extra_terms = target_losses
+                if self.vlm_target_adapter_policy == 'soft_boundary':
+                    boundary_selected = selected & vlm_target['boundary_available']
+                    vlm_target_boundary_samples = boundary_selected.sum().float()
+                    if boundary_selected.any():
+                        target_predictions = self.decode_offset(
+                            out_offsets_tgt, None, None, mode=mode
+                        )
+                        boundary_losses = ctr_diou_loss_1d(
+                            target_predictions[boundary_selected],
+                            vlm_target['boundary_targets'][boundary_selected],
+                            reduction='none',
+                        )
+                        boundary_losses = (
+                            boundary_losses
+                            * vlm_target['weights'][boundary_selected]
+                        )
+                        vlm_target_boundary_raw_loss = boundary_losses.mean()
+                        extra_terms = torch.stack((
+                            target_losses.mean(),
+                            vlm_target_boundary_raw_loss,
+                        ))
+                        vlm_target_raw_loss = extra_terms.mean()
                 (
                     vlm_target_loss,
                     vlm_target_budget_excess,
                 ) = bounded_extra_loss(
                     downstream_loss.reshape(1),
-                    target_losses,
+                    extra_terms,
                     self.vlm_target_adapter_budget,
                 )
                 vlm_target_budget = (
@@ -2799,6 +2825,8 @@ class SADA(nn.Module):
                    'vlm_target_agreement': vlm_target_agreement,
                    'vlm_target_samples': vlm_target_samples,
                    'vlm_target_weight_sum': vlm_target_weight_sum,
+                   'vlm_target_boundary_raw_loss': vlm_target_boundary_raw_loss.detach(),
+                   'vlm_target_boundary_samples': vlm_target_boundary_samples,
                    'downstream_loss': downstream_loss}
         
         

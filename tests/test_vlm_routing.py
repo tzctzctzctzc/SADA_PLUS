@@ -48,6 +48,63 @@ validate_semantic_selection_provenance = (
     vlm_routing.validate_semantic_selection_provenance
 )
 restore_training_trajectory = vlm_routing.restore_training_trajectory
+restore_training_trajectory_with_added_parameters = (
+    vlm_routing.restore_training_trajectory_with_added_parameters
+)
+
+
+class _BranchContinuationModel(torch.nn.Module):
+    def __init__(self, with_branch):
+        super().__init__()
+        self.base = torch.nn.Linear(2, 2)
+        if with_branch:
+            self.proposal_semantic_branch = torch.nn.Linear(2, 2)
+        self.disc = torch.nn.Linear(2, 1)
+
+
+def _split_optimizer(model):
+    named = dict(model.named_parameters())
+    base_names = sorted(name for name in named if not name.startswith("disc."))
+    return torch.optim.AdamW([
+        {"params": [named[name] for name in base_names if name.endswith("weight")]},
+        {"params": [named[name] for name in base_names if name.endswith("bias")]},
+    ], lr=1e-3)
+
+
+def _populate_optimizer(optimizer, parameters):
+    sum(parameter.sum() for parameter in parameters).backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+
+def test_branch_continuation_restores_base_optimizer_state_only():
+    parent = _BranchContinuationModel(with_branch=False)
+    parent_gen = _split_optimizer(parent)
+    parent_alignment = _split_optimizer(parent)
+    parent_disc = torch.optim.AdamW(parent.disc.parameters(), lr=2e-3)
+    _populate_optimizer(parent_gen, [parent.base.weight, parent.base.bias])
+    _populate_optimizer(parent_alignment, [parent.base.weight, parent.base.bias])
+    _populate_optimizer(parent_disc, list(parent.disc.parameters()))
+    checkpoint = {
+        "epoch": 3,
+        "optimizer_gen_source": parent_gen.state_dict(),
+        "optimizer_gen_source_alignment": parent_alignment.state_dict(),
+        "optimizer_disc": parent_disc.state_dict(),
+    }
+
+    current = _BranchContinuationModel(with_branch=True)
+    current_gen = _split_optimizer(current)
+    current_alignment = _split_optimizer(current)
+    current_disc = torch.optim.AdamW(current.disc.parameters(), lr=2e-3)
+    completed = restore_training_trajectory_with_added_parameters(
+        checkpoint, 7, current, ("proposal_semantic_branch.",),
+        current_gen, current_alignment, current_disc,
+        None, None, None,
+    )
+
+    assert completed == 21
+    assert current.base.weight in current_gen.state
+    assert current.proposal_semantic_branch.weight not in current_gen.state
 
 
 def semantic_payload(entries):

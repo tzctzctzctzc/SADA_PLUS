@@ -4,6 +4,7 @@ from tools.calibrate_vlm_temperature import (
     calibration_metrics,
     calibration_rows,
     fit_temperature,
+    row_class_logits,
     temperature_scaled_probabilities,
 )
 
@@ -47,3 +48,14 @@ def test_calibration_rows_use_only_known_source_actions():
     selected = calibration_rows(rows)
 
     assert selected == [{"class_logits": [0.0] * 10, "labels": [2]}]
+
+
+def test_clip_probabilities_can_be_used_as_temperature_logits():
+    probabilities = [0.55, 0.45] + [0.0] * 8
+
+    logits = row_class_logits({"class_probabilities": probabilities})
+
+    assert max(range(10), key=logits.__getitem__) == 0
+    assert temperature_scaled_probabilities(logits, 1.0) == pytest.approx(
+        probabilities, abs=1e-10
+    )

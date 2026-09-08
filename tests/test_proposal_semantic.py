@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
 import torch
 
 
@@ -154,6 +155,34 @@ def test_cached_vlm_special_labels_abstain_and_convert_to_crop_grid():
     # The first interval ends at the crop boundary and is excluded.
     assert result["evidence_eligible"].tolist() == [False]
     assert result["evidence"][0, 4].item() == 1.0
+
+
+def test_cached_vlm_probability_vector_is_used_as_semantic_embedding():
+    probabilities = (0.7, 0.3)
+    cache = {"video": [{
+        "candidate_id": "known",
+        "absolute_feature_index": 10,
+        "proposal_start_sec": 3.0,
+        "proposal_end_sec": 5.0,
+        "absolute_center_time": 4.0,
+        "semantic_label": "TAKE",
+        "source_fpn_levels": (0,),
+        "class_probabilities": probabilities,
+    }]}
+    videos = [{
+        "feats": torch.zeros(4, 10),
+        "metadata": {
+            "video_id": "video", "crop_start": 0, "crop_feat_len": 10,
+            "feat_stride": 10, "feat_num_frames": 0, "fps": 10,
+        },
+    }]
+
+    result = proposal_semantic.cached_proposals_for_videos(
+        cache, videos, 2, 1, "cpu", torch.float32
+    )[0]
+
+    assert result["evidence"][0, :2].tolist() == pytest.approx(probabilities)
+    assert result["evidence_eligible"].tolist() == [True]
 
 
 def test_branch_preserves_temporal_order_and_detaches_target_q():

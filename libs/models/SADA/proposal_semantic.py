@@ -81,6 +81,17 @@ def load_proposal_semantic_cache(path, num_classes):
             level < 0 for level in levels
         ):
             raise ValueError("proposal semantic cache contains invalid FPN levels")
+        probabilities = entry.get("class_probabilities")
+        if probabilities is not None:
+            probabilities = tuple(float(value) for value in probabilities)
+            if (
+                len(probabilities) != num_classes
+                or any(not math.isfinite(value) or value < 0.0 for value in probabilities)
+                or abs(sum(probabilities) - 1.0) > 1e-4
+            ):
+                raise ValueError("proposal semantic cache has invalid probabilities")
+            if label not in KNOWN_LABELS[:num_classes]:
+                raise ValueError("special proposal label cannot have class probabilities")
         by_video.setdefault(video_id, []).append({
             "candidate_id": candidate_id,
             "absolute_feature_index": int(entry["absolute_feature_index"]),
@@ -89,6 +100,7 @@ def load_proposal_semantic_cache(path, num_classes):
             "absolute_center_time": center,
             "semantic_label": label,
             "source_fpn_levels": levels,
+            "class_probabilities": probabilities,
         })
     return by_video, len(seen), hashlib.sha256(raw).hexdigest(), payload
 
@@ -190,10 +202,15 @@ def build_teacher_proposals(
     return proposals
 
 
-def evidence_vector(label, num_classes, device, dtype):
+def evidence_vector(label, num_classes, device, dtype, probabilities=None):
     vector = torch.zeros(num_classes + 4, device=device, dtype=dtype)
     if label in KNOWN_LABELS[:num_classes]:
-        vector[KNOWN_LABELS.index(label)] = 1.0
+        if probabilities is None:
+            vector[KNOWN_LABELS.index(label)] = 1.0
+        else:
+            vector[:num_classes] = torch.as_tensor(
+                probabilities, device=device, dtype=dtype
+            )
     elif label == "UNKNOWN_ACTION":
         vector[num_classes] = 1.0
     elif label == "BACKGROUND":
@@ -229,6 +246,7 @@ def cached_proposals_for_videos(cache, videos, num_classes, n_levels, device, dt
             rows.append((
                 max(start, 0.0), min(end, crop_length), level,
                 entry["semantic_label"], entry["candidate_id"],
+                entry.get("class_probabilities"),
             ))
         if rows:
             segments = torch.tensor(
@@ -238,7 +256,9 @@ def cached_proposals_for_videos(cache, videos, num_classes, n_levels, device, dt
                 [row[2] for row in rows], device=device, dtype=torch.long
             )
             evidence = torch.stack([
-                evidence_vector(row[3], num_classes, device, dtype) for row in rows
+                evidence_vector(
+                    row[3], num_classes, device, dtype, row[5]
+                ) for row in rows
             ])
             eligible = evidence[:, :num_classes].sum(dim=-1) > 0
         else:

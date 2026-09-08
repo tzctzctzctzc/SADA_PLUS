@@ -264,3 +264,56 @@ def test_soft_clip_policy_uses_distribution_and_confidence_weight():
     assert result["selected"].tolist() == [[False, True]]
     assert result["targets"][0, 1].tolist() == pytest.approx(probabilities)
     assert result["weights"][0, 1].item() == pytest.approx(0.7)
+
+
+def test_soft_boundary_policy_builds_offsets_in_feature_coordinates():
+    videos = [{"metadata": {
+        "video_id": "P01_01", "crop_start": 10,
+        "fps": 30.0, "feat_stride": 16, "feat_num_frames": 16,
+    }}]
+    points = [torch.tensor([
+        [0.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0]
+    ])]
+    valid = [torch.tensor([[True, True]])]
+    logits = [torch.zeros(1, 2, 10)]
+    probabilities = (0.7, 0.3) + (0.0,) * 8
+    cache = {"P01_01": {11: {
+        "class_id": 0,
+        "semantic_label": "TAKE",
+        "source_fpn_levels": (0,),
+        "absolute_center_time": (11 * 16 + 8) / 30,
+        "proposal_start_sec": (9 * 16 + 8) / 30,
+        "proposal_end_sec": (13 * 16 + 8) / 30,
+        "class_probabilities": probabilities,
+        "confidence": 0.7,
+    }}}
+
+    result = build_vlm_target_distillation(
+        videos, points, valid, logits, cache, (0,), 0.7,
+        policy="soft_boundary", confidence_threshold=0.0,
+    )
+
+    assert result["selected"].tolist() == [[False, True]]
+    assert result["boundary_available"].tolist() == [[False, True]]
+    assert result["boundary_targets"][0, 1].tolist() == pytest.approx([2.0, 2.0])
+
+
+def test_soft_boundary_policy_requires_cached_interval():
+    videos = [{"metadata": {
+        "video_id": "P01_01", "crop_start": 10,
+        "fps": 30.0, "feat_stride": 16, "feat_num_frames": 16,
+    }}]
+    points = [torch.tensor([[1.0, 0.0, 0.0, 1.0]])]
+    valid = [torch.tensor([[True]])]
+    logits = [torch.zeros(1, 1, 10)]
+    cache = {"P01_01": {11: {
+        "class_id": 0, "semantic_label": "TAKE",
+        "source_fpn_levels": (0,), "absolute_center_time": 1.0,
+        "class_probabilities": (1.0,) + (0.0,) * 9, "confidence": 1.0,
+    }}}
+
+    with pytest.raises(ValueError, match="requires proposal intervals"):
+        build_vlm_target_distillation(
+            videos, points, valid, logits, cache, (0,), 0.7,
+            policy="soft_boundary", confidence_threshold=0.0,
+        )

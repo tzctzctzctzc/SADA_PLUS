@@ -2,6 +2,11 @@ import argparse
 import json
 from pathlib import Path
 
+from tools.calibrate_vlm_temperature import (
+    row_class_logits,
+    temperature_scaled_probabilities,
+)
+
 
 KNOWN_LABELS = (
     "TAKE", "PUT", "WASH", "OPEN", "CLOSE", "INSERT",
@@ -18,7 +23,7 @@ def read_jsonl(path):
     ]
 
 
-def build_cache(manifest_path, prediction_paths):
+def build_cache(manifest_path, prediction_paths, temperature=None):
     manifest = read_jsonl(manifest_path)
     by_id = {row["candidate_id"]: row for row in manifest}
     if len(by_id) != len(manifest):
@@ -67,6 +72,21 @@ def build_cache(manifest_path, prediction_paths):
         }
         if label in KNOWN_LABELS:
             entry["class_id"] = KNOWN_LABELS.index(label)
+            probabilities = prediction.get("class_probabilities")
+            if temperature is not None:
+                probabilities = temperature_scaled_probabilities(
+                    row_class_logits(prediction), temperature
+                )
+            if probabilities is not None:
+                probabilities = [float(value) for value in probabilities]
+                if (
+                    len(probabilities) != len(KNOWN_LABELS)
+                    or any(value < 0.0 for value in probabilities)
+                    or abs(sum(probabilities) - 1.0) > 1e-4
+                ):
+                    raise ValueError("invalid VLM class probabilities")
+                entry["class_probabilities"] = probabilities
+                entry["confidence"] = max(probabilities)
         entries.append(entry)
     if len(protocols) > 1:
         raise ValueError("VLM prediction shards use different prompt protocols")
@@ -99,8 +119,17 @@ def main():
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--predictions", nargs="+", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--temperature-calibration-report")
     args = parser.parse_args()
-    payload = build_cache(args.manifest, args.predictions)
+    temperature = None
+    if args.temperature_calibration_report:
+        calibration = json.loads(
+            Path(args.temperature_calibration_report).read_text(encoding="utf-8")
+        )
+        if calibration.get("selection_uses_target_gt") is not False:
+            raise ValueError("temperature calibration must be source-only")
+        temperature = float(calibration["temperature"])
+    payload = build_cache(args.manifest, args.predictions, temperature)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(

@@ -51,6 +51,7 @@ def test_builder_retains_frozen_geometry_and_drops_manifest_gt(tmp_path):
         "model": "test-vlm",
         "prompt_version": "v1",
         "prompt_sha256": "a" * 64,
+        "class_probabilities": [0.01, 0.01, 0.01, 0.91] + [0.01] * 6,
     }])
 
     payload = build_cache(manifest, [predictions])
@@ -60,6 +61,8 @@ def test_builder_retains_frozen_geometry_and_drops_manifest_gt(tmp_path):
     assert payload["split"] == "train"
     assert payload["entries"][0]["semantic_label"] == "OPEN"
     assert payload["entries"][0]["class_id"] == 3
+    assert payload["entries"][0]["class_probabilities"][3] == pytest.approx(0.91)
+    assert payload["entries"][0]["confidence"] == pytest.approx(0.91)
     assert "gt_assigned_class_ids" not in payload["entries"][0]
 
 
