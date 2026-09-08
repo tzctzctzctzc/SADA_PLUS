@@ -1186,6 +1186,16 @@ def create_argparser():
         help='proposal-level VLM distribution distillation objective',
     )
     parser.add_argument(
+        '--proposal-semantic-direct-pooling',
+        choices=['mean', 'top2'],
+        default='mean',
+        help='temporal multiple-instance pooling for proposal supervision',
+    )
+    parser.add_argument(
+        '--proposal-semantic-share-logit-adapter', action='store_true',
+        help='share one target semantic residual expert across FPN levels',
+    )
+    parser.add_argument(
         '--proposal-semantic-freeze-base', action='store_true',
         help='freeze the official EMA detector and train only proposal adapters',
     )
@@ -1738,6 +1748,8 @@ if __name__ == '__main__':
         'logit_max_delta': args.proposal_semantic_logit_max_delta,
         'logit_gate': args.proposal_semantic_logit_gate,
         'direct_loss_type': args.proposal_semantic_direct_loss,
+        'direct_pooling': args.proposal_semantic_direct_pooling,
+        'logit_shared_levels': args.proposal_semantic_share_logit_adapter,
         'adapter_only': args.proposal_semantic_mode.startswith(
             'oracle_adapter_'
         ) or args.proposal_semantic_freeze_base,

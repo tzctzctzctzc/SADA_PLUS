@@ -461,10 +461,13 @@ def proposal_detection_loss(
     proposals,
     fpn_strides,
     loss_type="bce",
+    pooling="mean",
 ):
     """Supervise the detector through proposal-average class logits."""
     if loss_type not in ("bce", "soft_ce", "positive_bce"):
         raise ValueError("unknown proposal detection loss")
+    if pooling not in ("mean", "top2"):
+        raise ValueError("unknown proposal detection pooling")
     pooled_logits = []
     pooled_targets = []
     for batch_index, proposal in enumerate(proposals):
@@ -488,7 +491,13 @@ def proposal_detection_loss(
             sampled = _sample_sequence(
                 class_logits[level][batch_index].transpose(0, 1), positions
             ).transpose(0, 1)
-            pooled_logits.append(sampled.mean(dim=0))
+            if pooling == "top2":
+                pooled = sampled.topk(
+                    k=min(2, sampled.shape[0]), dim=0
+                ).values.mean(dim=0)
+            else:
+                pooled = sampled.mean(dim=0)
+            pooled_logits.append(pooled)
             pooled_targets.append(target.detach())
     if not pooled_logits:
         zero = sum(logits.sum() * 0.0 for logits in class_logits)

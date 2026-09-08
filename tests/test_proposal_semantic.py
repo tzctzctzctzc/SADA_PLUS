@@ -83,6 +83,32 @@ def test_positive_proposal_loss_does_not_update_unselected_classes():
     assert torch.equal(logits[0].grad[0, 0, 1:], torch.zeros(2))
 
 
+def test_top2_pooling_treats_a_proposal_as_a_temporal_bag():
+    logits = [torch.tensor([[[-4.0], [4.0], [3.0], [-4.0], [-4.0]]])]
+    proposals = [{
+        "segments": torch.tensor([[0.0, 4.0]]),
+        "levels": torch.tensor([0]),
+        "targets": torch.tensor([[1.0]]),
+    }]
+
+    mean_loss, _ = proposal_semantic.proposal_detection_loss(
+        logits,
+        proposals,
+        (1,),
+        loss_type="positive_bce",
+        pooling="mean",
+    )
+    top2_loss, _ = proposal_semantic.proposal_detection_loss(
+        logits,
+        proposals,
+        (1,),
+        loss_type="positive_bce",
+        pooling="top2",
+    )
+
+    assert top2_loss < mean_loss
+
+
 def test_vlm_proposal_agreement_gate_uses_frozen_base_logits():
     logits = [torch.tensor([[
         [4.0, 0.0], [4.0, 0.0], [0.0, 4.0], [0.0, 4.0]
