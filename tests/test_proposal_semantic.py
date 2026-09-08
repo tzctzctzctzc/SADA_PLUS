@@ -47,6 +47,21 @@ def test_logit_adapter_construction_does_not_consume_rng_state():
     assert torch.equal(actual, expected)
 
 
+def test_logit_adapter_temporal_kernel_preserves_length_and_uses_context():
+    adapter = proposal_semantic.ProposalLogitAdapter(
+        1, 1, max_delta=1.0, kernel_size=3
+    )
+    with torch.no_grad():
+        adapter.weight[0, 0, 0] = 1.0
+    features = torch.tensor([[[0.0, 1.0, 0.0, 0.0]]])
+
+    residual = adapter(features)
+
+    assert residual.shape == (1, 1, 4)
+    assert residual[0, 0, 2] > 0.0
+    assert torch.count_nonzero(residual) == 1
+
+
 def test_proposal_detection_soft_ce_prefers_matching_distribution():
     logits = [torch.tensor([[[4.0, -2.0], [-2.0, 4.0]]])]
     proposals = [{

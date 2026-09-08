@@ -381,16 +381,26 @@ class ProposalTargetAdapter(nn.Module):
 class ProposalLogitAdapter(nn.Module):
     """Small target-only classifier residual with an exact identity start."""
 
-    def __init__(self, channels, num_classes, max_delta=2.0):
+    def __init__(self, channels, num_classes, max_delta=2.0, kernel_size=1):
         super().__init__()
         self.max_delta = float(max_delta)
+        self.kernel_size = int(kernel_size)
+        if self.kernel_size not in (1, 3, 5):
+            raise ValueError("proposal logit kernel size must be 1, 3, or 5")
         # Construct parameters directly at zero so adding this branch does not
         # consume RNG state and perturb the matched SADA continuation trajectory.
-        self.weight = nn.Parameter(torch.zeros(num_classes, channels, 1))
+        self.weight = nn.Parameter(torch.zeros(
+            num_classes, channels, self.kernel_size
+        ))
         self.bias = nn.Parameter(torch.zeros(num_classes))
 
     def forward(self, features):
-        residual = F.conv1d(features.detach(), self.weight, self.bias)
+        residual = F.conv1d(
+            features.detach(),
+            self.weight,
+            self.bias,
+            padding=self.kernel_size // 2,
+        )
         return self.max_delta * torch.tanh(residual)
 
 

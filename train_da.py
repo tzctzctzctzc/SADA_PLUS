@@ -1196,6 +1196,13 @@ def create_argparser():
         help='share one target semantic residual expert across FPN levels',
     )
     parser.add_argument(
+        '--proposal-semantic-logit-kernel-size',
+        type=int,
+        choices=[1, 3, 5],
+        default=1,
+        help='local temporal receptive field of the semantic residual expert',
+    )
+    parser.add_argument(
         '--proposal-semantic-background-anchor-weight',
         type=float,
         default=0.0,
@@ -1761,6 +1768,7 @@ if __name__ == '__main__':
         'direct_loss_type': args.proposal_semantic_direct_loss,
         'direct_pooling': args.proposal_semantic_direct_pooling,
         'logit_shared_levels': args.proposal_semantic_share_logit_adapter,
+        'logit_kernel_size': args.proposal_semantic_logit_kernel_size,
         'background_anchor_weight': (
             args.proposal_semantic_background_anchor_weight
         ),

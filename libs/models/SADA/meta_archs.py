@@ -690,6 +690,9 @@ class SADA(nn.Module):
         self.proposal_logit_shared_levels = bool(
             proposal_cfg.get('logit_shared_levels', False)
         )
+        self.proposal_logit_kernel_size = int(
+            proposal_cfg.get('logit_kernel_size', 1)
+        )
         self.proposal_background_anchor_weight = float(
             proposal_cfg.get('background_anchor_weight', 0.0)
         )
@@ -716,6 +719,7 @@ class SADA(nn.Module):
                     'bce', 'soft_ce', 'positive_bce'
                 )
                 or self.proposal_direct_pooling not in ('mean', 'top2')
+                or self.proposal_logit_kernel_size not in (1, 3, 5)
                 or self.proposal_background_anchor_weight < 0.0
                 or not 0.0 <= self.proposal_background_anchor_confidence <= 1.0
             ):
@@ -1257,6 +1261,7 @@ class SADA(nn.Module):
                         fpn_dim,
                         self.num_class_orig,
                         self.proposal_logit_max_delta,
+                        self.proposal_logit_kernel_size,
                     )
                     for _ in range(
                         1 if self.proposal_logit_shared_levels else self.n_levels
