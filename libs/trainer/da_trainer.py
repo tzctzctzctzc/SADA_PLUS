@@ -181,8 +181,12 @@ class Trainer(BaseTrainerDA):
         return metadata
         
     def get_evaluation_model(self):
-        return self.model if not self.ema_active else self.model_ema.module
-        #return self.model
+        if (
+            not self.ema_active
+            or self.cfg['train_cfg'].get('evaluate_student', False)
+        ):
+            return self.model
+        return self.model_ema.module
 
     def _calibrate_stage1(self, epoch):
         self.logger.info("Calibrating Stage 1 thresholds at epoch %d", epoch)

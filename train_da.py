@@ -1278,6 +1278,10 @@ def create_argparser():
         help='skip three auxiliary mAP passes during fast target-val screening',
     )
     parser.add_argument(
+        '--diagnostic-evaluate-student', action='store_true',
+        help='evaluate current student weights instead of the EMA copy',
+    )
+    parser.add_argument(
         '--diagnostic-alignment-levels', default=None,
         help='comma-separated FPN levels used only for diagnostic runs',
     )
@@ -1870,6 +1874,9 @@ if __name__ == '__main__':
     }
     config_dict['train_cfg']['test_target_val_only'] = (
         args.diagnostic_test_target_val_only
+    )
+    config_dict['train_cfg']['evaluate_student'] = (
+        args.diagnostic_evaluate_student
     )
     validity_head_enabled = args.validity_head == 'train'
     if args.validity_head_loss_weight < 0.0:
