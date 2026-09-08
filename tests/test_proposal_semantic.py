@@ -154,6 +154,33 @@ def test_top2_pooling_treats_a_proposal_as_a_temporal_bag():
     assert top2_loss < mean_loss
 
 
+def test_inner_outer_ranking_penalizes_temporal_leakage():
+    localized = [torch.tensor([[[-4.0], [4.0], [4.0], [-4.0], [-4.0]]])]
+    leaked = [torch.tensor([[[4.0], [4.0], [4.0], [4.0], [4.0]]])]
+    proposals = [{
+        "segments": torch.tensor([[1.0, 2.0]]),
+        "levels": torch.tensor([0]),
+        "targets": torch.tensor([[1.0]]),
+    }]
+
+    localized_loss, _ = proposal_semantic.proposal_detection_loss(
+        localized,
+        proposals,
+        (1,),
+        loss_type="positive_bce_rank",
+        pooling="top2",
+    )
+    leaked_loss, _ = proposal_semantic.proposal_detection_loss(
+        leaked,
+        proposals,
+        (1,),
+        loss_type="positive_bce_rank",
+        pooling="top2",
+    )
+
+    assert localized_loss < leaked_loss
+
+
 def test_background_anchor_excludes_vlm_positive_bag_and_invalid_time():
     base = [torch.full((1, 4, 2), -10.0)]
     adapted = [base[0] + 1.0]

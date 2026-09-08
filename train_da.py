@@ -1183,7 +1183,8 @@ def create_argparser():
         '--proposal-semantic-direct-loss',
         choices=[
             'bce', 'soft_ce', 'positive_bce',
-            'top2_positive_bce', 'soft_positive_bce',
+            'positive_bce_rank', 'top2_positive_bce',
+            'soft_positive_bce',
         ],
         default='bce',
         help='proposal-level VLM distribution distillation objective',

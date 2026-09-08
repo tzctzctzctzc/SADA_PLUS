@@ -511,6 +511,7 @@ def proposal_detection_loss(
         "bce",
         "soft_ce",
         "positive_bce",
+        "positive_bce_rank",
         "top2_positive_bce",
         "soft_positive_bce",
     ):
@@ -518,6 +519,7 @@ def proposal_detection_loss(
     if pooling not in ("mean", "top2"):
         raise ValueError("unknown proposal detection pooling")
     pooled_logits = []
+    pooled_outer_logits = []
     pooled_targets = []
     for batch_index, proposal in enumerate(proposals):
         targets = proposal.get("targets")
@@ -547,6 +549,20 @@ def proposal_detection_loss(
             else:
                 pooled = sampled.mean(dim=0)
             pooled_logits.append(pooled)
+            if loss_type == "positive_bce_rank":
+                outer_positions = torch.stack((
+                    segment[0] - 0.50 * duration,
+                    segment[0] - 0.25 * duration,
+                    segment[1] + 0.25 * duration,
+                    segment[1] + 0.50 * duration,
+                )) / float(fpn_strides[level])
+                outer_sampled = _sample_sequence(
+                    class_logits[level][batch_index].transpose(0, 1),
+                    outer_positions,
+                ).transpose(0, 1)
+                pooled_outer_logits.append(
+                    outer_sampled.max(dim=0).values
+                )
             pooled_targets.append(target.detach())
     if not pooled_logits:
         zero = sum(logits.sum() * 0.0 for logits in class_logits)
@@ -565,10 +581,16 @@ def proposal_detection_loss(
         loss = (
             F.softplus(-top_logits) * top_targets.detach()
         ).sum(dim=-1)
-    elif loss_type == "positive_bce":
+    elif loss_type in ("positive_bce", "positive_bce_rank"):
         top_targets, top_classes = targets.max(dim=-1)
         top_logits = logits.gather(1, top_classes.unsqueeze(1)).squeeze(1)
         loss = F.softplus(-top_logits) * top_targets.detach()
+        if loss_type == "positive_bce_rank":
+            outer_logits = torch.stack(pooled_outer_logits).gather(
+                1, top_classes.unsqueeze(1)
+            ).squeeze(1)
+            rank_loss = F.softplus(outer_logits - top_logits)
+            loss = 0.5 * (loss + rank_loss * top_targets.detach())
     else:
         loss = F.binary_cross_entropy_with_logits(
             logits, targets, reduction="none"
