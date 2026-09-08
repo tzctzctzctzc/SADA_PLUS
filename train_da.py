@@ -1210,6 +1210,12 @@ def create_argparser():
         help='share one target semantic residual expert across FPN levels',
     )
     parser.add_argument(
+        '--proposal-semantic-logit-input',
+        choices=['feature', 'base_logits'],
+        default='feature',
+        help='learn the residual from FPN features or frozen SADA logits',
+    )
+    parser.add_argument(
         '--proposal-semantic-logit-kernel-size',
         type=int,
         choices=[1, 3, 5],
@@ -1788,6 +1794,7 @@ if __name__ == '__main__':
             args.proposal_semantic_direct_class_balance_max_weight
         ),
         'logit_shared_levels': args.proposal_semantic_share_logit_adapter,
+        'logit_input': args.proposal_semantic_logit_input,
         'logit_kernel_size': args.proposal_semantic_logit_kernel_size,
         'background_anchor_weight': (
             args.proposal_semantic_background_anchor_weight

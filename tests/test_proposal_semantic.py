@@ -62,6 +62,19 @@ def test_logit_adapter_temporal_kernel_preserves_length_and_uses_context():
     assert torch.count_nonzero(residual) == 1
 
 
+def test_logit_adapter_can_learn_confusion_correction_from_base_logits():
+    adapter = proposal_semantic.ProposalLogitAdapter(3, 2, max_delta=1.0)
+    with torch.no_grad():
+        adapter.weight[1, 2, 0] = 1.0
+    base_logits = torch.tensor([[[0.0], [0.0], [2.0]]], requires_grad=True)
+
+    residual = adapter(base_logits)
+    residual.sum().backward()
+
+    assert residual[0, 1, 0] > 0.0
+    assert base_logits.grad is None
+
+
 def test_proposal_detection_soft_ce_prefers_matching_distribution():
     logits = [torch.tensor([[[4.0, -2.0], [-2.0, 4.0]]])]
     proposals = [{

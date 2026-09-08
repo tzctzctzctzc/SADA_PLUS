@@ -697,6 +697,9 @@ class SADA(nn.Module):
         self.proposal_logit_shared_levels = bool(
             proposal_cfg.get('logit_shared_levels', False)
         )
+        self.proposal_logit_input = proposal_cfg.get(
+            'logit_input', 'feature'
+        )
         self.proposal_logit_kernel_size = int(
             proposal_cfg.get('logit_kernel_size', 1)
         )
@@ -722,6 +725,7 @@ class SADA(nn.Module):
                 or not 0.0 <= self.proposal_semantic_nms_threshold <= 1.0
                 or self.proposal_logit_max_delta <= 0.0
                 or self.proposal_logit_gate not in ('none', 'base_confidence')
+                or self.proposal_logit_input not in ('feature', 'base_logits')
                 or self.proposal_direct_loss_type not in (
                     'bce', 'soft_ce', 'positive_bce',
                     'top2_positive_bce', 'soft_positive_bce'
@@ -1281,9 +1285,13 @@ class SADA(nn.Module):
         self.proposal_logit_adapters = nn.ModuleList()
         if self.proposal_semantic_enabled:
             if self.proposal_semantic_mode.startswith('vlm_logit_'):
+                adapter_input_dim = (
+                    fpn_dim if self.proposal_logit_input == 'feature'
+                    else self.num_class_orig
+                )
                 self.proposal_logit_adapters = nn.ModuleList([
                     ProposalLogitAdapter(
-                        fpn_dim,
+                        adapter_input_dim,
                         self.num_class_orig,
                         self.proposal_logit_max_delta,
                         self.proposal_logit_kernel_size,
@@ -2216,7 +2224,13 @@ class SADA(nn.Module):
                 adapter_index = (
                     0 if self.proposal_logit_shared_levels else level
                 )
-                residual = self.proposal_logit_adapters[adapter_index](features)
+                adapter_input = (
+                    features if self.proposal_logit_input == 'feature'
+                    else logits
+                )
+                residual = self.proposal_logit_adapters[adapter_index](
+                    adapter_input
+                )
                 if self.proposal_logit_gate == 'base_confidence':
                     residual = residual * logits.detach().sigmoid().amax(
                         dim=1, keepdim=True
