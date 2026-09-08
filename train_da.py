@@ -1208,6 +1208,11 @@ def create_argparser():
         default=2.0,
     )
     parser.add_argument(
+        '--proposal-semantic-direct-class-reliability',
+        default=None,
+        help='source-only proposal class reliability calibration JSON',
+    )
+    parser.add_argument(
         '--proposal-semantic-share-logit-adapter', action='store_true',
         help='share one target semantic residual expert across FPN levels',
     )
@@ -1798,6 +1803,9 @@ if __name__ == '__main__':
         ),
         'direct_class_balance_max_weight': (
             args.proposal_semantic_direct_class_balance_max_weight
+        ),
+        'direct_class_reliability_path': (
+            args.proposal_semantic_direct_class_reliability
         ),
         'logit_shared_levels': args.proposal_semantic_share_logit_adapter,
         'logit_input': args.proposal_semantic_logit_input,

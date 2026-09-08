@@ -502,6 +502,48 @@ def proposal_class_balance_weights(
     return weights, counts
 
 
+def load_proposal_class_reliability(
+    path,
+    num_classes,
+    target_entries,
+    confidence_threshold,
+):
+    """Load source-only class reliability and preserve target loss scale."""
+    raw = Path(path).read_bytes()
+    payload = json.loads(raw.decode("utf-8"))
+    if payload.get("schema_version") != "proposal-class-reliability-v1":
+        raise ValueError("unsupported proposal class reliability schema")
+    if payload.get("target_gt_usage") != "forbidden":
+        raise ValueError("proposal reliability must forbid target GT")
+    reliabilities = payload.get("smoothed_reliabilities")
+    if (
+        not isinstance(reliabilities, list)
+        or len(reliabilities) != len(KNOWN_LABELS)
+        or any(
+            not math.isfinite(float(value)) or float(value) <= 0.0
+            for value in reliabilities
+        )
+    ):
+        raise ValueError("invalid proposal class reliabilities")
+    weights = torch.zeros(int(num_classes), dtype=torch.float32)
+    known_count = min(int(num_classes), len(KNOWN_LABELS))
+    weights[:known_count] = torch.tensor(reliabilities[:known_count])
+    target_counts = torch.zeros(int(num_classes), dtype=torch.float32)
+    for entry in target_entries:
+        label = entry.get("semantic_label")
+        if label not in KNOWN_LABELS[:known_count]:
+            continue
+        probabilities = entry.get("class_probabilities")
+        confidence = max(probabilities) if probabilities else 1.0
+        if confidence >= float(confidence_threshold):
+            target_counts[KNOWN_LABELS.index(label)] += 1.0
+    normalizer = (weights * target_counts).sum() / target_counts.sum().clamp(
+        min=1.0
+    )
+    weights[:known_count] /= normalizer.clamp(min=1e-6)
+    return weights, target_counts, hashlib.sha256(raw).hexdigest(), payload
+
+
 def proposal_detection_loss(
     class_logits,
     proposals,

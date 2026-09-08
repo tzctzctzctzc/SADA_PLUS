@@ -55,6 +55,7 @@ from .proposal_semantic import (
     build_teacher_proposals,
     cached_proposals_for_videos,
     labels_for_proposals,
+    load_proposal_class_reliability,
     load_proposal_semantic_cache,
     prepare_vlm_proposal_targets,
     proposal_class_balance_weights,
@@ -694,6 +695,9 @@ class SADA(nn.Module):
         self.proposal_direct_class_balance_max_weight = float(
             proposal_cfg.get('direct_class_balance_max_weight', 2.0)
         )
+        self.proposal_direct_class_reliability_path = proposal_cfg.get(
+            'direct_class_reliability_path'
+        )
         self.proposal_logit_shared_levels = bool(
             proposal_cfg.get('logit_shared_levels', False)
         )
@@ -798,6 +802,32 @@ class SADA(nn.Module):
                 self.proposal_semantic_cache_metadata[
                     'target_confident_class_counts'
                 ] = counts.tolist()
+            if self.proposal_direct_class_reliability_path:
+                if self.proposal_direct_class_balance_power > 0.0:
+                    raise ValueError(
+                        'class balance and source reliability are mutually exclusive'
+                    )
+                (
+                    weights,
+                    counts,
+                    reliability_sha256,
+                    reliability_payload,
+                ) = load_proposal_class_reliability(
+                    self.proposal_direct_class_reliability_path,
+                    num_classes,
+                    target_payload['entries'],
+                    self.proposal_semantic_confidence_threshold,
+                )
+                self.proposal_direct_class_weights = weights
+                self.proposal_semantic_cache_metadata[
+                    'target_confident_class_counts'
+                ] = counts.tolist()
+                self.proposal_semantic_cache_metadata[
+                    'class_reliability_sha256'
+                ] = reliability_sha256
+                self.proposal_semantic_cache_metadata[
+                    'class_reliability_gt_view'
+                ] = reliability_payload['gt_view']
         if self.proposal_semantic_mode.startswith('vlm') and not target_cache_path:
             raise ValueError('VLM proposal semantics require a target cache')
         stage1_cfg = cfg.get('stage1', {})

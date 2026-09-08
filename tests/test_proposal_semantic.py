@@ -313,6 +313,30 @@ def test_class_balance_upweights_rare_labels_and_preserves_mean_scale():
     assert float((weights * counts).sum() / counts.sum()) == pytest.approx(1.0)
 
 
+def test_source_class_reliability_preserves_target_weight_scale(tmp_path):
+    calibration = tmp_path / "reliability.json"
+    calibration.write_text(json.dumps({
+        "schema_version": "proposal-class-reliability-v1",
+        "target_gt_usage": "forbidden",
+        "gt_view": "proposal_interval_any",
+        "smoothed_reliabilities": [0.8, 0.4] + [0.6] * 8,
+    }))
+    entries = [
+        {"semantic_label": "TAKE", "class_probabilities": [0.9, 0.1]},
+        {"semantic_label": "PUT", "class_probabilities": [0.1, 0.9]},
+    ]
+
+    weights, counts, _, _ = (
+        proposal_semantic.load_proposal_class_reliability(
+            calibration, 2, entries, confidence_threshold=0.7
+        )
+    )
+
+    assert counts.tolist() == [1.0, 1.0]
+    assert weights[0] > weights[1]
+    assert float((weights * counts).sum() / counts.sum()) == pytest.approx(1.0)
+
+
 def test_vlm_proposal_agreement_gate_uses_frozen_base_logits():
     logits = [torch.tensor([[
         [4.0, 0.0], [4.0, 0.0], [0.0, 4.0], [0.0, 4.0]
