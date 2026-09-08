@@ -128,3 +128,62 @@ def test_builder_rejects_prediction_identity_mismatch(tmp_path):
 
     with pytest.raises(ValueError, match="identity"):
         build_cache(manifest, [predictions])
+
+
+def test_builder_filters_by_observable_teacher_score(tmp_path):
+    manifest = tmp_path / "target_train_manifest.jsonl"
+    write_jsonl(manifest, [
+        {
+            "candidate_id": "v-p1",
+            "video_id": "v",
+            "absolute_feature_index": 11,
+            "absolute_center_time": 1.5,
+            "proposal_start_sec": 1.0,
+            "proposal_end_sec": 2.0,
+            "source_fpn_levels": [0],
+            "teacher_score": 0.44,
+        },
+        {
+            "candidate_id": "v-p2",
+            "video_id": "v",
+            "absolute_feature_index": 12,
+            "absolute_center_time": 2.5,
+            "proposal_start_sec": 2.0,
+            "proposal_end_sec": 3.0,
+            "source_fpn_levels": [1],
+            "teacher_score": 0.45,
+        },
+    ])
+    (tmp_path / "target_train_manifest.jsonl.meta.json").write_text(json.dumps({
+        "domain": "target",
+        "split": "train",
+        "selection_teacher_provenance": {"weights": "ema"},
+    }), encoding="utf-8")
+    predictions = tmp_path / "predictions.jsonl"
+    write_jsonl(predictions, [
+        {
+            "candidate_id": candidate_id,
+            "video_id": "v",
+            "absolute_feature_index": index,
+            "status": "ok",
+            "prediction": "OPEN",
+            "model": "test-vlm",
+            "prompt_version": "v1",
+            "prompt_sha256": "a" * 64,
+            "wire_api": "test-api",
+        }
+        for candidate_id, index in (("v-p1", 11), ("v-p2", 12))
+    ])
+
+    payload = build_cache(
+        manifest,
+        [predictions],
+        min_teacher_score=0.45,
+    )
+
+    assert [entry["candidate_id"] for entry in payload["entries"]] == ["v-p2"]
+    assert payload["entries"][0]["teacher_score"] == pytest.approx(0.45)
+    assert payload["selection_filter"] == {
+        "min_teacher_score": 0.45,
+        "uses_target_gt": False,
+    }

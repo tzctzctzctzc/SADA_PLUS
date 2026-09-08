@@ -35,7 +35,14 @@ def read_jsonl(path):
     ]
 
 
-def build_cache(manifest_path, prediction_paths, temperature=None):
+def build_cache(
+    manifest_path,
+    prediction_paths,
+    temperature=None,
+    min_teacher_score=0.0,
+):
+    if min_teacher_score < 0.0 or min_teacher_score > 1.0:
+        raise ValueError("minimum teacher score must be in [0, 1]")
     manifest = read_jsonl(manifest_path)
     by_id = {row["candidate_id"]: row for row in manifest}
     if len(by_id) != len(manifest):
@@ -56,6 +63,13 @@ def build_cache(manifest_path, prediction_paths, temperature=None):
         if candidate_id not in by_id:
             raise ValueError("VLM prediction is absent from the manifest")
         source = by_id[candidate_id]
+        if min_teacher_score > 0.0:
+            if "teacher_score" not in source:
+                raise ValueError(
+                    "teacher-score filtering requires manifest teacher scores"
+                )
+            if float(source["teacher_score"]) < min_teacher_score:
+                continue
         if (
             str(prediction["video_id"]) != str(source["video_id"])
             or int(prediction["absolute_feature_index"])
@@ -83,6 +97,8 @@ def build_cache(manifest_path, prediction_paths, temperature=None):
             ],
             "semantic_label": label,
         }
+        if "teacher_score" in source:
+            entry["teacher_score"] = float(source["teacher_score"])
         if label in KNOWN_LABELS:
             entry["class_id"] = KNOWN_LABELS.index(label)
             probabilities = prediction.get("class_probabilities")
@@ -127,6 +143,10 @@ def build_cache(manifest_path, prediction_paths, temperature=None):
         },
         "manifest_candidates": len(manifest),
         "successful_predictions": len(entries),
+        "selection_filter": {
+            "min_teacher_score": float(min_teacher_score),
+            "uses_target_gt": False,
+        },
         "entries": entries,
     }
 
@@ -137,6 +157,7 @@ def main():
     parser.add_argument("--predictions", nargs="+", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--temperature-calibration-report")
+    parser.add_argument("--min-teacher-score", type=float, default=0.0)
     args = parser.parse_args()
     temperature = None
     if args.temperature_calibration_report:
@@ -146,7 +167,12 @@ def main():
         if calibration.get("selection_uses_target_gt") is not False:
             raise ValueError("temperature calibration must be source-only")
         temperature = float(calibration["temperature"])
-    payload = build_cache(args.manifest, args.predictions, temperature)
+    payload = build_cache(
+        args.manifest,
+        args.predictions,
+        temperature,
+        min_teacher_score=args.min_teacher_score,
+    )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
