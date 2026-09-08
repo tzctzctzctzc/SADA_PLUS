@@ -774,7 +774,7 @@ class SADA(nn.Module):
             if self.proposal_direct_class_balance_power > 0.0:
                 weights, counts = proposal_class_balance_weights(
                     target_payload['entries'],
-                    self.num_class_orig,
+                    num_classes,
                     self.proposal_semantic_confidence_threshold,
                     power=self.proposal_direct_class_balance_power,
                     max_weight=(
