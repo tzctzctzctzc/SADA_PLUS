@@ -47,6 +47,25 @@ def test_logit_adapter_construction_does_not_consume_rng_state():
     assert torch.equal(actual, expected)
 
 
+def test_proposal_detection_soft_ce_prefers_matching_distribution():
+    logits = [torch.tensor([[[4.0, -2.0], [-2.0, 4.0]]])]
+    proposals = [{
+        "segments": torch.tensor([[0.0, 0.0], [1.0, 1.0]]),
+        "levels": torch.tensor([0, 0]),
+        "targets": torch.tensor([[1.0, 0.0], [0.0, 1.0]]),
+    }]
+
+    matching, count = proposal_semantic.proposal_detection_loss(
+        logits, proposals, (1,), loss_type="soft_ce"
+    )
+    reversed_loss, _ = proposal_semantic.proposal_detection_loss(
+        [logits[0].flip(-1)], proposals, (1,), loss_type="soft_ce"
+    )
+
+    assert count == 2
+    assert matching < reversed_loss
+
+
 def test_vlm_proposal_agreement_gate_uses_frozen_base_logits():
     logits = [torch.tensor([[
         [4.0, 0.0], [4.0, 0.0], [0.0, 4.0], [0.0, 4.0]

@@ -679,6 +679,10 @@ class SADA(nn.Module):
         self.proposal_logit_max_delta = float(
             proposal_cfg.get('logit_max_delta', 2.0)
         )
+        self.proposal_logit_gate = proposal_cfg.get('logit_gate', 'none')
+        self.proposal_direct_loss_type = proposal_cfg.get(
+            'direct_loss_type', 'bce'
+        )
         if self.proposal_semantic_enabled:
             if (
                 self.proposal_semantic_source_weight < 0.0
@@ -694,6 +698,8 @@ class SADA(nn.Module):
                 or self.proposal_semantic_max_proposals < 1
                 or not 0.0 <= self.proposal_semantic_nms_threshold <= 1.0
                 or self.proposal_logit_max_delta <= 0.0
+                or self.proposal_logit_gate not in ('none', 'base_confidence')
+                or self.proposal_direct_loss_type not in ('bce', 'soft_ce')
             ):
                 raise ValueError('proposal semantic configuration is invalid')
         self.proposal_semantic_source_cache = {}
@@ -1833,7 +1839,10 @@ class SADA(nn.Module):
                 ),
             )
             direct_loss, selected_count = proposal_detection_loss(
-                out_cls_logits_tgt, target, self.fpn_strides
+                out_cls_logits_tgt,
+                target,
+                self.fpn_strides,
+                loss_type=self.proposal_direct_loss_type,
             )
             zero = direct_loss * 0.0
             return {
@@ -2124,13 +2133,19 @@ class SADA(nn.Module):
         out_cls_logits_tgt_detection = out_cls_logits_tgt
         if self.proposal_semantic_mode.startswith('vlm_logit_'):
             enabled_levels = set(self.proposal_semantic_levels)
-            out_cls_logits_tgt_detection = [
-                logits + self.proposal_logit_adapters[level](features)
-                if level in enabled_levels else logits
-                for level, (features, logits) in enumerate(zip(
-                    fpn_feats_tgt, out_cls_logits_tgt
-                ))
-            ]
+            out_cls_logits_tgt_detection = []
+            for level, (features, logits) in enumerate(zip(
+                fpn_feats_tgt, out_cls_logits_tgt
+            )):
+                if level not in enabled_levels:
+                    out_cls_logits_tgt_detection.append(logits)
+                    continue
+                residual = self.proposal_logit_adapters[level](features)
+                if self.proposal_logit_gate == 'base_confidence':
+                    residual = residual * logits.detach().sigmoid().amax(
+                        dim=1, keepdim=True
+                    )
+                out_cls_logits_tgt_detection.append(logits + residual)
         
         out_cls_logits = [torch.cat((out_cls_logits_src[i], out_cls_logits_tgt[i]), dim=0) for i in range(len(out_cls_logits_src))]
 

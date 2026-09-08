@@ -453,8 +453,15 @@ def prepare_vlm_proposal_targets(
     }
 
 
-def proposal_detection_loss(class_logits, proposals, fpn_strides):
+def proposal_detection_loss(
+    class_logits,
+    proposals,
+    fpn_strides,
+    loss_type="bce",
+):
     """Supervise the detector through proposal-average class logits."""
+    if loss_type not in ("bce", "soft_ce"):
+        raise ValueError("unknown proposal detection loss")
     pooled_logits = []
     pooled_targets = []
     for batch_index, proposal in enumerate(proposals):
@@ -485,8 +492,13 @@ def proposal_detection_loss(class_logits, proposals, fpn_strides):
         return zero, 0
     logits = torch.stack(pooled_logits)
     targets = torch.stack(pooled_targets)
-    loss = F.binary_cross_entropy_with_logits(logits, targets, reduction="none")
-    return loss.sum(dim=-1).mean(), logits.shape[0]
+    if loss_type == "soft_ce":
+        loss = -(targets * F.log_softmax(logits, dim=-1)).sum(dim=-1)
+    else:
+        loss = F.binary_cross_entropy_with_logits(
+            logits, targets, reduction="none"
+        ).sum(dim=-1)
+    return loss.mean(), logits.shape[0]
 
 
 class ProposalSemanticBranch(nn.Module):

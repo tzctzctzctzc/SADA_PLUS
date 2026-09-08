@@ -1174,6 +1174,18 @@ def create_argparser():
     parser.add_argument('--proposal-semantic-adapter-bottleneck', type=int, default=64)
     parser.add_argument('--proposal-semantic-logit-max-delta', type=float, default=2.0)
     parser.add_argument(
+        '--proposal-semantic-logit-gate',
+        choices=['none', 'base_confidence'],
+        default='none',
+        help='gate target logit residuals with frozen SADA foreground confidence',
+    )
+    parser.add_argument(
+        '--proposal-semantic-direct-loss',
+        choices=['bce', 'soft_ce'],
+        default='bce',
+        help='proposal-level VLM distribution distillation objective',
+    )
+    parser.add_argument(
         '--proposal-semantic-freeze-base', action='store_true',
         help='freeze the official EMA detector and train only proposal adapters',
     )
@@ -1720,6 +1732,8 @@ if __name__ == '__main__':
         'direct_weight': args.proposal_semantic_direct_weight,
         'adapter_bottleneck': args.proposal_semantic_adapter_bottleneck,
         'logit_max_delta': args.proposal_semantic_logit_max_delta,
+        'logit_gate': args.proposal_semantic_logit_gate,
+        'direct_loss_type': args.proposal_semantic_direct_loss,
         'adapter_only': args.proposal_semantic_mode.startswith(
             'oracle_adapter_'
         ) or args.proposal_semantic_freeze_base,
