@@ -1137,7 +1137,7 @@ def create_argparser():
     )
     parser.add_argument(
         '--gradient-harmonization',
-        choices=['off', 'task_protect'],
+        choices=['off', 'task_protect', 'block_task_protect'],
         default='off',
         help=(
             'project conflicting domain-alignment gradients away from the '

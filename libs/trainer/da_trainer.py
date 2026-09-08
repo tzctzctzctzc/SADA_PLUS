@@ -19,7 +19,10 @@ from libs.models.SADA.stage1_calibration import (
 from libs.models.SADA.anchor_validity import (
     clip_grad_norm_with_isolated_validity_head,
 )
-from .gradient_harmonization import task_protected_gradients
+from .gradient_harmonization import (
+    blockwise_task_protected_gradients,
+    task_protected_gradients,
+)
 
 def move_to_device(video_list, device):
     for i, video in enumerate(video_list):
@@ -96,23 +99,39 @@ class Trainer(BaseTrainerDA):
 
         harmonization_cfg = self.cfg.get('gradient_harmonization', {})
         self.gradient_harmonization_mode = harmonization_cfg.get('mode', 'off')
-        if self.gradient_harmonization_mode not in ('off', 'task_protect'):
+        if self.gradient_harmonization_mode not in (
+            'off', 'task_protect', 'block_task_protect'
+        ):
             raise ValueError(
                 'unknown gradient harmonization mode: {}'.format(
                     self.gradient_harmonization_mode
                 )
             )
-        self.gradient_harmonization_parameters = [
-            parameter
+        harmonization_named_parameters = [
+            (name, parameter)
             for name, parameter in self.model.named_parameters()
             if parameter.requires_grad
             and name.startswith(('backbone_source.', 'neck_source.'))
+        ]
+        self.gradient_harmonization_parameters = [
+            parameter for _, parameter in harmonization_named_parameters
+        ]
+        self.gradient_harmonization_blocks = [
+            self._gradient_harmonization_block(name)
+            for name, _ in harmonization_named_parameters
         ]
         if (
             self.gradient_harmonization_mode != 'off'
             and not self.gradient_harmonization_parameters
         ):
             raise ValueError('gradient harmonization found no shared feature parameters')
+
+    @staticmethod
+    def _gradient_harmonization_block(parameter_name):
+        parts = parameter_name.split('.')
+        if len(parts) >= 3 and parts[2].isdigit():
+            return '.'.join(parts[:3])
+        return '.'.join(parts[:2])
 
     def _stage1_artifact_metadata(self, include_model=False):
         stage1_cfg = self.cfg.get('stage1', {})
@@ -428,7 +447,7 @@ class Trainer(BaseTrainerDA):
             
             use_harmonization = (
                 curr_epoch >= warmup_adv
-                and self.gradient_harmonization_mode == 'task_protect'
+                and self.gradient_harmonization_mode != 'off'
                 and alignment_loss.requires_grad
             )
             if use_harmonization:
@@ -450,9 +469,18 @@ class Trainer(BaseTrainerDA):
                         alignment_gradients.append(
                             parameter.grad.detach().clone() - task_gradient
                         )
-                combined_gradients, harmonization_stats = task_protected_gradients(
-                    task_gradients, alignment_gradients
-                )
+                if self.gradient_harmonization_mode == 'block_task_protect':
+                    combined_gradients, harmonization_stats = (
+                        blockwise_task_protected_gradients(
+                            task_gradients,
+                            alignment_gradients,
+                            self.gradient_harmonization_blocks,
+                        )
+                    )
+                else:
+                    combined_gradients, harmonization_stats = task_protected_gradients(
+                        task_gradients, alignment_gradients
+                    )
                 for parameter, gradient in zip(
                     self.gradient_harmonization_parameters, combined_gradients
                 ):
