@@ -475,6 +475,8 @@ class BaseTrainerDA:
 
 
     def save_ckpt(self, mode, epoch):
+        if self.test_target_val_only:
+            return
         state = self.get_state(epoch)
 
         if mode == 'latest':
