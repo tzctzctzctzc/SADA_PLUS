@@ -1276,8 +1276,11 @@ if __name__ == '__main__':
             'VLM target adapter confidence threshold must be in [0, 1]'
         )
     if vlm_target_adapter_enabled:
-        if args.resume is None:
-            raise ValueError('VLM target adapter requires --resume')
+        if args.resume is None and not args.vlm_target_adapter_external_selection:
+            raise ValueError(
+                'VLM target adapter requires --resume, unless using '
+                '--vlm-target-adapter-external-selection for a fixed external teacher'
+            )
         if (
             vlm_enabled
             or effective_stage1 != 'off'
@@ -1297,11 +1300,14 @@ if __name__ == '__main__':
         )
         selection = cache_payload['selection_teacher_provenance']
         selection_matches_resume = (
-            selection.get('selection_teacher_checkpoint_sha256')
+            args.resume is not None
+            and selection.get('selection_teacher_checkpoint_sha256')
             == file_sha256(args.resume)
         )
         selection_mode = 'matching_resume'
-        if not selection_matches_resume:
+        if args.resume is None:
+            selection_mode = 'fixed_external_teacher'
+        elif not selection_matches_resume:
             resume_checkpoint = torch.load(args.resume, map_location='cpu')
             prior_adapter = resume_checkpoint.get('config', {}).get(
                 'vlm_target_adapter', {}
