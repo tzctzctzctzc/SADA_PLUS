@@ -1181,6 +1181,12 @@ def create_argparser():
     parser.add_argument('--proposal-semantic-adapter-bottleneck', type=int, default=64)
     parser.add_argument('--proposal-semantic-logit-max-delta', type=float, default=2.0)
     parser.add_argument(
+        '--proposal-semantic-logit-architecture',
+        choices=['linear', 'mlp'],
+        default='linear',
+        help='linear or bottleneck nonlinear target semantic expert',
+    )
+    parser.add_argument(
         '--proposal-semantic-logit-gate',
         choices=['none', 'base_confidence', 'base_ambiguity'],
         default='none',
@@ -1818,6 +1824,7 @@ if __name__ == '__main__':
         'direct_weight': args.proposal_semantic_direct_weight,
         'adapter_bottleneck': args.proposal_semantic_adapter_bottleneck,
         'logit_max_delta': args.proposal_semantic_logit_max_delta,
+        'logit_architecture': args.proposal_semantic_logit_architecture,
         'logit_gate': args.proposal_semantic_logit_gate,
         'direct_loss_type': args.proposal_semantic_direct_loss,
         'direct_pooling': args.proposal_semantic_direct_pooling,

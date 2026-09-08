@@ -408,6 +408,46 @@ class ProposalLogitAdapter(nn.Module):
         return self.max_delta * torch.tanh(residual)
 
 
+class ProposalMLPLogitAdapter(nn.Module):
+    """A small nonlinear target expert with an exactly zero initial residual."""
+
+    def __init__(
+        self,
+        channels,
+        num_classes,
+        max_delta=2.0,
+        bottleneck=64,
+        kernel_size=1,
+        bias=True,
+    ):
+        super().__init__()
+        if bottleneck < 1 or kernel_size not in (1, 3, 5):
+            raise ValueError("invalid proposal MLP logit adapter")
+        # A fixed seed inside fork_rng gives every paired run the same expert
+        # initialization without perturbing the detector/data RNG trajectory.
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(0)
+            self.input_proj = nn.Conv1d(channels, bottleneck, 1)
+        self.output_weight = nn.Parameter(torch.zeros(
+            num_classes, bottleneck, kernel_size
+        ))
+        self.output_bias = (
+            nn.Parameter(torch.zeros(num_classes)) if bias else None
+        )
+        self.max_delta = float(max_delta)
+        self.kernel_size = int(kernel_size)
+
+    def forward(self, features):
+        hidden = F.gelu(self.input_proj(features.detach()))
+        residual = F.conv1d(
+            hidden,
+            self.output_weight,
+            self.output_bias,
+            padding=self.kernel_size // 2,
+        )
+        return self.max_delta * torch.tanh(residual)
+
+
 def proposal_logit_gate(base_logits, mode):
     """Gate a target residual using only frozen detector confidence."""
     confidence = base_logits.detach().sigmoid().amax(dim=1, keepdim=True)

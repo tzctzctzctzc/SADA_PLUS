@@ -50,6 +50,7 @@ from .conditional_alignment import aggregate_conditional_class_losses
 from .proposal_semantic import (
     PROPOSAL_SEMANTIC_MODES,
     ProposalLogitAdapter,
+    ProposalMLPLogitAdapter,
     ProposalSemanticBranch,
     ProposalTargetAdapter,
     build_teacher_proposals,
@@ -711,6 +712,9 @@ class SADA(nn.Module):
         self.proposal_logit_kernel_size = int(
             proposal_cfg.get('logit_kernel_size', 1)
         )
+        self.proposal_logit_architecture = proposal_cfg.get(
+            'logit_architecture', 'linear'
+        )
         self.proposal_background_anchor_weight = float(
             proposal_cfg.get('background_anchor_weight', 0.0)
         )
@@ -750,6 +754,7 @@ class SADA(nn.Module):
                 or not 0.0 <= self.proposal_direct_class_balance_power <= 1.0
                 or self.proposal_direct_class_balance_max_weight < 1.0
                 or self.proposal_logit_kernel_size not in (1, 3, 5)
+                or self.proposal_logit_architecture not in ('linear', 'mlp')
                 or self.proposal_background_anchor_weight < 0.0
                 or not 0.0 <= self.proposal_background_anchor_confidence <= 1.0
             ):
@@ -1331,13 +1336,23 @@ class SADA(nn.Module):
                     fpn_dim if self.proposal_logit_input == 'feature'
                     else self.num_class_orig
                 )
+                adapter_class = (
+                    ProposalMLPLogitAdapter
+                    if self.proposal_logit_architecture == 'mlp'
+                    else ProposalLogitAdapter
+                )
                 self.proposal_logit_adapters = nn.ModuleList([
-                    ProposalLogitAdapter(
+                    adapter_class(
                         adapter_input_dim,
                         self.num_class_orig,
                         self.proposal_logit_max_delta,
-                        self.proposal_logit_kernel_size,
-                        self.proposal_logit_bias,
+                        **({
+                            'bottleneck': int(proposal_cfg.get(
+                                'adapter_bottleneck', 64
+                            )),
+                        } if self.proposal_logit_architecture == 'mlp' else {}),
+                        kernel_size=self.proposal_logit_kernel_size,
+                        bias=self.proposal_logit_bias,
                     )
                     for _ in range(
                         1 if self.proposal_logit_shared_levels else self.n_levels

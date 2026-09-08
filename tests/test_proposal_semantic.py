@@ -87,6 +87,25 @@ def test_logit_adapter_can_disable_global_class_bias():
     )
 
 
+def test_mlp_logit_adapter_is_zero_and_preserves_rng_state():
+    torch.manual_seed(123)
+    expected = torch.rand(4)
+    torch.manual_seed(123)
+    adapter = proposal_semantic.ProposalMLPLogitAdapter(
+        4, 2, max_delta=1.0, bottleneck=3
+    )
+    actual = torch.rand(4)
+    features = torch.randn(2, 4, 5, requires_grad=True)
+
+    residual = adapter(features)
+    residual.sum().backward()
+
+    assert torch.equal(actual, expected)
+    assert torch.equal(residual, torch.zeros_like(residual))
+    assert features.grad is None
+    assert adapter.output_weight.grad is not None
+
+
 def test_proposal_detection_soft_ce_prefers_matching_distribution():
     logits = [torch.tensor([[[4.0, -2.0], [-2.0, 4.0]]])]
     proposals = [{
