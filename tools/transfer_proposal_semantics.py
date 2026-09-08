@@ -26,11 +26,21 @@ def temporal_iou(first, second):
     return intersection / max(union, 1e-8)
 
 
-def transfer_semantics(manifest, source_payload, manifest_metadata, min_iou):
+def transfer_semantics(
+    manifest,
+    source_payload,
+    manifest_metadata,
+    min_iou,
+    min_confidence=0.0,
+):
     if source_payload.get("target_gt_usage") not in (None, "forbidden"):
         raise ValueError("semantic source must not use target GT")
     by_video = defaultdict(list)
     for entry in source_payload["entries"]:
+        probabilities = entry.get("class_probabilities")
+        confidence = max(probabilities) if probabilities else 1.0
+        if confidence < float(min_confidence):
+            continue
         by_video[str(entry["video_id"])].append(entry)
 
     entries = []
@@ -94,6 +104,7 @@ def transfer_semantics(manifest, source_payload, manifest_metadata, min_iou):
         "selection_filter": {
             "semantic_transfer": "maximum_temporal_iou",
             "minimum_temporal_iou": float(min_iou),
+            "minimum_semantic_confidence": float(min_confidence),
             "uses_target_gt": False,
         },
         "entries": entries,
@@ -106,9 +117,13 @@ def main():
     parser.add_argument("--semantic-cache", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--min-iou", type=float, default=0.5)
+    parser.add_argument("--min-confidence", type=float, default=0.0)
     args = parser.parse_args()
-    if not 0.0 <= args.min_iou <= 1.0:
-        raise ValueError("minimum IoU must be in [0, 1]")
+    if not (
+        0.0 <= args.min_iou <= 1.0
+        and 0.0 <= args.min_confidence <= 1.0
+    ):
+        raise ValueError("minimum IoU and confidence must be in [0, 1]")
 
     manifest_path = Path(args.manifest)
     semantic_path = Path(args.semantic_cache)
@@ -121,6 +136,7 @@ def main():
         source_payload,
         manifest_metadata,
         args.min_iou,
+        args.min_confidence,
     )
     payload["semantic_source_sha256"] = hashlib.sha256(
         semantic_path.read_bytes()
@@ -135,6 +151,7 @@ def main():
         "manifest_candidates": len(read_jsonl(manifest_path)),
         "transferred_entries": len(payload["entries"]),
         "minimum_temporal_iou": args.min_iou,
+        "minimum_semantic_confidence": args.min_confidence,
     }, indent=2))
 
 
