@@ -184,12 +184,16 @@ def main(cfg, resume, project_name='sada', debug=False):
     if cfg.get('proposal_semantic', {}).get('adapter_only', False):
         model.requires_grad_(False)
         model.proposal_target_adapters.requires_grad_(True)
+        model.proposal_logit_adapters.requires_grad_(True)
         trainable = [
             name for name, parameter in model.named_parameters()
             if parameter.requires_grad
         ]
+        allowed_adapter_prefixes = (
+            'proposal_target_adapters.', 'proposal_logit_adapters.'
+        )
         if not trainable or any(
-            not name.startswith('proposal_target_adapters.')
+            not name.startswith(allowed_adapter_prefixes)
             for name in trainable
         ):
             raise ValueError(
@@ -456,7 +460,14 @@ def main(cfg, resume, project_name='sada', debug=False):
                 'SADA checkpoint has no {}'.format(initialization_state_key)
             )
         continuing = args.proposal_semantic_continue_from_sada is not None
-        model_state_key = 'state_dict' if continuing else initialization_state_key
+        freeze_base = cfg.get('proposal_semantic', {}).get(
+            'freeze_base', False
+        )
+        model_state_key = (
+            'ema_state_dict'
+            if continuing and freeze_base
+            else 'state_dict' if continuing else initialization_state_key
+        )
         incompatible = model.load_state_dict(
             checkpoint[model_state_key], strict=False
         )
@@ -1162,6 +1173,10 @@ def create_argparser():
     parser.add_argument('--proposal-semantic-direct-weight', type=float, default=1.0)
     parser.add_argument('--proposal-semantic-adapter-bottleneck', type=int, default=64)
     parser.add_argument('--proposal-semantic-logit-max-delta', type=float, default=2.0)
+    parser.add_argument(
+        '--proposal-semantic-freeze-base', action='store_true',
+        help='freeze the official EMA detector and train only proposal adapters',
+    )
     parser.add_argument('--proposal-semantic-target-start-epoch', type=int, default=5)
     parser.add_argument('--proposal-semantic-levels', default='0,1,2')
     parser.add_argument('--proposal-semantic-score-threshold', type=float, default=0.3)
@@ -1607,6 +1622,13 @@ if __name__ == '__main__':
         ):
             raise ValueError('VLM proposal semantics require a target cache')
         if (
+            args.proposal_semantic_freeze_base
+            and not args.proposal_semantic_mode.startswith('vlm_logit_')
+        ):
+            raise ValueError(
+                'frozen-base proposal training requires a VLM logit adapter'
+            )
+        if (
             vlm_enabled
             or vlm_target_adapter_enabled
             or effective_stage1 != 'off'
@@ -1700,7 +1722,8 @@ if __name__ == '__main__':
         'logit_max_delta': args.proposal_semantic_logit_max_delta,
         'adapter_only': args.proposal_semantic_mode.startswith(
             'oracle_adapter_'
-        ),
+        ) or args.proposal_semantic_freeze_base,
+        'freeze_base': args.proposal_semantic_freeze_base,
         'target_start_epoch': args.proposal_semantic_target_start_epoch,
         'levels': proposal_levels,
         'score_threshold': args.proposal_semantic_score_threshold,
