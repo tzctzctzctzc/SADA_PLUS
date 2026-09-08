@@ -95,3 +95,37 @@ def test_transfer_filters_low_confidence_semantics_before_matching():
 
     assert payload["entries"][0]["semantic_label"] == "PUT"
     assert payload["entries"][0]["semantic_source_candidate_id"] == "high"
+
+
+def test_transfer_recovers_split_from_semantic_cache_for_legacy_manifest():
+    source = {
+        "domain": "target",
+        "split": "train",
+        "target_gt_usage": "forbidden",
+        "prompt_protocol": {"model": "vlm"},
+        "entries": [{
+            "candidate_id": "old",
+            "video_id": "video",
+            "proposal_start_sec": 0.0,
+            "proposal_end_sec": 2.0,
+            "semantic_label": "TAKE",
+            "class_probabilities": [1.0],
+        }],
+    }
+    manifest = [{
+        "candidate_id": "new",
+        "video_id": "video",
+        "absolute_feature_index": 1,
+        "absolute_center_time": 1.0,
+        "proposal_start_sec": 0.0,
+        "proposal_end_sec": 2.0,
+        "source_fpn_levels": [0],
+    }]
+    metadata = {
+        "domain": "target",
+        "selection_teacher_provenance": {"checkpoint": "new"},
+    }
+
+    payload = transfer_semantics(manifest, source, metadata, min_iou=0.5)
+
+    assert payload["split"] == "train"

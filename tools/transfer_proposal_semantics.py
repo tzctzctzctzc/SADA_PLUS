@@ -91,7 +91,7 @@ def transfer_semantics(
         "schema_version": "proposal-semantic-evidence-v1",
         "source": "offline_vlm_proposal_semantics",
         "domain": manifest_metadata["domain"],
-        "split": manifest_metadata["split"],
+        "split": manifest_metadata.get("split", source_payload.get("split")),
         "key_fields": ["candidate_id"],
         "selection_uses_gt": False,
         "target_gt_usage": "forbidden",
