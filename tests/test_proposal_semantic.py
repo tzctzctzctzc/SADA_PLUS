@@ -337,6 +337,19 @@ def test_source_class_reliability_preserves_target_weight_scale(tmp_path):
     assert float((weights * counts).sum() / counts.sum()) == pytest.approx(1.0)
 
 
+def test_base_ambiguity_gate_protects_confident_foreground_and_background():
+    probabilities = torch.tensor([0.01, 0.5, 0.99])
+    logits = torch.logit(probabilities).reshape(1, 1, 3)
+
+    gate = proposal_semantic.proposal_logit_gate(
+        logits, "base_ambiguity"
+    ).flatten()
+
+    assert gate[1] == pytest.approx(1.0)
+    assert gate[0] == pytest.approx(float(gate[2]), abs=1e-6)
+    assert gate[0] < 0.05
+
+
 def test_vlm_proposal_agreement_gate_uses_frozen_base_logits():
     logits = [torch.tensor([[
         [4.0, 0.0], [4.0, 0.0], [0.0, 4.0], [0.0, 4.0]

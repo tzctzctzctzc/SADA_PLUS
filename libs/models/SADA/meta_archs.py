@@ -60,6 +60,7 @@ from .proposal_semantic import (
     prepare_vlm_proposal_targets,
     proposal_class_balance_weights,
     proposal_detection_loss,
+    proposal_logit_gate,
     proposal_background_anchor_loss,
     source_gt_proposals,
 )
@@ -731,7 +732,9 @@ class SADA(nn.Module):
                 or self.proposal_semantic_max_proposals < 1
                 or not 0.0 <= self.proposal_semantic_nms_threshold <= 1.0
                 or self.proposal_logit_max_delta <= 0.0
-                or self.proposal_logit_gate not in ('none', 'base_confidence')
+                or self.proposal_logit_gate not in (
+                    'none', 'base_confidence', 'base_ambiguity'
+                )
                 or self.proposal_logit_input not in ('feature', 'base_logits')
                 or self.proposal_direct_loss_type not in (
                     'bce', 'soft_ce', 'known_soft_ce',
@@ -2271,10 +2274,9 @@ class SADA(nn.Module):
                 residual = self.proposal_logit_adapters[adapter_index](
                     adapter_input
                 )
-                if self.proposal_logit_gate == 'base_confidence':
-                    residual = residual * logits.detach().sigmoid().amax(
-                        dim=1, keepdim=True
-                    )
+                residual = residual * proposal_logit_gate(
+                    logits, self.proposal_logit_gate
+                )
                 out_cls_logits_tgt_detection.append(logits + residual)
         
         out_cls_logits = [torch.cat((out_cls_logits_src[i], out_cls_logits_tgt[i]), dim=0) for i in range(len(out_cls_logits_src))]

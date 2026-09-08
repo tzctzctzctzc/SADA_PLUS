@@ -1175,9 +1175,9 @@ def create_argparser():
     parser.add_argument('--proposal-semantic-logit-max-delta', type=float, default=2.0)
     parser.add_argument(
         '--proposal-semantic-logit-gate',
-        choices=['none', 'base_confidence'],
+        choices=['none', 'base_confidence', 'base_ambiguity'],
         default='none',
-        help='gate target logit residuals with frozen SADA foreground confidence',
+        help='gate target logit residuals using frozen SADA confidence',
     )
     parser.add_argument(
         '--proposal-semantic-direct-loss',

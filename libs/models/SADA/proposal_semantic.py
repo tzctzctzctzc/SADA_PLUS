@@ -408,6 +408,18 @@ class ProposalLogitAdapter(nn.Module):
         return self.max_delta * torch.tanh(residual)
 
 
+def proposal_logit_gate(base_logits, mode):
+    """Gate a target residual using only frozen detector confidence."""
+    confidence = base_logits.detach().sigmoid().amax(dim=1, keepdim=True)
+    if mode == "base_confidence":
+        return confidence
+    if mode == "base_ambiguity":
+        return 4.0 * confidence * (1.0 - confidence)
+    if mode == "none":
+        return torch.ones_like(confidence)
+    raise ValueError("unknown proposal logit gate")
+
+
 def prepare_vlm_proposal_targets(
     class_logits,
     proposals,
