@@ -1136,6 +1136,15 @@ def create_argparser():
         help='comma-separated aligned FPN levels that use background',
     )
     parser.add_argument(
+        '--gradient-harmonization',
+        choices=['off', 'task_protect'],
+        default='off',
+        help=(
+            'project conflicting domain-alignment gradients away from the '
+            'source detection gradient on the shared backbone and neck'
+        ),
+    )
+    parser.add_argument(
         '--stop-after-epoch', type=int, default=None,
         help='stop after this epoch without changing the scheduler horizon',
     )
@@ -1760,6 +1769,9 @@ if __name__ == '__main__':
         'conditional_paired_fixed_denominator': (
             args.conditional_paired_fixed_denominator
         ),
+    }
+    config_dict['gradient_harmonization'] = {
+        'mode': args.gradient_harmonization,
     }
 
     update_config_with_arguments(config_dict, args, ARGS_TYPES, ARGS_CONFIGPATH)

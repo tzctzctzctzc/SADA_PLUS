@@ -19,6 +19,7 @@ from libs.models.SADA.stage1_calibration import (
 from libs.models.SADA.anchor_validity import (
     clip_grad_norm_with_isolated_validity_head,
 )
+from .gradient_harmonization import task_protected_gradients
 
 def move_to_device(video_list, device):
     for i, video in enumerate(video_list):
@@ -92,6 +93,26 @@ class Trainer(BaseTrainerDA):
             self.model.stage1_tau_act = calibrated['tau_act']
             self.model.stage1_tau_bg = calibrated['tau_bg']
             self.model.stage1_calibrated = True
+
+        harmonization_cfg = self.cfg.get('gradient_harmonization', {})
+        self.gradient_harmonization_mode = harmonization_cfg.get('mode', 'off')
+        if self.gradient_harmonization_mode not in ('off', 'task_protect'):
+            raise ValueError(
+                'unknown gradient harmonization mode: {}'.format(
+                    self.gradient_harmonization_mode
+                )
+            )
+        self.gradient_harmonization_parameters = [
+            parameter
+            for name, parameter in self.model.named_parameters()
+            if parameter.requires_grad
+            and name.startswith(('backbone_source.', 'neck_source.'))
+        ]
+        if (
+            self.gradient_harmonization_mode != 'off'
+            and not self.gradient_harmonization_parameters
+        ):
+            raise ValueError('gradient harmonization found no shared feature parameters')
 
     def _stage1_artifact_metadata(self, include_model=False):
         stage1_cfg = self.cfg.get('stage1', {})
@@ -360,9 +381,12 @@ class Trainer(BaseTrainerDA):
             
             
             final_loss = torch.tensor(0.0, requires_grad=True).to(self.model.device)
+            task_loss = losses['downstream_loss'] * 0.0
+            alignment_loss = losses['downstream_loss'] * 0.0
             if curr_epoch < warmup_adv:
                 # Apply the source only training 
-                final_loss += losses['downstream_loss'] 
+                task_loss = losses['downstream_loss']
+                final_loss += task_loss
             else:
                 # This means that we have left the pretraining phase and we are now in the adversarial training phase
                 #print("not using warmup")
@@ -372,20 +396,26 @@ class Trainer(BaseTrainerDA):
                 weight_semantic = self.cfg['model']['loss_weights']['weight_semantic'] 
                 if 'reverse' in adv_method: 
                     if adv_disc: 
-                        final_loss += weight_adv * losses['loss_adv_rev']  
+                        alignment_loss = (
+                            alignment_loss + weight_adv * losses['loss_adv_rev']
+                        )
                 if 'conditional_rev' in adv_method: 
                     no_conditional_update = self.cfg.get(
                         'diagnostic', {}
                     ).get('no_conditional_update', False)
                     if adv_disc and not no_conditional_update:
-                        final_loss += weight_adv * losses['loss_conditional_adv_rev']  
+                        alignment_loss = (
+                            alignment_loss
+                            + weight_adv * losses['loss_conditional_adv_rev']
+                        )
                 if 'None' in adv_method:
                     pass
                 
                 downstream_weight = self.cfg['model']['loss_weights']['weight_downstream']
 
                 if iter_idx % 1 == 0:
-                    final_loss += downstream_weight * losses['downstream_loss']    # Downweight this loss to avoid overfitting?
+                    task_loss = downstream_weight * losses['downstream_loss']
+                final_loss += task_loss + alignment_loss
 
 
             # For debugging purposes
@@ -396,7 +426,41 @@ class Trainer(BaseTrainerDA):
             self.optimizer_gen_source_alignment.zero_grad(set_to_none=True)
             self.optimizer_disc.zero_grad(set_to_none=True)
             
-            final_loss.backward()
+            use_harmonization = (
+                curr_epoch >= warmup_adv
+                and self.gradient_harmonization_mode == 'task_protect'
+                and alignment_loss.requires_grad
+            )
+            if use_harmonization:
+                task_loss.backward(retain_graph=True)
+                task_gradients = [
+                    None if parameter.grad is None else parameter.grad.detach().clone()
+                    for parameter in self.gradient_harmonization_parameters
+                ]
+                alignment_loss.backward()
+                alignment_gradients = []
+                for parameter, task_gradient in zip(
+                    self.gradient_harmonization_parameters, task_gradients
+                ):
+                    if parameter.grad is None:
+                        alignment_gradients.append(None)
+                    elif task_gradient is None:
+                        alignment_gradients.append(parameter.grad.detach().clone())
+                    else:
+                        alignment_gradients.append(
+                            parameter.grad.detach().clone() - task_gradient
+                        )
+                combined_gradients, harmonization_stats = task_protected_gradients(
+                    task_gradients, alignment_gradients
+                )
+                for parameter, gradient in zip(
+                    self.gradient_harmonization_parameters, combined_gradients
+                ):
+                    parameter.grad = None if gradient is None else gradient.detach()
+                for name, value in harmonization_stats.items():
+                    losses['gradient_harmonization_' + name] = value
+            else:
+                final_loss.backward()
             
             clip_value = self.cfg['model']['weight_clip_value']
             if clip_value > 0.0:
