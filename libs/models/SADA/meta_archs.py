@@ -699,7 +699,9 @@ class SADA(nn.Module):
                 or not 0.0 <= self.proposal_semantic_nms_threshold <= 1.0
                 or self.proposal_logit_max_delta <= 0.0
                 or self.proposal_logit_gate not in ('none', 'base_confidence')
-                or self.proposal_direct_loss_type not in ('bce', 'soft_ce')
+                or self.proposal_direct_loss_type not in (
+                    'bce', 'soft_ce', 'positive_bce'
+                )
             ):
                 raise ValueError('proposal semantic configuration is invalid')
         self.proposal_semantic_source_cache = {}

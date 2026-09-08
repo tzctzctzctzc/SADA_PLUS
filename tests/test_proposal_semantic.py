@@ -66,6 +66,23 @@ def test_proposal_detection_soft_ce_prefers_matching_distribution():
     assert matching < reversed_loss
 
 
+def test_positive_proposal_loss_does_not_update_unselected_classes():
+    logits = [torch.zeros(1, 1, 3, requires_grad=True)]
+    proposals = [{
+        "segments": torch.tensor([[0.0, 0.0]]),
+        "levels": torch.tensor([0]),
+        "targets": torch.tensor([[0.8, 0.1, 0.1]]),
+    }]
+
+    loss, _ = proposal_semantic.proposal_detection_loss(
+        logits, proposals, (1,), loss_type="positive_bce"
+    )
+    loss.backward()
+
+    assert logits[0].grad[0, 0, 0] < 0
+    assert torch.equal(logits[0].grad[0, 0, 1:], torch.zeros(2))
+
+
 def test_vlm_proposal_agreement_gate_uses_frozen_base_logits():
     logits = [torch.tensor([[
         [4.0, 0.0], [4.0, 0.0], [0.0, 4.0], [0.0, 4.0]

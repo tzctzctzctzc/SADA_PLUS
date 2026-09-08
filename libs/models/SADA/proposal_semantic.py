@@ -460,7 +460,7 @@ def proposal_detection_loss(
     loss_type="bce",
 ):
     """Supervise the detector through proposal-average class logits."""
-    if loss_type not in ("bce", "soft_ce"):
+    if loss_type not in ("bce", "soft_ce", "positive_bce"):
         raise ValueError("unknown proposal detection loss")
     pooled_logits = []
     pooled_targets = []
@@ -494,6 +494,10 @@ def proposal_detection_loss(
     targets = torch.stack(pooled_targets)
     if loss_type == "soft_ce":
         loss = -(targets * F.log_softmax(logits, dim=-1)).sum(dim=-1)
+    elif loss_type == "positive_bce":
+        top_targets, top_classes = targets.max(dim=-1)
+        top_logits = logits.gather(1, top_classes.unsqueeze(1)).squeeze(1)
+        loss = F.softplus(-top_logits) * top_targets.detach()
     else:
         loss = F.binary_cross_entropy_with_logits(
             logits, targets, reduction="none"
