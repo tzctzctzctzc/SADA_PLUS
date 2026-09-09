@@ -1439,6 +1439,9 @@ class SADA(nn.Module):
                             prototype_momentum=proposal_cfg.get(
                                 'prototype_momentum', 0.9
                             ),
+                            update_backbone_alignment=proposal_cfg.get(
+                                'transport_update_backbone', False
+                            ),
                         )
                     )
             else:

@@ -1493,6 +1493,7 @@ class VLMSemanticTransportBranch(nn.Module):
         temperature=0.1,
         max_residual=0.1,
         prototype_momentum=0.9,
+        update_backbone_alignment=False,
     ):
         super().__init__()
         self.num_classes = int(num_classes)
@@ -1501,6 +1502,7 @@ class VLMSemanticTransportBranch(nn.Module):
         self.temperature = float(temperature)
         self.max_residual = float(max_residual)
         self.prototype_momentum = float(prototype_momentum)
+        self.update_backbone_alignment = bool(update_backbone_alignment)
         self.input_projection = nn.Conv1d(int(fpn_dim), self.hidden_dim, 1)
         self.level_embedding = nn.Parameter(
             torch.zeros(self.n_levels, self.hidden_dim)
@@ -1658,8 +1660,14 @@ class VLMSemanticTransportBranch(nn.Module):
             )
             source_detection.append(source + source_residual)
             target_detection.append(target + target_residual)
-            source_alignment.append(source.detach() + source_residual)
-            target_alignment.append(target.detach() + target_residual)
+            source_alignment_base = (
+                source if self.update_backbone_alignment else source.detach()
+            )
+            target_alignment_base = (
+                target if self.update_backbone_alignment else target.detach()
+            )
+            source_alignment.append(source_alignment_base + source_residual)
+            target_alignment.append(target_alignment_base + target_residual)
             residual_square_sum = (
                 residual_square_sum
                 + source_residual.pow(2).sum()

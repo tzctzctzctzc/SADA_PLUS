@@ -1085,3 +1085,30 @@ def test_semantic_transport_multilevel_prototype_updates_allow_backward():
 
     assert branch.input_projection.weight.grad is not None
     assert branch.output.weight.grad is not None
+
+
+def test_semantic_transport_can_preserve_sada_alignment_backbone_gradient():
+    branch = proposal_semantic.VLMSemanticTransportBranch(
+        fpn_dim=4,
+        num_classes=2,
+        n_levels=1,
+        hidden_dim=8,
+        update_backbone_alignment=True,
+    )
+    source = [torch.randn(1, 4, 3, requires_grad=True)]
+    target = [torch.randn(1, 4, 3, requires_grad=True)]
+    masks = [torch.ones(1, 1, 3, dtype=torch.bool)]
+
+    output = branch(
+        source, target, masks, masks, enabled_levels=(0,)
+    )
+    alignment_objective = (
+        output["source_alignment_feats"][0].sum()
+        + output["target_alignment_feats"][0].sum()
+    )
+    alignment_objective.backward()
+
+    assert source[0].grad is not None
+    assert target[0].grad is not None
+    assert torch.equal(source[0].grad, torch.ones_like(source[0]))
+    assert torch.equal(target[0].grad, torch.ones_like(target[0]))

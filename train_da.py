@@ -1206,6 +1206,13 @@ def create_argparser():
         help='maximum classification-feature residual relative to feature RMS',
     )
     parser.add_argument(
+        '--proposal-semantic-transport-update-backbone', action='store_true',
+        help=(
+            'let VLM-corrected conditional alignment retain the original '
+            'SADA backbone gradient; prototype losses remain detached'
+        ),
+    )
+    parser.add_argument(
         '--proposal-semantic-logit-architecture',
         choices=['linear', 'mlp'],
         default='linear',
@@ -1898,6 +1905,9 @@ if __name__ == '__main__':
         ),
         'transport_max_residual': (
             args.proposal_semantic_transport_max_residual
+        ),
+        'transport_update_backbone': (
+            args.proposal_semantic_transport_update_backbone
         ),
         'logit_architecture': args.proposal_semantic_logit_architecture,
         'logit_gate': args.proposal_semantic_logit_gate,
