@@ -1031,6 +1031,7 @@ def test_semantic_transport_is_zero_initialized_and_detaches_fpn():
     assert branch.source_prototype_ready[0].tolist() == [True, True]
     loss = output["source_loss"] + output["alignment_loss"] + output["direct_loss"]
     assert torch.isfinite(loss)
+    assert output["direct_loss"] > 0.01
     loss.backward()
 
     assert source[0].grad is None

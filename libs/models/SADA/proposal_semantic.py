@@ -1693,8 +1693,7 @@ class VLMSemanticTransportBranch(nn.Module):
                         ((1.0 - before) * weights).sum() / normalizer
                     )
                     target_direct_losses.append(
-                        (F.softplus(-after / self.temperature) * weights).sum()
-                        / normalizer
+                        ((1.0 - after) * weights).sum() / normalizer
                     )
                     before_similarities.append(before.detach())
                     after_similarities.append(after.detach())
