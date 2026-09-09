@@ -1037,3 +1037,50 @@ def test_semantic_transport_is_zero_initialized_and_detaches_fpn():
     assert target[0].grad is None
     assert branch.output.weight.grad is not None
     assert branch.output.weight.grad.abs().sum() > 0
+
+
+def test_semantic_transport_multilevel_prototype_updates_allow_backward():
+    branch = proposal_semantic.VLMSemanticTransportBranch(
+        fpn_dim=4, num_classes=2, n_levels=2, hidden_dim=8
+    )
+    source = [torch.randn(1, 4, 5), torch.randn(1, 4, 3)]
+    target = [torch.randn(1, 4, 5), torch.randn(1, 4, 3)]
+    masks = [
+        torch.ones(1, 1, 5, dtype=torch.bool),
+        torch.ones(1, 1, 3, dtype=torch.bool),
+    ]
+    source_labels = [
+        torch.tensor([[[1.0, 0.0], [0.0, 1.0], [0.0, 0.0],
+                       [0.0, 0.0], [0.0, 0.0]]]),
+        torch.tensor([[[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]]]),
+    ]
+    routes = [
+        {
+            "selected": torch.tensor([[True, False, False, False, False]]),
+            "scores": torch.tensor([[0.9, 0.0, 0.0, 0.0, 0.0]]),
+            "pseudo_class": torch.zeros(1, 5, dtype=torch.long),
+            "targets": torch.tensor([[[1.0, 0.0], [0.0, 0.0],
+                                      [0.0, 0.0], [0.0, 0.0],
+                                      [0.0, 0.0]]]),
+        },
+        {
+            "selected": torch.tensor([[True, False, False]]),
+            "scores": torch.tensor([[0.9, 0.0, 0.0]]),
+            "pseudo_class": torch.zeros(1, 3, dtype=torch.long),
+            "targets": torch.tensor([[[1.0, 0.0], [0.0, 0.0],
+                                      [0.0, 0.0]]]),
+        },
+    ]
+
+    output = branch(
+        source, target, masks, masks,
+        source_labels=source_labels,
+        target_routes=routes,
+        enabled_levels=(0, 1),
+        update_prototypes=True,
+    )
+    loss = output["source_loss"] + output["direct_loss"]
+    loss.backward()
+
+    assert branch.input_projection.weight.grad is not None
+    assert branch.output.weight.grad is not None

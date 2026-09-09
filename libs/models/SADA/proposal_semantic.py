@@ -1552,15 +1552,19 @@ class VLMSemanticTransportBranch(nn.Module):
             self.source_prototype_ready[level, class_id] = True
 
     def _semantic_logits(self, embeddings, level):
-        prototypes = self.source_prototypes[level].detach()
+        # Each FPN level updates a slice of the same prototype buffer before
+        # the batch backward pass.  Clone the slice so later level updates do
+        # not invalidate autograd's saved read-only tensor version.
+        prototypes = self.source_prototypes[level].detach().clone()
+        ready = self.source_prototype_ready[level].detach().clone()
         logits = torch.einsum("bth,ch->btc", embeddings, prototypes)
         logits = logits / self.temperature
         return logits.masked_fill(
-            ~self.source_prototype_ready[level][None, None, :], -10.0
+            ~ready[None, None, :], -10.0
         )
 
     def _adapt(self, features, embeddings, logits, level, route=None):
-        ready = self.source_prototype_ready[level]
+        ready = self.source_prototype_ready[level].detach().clone()
         probabilities = logits.sigmoid() * ready[None, None, :].to(logits.dtype)
         probabilities = probabilities / probabilities.sum(
             dim=-1, keepdim=True
@@ -1572,7 +1576,9 @@ class VLMSemanticTransportBranch(nn.Module):
                 + route_weight * route["targets"].to(probabilities.dtype)
             )
         context = torch.einsum(
-            "btc,ch->bth", probabilities, self.source_prototypes[level].detach()
+            "btc,ch->bth",
+            probabilities,
+            self.source_prototypes[level].detach().clone(),
         )
         fused = torch.cat((embeddings, context), dim=-1).transpose(1, 2)
         raw_residual = self.output(F.gelu(self.fusion(fused)))
@@ -1635,7 +1641,7 @@ class VLMSemanticTransportBranch(nn.Module):
                 source_foreground = (
                     source_labels[level].sum(dim=-1) > 0
                 ) & source_valid
-                ready = self.source_prototype_ready[level]
+                ready = self.source_prototype_ready[level].detach().clone()
                 if source_foreground.any() and ready.any():
                     source_losses.append(F.binary_cross_entropy_with_logits(
                         source_logits[source_foreground][:, ready],
@@ -1664,11 +1670,15 @@ class VLMSemanticTransportBranch(nn.Module):
             if route is not None:
                 selected = route["selected"] & target_valid
                 labels = route["pseudo_class"]
-                selected &= self.source_prototype_ready[level][labels]
+                selected &= self.source_prototype_ready[level].detach().clone()[
+                    labels
+                ]
                 if selected.any():
                     target_count += int(selected.sum().item())
                     weights = route["scores"][selected].detach()
-                    prototypes = self.source_prototypes[level][labels[selected]].detach()
+                    prototypes = self.source_prototypes[level][
+                        labels[selected]
+                    ].detach().clone()
                     before = (
                         target_embedding[selected] * prototypes
                     ).sum(dim=-1)
