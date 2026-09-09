@@ -109,6 +109,8 @@ def download_video(video_id, old_splits, output, retries=3, connections=8):
                     [
                         "aria2c", "--quiet=true", "--allow-overwrite=true",
                         "--auto-file-renaming=false", "--file-allocation=none",
+                        "--continue=true", "--timeout=60", "--connect-timeout=20",
+                        "--max-tries=2", "--retry-wait=5",
                         "--max-connection-per-server={}".format(connections),
                         "--split={}".format(connections),
                         "--min-split-size=1M", "--dir", str(output.parent),
