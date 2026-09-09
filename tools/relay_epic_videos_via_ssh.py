@@ -88,7 +88,19 @@ class RelayWorker:
                     pass
                 else:
                     raise RuntimeError("remote aria2 file is incomplete: {}".format(remote_path))
-                sftp.get(remote_path, str(partial))
+                local_size = partial.stat().st_size if partial.exists() else 0
+                if local_size > remote_size:
+                    partial.unlink()
+                    local_size = 0
+                with sftp.open(remote_path, "rb") as remote_file:
+                    remote_file.seek(local_size)
+                    remote_file.prefetch(remote_size)
+                    with partial.open("ab") as local_file:
+                        while True:
+                            chunk = remote_file.read(4 * 1024 * 1024)
+                            if not chunk:
+                                break
+                            local_file.write(chunk)
             finally:
                 sftp.close()
 
