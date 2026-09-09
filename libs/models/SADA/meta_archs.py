@@ -54,7 +54,9 @@ from .proposal_semantic import (
     ProposalSemanticBranch,
     VLMProposalCoAdaptationBranch,
     VLMDualStreamSemanticBranch,
+    VLMSemanticTransportBranch,
     ProposalTargetAdapter,
+    build_vlm_anchor_routes,
     build_teacher_proposals,
     cached_proposals_for_videos,
     labels_for_proposals,
@@ -65,6 +67,7 @@ from .proposal_semantic import (
     proposal_detection_loss,
     proposal_logit_gate,
     proposal_background_anchor_loss,
+    override_target_routes,
     source_gt_proposals,
 )
 from .transport_alignment import (
@@ -729,6 +732,18 @@ class SADA(nn.Module):
         self.proposal_dual_global_tokens = int(
             proposal_cfg.get('dual_global_tokens', 32)
         )
+        self.proposal_transport_hidden_dim = int(
+            proposal_cfg.get('transport_hidden_dim', 128)
+        )
+        self.proposal_transport_topk = int(
+            proposal_cfg.get('transport_topk', 5)
+        )
+        self.proposal_transport_temperature = float(
+            proposal_cfg.get('transport_temperature', 0.1)
+        )
+        self.proposal_transport_max_residual = float(
+            proposal_cfg.get('transport_max_residual', 0.1)
+        )
         if self.proposal_semantic_enabled:
             if (
                 self.proposal_semantic_source_weight < 0.0
@@ -769,6 +784,10 @@ class SADA(nn.Module):
                 or self.proposal_dual_hidden_dim <= 0
                 or self.proposal_dual_hidden_dim % 4
                 or self.proposal_dual_global_tokens <= 0
+                or self.proposal_transport_hidden_dim <= 0
+                or self.proposal_transport_topk <= 0
+                or self.proposal_transport_temperature <= 0.0
+                or not 0.0 < self.proposal_transport_max_residual <= 1.0
             ):
                 raise ValueError('proposal semantic configuration is invalid')
         self.proposal_semantic_source_cache = {}
@@ -1406,6 +1425,22 @@ class SADA(nn.Module):
                             max_delta=self.proposal_logit_max_delta,
                         )
                     )
+            elif self.proposal_semantic_mode == 'vlm_semantic_transport':
+                with torch.random.fork_rng(devices=[]):
+                    torch.manual_seed(0)
+                    self.proposal_semantic_branch = (
+                        VLMSemanticTransportBranch(
+                            fpn_dim=fpn_dim,
+                            num_classes=self.num_class_orig,
+                            n_levels=self.n_levels,
+                            hidden_dim=self.proposal_transport_hidden_dim,
+                            temperature=self.proposal_transport_temperature,
+                            max_residual=self.proposal_transport_max_residual,
+                            prototype_momentum=proposal_cfg.get(
+                                'prototype_momentum', 0.9
+                            ),
+                        )
+                    )
             else:
                 self.proposal_semantic_branch = ProposalSemanticBranch(
                     fpn_dim=fpn_dim,
@@ -1990,7 +2025,49 @@ class SADA(nn.Module):
         fpn_masks_tgt=None,
         dual_stream_source_logits=None,
         dual_stream_diagnostics=None,
+        semantic_transport_output=None,
     ):
+        if self.proposal_semantic_mode == 'vlm_semantic_transport':
+            output = semantic_transport_output
+            if output is None:
+                raise ValueError('semantic transport output is unavailable')
+            zero = output['source_loss'] * 0.0
+            route_stats = output['route_stats']
+            ready_classes = self.proposal_semantic_branch.source_prototype_ready[
+                list(self.proposal_semantic_levels)
+            ].any(dim=0).sum()
+            return {
+                'proposal_semantic_source_loss': output['source_loss'],
+                'proposal_semantic_alignment_loss': output['alignment_loss'],
+                'proposal_semantic_direct_loss': output['direct_loss'],
+                'proposal_semantic_source_count': zero.new_tensor(
+                    float(output['source_count'])
+                ),
+                'proposal_semantic_target_count': zero.new_tensor(
+                    float(output['target_count'])
+                ),
+                'proposal_semantic_selected_count': zero.new_tensor(
+                    float(route_stats['selected_count'])
+                ),
+                'proposal_semantic_aligned_classes': ready_classes.float(),
+                'proposal_semantic_mean_entropy': zero.detach(),
+                'proposal_semantic_mean_confidence': route_stats[
+                    'mean_confidence'
+                ].detach(),
+                'proposal_semantic_eligible_count': zero.new_tensor(
+                    float(route_stats['anchor_count'])
+                ),
+                'proposal_semantic_agreement_count': zero.detach(),
+                'proposal_transport_residual_rms': output[
+                    'residual_rms'
+                ].detach(),
+                'proposal_transport_cosine_before': output[
+                    'prototype_cosine_before'
+                ].detach(),
+                'proposal_transport_cosine_after': output[
+                    'prototype_cosine_after'
+                ].detach(),
+            }
         if self.proposal_semantic_mode == 'vlm_dual_stream':
             source = source_gt_proposals(
                 video_list_src,
@@ -2483,9 +2560,78 @@ class SADA(nn.Module):
         # Separate the dom_invariant features and masks into source and target
         fpn_masks_src = [cur_mask[:bs] for cur_mask in fpn_masks]
         fpn_masks_tgt = [cur_mask[bs:] for cur_mask in fpn_masks]
+
+        semantic_transport_routes = None
+        semantic_transport_output = None
+        semantic_dom_feats = None
+        fpn_feats_src_cls = fpn_feats_src
+        if self.proposal_semantic_mode == 'vlm_semantic_transport':
+            source_labels_per_level = None
+            if mode == 'train':
+                source_gt_cls, _ = self.label_points(
+                    points,
+                    [item['segments'].to(self.device) for item in video_list_src],
+                    [item['labels'].to(self.device) for item in video_list_src],
+                )
+                source_labels_per_level = []
+                start = 0
+                for level_length in points_per_level:
+                    source_labels_per_level.append(torch.stack([
+                        labels[start:start + level_length]
+                        for labels in source_gt_cls
+                    ]))
+                    start += level_length
+            if (
+                mode == 'train'
+                and curr_epoch >= self.proposal_semantic_target_start_epoch
+            ):
+                semantic_transport_routes, route_stats = build_vlm_anchor_routes(
+                    self.proposal_semantic_target_cache,
+                    video_list_tgt,
+                    fpn_feats_tgt,
+                    fpn_masks_tgt,
+                    self.fpn_strides,
+                    self.reg_range,
+                    self.proposal_semantic_levels,
+                    self.num_class_orig,
+                    confidence_threshold=(
+                        self.proposal_semantic_confidence_threshold
+                    ),
+                    topk=self.proposal_transport_topk,
+                )
+            else:
+                route_stats = {
+                    'anchor_count': 0,
+                    'selected_count': 0,
+                    'mean_confidence': fpn_feats_tgt[0].new_tensor(0.0),
+                }
+            semantic_transport_output = self.proposal_semantic_branch(
+                fpn_feats_src,
+                fpn_feats_tgt,
+                fpn_masks_src,
+                fpn_masks_tgt,
+                source_labels=source_labels_per_level,
+                target_routes=semantic_transport_routes,
+                enabled_levels=self.proposal_semantic_levels,
+                update_prototypes=mode == 'train',
+            )
+            semantic_transport_output['route_stats'] = route_stats
+            fpn_feats_src_cls = semantic_transport_output[
+                'source_detection_feats'
+            ]
+            fpn_feats_tgt_cls = semantic_transport_output[
+                'target_detection_feats'
+            ]
+            semantic_dom_feats = [
+                torch.cat((source, target), dim=0)
+                for source, target in zip(
+                    semantic_transport_output['source_alignment_feats'],
+                    semantic_transport_output['target_alignment_feats'],
+                )
+            ]
         
         # out_cls: List[B, #cls + 1, T_i]
-        out_cls_logits_src, _ = self.cls_head(fpn_feats_src, fpn_masks_src)
+        out_cls_logits_src, _ = self.cls_head(fpn_feats_src_cls, fpn_masks_src)
         out_cls_logits_tgt, _ = self.cls_head_target(
             fpn_feats_tgt_cls, fpn_masks_tgt
         )
@@ -2718,6 +2864,8 @@ class SADA(nn.Module):
                 curr_epoch=curr_epoch,
                 stage1_routes=stage1_routes,
                 vlm_routes=vlm_routes,
+                semantic_transport_routes=semantic_transport_routes,
+                semantic_dom_feats=semantic_dom_feats,
                 out_validity_logits_src=out_validity_logits_src,
                 source_validity_cohorts=source_validity_cohorts,
                 video_list_tgt=video_list_tgt,
@@ -2754,6 +2902,7 @@ class SADA(nn.Module):
                     fpn_masks_tgt=fpn_masks_tgt,
                     dual_stream_source_logits=dual_stream_source_logits,
                     dual_stream_diagnostics=dual_stream_diagnostics,
+                    semantic_transport_output=semantic_transport_output,
                 )
                 losses.update(proposal_losses)
                 losses['downstream_loss'] = (
@@ -2801,7 +2950,9 @@ class SADA(nn.Module):
             out_cls_logits_tgt = [x[bs:] for x in out_cls_logits]
             if (
                 self.proposal_semantic_mode.startswith('vlm_logit_')
-                or self.proposal_semantic_mode == 'vlm_dual_stream'
+                or self.proposal_semantic_mode in (
+                    'vlm_dual_stream', 'vlm_semantic_transport'
+                )
             ):
                 out_cls_logits_tgt = out_cls_logits_tgt_detection
             
@@ -3017,11 +3168,16 @@ class SADA(nn.Module):
             curr_epoch,
             stage1_routes=None,
             vlm_routes=None,
+            semantic_transport_routes=None,
+            semantic_dom_feats=None,
             out_validity_logits_src=None,
             source_validity_cohorts=None,
             video_list_tgt=None,
     ):
         bs = int(fpn_masks[0].shape[0] / 2)
+        conditional_dom_feats = (
+            dom_inv_feats if semantic_dom_feats is None else semantic_dom_feats
+        )
         
         # gt_cls_labels is a list of 2B elements, each of shape FT x C
         
@@ -3830,6 +3986,28 @@ class SADA(nn.Module):
                             if route_l['valid'].any()
                             else route_l['background_std'].sum() * 0
                         )
+
+                    if semantic_transport_routes is not None:
+                        transport_route = semantic_transport_routes[l]
+                        (
+                            pseudo_gt_cls_target,
+                            selected_anchors_mask,
+                            transport_selected,
+                        ) = override_target_routes(
+                            pseudo_gt_cls_target,
+                            selected_anchors_mask,
+                            transport_route,
+                            valid_mask_l_tgt,
+                        )
+                        metric_prefix = 'semantic_transport_l{}_'.format(l)
+                        losses[metric_prefix + 'selected'] = (
+                            transport_selected.sum().float()
+                        )
+                        losses[metric_prefix + 'weight_sum'] = (
+                            transport_route['scores'][valid_mask_l_tgt][
+                                transport_selected
+                            ].sum()
+                        )
             
                     # 2) Compute the pseudo-labels of the source domain
                     # c* = argmax_c \hat{p}_c
@@ -3849,8 +4027,8 @@ class SADA(nn.Module):
                     
                     # 2) Iterate over each of the classes. Update the centroids and align both of them
                     # 2.0) Separate the source and target domain invariant representations
-                    dom_inv_feats_src = dom_inv_feats[l][:bs]   # shape: [B x F x T_i]
-                    dom_inv_feats_tgt = dom_inv_feats[l][bs:]   # shape: [B x F x T_i]
+                    dom_inv_feats_src = conditional_dom_feats[l][:bs]   # shape: [B x F x T_i]
+                    dom_inv_feats_tgt = conditional_dom_feats[l][bs:]   # shape: [B x F x T_i]
                     
                     # Transpose to have shapes: B x (T_1 + ... + T_L) x C, and filter out padding
                     dom_inv_feats_src = einops.rearrange(dom_inv_feats_src, 'b c t -> b t c')[valid_mask_l_src] # shape: T' x F where T' is B(T_i)

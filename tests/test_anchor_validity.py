@@ -204,13 +204,18 @@ def test_validity_head_gradient_does_not_change_base_gradient_clipping():
     )
 
 
-def test_dual_stream_gradient_does_not_change_base_gradient_clipping():
+@pytest.mark.parametrize(
+    "semantic_mode", ["vlm_dual_stream", "vlm_semantic_transport"]
+)
+def test_semantic_branch_gradient_does_not_change_base_gradient_clipping(
+    semantic_mode,
+):
     class ToyModel(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.base = torch.nn.Linear(2, 1, bias=False)
             self.validity_head = None
-            self.proposal_semantic_mode = "vlm_dual_stream"
+            self.proposal_semantic_mode = semantic_mode
             self.proposal_semantic_branch = torch.nn.Linear(1, 1, bias=False)
 
     clipped_base_gradients = []

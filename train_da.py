@@ -1156,7 +1156,7 @@ def create_argparser():
             'off', 'source', 'teacher', 'oracle_center',
             'oracle_dominant', 'oracle_soft', 'oracle_adapter_center',
             'oracle_adapter_dominant', 'oracle_adapter_soft', 'vlm',
-            'vlm_cotrain', 'vlm_dual_stream',
+            'vlm_cotrain', 'vlm_dual_stream', 'vlm_semantic_transport',
             'vlm_logit_soft', 'vlm_logit_confident', 'vlm_logit_agree',
         ],
         default='off',
@@ -1188,6 +1188,22 @@ def create_argparser():
     parser.add_argument(
         '--proposal-semantic-dual-global-tokens', type=int, default=32,
         help='mask-aware pooled tokens used by dual-stream long attention',
+    )
+    parser.add_argument(
+        '--proposal-semantic-transport-hidden-dim', type=int, default=128,
+        help='hidden width of the detached VLM semantic transport stream',
+    )
+    parser.add_argument(
+        '--proposal-semantic-transport-topk', type=int, default=5,
+        help='reliable neighbours retained per sparse VLM evidence point',
+    )
+    parser.add_argument(
+        '--proposal-semantic-transport-temperature', type=float, default=0.1,
+        help='temperature of source-prototype semantic similarities',
+    )
+    parser.add_argument(
+        '--proposal-semantic-transport-max-residual', type=float, default=0.1,
+        help='maximum classification-feature residual relative to feature RMS',
     )
     parser.add_argument(
         '--proposal-semantic-logit-architecture',
@@ -1698,7 +1714,7 @@ if __name__ == '__main__':
             and args.proposal_semantic_init_from_sada is None
             and args.proposal_semantic_continue_from_sada is None
             and args.proposal_semantic_mode not in (
-                'vlm_cotrain', 'vlm_dual_stream'
+                'vlm_cotrain', 'vlm_dual_stream', 'vlm_semantic_transport'
             )
         ):
             raise ValueError(
@@ -1714,6 +1730,10 @@ if __name__ == '__main__':
             or args.proposal_semantic_dual_hidden_dim <= 0
             or args.proposal_semantic_dual_hidden_dim % 4
             or args.proposal_semantic_dual_global_tokens <= 0
+            or args.proposal_semantic_transport_hidden_dim <= 0
+            or args.proposal_semantic_transport_topk <= 0
+            or args.proposal_semantic_transport_temperature <= 0.0
+            or not 0.0 < args.proposal_semantic_transport_max_residual <= 1.0
             or args.proposal_semantic_target_start_epoch < 1
             or not 0.0 < args.proposal_semantic_score_threshold <= 1.0
             or args.proposal_semantic_max_proposals < 1
@@ -1825,7 +1845,9 @@ if __name__ == '__main__':
                     )
                 proposal_selection_mode = 'fixed_external_teacher'
     elif (
-        args.proposal_semantic_mode in ('vlm_cotrain', 'vlm_dual_stream')
+        args.proposal_semantic_mode in (
+            'vlm_cotrain', 'vlm_dual_stream', 'vlm_semantic_transport'
+        )
         and target_cache_payload is not None
     ):
         if not args.proposal_semantic_external_selection:
@@ -1844,7 +1866,9 @@ if __name__ == '__main__':
             )
         )
         or (
-            args.proposal_semantic_mode in ('vlm_cotrain', 'vlm_dual_stream')
+            args.proposal_semantic_mode in (
+                'vlm_cotrain', 'vlm_dual_stream', 'vlm_semantic_transport'
+            )
             and target_cache_payload is not None
         )
     ):
@@ -1867,6 +1891,14 @@ if __name__ == '__main__':
         'logit_max_delta': args.proposal_semantic_logit_max_delta,
         'dual_hidden_dim': args.proposal_semantic_dual_hidden_dim,
         'dual_global_tokens': args.proposal_semantic_dual_global_tokens,
+        'transport_hidden_dim': args.proposal_semantic_transport_hidden_dim,
+        'transport_topk': args.proposal_semantic_transport_topk,
+        'transport_temperature': (
+            args.proposal_semantic_transport_temperature
+        ),
+        'transport_max_residual': (
+            args.proposal_semantic_transport_max_residual
+        ),
         'logit_architecture': args.proposal_semantic_logit_architecture,
         'logit_gate': args.proposal_semantic_logit_gate,
         'direct_loss_type': args.proposal_semantic_direct_loss,

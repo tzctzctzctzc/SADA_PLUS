@@ -21,6 +21,7 @@ PROPOSAL_SEMANTIC_MODES = (
     "vlm",
     "vlm_cotrain",
     "vlm_dual_stream",
+    "vlm_semantic_transport",
     "vlm_logit_soft",
     "vlm_logit_confident",
     "vlm_logit_agree",
@@ -1338,4 +1339,385 @@ class VLMDualStreamSemanticBranch(nn.Module):
             "residual_rms": (
                 residual_square_sum / max(residual_count, 1)
             ).sqrt(),
+        }
+
+
+def build_vlm_anchor_routes(
+    cache,
+    videos,
+    fpn_feats,
+    fpn_masks,
+    fpn_strides,
+    regression_ranges,
+    levels,
+    num_classes,
+    confidence_threshold=0.7,
+    topk=5,
+):
+    """Propagate sparse absolute-time VLM labels without copying proposals.
+
+    An evidence point only competes with nearby snippets at its original FPN
+    scale.  The window is fixed by that scale's regression range, while cosine
+    and temporal affinity retain the most reliable neighbours.  This makes the
+    propagated route independent of the cached proposal boundaries.
+    """
+    enabled = set(int(level) for level in levels)
+    routes = []
+    anchor_count = 0
+    selected_confidences = []
+    for level, (features, mask) in enumerate(zip(fpn_feats, fpn_masks)):
+        valid = mask.squeeze(1).bool() if mask.ndim == 3 else mask.bool()
+        batch_size, _, length = features.shape
+        selected = torch.zeros_like(valid)
+        scores = features.new_zeros((batch_size, length))
+        classes = torch.zeros(
+            (batch_size, length), dtype=torch.long, device=features.device
+        )
+        targets = features.new_zeros((batch_size, length, int(num_classes)))
+        if level in enabled:
+            stride = float(fpn_strides[level])
+            upper_range = float(regression_ranges[level][1])
+            radius = max(1, int(math.ceil(upper_range / stride)))
+            normalized = F.normalize(features.detach(), dim=1)
+            for batch_index, video in enumerate(videos):
+                metadata = video["metadata"]
+                video_id = str(metadata["video_id"])
+                crop_start = int(metadata.get("crop_start", 0))
+                crop_length = int(
+                    metadata.get("crop_feat_len", video["feats"].shape[-1])
+                )
+                valid_length = int(valid[batch_index].sum().item())
+                for entry in cache.get(video_id, []):
+                    if level not in entry["source_fpn_levels"]:
+                        continue
+                    probabilities = entry.get("class_probabilities")
+                    if not probabilities:
+                        continue
+                    confidence = float(max(probabilities))
+                    label = entry.get("semantic_label")
+                    if (
+                        confidence < float(confidence_threshold)
+                        or label not in KNOWN_LABELS[: min(num_classes, len(KNOWN_LABELS))]
+                    ):
+                        continue
+                    local_coordinate = (
+                        int(entry["absolute_feature_index"]) - crop_start
+                    )
+                    if local_coordinate < 0 or local_coordinate >= crop_length:
+                        continue
+                    anchor_index = int(round(local_coordinate / stride))
+                    if not 0 <= anchor_index < valid_length:
+                        continue
+                    left = max(0, anchor_index - radius)
+                    right = min(valid_length, anchor_index + radius + 1)
+                    candidates = torch.arange(
+                        left, right, device=features.device, dtype=torch.long
+                    )
+                    anchor_feature = normalized[
+                        batch_index, :, anchor_index
+                    ].unsqueeze(1)
+                    cosine = (
+                        normalized[batch_index, :, candidates] * anchor_feature
+                    ).sum(dim=0)
+                    distance = (candidates - anchor_index).abs().to(cosine.dtype)
+                    temporal = 1.0 - distance / float(radius + 1)
+                    affinity = (
+                        confidence
+                        * ((cosine + 1.0) * 0.5).clamp(0.0, 1.0)
+                        * temporal
+                    )
+                    keep_count = min(int(topk), int(candidates.numel()))
+                    keep = affinity.topk(keep_count).indices
+                    candidate_indices = candidates[keep]
+                    candidate_scores = affinity[keep]
+                    class_id = KNOWN_LABELS.index(label)
+                    better = candidate_scores > scores[
+                        batch_index, candidate_indices
+                    ]
+                    candidate_indices = candidate_indices[better]
+                    candidate_scores = candidate_scores[better]
+                    if not candidate_indices.numel():
+                        continue
+                    selected[batch_index, candidate_indices] = True
+                    scores[batch_index, candidate_indices] = candidate_scores
+                    classes[batch_index, candidate_indices] = class_id
+                    targets[batch_index, candidate_indices].zero_()
+                    targets[batch_index, candidate_indices, class_id] = 1.0
+                    anchor_count += 1
+                    selected_confidences.append(confidence)
+        routes.append({
+            "selected": selected,
+            "scores": scores,
+            "pseudo_class": classes,
+            "targets": targets,
+        })
+    selected_count = sum(int(route["selected"].sum().item()) for route in routes)
+    mean_confidence = (
+        fpn_feats[0].new_tensor(selected_confidences).mean()
+        if selected_confidences else fpn_feats[0].new_tensor(0.0)
+    )
+    return routes, {
+        "anchor_count": anchor_count,
+        "selected_count": selected_count,
+        "mean_confidence": mean_confidence,
+    }
+
+
+def override_target_routes(base_targets, base_selected, route, valid_mask):
+    """Replace only VLM-covered target class routes; preserve all others."""
+    route_selected = route["selected"][valid_mask].bool()
+    result_targets = base_targets.clone()
+    result_selected = base_selected.clone()
+    if route_selected.any():
+        result_targets[route_selected] = route["targets"][valid_mask][
+            route_selected
+        ].to(result_targets.dtype)
+        result_selected[route_selected] = True
+    return result_targets, result_selected, route_selected
+
+
+class VLMSemanticTransportBranch(nn.Module):
+    """Distill sparse VLM points into a source-prototype feature stream.
+
+    The shared detector is only a feature provider for this branch.  Its
+    classification stream receives a bounded residual, while regression and
+    boundary heads continue to use the untouched FPN tensors.
+    """
+
+    def __init__(
+        self,
+        fpn_dim,
+        num_classes,
+        n_levels,
+        hidden_dim=128,
+        temperature=0.1,
+        max_residual=0.1,
+        prototype_momentum=0.9,
+    ):
+        super().__init__()
+        self.num_classes = int(num_classes)
+        self.n_levels = int(n_levels)
+        self.hidden_dim = int(hidden_dim)
+        self.temperature = float(temperature)
+        self.max_residual = float(max_residual)
+        self.prototype_momentum = float(prototype_momentum)
+        self.input_projection = nn.Conv1d(int(fpn_dim), self.hidden_dim, 1)
+        self.level_embedding = nn.Parameter(
+            torch.zeros(self.n_levels, self.hidden_dim)
+        )
+        self.fusion = nn.Conv1d(self.hidden_dim * 2, self.hidden_dim, 1)
+        self.output = nn.Conv1d(self.hidden_dim, int(fpn_dim), 1)
+        nn.init.zeros_(self.output.weight)
+        nn.init.zeros_(self.output.bias)
+        self.register_buffer(
+            "source_prototypes",
+            torch.zeros(self.n_levels, self.num_classes, self.hidden_dim),
+        )
+        self.register_buffer(
+            "source_prototype_ready",
+            torch.zeros(self.n_levels, self.num_classes, dtype=torch.bool),
+        )
+
+    @staticmethod
+    def _valid(mask):
+        return mask.squeeze(1).bool() if mask.ndim == 3 else mask.bool()
+
+    def _project(self, features, level, detach_input=True):
+        if detach_input:
+            features = features.detach()
+        projected = self.input_projection(features).transpose(1, 2)
+        projected = projected + self.level_embedding[level][None, None, :]
+        return F.normalize(projected, dim=-1)
+
+    @torch.no_grad()
+    def _update_prototypes(self, level, embeddings, labels, valid):
+        weights = labels * valid.unsqueeze(-1).to(labels.dtype)
+        class_sums = torch.einsum("btc,bth->ch", weights, embeddings.detach())
+        class_mass = weights.sum(dim=(0, 1))
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            torch.distributed.all_reduce(class_sums)
+            torch.distributed.all_reduce(class_mass)
+        for class_id in torch.nonzero(class_mass > 0).flatten().tolist():
+            center = F.normalize(
+                class_sums[class_id] / class_mass[class_id], dim=0
+            )
+            if self.source_prototype_ready[level, class_id]:
+                center = F.normalize(
+                    self.prototype_momentum
+                    * self.source_prototypes[level, class_id]
+                    + (1.0 - self.prototype_momentum) * center,
+                    dim=0,
+                )
+            self.source_prototypes[level, class_id].copy_(center)
+            self.source_prototype_ready[level, class_id] = True
+
+    def _semantic_logits(self, embeddings, level):
+        prototypes = self.source_prototypes[level].detach()
+        logits = torch.einsum("bth,ch->btc", embeddings, prototypes)
+        logits = logits / self.temperature
+        return logits.masked_fill(
+            ~self.source_prototype_ready[level][None, None, :], -10.0
+        )
+
+    def _adapt(self, features, embeddings, logits, level, route=None):
+        ready = self.source_prototype_ready[level]
+        probabilities = logits.sigmoid() * ready[None, None, :].to(logits.dtype)
+        probabilities = probabilities / probabilities.sum(
+            dim=-1, keepdim=True
+        ).clamp_min(1e-6)
+        if route is not None:
+            route_weight = route["scores"].clamp(0.0, 1.0).unsqueeze(-1)
+            probabilities = (
+                (1.0 - route_weight) * probabilities
+                + route_weight * route["targets"].to(probabilities.dtype)
+            )
+        context = torch.einsum(
+            "btc,ch->bth", probabilities, self.source_prototypes[level].detach()
+        )
+        fused = torch.cat((embeddings, context), dim=-1).transpose(1, 2)
+        raw_residual = self.output(F.gelu(self.fusion(fused)))
+        feature_scale = features.detach().pow(2).mean(
+            dim=1, keepdim=True
+        ).sqrt().clamp_min(1e-3)
+        return (
+            self.max_residual
+            * feature_scale
+            * torch.tanh(raw_residual)
+        )
+
+    def forward(
+        self,
+        source_feats,
+        target_feats,
+        source_masks,
+        target_masks,
+        source_labels=None,
+        target_routes=None,
+        enabled_levels=(),
+        update_prototypes=False,
+    ):
+        enabled = set(int(level) for level in enabled_levels)
+        source_detection = []
+        target_detection = []
+        source_alignment = []
+        target_alignment = []
+        source_losses = []
+        target_alignment_losses = []
+        target_direct_losses = []
+        before_similarities = []
+        after_similarities = []
+        residual_square_sum = source_feats[0].new_tensor(0.0)
+        residual_count = 0
+        source_count = 0
+        target_count = 0
+
+        for level, (source, target, source_mask, target_mask) in enumerate(zip(
+            source_feats, target_feats, source_masks, target_masks
+        )):
+            if level not in enabled:
+                source_detection.append(source)
+                target_detection.append(target)
+                source_alignment.append(source)
+                target_alignment.append(target)
+                continue
+            source_valid = self._valid(source_mask)
+            target_valid = self._valid(target_mask)
+            source_embedding = self._project(source, level)
+            target_embedding = self._project(target, level)
+            if source_labels is not None and update_prototypes:
+                self._update_prototypes(
+                    level, source_embedding, source_labels[level], source_valid
+                )
+            source_logits = self._semantic_logits(source_embedding, level)
+            target_logits = self._semantic_logits(target_embedding, level)
+
+            if source_labels is not None:
+                source_foreground = (
+                    source_labels[level].sum(dim=-1) > 0
+                ) & source_valid
+                ready = self.source_prototype_ready[level]
+                if source_foreground.any() and ready.any():
+                    source_losses.append(F.binary_cross_entropy_with_logits(
+                        source_logits[source_foreground][:, ready],
+                        source_labels[level][source_foreground][:, ready],
+                    ))
+                    source_count += int(source_foreground.sum().item())
+
+            route = None if target_routes is None else target_routes[level]
+            source_residual = self._adapt(
+                source, source_embedding, source_logits, level
+            )
+            target_residual = self._adapt(
+                target, target_embedding, target_logits, level, route=route
+            )
+            source_detection.append(source + source_residual)
+            target_detection.append(target + target_residual)
+            source_alignment.append(source.detach() + source_residual)
+            target_alignment.append(target.detach() + target_residual)
+            residual_square_sum = (
+                residual_square_sum
+                + source_residual.pow(2).sum()
+                + target_residual.pow(2).sum()
+            )
+            residual_count += source_residual.numel() + target_residual.numel()
+
+            if route is not None:
+                selected = route["selected"] & target_valid
+                labels = route["pseudo_class"]
+                selected &= self.source_prototype_ready[level][labels]
+                if selected.any():
+                    target_count += int(selected.sum().item())
+                    weights = route["scores"][selected].detach()
+                    prototypes = self.source_prototypes[level][labels[selected]].detach()
+                    before = (
+                        target_embedding[selected] * prototypes
+                    ).sum(dim=-1)
+                    transported = self._project(
+                        target.detach() + target_residual,
+                        level,
+                        detach_input=False,
+                    )
+                    after = (transported[selected] * prototypes).sum(dim=-1)
+                    normalizer = weights.sum().clamp_min(1e-6)
+                    target_alignment_losses.append(
+                        ((1.0 - before) * weights).sum() / normalizer
+                    )
+                    target_direct_losses.append(
+                        (F.softplus(-after / self.temperature) * weights).sum()
+                        / normalizer
+                    )
+                    before_similarities.append(before.detach())
+                    after_similarities.append(after.detach())
+
+        zero = sum(value.sum() for value in source_feats) * 0.0
+        source_loss = torch.stack(source_losses).mean() if source_losses else zero
+        alignment_loss = (
+            torch.stack(target_alignment_losses).mean()
+            if target_alignment_losses else zero
+        )
+        direct_loss = (
+            torch.stack(target_direct_losses).mean()
+            if target_direct_losses else zero
+        )
+        return {
+            "source_detection_feats": source_detection,
+            "target_detection_feats": target_detection,
+            "source_alignment_feats": source_alignment,
+            "target_alignment_feats": target_alignment,
+            "source_loss": source_loss,
+            "alignment_loss": alignment_loss,
+            "direct_loss": direct_loss,
+            "source_count": source_count,
+            "target_count": target_count,
+            "residual_rms": (
+                residual_square_sum / max(residual_count, 1)
+            ).sqrt(),
+            "prototype_cosine_before": (
+                torch.cat(before_similarities).mean()
+                if before_similarities else zero.detach()
+            ),
+            "prototype_cosine_after": (
+                torch.cat(after_similarities).mean()
+                if after_similarities else zero.detach()
+            ),
         }

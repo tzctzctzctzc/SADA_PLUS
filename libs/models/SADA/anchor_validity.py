@@ -483,7 +483,9 @@ def clip_grad_norm_with_isolated_validity_head(model, max_norm):
     validity_head = getattr(model, "validity_head", None)
     if validity_head is not None:
         isolated_modules.append(validity_head)
-    if getattr(model, "proposal_semantic_mode", None) == "vlm_dual_stream":
+    if getattr(model, "proposal_semantic_mode", None) in (
+        "vlm_dual_stream", "vlm_semantic_transport"
+    ):
         semantic_branch = getattr(model, "proposal_semantic_branch", None)
         if semantic_branch is not None:
             isolated_modules.append(semantic_branch)

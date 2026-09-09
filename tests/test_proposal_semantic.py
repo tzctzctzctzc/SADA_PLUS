@@ -931,3 +931,109 @@ def test_cache_loader_keeps_only_semantics_and_proposal_geometry(tmp_path):
         "gt_assigned_class_ids", "center_all_gt_class_ids", "semantic_gt_kind"
     })
     assert cache["v"][0]["semantic_label"] == "PUT"
+
+
+def test_vlm_anchor_routes_use_absolute_point_not_cached_boundaries():
+    features = [torch.ones(1, 2, 9)]
+    masks = [torch.ones(1, 1, 9, dtype=torch.bool)]
+    videos = [{
+        "feats": torch.ones(2, 9),
+        "metadata": {"video_id": "v", "crop_start": 3, "crop_feat_len": 9},
+    }]
+    entry = {
+        "absolute_feature_index": 7,
+        "proposal_start_sec": 0.0,
+        "proposal_end_sec": 100.0,
+        "source_fpn_levels": [0],
+        "semantic_label": "PUT",
+        "class_probabilities": [0.05, 0.8] + [0.0] * 8,
+    }
+
+    first, stats = proposal_semantic.build_vlm_anchor_routes(
+        {"v": [entry]}, videos, features, masks, (1,), ((0, 4),),
+        (0,), 10, confidence_threshold=0.7, topk=3,
+    )
+    changed = dict(entry, proposal_start_sec=49.0, proposal_end_sec=50.0)
+    second, _ = proposal_semantic.build_vlm_anchor_routes(
+        {"v": [changed]}, videos, features, masks, (1,), ((0, 4),),
+        (0,), 10, confidence_threshold=0.7, topk=3,
+    )
+
+    assert stats["anchor_count"] == 1
+    assert stats["selected_count"] == 3
+    assert first[0]["selected"][0, 4]
+    assert first[0]["pseudo_class"][0, 4].item() == 1
+    assert torch.equal(first[0]["selected"], second[0]["selected"])
+    assert torch.equal(first[0]["targets"], second[0]["targets"])
+
+
+def test_vlm_anchor_route_override_preserves_uncovered_sada_routes():
+    base_targets = torch.tensor([
+        [1.0, 0.0],
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [0.0, 0.0],
+    ])
+    base_selected = torch.tensor([True, False, True, False])
+    route = {
+        "selected": torch.tensor([[False, False, True, False]]),
+        "targets": torch.tensor([[[0.0, 0.0], [0.0, 0.0],
+                                  [0.0, 1.0], [0.0, 0.0]]]),
+    }
+    valid = torch.ones(1, 4, dtype=torch.bool)
+
+    targets, selected, overridden = proposal_semantic.override_target_routes(
+        base_targets, base_selected, route, valid
+    )
+
+    assert torch.equal(targets[0], base_targets[0])
+    assert torch.equal(targets[1], base_targets[1])
+    assert torch.equal(targets[2], torch.tensor([0.0, 1.0]))
+    assert selected.tolist() == [True, False, True, False]
+    assert overridden.tolist() == [False, False, True, False]
+
+
+def test_semantic_transport_is_zero_initialized_and_detaches_fpn():
+    branch = proposal_semantic.VLMSemanticTransportBranch(
+        fpn_dim=4,
+        num_classes=2,
+        n_levels=1,
+        hidden_dim=8,
+        temperature=0.2,
+        max_residual=0.1,
+    )
+    source = [torch.randn(1, 4, 5, requires_grad=True)]
+    target = [torch.randn(1, 4, 5, requires_grad=True)]
+    masks = [torch.ones(1, 1, 5, dtype=torch.bool)]
+    source_labels = [torch.tensor([[
+        [1.0, 0.0], [1.0, 0.0], [0.0, 1.0],
+        [0.0, 1.0], [0.0, 0.0],
+    ]])]
+    routes = [{
+        "selected": torch.tensor([[False, True, False, True, False]]),
+        "scores": torch.tensor([[0.0, 0.9, 0.0, 0.8, 0.0]]),
+        "pseudo_class": torch.tensor([[0, 0, 0, 1, 0]]),
+        "targets": torch.tensor([[
+            [0.0, 0.0], [1.0, 0.0], [0.0, 0.0],
+            [0.0, 1.0], [0.0, 0.0],
+        ]]),
+    }]
+
+    output = branch(
+        source, target, masks, masks,
+        source_labels=source_labels,
+        target_routes=routes,
+        enabled_levels=(0,),
+        update_prototypes=True,
+    )
+    assert torch.equal(output["source_detection_feats"][0], source[0])
+    assert torch.equal(output["target_detection_feats"][0], target[0])
+    assert branch.source_prototype_ready[0].tolist() == [True, True]
+    loss = output["source_loss"] + output["alignment_loss"] + output["direct_loss"]
+    assert torch.isfinite(loss)
+    loss.backward()
+
+    assert source[0].grad is None
+    assert target[0].grad is None
+    assert branch.output.weight.grad is not None
+    assert branch.output.weight.grad.abs().sum() > 0
