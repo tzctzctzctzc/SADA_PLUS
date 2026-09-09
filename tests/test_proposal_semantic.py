@@ -774,12 +774,12 @@ def test_dual_stream_is_zero_initialized_and_detached_from_detector():
         torch.ones(2, 1, 7, dtype=torch.bool),
         torch.ones(2, 1, 4, dtype=torch.bool),
     ]
-    actionness = [
-        torch.zeros(2, 1, 7, requires_grad=True),
-        torch.zeros(2, 1, 4, requires_grad=True),
+    foreground = [
+        torch.full((2, 1, 7), 0.5, requires_grad=True),
+        torch.full((2, 1, 4), 0.5, requires_grad=True),
     ]
 
-    output = branch(features, masks, foreground_gates=actionness)
+    output = branch(features, masks, foreground_gates=foreground)
     assert [value.shape for value in output["semantic_logits"]] == [
         (2, 7, 3), (2, 4, 3)
     ]
@@ -790,10 +790,10 @@ def test_dual_stream_is_zero_initialized_and_detached_from_detector():
 
     assert branch.classifier.weight.grad is not None
     assert all(value.grad is None for value in features)
-    assert all(value.grad is None for value in actionness)
+    assert all(value.grad is None for value in foreground)
 
 
-def test_dual_stream_actionness_and_validity_gate_dense_residual():
+def test_dual_stream_foreground_confidence_and_validity_gate_dense_residual():
     branch = proposal_semantic.VLMDualStreamSemanticBranch(
         fpn_dim=4,
         num_classes=2,
@@ -806,10 +806,10 @@ def test_dual_stream_actionness_and_validity_gate_dense_residual():
         branch.classifier.weight.fill_(0.1)
     features = [torch.randn(1, 4, 5)]
     masks = [torch.tensor([[[True, True, True, True, False]]])]
-    actionness = [torch.tensor([[[-20.0, 20.0, 20.0, -20.0, 20.0]]])]
+    foreground = [torch.tensor([[[0.0, 1.0, 1.0, 0.0, 1.0]]])]
 
     residual = branch(
-        features, masks, foreground_gates=actionness
+        features, masks, foreground_gates=foreground
     )["residuals"][0]
 
     assert residual[:, 1:3].abs().sum() > 0

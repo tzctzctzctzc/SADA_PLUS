@@ -1321,7 +1321,8 @@ class VLMDualStreamSemanticBranch(nn.Module):
                 foreground = foreground_gates[level].detach()
                 if foreground.ndim == 3:
                     foreground = foreground.squeeze(1)
-                foreground = foreground.sigmoid() * valid.to(foreground.dtype)
+                foreground = foreground.clamp(0.0, 1.0)
+                foreground = foreground * valid.to(foreground.dtype)
             residual = residual * foreground.unsqueeze(-1)
             semantic_logits.append(raw_logits)
             residuals.append(residual)

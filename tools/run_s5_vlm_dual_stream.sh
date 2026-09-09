@@ -6,7 +6,7 @@ set -euo pipefail
 # - The detector/UDA stream receives no gradient or gradient-clip coupling from VLM.
 # - A detached long/short semantic stream is source-GT trained and target-Qwen32
 #   trained from epoch 1; its zero-initialized residual only changes target class
-#   logits and is gated by detached class-agnostic actionness.
+#   logits and is gated by detached max-class foreground confidence.
 # - Advance only if target-val Average mAP exceeds the paired 65.87 reference.
 
 root=${SADA_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}

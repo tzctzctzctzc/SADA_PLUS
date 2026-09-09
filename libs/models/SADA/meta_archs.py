@@ -2551,7 +2551,10 @@ class SADA(nn.Module):
             target_semantics = self.proposal_semantic_branch(
                 fpn_feats_tgt,
                 fpn_masks_tgt,
-                foreground_gates=out_actionness_tgt,
+                foreground_gates=[
+                    logits.detach().sigmoid().amax(dim=1, keepdim=True)
+                    for logits in out_cls_logits_tgt
+                ],
             )
             out_cls_logits_tgt_detection = [
                 (
