@@ -121,9 +121,9 @@ def _prepare_video(video_id, rows, frame_cache, args, old_splits):
 
 
 def prepare_all_manifests(scenario_root, frame_cache, args, old_splits):
-    """Prepare S1--S6 once per unique video, with bounded concurrency."""
+    """Prepare the requested shifts once per unique video, with bounded concurrency."""
     manifests = []
-    for shift in SHIFT_NAMES:
+    for shift in args.shifts:
         root = Path(scenario_root) / shift
         manifests.append(
             (
@@ -205,6 +205,13 @@ def parse_args():
     parser.add_argument("--video-root", required=True)
     parser.add_argument("--epic55-splits", required=True)
     parser.add_argument("--frame-count", type=int, default=8)
+    parser.add_argument(
+        "--shifts",
+        nargs="+",
+        choices=SHIFT_NAMES,
+        default=list(SHIFT_NAMES),
+        help="shift(s) to prepare; defaults to all S1--S6",
+    )
     parser.add_argument("--download-retries", type=int, default=3)
     parser.add_argument("--download-connections", type=int, default=8)
     parser.add_argument("--workers", type=int, default=4)
