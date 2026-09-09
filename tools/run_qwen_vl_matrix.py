@@ -12,7 +12,7 @@ from tools import run_qwen3_vl_classification as base
 SHIFT_NAMES = ("S1", "S2", "S3", "S4", "S5", "S6")
 
 
-def protocol(model_family):
+def protocol(model_family, frame_count=8):
     if model_family == "qwen3-8b":
         version = "qwen3-vl-8b-ordered-images-digit-logits-v1"
         wire_api = "qwen3-vl-next-token-classification"
@@ -24,6 +24,10 @@ def protocol(model_family):
         wire_api = "qwen3.8-vl-next-token-classification"
     else:
         raise ValueError("unknown model family: {}".format(model_family))
+    if frame_count != 8:
+        version = version.replace(
+            "-digit-logits-v1", "-{}f-digit-logits-v1".format(frame_count)
+        )
     prompt_sha = hashlib.sha256(
         json.dumps(
             {
@@ -104,7 +108,9 @@ def main():
     args = parse_args()
     if args.frame_count <= 0 or args.min_pixels <= 0 or args.max_pixels < args.min_pixels:
         raise ValueError("invalid frame or pixel limits")
-    version, wire_api, prompt_sha = protocol(args.model_family)
+    version, wire_api, prompt_sha = protocol(
+        args.model_family, args.frame_count
+    )
     base.PROMPT_VERSION = version
     base.PROMPT_SHA256 = prompt_sha
     base.WIRE_API = wire_api

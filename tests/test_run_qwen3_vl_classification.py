@@ -37,6 +37,14 @@ def test_prompt_has_all_digit_label_options():
     assert "exactly one digit" in prompt
 
 
+def test_prompt_reflects_dense_frame_count():
+    prompt = build_prompt("proposal-1", frame_count=16)
+    assert "The 16 images above" in prompt
+    assert prompt_sha256("proposal-1", frame_count=16) != prompt_sha256(
+        "proposal-1", frame_count=8
+    )
+
+
 def test_build_messages_keeps_eight_images_separate_and_ordered(tmp_path):
     paths = []
     for index in range(1, 9):
@@ -89,3 +97,8 @@ def test_qwen3_8b_and_32b_use_the_same_wire_protocol():
     assert version_8b.startswith("qwen3-vl-8b-")
     assert version_32b.startswith("qwen3-vl-32b-")
     assert wire_8b == wire_32b == "qwen3-vl-next-token-classification"
+
+
+def test_dense_frame_protocol_is_versioned():
+    version, _, _ = protocol("qwen3-32b", frame_count=16)
+    assert version == "qwen3-vl-32b-ordered-images-16f-digit-logits-v1"

@@ -1,6 +1,6 @@
 """Classify proposal frame sequences with Qwen3-VL next-token scores.
 
-Each proposal is passed as eight ordered images.  The model predicts one of ten
+Each proposal is passed as a configurable number of ordered images.  The model predicts one of ten
 digit tokens; their logits are renormalized into a closed-set class
 distribution.  This avoids contact-sheet cropping and self-reported confidence.
 """
@@ -43,25 +43,32 @@ def digit_to_label(candidate_id):
     return tuple(labels)
 
 
-def build_prompt(candidate_id):
+def build_prompt(candidate_id, frame_count=8):
+    if frame_count <= 0:
+        raise ValueError("frame_count must be positive")
     mapping = digit_to_label(candidate_id)
     definitions = {label: phrase for label, phrase in zip(LABELS, ACTION_PHRASES)}
     options = [
         "{}: {} ({})".format(digit, label, definitions[label])
         for digit, label in zip(DIGITS, mapping)
     ]
+    intro = (
+        "The {} images above are frames sampled uniformly from one temporal proposal "
+        "in chronological order. Classify the single dominant hand-object action. "
+        "Choose exactly one option below.\n"
+    ).format(frame_count)
     return (
-        "The eight images above are frames sampled uniformly from one temporal "
-        "proposal in chronological order. Classify the single dominant hand-object "
-        "action. Choose exactly one option below.\n"
+        intro
         + "\n".join(options)
         + "\nAnswer immediately with exactly one digit from 0 to 9. Do not add "
         "words, punctuation, explanation, or formatting."
     )
 
 
-def prompt_sha256(candidate_id):
-    return hashlib.sha256(build_prompt(candidate_id).encode("utf-8")).hexdigest()
+def prompt_sha256(candidate_id, frame_count=8):
+    return hashlib.sha256(
+        build_prompt(candidate_id, frame_count).encode("utf-8")
+    ).hexdigest()
 
 
 def build_messages(paths, prompt, min_pixels, max_pixels):
@@ -165,7 +172,7 @@ def load_qwen3(args):
 
 def infer_one(runtime, paths, candidate_id, args):
     torch = runtime["torch"]
-    prompt = build_prompt(candidate_id)
+    prompt = build_prompt(candidate_id, args.frame_count)
     mapping = digit_to_label(candidate_id)
     messages = build_messages(paths, prompt, args.min_pixels, args.max_pixels)
     chat_template_kwargs = runtime.get("chat_template_kwargs", {})
@@ -214,12 +221,15 @@ def infer_one(runtime, paths, candidate_id, args):
 
 def prediction_is_current(row, args):
     candidate_id = row.get("candidate_id")
+    frame_count = getattr(args, "frame_count", 8)
     return bool(
         candidate_id
         and row.get("status") == "ok"
         and row.get("model") == args.model_path
         and row.get("prompt_version") == PROMPT_VERSION
-        and row.get("prompt_sha256") == prompt_sha256(candidate_id)
+        and row.get("prompt_sha256") == prompt_sha256(
+            candidate_id, frame_count
+        )
         and row.get("wire_api") == WIRE_API
     )
 
