@@ -32,8 +32,9 @@ run_seed() {
     fi
 
     local parent
-    parent=$(find "$parent_dir"/saved_ckpt/best_ckpt \
-        -maxdepth 1 -type f -name 'checkpoint-epoch*.pt' | head -1)
+    parent=$(find "$parent_dir" \
+        -path '*/saved_ckpt/best_ckpt/checkpoint-epoch*.pt' \
+        -type f | head -1)
     if [[ -z "$parent" ]]; then
         echo "source-loss best parent checkpoint is missing for seed=$seed" >&2
         return 1
@@ -46,8 +47,9 @@ run_seed() {
     stop_epoch=$((parent_epoch + 5))
 
     # The source-loss best parent is retained; the duplicate latest checkpoint is expendable.
-    find "$parent_dir"/saved_ckpt/latest_ckpt \
-        -maxdepth 1 -type f -name 'checkpoint-epoch*.pt' -delete 2>/dev/null || true
+    find "$parent_dir" \
+        -path '*/saved_ckpt/latest_ckpt/checkpoint-epoch*.pt' \
+        -type f -delete
 
     local name="s5_qwen32_top1_posrank_no_trident_from_repro_seed${seed}_20260909"
     local log="$artifact_root/logs/${name}.log"
