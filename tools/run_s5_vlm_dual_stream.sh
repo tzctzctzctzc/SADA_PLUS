@@ -23,7 +23,7 @@ mkdir -p "$artifact_root/logs"
 ulimit -n 65535
 
 CUDA_VISIBLE_DEVICES="$gpu" PYTHONPATH=. "$python" -u train_da.py \
-    -c "$config" -n "$name" -s 123 -i 0 -d \
+    -c "$config" -n "$name" -s 123 -i 0 -d --trident-head \
     --proposal-semantic-mode vlm_dual_stream \
     --proposal-semantic-target-cache "$cache" \
     --proposal-semantic-external-selection \
