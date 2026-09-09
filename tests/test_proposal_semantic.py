@@ -681,6 +681,82 @@ def test_branch_preserves_temporal_order_and_detaches_target_q():
     assert logits[0].grad is not None
 
 
+def test_cotrain_branch_updates_visual_features_without_vlm_shortcut():
+    branch = proposal_semantic.VLMProposalCoAdaptationBranch(
+        fpn_dim=4,
+        num_classes=2,
+        hidden_dim=16,
+        embedding_dim=8,
+        confidence_threshold=0.7,
+    )
+    assert branch.classifier.bias is None
+    source_features = [torch.randn(1, 4, 8, requires_grad=True)]
+    target_features = [torch.randn(1, 4, 8, requires_grad=True)]
+    source = [{
+        "segments": torch.tensor([[2.0, 6.0]]),
+        "levels": torch.tensor([0]),
+        "targets": torch.tensor([[1.0, 0.0]]),
+    }]
+    target_evidence = torch.tensor(
+        [[0.9, 0.1, 0.0, 0.0, 0.0, 0.0]], requires_grad=True
+    )
+    target = [{
+        "segments": torch.tensor([[2.0, 6.0]]),
+        "levels": torch.tensor([0]),
+        "evidence": target_evidence,
+        "evidence_eligible": torch.tensor([True]),
+    }]
+
+    encoded_source = branch.encode(source_features, source, (1,))
+    encoded_target = branch.encode(target_features, target, (1,))
+    source_targets = branch.flatten_field(source, "targets")
+    selection = branch.select_vlm_target(target)
+    source_loss = branch.source_loss(encoded_source, source)
+    positive_loss, positive_count = branch.target_positive_loss(
+        encoded_target, selection
+    )
+    alignment_loss, aligned_classes, _ = branch.prototype_alignment(
+        encoded_source,
+        source_targets,
+        encoded_target,
+        selection,
+    )
+    (source_loss + positive_loss + alignment_loss).backward()
+
+    assert positive_count == 1
+    assert aligned_classes == 1
+    assert source_features[0].grad is not None
+    assert source_features[0].grad.abs().sum() > 0
+    assert target_features[0].grad is not None
+    assert target_features[0].grad.abs().sum() > 0
+    assert target_evidence.grad is None
+
+
+def test_cotrain_target_selection_comes_from_vlm_not_student_logits():
+    branch = proposal_semantic.VLMProposalCoAdaptationBranch(
+        fpn_dim=4,
+        num_classes=2,
+        hidden_dim=16,
+        embedding_dim=8,
+        confidence_threshold=0.7,
+    )
+    proposals = [{
+        "segments": torch.tensor([[1.0, 3.0], [4.0, 6.0]]),
+        "levels": torch.tensor([0, 0]),
+        "evidence": torch.tensor([
+            [0.8, 0.2, 0.0, 0.0, 0.0, 0.0],
+            [0.4, 0.6, 0.0, 0.0, 0.0, 0.0],
+        ]),
+        "evidence_eligible": torch.tensor([True, True]),
+    }]
+
+    selection = branch.select_vlm_target(proposals)
+
+    assert selection["labels"].tolist() == [0, 1]
+    assert selection["selected"].tolist() == [True, False]
+    assert selection["q"].requires_grad is False
+
+
 def test_prototype_alignment_uses_soft_q_and_source_memory_without_q_gradient():
     branch = proposal_semantic.ProposalSemanticBranch(
         fpn_dim=1,

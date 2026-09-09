@@ -52,6 +52,7 @@ from .proposal_semantic import (
     ProposalLogitAdapter,
     ProposalMLPLogitAdapter,
     ProposalSemanticBranch,
+    VLMProposalCoAdaptationBranch,
     ProposalTargetAdapter,
     build_teacher_proposals,
     cached_proposals_for_videos,
@@ -1359,6 +1360,27 @@ class SADA(nn.Module):
                         1 if self.proposal_logit_shared_levels else self.n_levels
                     )
                 ])
+            elif self.proposal_semantic_mode == 'vlm_cotrain':
+                # Preserve the baseline initialization stream: the auxiliary
+                # proposal transformer must not perturb later SADA modules.
+                with torch.random.fork_rng(devices=[]):
+                    torch.manual_seed(0)
+                    self.proposal_semantic_branch = (
+                        VLMProposalCoAdaptationBranch(
+                            fpn_dim=fpn_dim,
+                            num_classes=self.num_class_orig,
+                            hidden_dim=proposal_cfg.get('hidden_dim', 256),
+                            embedding_dim=proposal_cfg.get(
+                                'embedding_dim', 128
+                            ),
+                            confidence_threshold=(
+                                self.proposal_semantic_confidence_threshold
+                            ),
+                            prototype_momentum=proposal_cfg.get(
+                                'prototype_momentum', 0.9
+                            ),
+                        )
+                    )
             else:
                 self.proposal_semantic_branch = ProposalSemanticBranch(
                     fpn_dim=fpn_dim,
@@ -1942,6 +1964,95 @@ class SADA(nn.Module):
         out_cls_logits_tgt_base=None,
         fpn_masks_tgt=None,
     ):
+        if self.proposal_semantic_mode == 'vlm_cotrain':
+            branch = self.proposal_semantic_branch
+            source = source_gt_proposals(
+                video_list_src,
+                self.num_class_orig,
+                self.n_levels,
+                self.reg_range,
+            )
+            encoded_source = branch.encode(
+                fpn_feats_src, source, self.fpn_strides
+            )
+            source_targets = branch.flatten_field(source, 'targets')
+            source_loss = branch.source_loss(encoded_source, source)
+            zero = source_loss * 0.0
+            alignment_loss = zero
+            direct_loss = zero
+            target_count = 0
+            selected_count = 0
+            aligned_count = 0
+            target_agreement = zero.detach()
+            mean_similarity = zero.detach()
+            confidence = zero.detach()
+            entropy = zero.detach()
+
+            source_accuracy = zero.detach()
+            if source_targets is not None and source_targets.numel():
+                known = source_targets.sum(dim=-1) > 0
+                if known.any():
+                    source_accuracy = (
+                        encoded_source['logits'][known].argmax(dim=-1)
+                        == source_targets[known].argmax(dim=-1)
+                    ).float().mean().detach()
+
+            if curr_epoch >= self.proposal_semantic_target_start_epoch:
+                target = self._cached_semantic_proposals(
+                    self.proposal_semantic_target_cache, video_list_tgt
+                )
+                encoded_target = branch.encode(
+                    fpn_feats_tgt, target, self.fpn_strides
+                )
+                selection = branch.select_vlm_target(target)
+                direct_loss, selected_count = branch.target_positive_loss(
+                    encoded_target, selection
+                )
+                alignment_loss, aligned_count, mean_similarity = (
+                    branch.prototype_alignment(
+                        encoded_source,
+                        source_targets,
+                        encoded_target,
+                        selection,
+                    )
+                )
+                target_count = int(encoded_target['embedding'].shape[0])
+                if target_count:
+                    confidence = selection['confidence'].mean().detach()
+                    entropy = selection['entropy'].mean().detach()
+                if selected_count:
+                    selected = selection['selected']
+                    target_agreement = (
+                        encoded_target['logits'][selected].argmax(dim=-1)
+                        == selection['labels'][selected]
+                    ).float().mean().detach()
+            else:
+                branch._update_source_prototypes(
+                    encoded_source['embedding'], source_targets
+                )
+
+            return {
+                'proposal_semantic_source_loss': source_loss,
+                'proposal_semantic_alignment_loss': alignment_loss,
+                'proposal_semantic_direct_loss': direct_loss,
+                'proposal_semantic_source_count': zero.new_tensor(float(
+                    encoded_source['embedding'].shape[0]
+                )),
+                'proposal_semantic_target_count': zero.new_tensor(
+                    float(target_count)
+                ),
+                'proposal_semantic_selected_count': zero.new_tensor(
+                    float(selected_count)
+                ),
+                'proposal_semantic_aligned_classes': zero.new_tensor(float(
+                    aligned_count
+                )),
+                'proposal_semantic_mean_entropy': entropy,
+                'proposal_semantic_mean_confidence': confidence,
+                'proposal_cotrain_source_accuracy': source_accuracy,
+                'proposal_cotrain_target_agreement': target_agreement,
+                'proposal_cotrain_mean_similarity': mean_similarity,
+            }
         if self.proposal_semantic_mode.startswith('vlm_logit_'):
             target = self._cached_semantic_proposals(
                 self.proposal_semantic_target_cache, video_list_tgt

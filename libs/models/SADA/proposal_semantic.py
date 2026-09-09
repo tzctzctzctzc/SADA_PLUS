@@ -19,6 +19,7 @@ PROPOSAL_SEMANTIC_MODES = (
     "oracle_adapter_dominant",
     "oracle_adapter_soft",
     "vlm",
+    "vlm_cotrain",
     "vlm_logit_soft",
     "vlm_logit_confident",
     "vlm_logit_agree",
@@ -1016,6 +1017,191 @@ class ProposalSemanticBranch(nn.Module):
             if float(weight.sum()) <= 1e-6:
                 continue
             center = (embeddings.detach() * weight[:, None]).sum(dim=0) / weight.sum()
+            if self.source_prototype_ready[class_id]:
+                center = (
+                    self.prototype_momentum * self.source_prototypes[class_id]
+                    + (1.0 - self.prototype_momentum) * center
+                )
+            self.source_prototypes[class_id].copy_(F.normalize(center, dim=0))
+            self.source_prototype_ready[class_id] = True
+
+
+class VLMProposalCoAdaptationBranch(nn.Module):
+    """Learn domain-adapted proposal representations from positive VLM evidence.
+
+    Unlike the logit residual, this branch consumes only visual proposal tokens and
+    sends gradients into the shared FPN.  VLM outputs choose a positive source
+    prototype; they are never part of the visual encoder input and never provide
+    negative class supervision.
+    """
+
+    sample_ratios = (-0.25, 0.0, 0.25, 0.5, 0.75, 1.0, 1.25)
+
+    def __init__(
+        self,
+        fpn_dim,
+        num_classes,
+        hidden_dim=256,
+        embedding_dim=128,
+        confidence_threshold=0.7,
+        prototype_momentum=0.9,
+    ):
+        super().__init__()
+        if embedding_dim % 4:
+            raise ValueError("proposal embedding dimension must be divisible by 4")
+        self.num_classes = int(num_classes)
+        self.confidence_threshold = float(confidence_threshold)
+        self.prototype_momentum = float(prototype_momentum)
+        self.input_projection = nn.Linear(int(fpn_dim), int(embedding_dim))
+        self.position_embedding = nn.Parameter(torch.zeros(
+            len(self.sample_ratios), int(embedding_dim)
+        ))
+        layer = nn.TransformerEncoderLayer(
+            d_model=int(embedding_dim),
+            nhead=4,
+            dim_feedforward=int(hidden_dim),
+            dropout=0.0,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+        self.encoder = nn.TransformerEncoder(layer, num_layers=1)
+        self.output_norm = nn.LayerNorm(int(embedding_dim))
+        # No bias: target positive supervision must reshape visual proposal
+        # embeddings instead of being absorbed by a class-wise constant.
+        self.classifier = nn.Linear(
+            int(embedding_dim), self.num_classes, bias=False
+        )
+        self.register_buffer(
+            "source_prototypes",
+            torch.zeros(self.num_classes, int(embedding_dim)),
+        )
+        self.register_buffer(
+            "source_prototype_ready",
+            torch.zeros(self.num_classes, dtype=torch.bool),
+        )
+
+    @staticmethod
+    def flatten_field(proposals, field):
+        values = [
+            proposal[field]
+            for proposal in proposals
+            if field in proposal and proposal[field].numel()
+        ]
+        return torch.cat(values) if values else None
+
+    def encode(self, fpn_feats, proposals, fpn_strides):
+        rows = []
+        for batch_index, proposal in enumerate(proposals):
+            for segment, level in zip(proposal["segments"], proposal["levels"]):
+                level = int(level)
+                duration = (segment[1] - segment[0]).clamp(min=1.0)
+                positions = torch.stack([
+                    segment[0] + ratio * duration for ratio in self.sample_ratios
+                ]) / float(fpn_strides[level])
+                rows.append(
+                    _sample_sequence(fpn_feats[level][batch_index], positions)
+                    .transpose(0, 1)
+                )
+        if not rows:
+            empty = fpn_feats[0].new_zeros((0, self.classifier.in_features))
+            return {
+                "embedding": empty,
+                "logits": fpn_feats[0].new_zeros((0, self.num_classes)),
+            }
+        tokens = self.input_projection(torch.stack(rows))
+        tokens = tokens + self.position_embedding.unsqueeze(0)
+        tokens = self.encoder(tokens)
+        embedding = self.output_norm(tokens.mean(dim=1))
+        logits = self.classifier(embedding)
+        return {
+            "embedding": F.normalize(embedding, dim=-1),
+            "logits": logits,
+        }
+
+    def source_loss(self, encoded, proposals):
+        targets = self.flatten_field(proposals, "targets")
+        if targets is None or not targets.numel():
+            return encoded["logits"].sum() * 0.0
+        known = targets.sum(dim=-1) > 0
+        if not known.any():
+            return encoded["logits"].sum() * 0.0
+        loss = -(
+            targets[known]
+            * encoded["logits"][known].log_softmax(dim=-1)
+        ).sum(dim=-1).mean()
+        return loss / math.log(max(self.num_classes, 2))
+
+    def select_vlm_target(self, proposals):
+        evidence = self.flatten_field(proposals, "evidence")
+        eligible = self.flatten_field(proposals, "evidence_eligible")
+        if evidence is None:
+            empty = self.source_prototypes.new_zeros((0, self.num_classes))
+            return {
+                "q": empty,
+                "labels": torch.empty(
+                    0, dtype=torch.long, device=self.source_prototypes.device
+                ),
+                "selected": torch.empty(
+                    0, dtype=torch.bool, device=self.source_prototypes.device
+                ),
+                "confidence": empty.new_zeros(0),
+                "entropy": empty.new_zeros(0),
+            }
+        q = evidence[:, :self.num_classes].detach()
+        confidence, labels = q.max(dim=-1)
+        selected = eligible.detach().bool() & (
+            confidence >= self.confidence_threshold
+        )
+        known_count = min(self.num_classes, len(KNOWN_LABELS))
+        entropy = -(q.clamp(min=1e-8).log() * q).sum(dim=-1)
+        entropy = entropy / math.log(max(known_count, 2))
+        return {
+            "q": q,
+            "labels": labels,
+            "selected": selected,
+            "confidence": confidence,
+            "entropy": entropy,
+        }
+
+    def target_positive_loss(self, encoded, selection):
+        selected = selection["selected"]
+        if not selected.any():
+            return encoded["logits"].sum() * 0.0, 0
+        labels = selection["labels"][selected]
+        logits = encoded["logits"][selected]
+        positive_logits = logits.gather(1, labels[:, None]).squeeze(1)
+        return F.softplus(-positive_logits).mean(), int(selected.sum())
+
+    def prototype_alignment(self, source, source_targets, target, selection):
+        zero = source["embedding"].sum() * 0.0 + target["embedding"].sum() * 0.0
+        self._update_source_prototypes(source["embedding"], source_targets)
+        selected = selection["selected"].clone()
+        if not selected.any():
+            return zero, 0, zero.detach()
+        labels = selection["labels"]
+        selected &= self.source_prototype_ready[labels]
+        if not selected.any():
+            return zero, 0, zero.detach()
+        target_embedding = target["embedding"][selected]
+        prototypes = self.source_prototypes[labels[selected]].detach()
+        similarity = (target_embedding * prototypes).sum(dim=-1)
+        aligned_classes = int(labels[selected].unique().numel())
+        return 1.0 - similarity.mean(), aligned_classes, similarity.mean().detach()
+
+    @torch.no_grad()
+    def _update_source_prototypes(self, embeddings, targets):
+        if targets is None or not targets.numel():
+            return
+        class_sums = targets.transpose(0, 1) @ embeddings.detach()
+        class_weights = targets.sum(dim=0)
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            torch.distributed.all_reduce(class_sums)
+            torch.distributed.all_reduce(class_weights)
+        for class_id in range(self.num_classes):
+            if float(class_weights[class_id]) <= 1e-6:
+                continue
+            center = class_sums[class_id] / class_weights[class_id]
             if self.source_prototype_ready[class_id]:
                 center = (
                     self.prototype_momentum * self.source_prototypes[class_id]

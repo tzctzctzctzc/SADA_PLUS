@@ -1156,6 +1156,7 @@ def create_argparser():
             'off', 'source', 'teacher', 'oracle_center',
             'oracle_dominant', 'oracle_soft', 'oracle_adapter_center',
             'oracle_adapter_dominant', 'oracle_adapter_soft', 'vlm',
+            'vlm_cotrain',
             'vlm_logit_soft', 'vlm_logit_confident', 'vlm_logit_agree',
         ],
         default='off',
@@ -1688,6 +1689,7 @@ if __name__ == '__main__':
             args.resume is None
             and args.proposal_semantic_init_from_sada is None
             and args.proposal_semantic_continue_from_sada is None
+            and args.proposal_semantic_mode != 'vlm_cotrain'
         ):
             raise ValueError(
                 'a proposal semantic run requires a proposal-semantic start '
@@ -1809,13 +1811,34 @@ if __name__ == '__main__':
                         'controlled cross-architecture comparison'
                     )
                 proposal_selection_mode = 'fixed_external_teacher'
+    elif (
+        args.proposal_semantic_mode == 'vlm_cotrain'
+        and target_cache_payload is not None
+    ):
+        if not args.proposal_semantic_external_selection:
+            raise ValueError(
+                'from-scratch VLM co-adaptation uses proposals from a fixed '
+                'external teacher and requires '
+                '--proposal-semantic-external-selection'
+            )
+        proposal_selection_mode = 'fixed_external_teacher'
     if args.proposal_semantic_external_selection and not (
-        proposal_semantic_selection_checkpoint
-        and (source_cache_payload is not None or target_cache_payload is not None)
+        (
+            proposal_semantic_selection_checkpoint
+            and (
+                source_cache_payload is not None
+                or target_cache_payload is not None
+            )
+        )
+        or (
+            args.proposal_semantic_mode == 'vlm_cotrain'
+            and target_cache_payload is not None
+        )
     ):
         raise ValueError(
             '--proposal-semantic-external-selection requires a proposal '
-            'semantic cache and an initialization checkpoint'
+            'semantic cache plus either an initialization checkpoint or '
+            'from-scratch VLM co-adaptation'
         )
     config_dict['proposal_semantic'] = {
         'mode': args.proposal_semantic_mode,
