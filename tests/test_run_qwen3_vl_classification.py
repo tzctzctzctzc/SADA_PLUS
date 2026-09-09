@@ -58,6 +58,14 @@ def test_phase_prompt_describes_state_transitions_and_incidental_actions():
     ) != prompt_sha256("proposal-1")
 
 
+def test_contrastive_prompt_keeps_baseline_actions_and_limits_temporal_rules():
+    prompt = build_prompt("proposal-1", prompt_mode="contrastive_transition")
+    assert "may contain only part of an action" in prompt
+    assert "TAKE versus PUT" in prompt
+    assert "Do not relabel INSERT as PUT" in prompt
+    assert "taking or picking up an object" in prompt
+
+
 def test_reverse_order_and_protocol_are_explicit():
     assert ordered_frame_paths([1, 2, 3], "reverse") == [3, 2, 1]
     version, prompt_hash = prompt_protocol(

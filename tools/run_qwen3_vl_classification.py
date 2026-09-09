@@ -33,6 +33,14 @@ PHASE_ACTION_DESCRIPTIONS = (
     "a device, light, flame, or flow changes from active or on to inactive or off",
     "a container tilts and its contents visibly flow or are transferred out",
 )
+CONTRASTIVE_TRANSITION_RULES = (
+    "TAKE versus PUT: choose TAKE only for a visible resting-to-held change, and "
+    "PUT only for a visible held-to-resting or held-to-released change.",
+    "OPEN versus CLOSE: follow the visible state change of the door, lid, or container itself.",
+    "TURN_ON versus TURN_OFF: follow the visible inactive-to-active or active-to-inactive change.",
+    "Do not relabel INSERT as PUT when an object visibly moves into a slot or container. "
+    "Do not relabel POUR as PUT when contents visibly flow from a tilted container.",
+)
 PROMPT_SHA256 = hashlib.sha256(
     json.dumps(
         {
@@ -46,23 +54,29 @@ PROMPT_SHA256 = hashlib.sha256(
 
 
 def prompt_protocol(base_version, prompt_mode="baseline", frame_order="forward"):
-    if prompt_mode not in ("baseline", "phase_transition"):
+    if prompt_mode not in (
+        "baseline", "phase_transition", "contrastive_transition"
+    ):
         raise ValueError("unknown prompt mode: {}".format(prompt_mode))
     if frame_order not in ("forward", "reverse"):
         raise ValueError("unknown frame order: {}".format(frame_order))
     version = base_version
-    if prompt_mode == "phase_transition":
+    if prompt_mode in ("phase_transition", "contrastive_transition"):
         version = version.replace(
-            "-digit-logits-v1", "-phase-transition-digit-logits-v1"
+            "-digit-logits-v1", "-{}-digit-logits-v1".format(
+                prompt_mode.replace("_", "-")
+            )
         )
     if frame_order == "reverse":
         version = version.replace("-digit-logits-v1", "-reverse-digit-logits-v1")
     phrases = (
-        ACTION_PHRASES
-        if prompt_mode == "baseline"
-        else PHASE_ACTION_DESCRIPTIONS
+        PHASE_ACTION_DESCRIPTIONS
+        if prompt_mode == "phase_transition"
+        else ACTION_PHRASES
     )
     payload = {"version": version, "labels": LABELS, "phrases": phrases}
+    if prompt_mode == "contrastive_transition":
+        payload["contrastive_rules"] = CONTRASTIVE_TRANSITION_RULES
     if prompt_mode != "baseline" or frame_order != "forward":
         payload.update({"prompt_mode": prompt_mode, "frame_order": frame_order})
     prompt_hash = hashlib.sha256(
@@ -85,7 +99,7 @@ def build_prompt(candidate_id, frame_count=8, prompt_mode="baseline"):
     if frame_count <= 0:
         raise ValueError("frame_count must be positive")
     mapping = digit_to_label(candidate_id)
-    if prompt_mode == "baseline":
+    if prompt_mode in ("baseline", "contrastive_transition"):
         phrases = ACTION_PHRASES
     elif prompt_mode == "phase_transition":
         phrases = PHASE_ACTION_DESCRIPTIONS
@@ -96,13 +110,14 @@ def build_prompt(candidate_id, frame_count=8, prompt_mode="baseline"):
         "{}: {} ({})".format(digit, label, definitions[label])
         for digit, label in zip(DIGITS, mapping)
     ]
+    guidance = ""
     if prompt_mode == "baseline":
         intro = (
             "The {} images above are frames sampled uniformly from one temporal proposal "
             "in chronological order. Classify the single dominant hand-object action. "
             "Choose exactly one option below.\n"
         ).format(frame_count)
-    else:
+    elif prompt_mode == "phase_transition":
         intro = (
             "The {} images above are frames sampled uniformly from one temporal proposal "
             "in chronological order. Infer the dominant goal-level hand-object action from "
@@ -111,9 +126,21 @@ def build_prompt(candidate_id, frame_count=8, prompt_mode="baseline"):
             "or hand motions when they are only incidental steps toward moving another object. "
             "Choose the option whose full state transition best matches the sequence.\n"
         ).format(frame_count)
+    else:
+        intro = (
+            "The {} images above are frames sampled uniformly from one temporal proposal "
+            "in chronological order. Classify the single dominant hand-object action that "
+            "is visibly supported. The proposal may contain only part of an action, so do "
+            "not invent an unseen intention or require a complete ideal action sequence. "
+            "Use temporal order only to resolve the specific confusing pairs below.\n"
+        ).format(frame_count)
+        guidance = "\nTemporal disambiguation rules:\n" + "\n".join(
+            "- " + rule for rule in CONTRASTIVE_TRANSITION_RULES
+        )
     return (
         intro
         + "\n".join(options)
+        + guidance
         + "\nAnswer immediately with exactly one digit from 0 to 9. Do not add "
         "words, punctuation, explanation, or formatting."
     )
@@ -481,7 +508,7 @@ def parse_args():
     parser.add_argument("--frame-count", type=int, default=8)
     parser.add_argument(
         "--prompt-mode",
-        choices=("baseline", "phase_transition"),
+        choices=("baseline", "phase_transition", "contrastive_transition"),
         default="baseline",
     )
     parser.add_argument(

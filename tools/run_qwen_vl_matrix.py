@@ -84,7 +84,7 @@ def parse_args():
     parser.add_argument("--frame-count", type=int, default=8)
     parser.add_argument(
         "--prompt-mode",
-        choices=("baseline", "phase_transition"),
+        choices=("baseline", "phase_transition", "contrastive_transition"),
         default="baseline",
     )
     parser.add_argument(
