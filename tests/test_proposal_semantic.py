@@ -757,6 +757,67 @@ def test_cotrain_target_selection_comes_from_vlm_not_student_logits():
     assert selection["q"].requires_grad is False
 
 
+def test_dual_stream_is_zero_initialized_and_detached_from_detector():
+    branch = proposal_semantic.VLMDualStreamSemanticBranch(
+        fpn_dim=4,
+        num_classes=3,
+        n_levels=2,
+        hidden_dim=8,
+        global_tokens=3,
+        max_delta=1.0,
+    )
+    features = [
+        torch.randn(2, 4, 7, requires_grad=True),
+        torch.randn(2, 4, 4, requires_grad=True),
+    ]
+    masks = [
+        torch.ones(2, 1, 7, dtype=torch.bool),
+        torch.ones(2, 1, 4, dtype=torch.bool),
+    ]
+    actionness = [
+        torch.zeros(2, 1, 7, requires_grad=True),
+        torch.zeros(2, 1, 4, requires_grad=True),
+    ]
+
+    output = branch(features, masks, foreground_gates=actionness)
+    assert [value.shape for value in output["semantic_logits"]] == [
+        (2, 7, 3), (2, 4, 3)
+    ]
+    assert all(torch.count_nonzero(value) == 0 for value in output["residuals"])
+    loss = sum(value.sum() for value in output["semantic_logits"])
+    loss = loss + sum(value.sum() for value in output["residuals"])
+    loss.backward()
+
+    assert branch.classifier.weight.grad is not None
+    assert all(value.grad is None for value in features)
+    assert all(value.grad is None for value in actionness)
+
+
+def test_dual_stream_actionness_and_validity_gate_dense_residual():
+    branch = proposal_semantic.VLMDualStreamSemanticBranch(
+        fpn_dim=4,
+        num_classes=2,
+        n_levels=1,
+        hidden_dim=8,
+        global_tokens=2,
+        max_delta=0.75,
+    )
+    with torch.no_grad():
+        branch.classifier.weight.fill_(0.1)
+    features = [torch.randn(1, 4, 5)]
+    masks = [torch.tensor([[[True, True, True, True, False]]])]
+    actionness = [torch.tensor([[[-20.0, 20.0, 20.0, -20.0, 20.0]]])]
+
+    residual = branch(
+        features, masks, foreground_gates=actionness
+    )["residuals"][0]
+
+    assert residual[:, 1:3].abs().sum() > 0
+    assert residual[:, [0, 3]].abs().max() < 1e-6
+    assert torch.count_nonzero(residual[:, 4]) == 0
+    assert residual.abs().max() <= 0.75
+
+
 def test_prototype_alignment_uses_soft_q_and_source_memory_without_q_gradient():
     branch = proposal_semantic.ProposalSemanticBranch(
         fpn_dim=1,

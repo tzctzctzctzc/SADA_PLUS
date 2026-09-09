@@ -53,6 +53,7 @@ from .proposal_semantic import (
     ProposalMLPLogitAdapter,
     ProposalSemanticBranch,
     VLMProposalCoAdaptationBranch,
+    VLMDualStreamSemanticBranch,
     ProposalTargetAdapter,
     build_teacher_proposals,
     cached_proposals_for_videos,
@@ -722,6 +723,12 @@ class SADA(nn.Module):
         self.proposal_background_anchor_confidence = float(
             proposal_cfg.get('background_anchor_confidence', 0.05)
         )
+        self.proposal_dual_hidden_dim = int(
+            proposal_cfg.get('dual_hidden_dim', 128)
+        )
+        self.proposal_dual_global_tokens = int(
+            proposal_cfg.get('dual_global_tokens', 32)
+        )
         if self.proposal_semantic_enabled:
             if (
                 self.proposal_semantic_source_weight < 0.0
@@ -759,6 +766,9 @@ class SADA(nn.Module):
                 or self.proposal_logit_architecture not in ('linear', 'mlp')
                 or self.proposal_background_anchor_weight < 0.0
                 or not 0.0 <= self.proposal_background_anchor_confidence <= 1.0
+                or self.proposal_dual_hidden_dim <= 0
+                or self.proposal_dual_hidden_dim % 4
+                or self.proposal_dual_global_tokens <= 0
             ):
                 raise ValueError('proposal semantic configuration is invalid')
         self.proposal_semantic_source_cache = {}
@@ -1381,6 +1391,21 @@ class SADA(nn.Module):
                             ),
                         )
                     )
+            elif self.proposal_semantic_mode == 'vlm_dual_stream':
+                # Keep all later detector initialization bit-identical to the
+                # control despite adding a new randomly initialized branch.
+                with torch.random.fork_rng(devices=[]):
+                    torch.manual_seed(0)
+                    self.proposal_semantic_branch = (
+                        VLMDualStreamSemanticBranch(
+                            fpn_dim=fpn_dim,
+                            num_classes=self.num_class_orig,
+                            n_levels=self.n_levels,
+                            hidden_dim=self.proposal_dual_hidden_dim,
+                            global_tokens=self.proposal_dual_global_tokens,
+                            max_delta=self.proposal_logit_max_delta,
+                        )
+                    )
             else:
                 self.proposal_semantic_branch = ProposalSemanticBranch(
                     fpn_dim=fpn_dim,
@@ -1963,7 +1988,89 @@ class SADA(nn.Module):
         curr_epoch,
         out_cls_logits_tgt_base=None,
         fpn_masks_tgt=None,
+        dual_stream_source_logits=None,
+        dual_stream_diagnostics=None,
     ):
+        if self.proposal_semantic_mode == 'vlm_dual_stream':
+            source = source_gt_proposals(
+                video_list_src,
+                self.num_class_orig,
+                self.n_levels,
+                self.reg_range,
+            )
+            source_loss, source_count = proposal_detection_loss(
+                dual_stream_source_logits,
+                source,
+                self.fpn_strides,
+                loss_type='known_soft_ce',
+                pooling='top1',
+            )
+            zero = source_loss * 0.0
+            direct_loss = zero
+            target_count = 0
+            selected_count = 0
+            stats = {
+                'eligible_count': 0,
+                'agreement_count': 0,
+                'mean_confidence': zero.detach(),
+            }
+            if curr_epoch >= self.proposal_semantic_target_start_epoch:
+                target = self._cached_semantic_proposals(
+                    self.proposal_semantic_target_cache, video_list_tgt
+                )
+                stats = prepare_vlm_proposal_targets(
+                    out_cls_logits_tgt_base,
+                    target,
+                    self.fpn_strides,
+                    policy='confident',
+                    confidence_threshold=(
+                        self.proposal_semantic_confidence_threshold
+                    ),
+                )
+                direct_loss, selected_count = proposal_detection_loss(
+                    out_cls_logits_tgt,
+                    target,
+                    self.fpn_strides,
+                    loss_type=self.proposal_direct_loss_type,
+                    pooling=self.proposal_direct_pooling,
+                    class_weights=self.proposal_direct_class_weights,
+                    base_logits=out_cls_logits_tgt_base,
+                )
+                target_count = sum(
+                    int(item['segments'].shape[0]) for item in target
+                )
+            diagnostics = dual_stream_diagnostics or {}
+            return {
+                'proposal_semantic_source_loss': source_loss,
+                'proposal_semantic_alignment_loss': zero,
+                'proposal_semantic_direct_loss': direct_loss,
+                'proposal_semantic_source_count': zero.new_tensor(
+                    float(source_count)
+                ),
+                'proposal_semantic_target_count': zero.new_tensor(
+                    float(target_count)
+                ),
+                'proposal_semantic_selected_count': zero.new_tensor(
+                    float(selected_count)
+                ),
+                'proposal_semantic_aligned_classes': zero.detach(),
+                'proposal_semantic_mean_entropy': zero.detach(),
+                'proposal_semantic_mean_confidence': stats[
+                    'mean_confidence'
+                ].detach(),
+                'proposal_semantic_eligible_count': zero.new_tensor(
+                    float(stats['eligible_count'])
+                ),
+                'proposal_semantic_agreement_count': zero.new_tensor(
+                    float(stats['agreement_count'])
+                ),
+                'proposal_dual_foreground_mean': diagnostics.get(
+                    'foreground_mean', zero.detach()
+                ).detach(),
+                'proposal_dual_residual_rms': diagnostics.get(
+                    'residual_rms', zero.detach()
+                ).detach(),
+            }
         if self.proposal_semantic_mode == 'vlm_cotrain':
             branch = self.proposal_semantic_branch
             source = source_gt_proposals(
@@ -2383,6 +2490,8 @@ class SADA(nn.Module):
             fpn_feats_tgt_cls, fpn_masks_tgt
         )
         out_cls_logits_tgt_detection = out_cls_logits_tgt
+        dual_stream_source_logits = None
+        dual_stream_diagnostics = None
         if self.proposal_semantic_mode.startswith('vlm_logit_'):
             enabled_levels = set(self.proposal_semantic_levels)
             out_cls_logits_tgt_detection = []
@@ -2436,6 +2545,33 @@ class SADA(nn.Module):
         # out_offset: List[B, 2, T_i]
         out_offsets_src, out_actionness_src = self.reg_head(fpn_feats_src, fpn_masks_src)
         out_offsets_tgt, out_actionness_tgt= self.reg_head_target(fpn_feats_tgt, fpn_masks_tgt)
+
+        if self.proposal_semantic_mode == 'vlm_dual_stream':
+            enabled_levels = set(self.proposal_semantic_levels)
+            target_semantics = self.proposal_semantic_branch(
+                fpn_feats_tgt,
+                fpn_masks_tgt,
+                foreground_gates=out_actionness_tgt,
+            )
+            out_cls_logits_tgt_detection = [
+                (
+                    logits.detach() + residual.permute(0, 2, 1)
+                    if level in enabled_levels else logits.detach()
+                )
+                for level, (logits, residual) in enumerate(zip(
+                    out_cls_logits_tgt,
+                    target_semantics['residuals'],
+                ))
+            ]
+            dual_stream_diagnostics = target_semantics
+            if mode != 'test':
+                source_semantics = self.proposal_semantic_branch(
+                    fpn_feats_src,
+                    fpn_masks_src,
+                )
+                dual_stream_source_logits = source_semantics[
+                    'semantic_logits'
+                ]
 
         out_validity_logits_src = None
         if self.validity_head_enabled:
@@ -2613,6 +2749,8 @@ class SADA(nn.Module):
                         for value in out_cls_logits_tgt
                     ],
                     fpn_masks_tgt=fpn_masks_tgt,
+                    dual_stream_source_logits=dual_stream_source_logits,
+                    dual_stream_diagnostics=dual_stream_diagnostics,
                 )
                 losses.update(proposal_losses)
                 losses['downstream_loss'] = (
@@ -2658,7 +2796,10 @@ class SADA(nn.Module):
             # Separate all the tensors into source and target
             out_cls_logits_src = [x[:bs] for x in out_cls_logits]
             out_cls_logits_tgt = [x[bs:] for x in out_cls_logits]
-            if self.proposal_semantic_mode.startswith('vlm_logit_'):
+            if (
+                self.proposal_semantic_mode.startswith('vlm_logit_')
+                or self.proposal_semantic_mode == 'vlm_dual_stream'
+            ):
                 out_cls_logits_tgt = out_cls_logits_tgt_detection
             
             out_offsets_src = [x[:bs] for x in out_offsets]

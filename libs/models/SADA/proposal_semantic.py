@@ -20,6 +20,7 @@ PROPOSAL_SEMANTIC_MODES = (
     "oracle_adapter_soft",
     "vlm",
     "vlm_cotrain",
+    "vlm_dual_stream",
     "vlm_logit_soft",
     "vlm_logit_confident",
     "vlm_logit_agree",
@@ -1209,3 +1210,131 @@ class VLMProposalCoAdaptationBranch(nn.Module):
                 )
             self.source_prototypes[class_id].copy_(F.normalize(center, dim=0))
             self.source_prototype_ready[class_id] = True
+
+
+class VLMDualStreamSemanticBranch(nn.Module):
+    """Detached long/short semantic stream with a bounded dense logit residual.
+
+    The detector is a read-only feature provider.  Local depthwise convolution
+    models short action dynamics, while dense queries attend to a small set of
+    mask-aware pooled tokens for long context.  A zero-initialized classifier
+    makes the initial detector exactly identical to the SADA control.
+    """
+
+    def __init__(
+        self,
+        fpn_dim,
+        num_classes,
+        n_levels,
+        hidden_dim=128,
+        global_tokens=32,
+        max_delta=1.0,
+    ):
+        super().__init__()
+        if int(hidden_dim) % 4:
+            raise ValueError("dual-stream hidden dimension must be divisible by 4")
+        if int(global_tokens) < 1:
+            raise ValueError("dual-stream global token count must be positive")
+        self.num_classes = int(num_classes)
+        self.n_levels = int(n_levels)
+        self.global_tokens = int(global_tokens)
+        self.max_delta = float(max_delta)
+        self.input_projection = nn.Conv1d(int(fpn_dim), int(hidden_dim), 1)
+        self.short_context = nn.Sequential(
+            nn.Conv1d(
+                int(hidden_dim), int(hidden_dim), 5,
+                padding=2, groups=int(hidden_dim), bias=False,
+            ),
+            nn.GELU(),
+            nn.Conv1d(int(hidden_dim), int(hidden_dim), 1, bias=False),
+        )
+        self.level_embedding = nn.Parameter(
+            torch.zeros(self.n_levels, int(hidden_dim))
+        )
+        self.query_norm = nn.LayerNorm(int(hidden_dim))
+        self.key_norm = nn.LayerNorm(int(hidden_dim))
+        self.long_context = nn.MultiheadAttention(
+            int(hidden_dim), num_heads=4, dropout=0.0, batch_first=True
+        )
+        self.fusion_norm = nn.LayerNorm(int(hidden_dim))
+        self.fusion_mlp = nn.Sequential(
+            nn.Linear(int(hidden_dim), int(hidden_dim) * 2),
+            nn.GELU(),
+            nn.Linear(int(hidden_dim) * 2, int(hidden_dim)),
+        )
+        self.output_norm = nn.LayerNorm(int(hidden_dim))
+        self.classifier = nn.Linear(
+            int(hidden_dim), self.num_classes, bias=False
+        )
+        nn.init.zeros_(self.classifier.weight)
+
+    @staticmethod
+    def _valid_mask(mask):
+        return mask.squeeze(1).bool() if mask.ndim == 3 else mask.bool()
+
+    def _pool_global_tokens(self, features, valid):
+        token_count = min(self.global_tokens, features.shape[-1])
+        weights = valid[:, None, :].to(features.dtype)
+        numerator = F.adaptive_avg_pool1d(features * weights, token_count)
+        denominator = F.adaptive_avg_pool1d(weights, token_count)
+        pooled = numerator / denominator.clamp(min=1e-6)
+        pooled_valid = denominator.squeeze(1) > 0
+        return pooled.transpose(1, 2), pooled_valid
+
+    def forward(self, fpn_feats, fpn_masks, foreground_gates=None):
+        if len(fpn_feats) != self.n_levels or len(fpn_masks) != self.n_levels:
+            raise ValueError("dual-stream inputs do not match the FPN level count")
+        if foreground_gates is not None and len(foreground_gates) != self.n_levels:
+            raise ValueError("dual-stream foreground gates do not match FPN levels")
+
+        semantic_logits = []
+        residuals = []
+        foreground_sum = fpn_feats[0].new_tensor(0.0)
+        foreground_count = 0
+        residual_square_sum = fpn_feats[0].new_tensor(0.0)
+        residual_count = 0
+        for level, (features, mask) in enumerate(zip(fpn_feats, fpn_masks)):
+            # This detach is the architectural boundary, not a training option.
+            features = features.detach()
+            valid = self._valid_mask(mask).detach()
+            x = self.input_projection(features)
+            x = x * valid[:, None, :].to(x.dtype)
+            short = self.short_context(x)
+            tokens = (x + short).transpose(1, 2)
+            tokens = tokens + self.level_embedding[level][None, None, :]
+            pooled, pooled_valid = self._pool_global_tokens(x, valid)
+            long, _ = self.long_context(
+                self.query_norm(tokens),
+                self.key_norm(pooled),
+                pooled,
+                key_padding_mask=~pooled_valid,
+                need_weights=False,
+            )
+            fused = self.fusion_norm(tokens + long)
+            fused = self.output_norm(fused + self.fusion_mlp(fused))
+            raw_logits = self.classifier(fused)
+            residual = self.max_delta * torch.tanh(raw_logits)
+
+            if foreground_gates is None:
+                foreground = valid.to(residual.dtype)
+            else:
+                foreground = foreground_gates[level].detach()
+                if foreground.ndim == 3:
+                    foreground = foreground.squeeze(1)
+                foreground = foreground.sigmoid() * valid.to(foreground.dtype)
+            residual = residual * foreground.unsqueeze(-1)
+            semantic_logits.append(raw_logits)
+            residuals.append(residual)
+            foreground_sum = foreground_sum + foreground.sum()
+            foreground_count += int(valid.sum())
+            residual_square_sum = residual_square_sum + residual.pow(2).sum()
+            residual_count += residual.numel()
+
+        return {
+            "semantic_logits": semantic_logits,
+            "residuals": residuals,
+            "foreground_mean": foreground_sum / max(foreground_count, 1),
+            "residual_rms": (
+                residual_square_sum / max(residual_count, 1)
+            ).sqrt(),
+        }

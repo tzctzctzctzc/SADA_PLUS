@@ -1156,7 +1156,7 @@ def create_argparser():
             'off', 'source', 'teacher', 'oracle_center',
             'oracle_dominant', 'oracle_soft', 'oracle_adapter_center',
             'oracle_adapter_dominant', 'oracle_adapter_soft', 'vlm',
-            'vlm_cotrain',
+            'vlm_cotrain', 'vlm_dual_stream',
             'vlm_logit_soft', 'vlm_logit_confident', 'vlm_logit_agree',
         ],
         default='off',
@@ -1181,6 +1181,14 @@ def create_argparser():
     parser.add_argument('--proposal-semantic-direct-weight', type=float, default=1.0)
     parser.add_argument('--proposal-semantic-adapter-bottleneck', type=int, default=64)
     parser.add_argument('--proposal-semantic-logit-max-delta', type=float, default=2.0)
+    parser.add_argument(
+        '--proposal-semantic-dual-hidden-dim', type=int, default=128,
+        help='hidden width of the detached long/short semantic stream',
+    )
+    parser.add_argument(
+        '--proposal-semantic-dual-global-tokens', type=int, default=32,
+        help='mask-aware pooled tokens used by dual-stream long attention',
+    )
     parser.add_argument(
         '--proposal-semantic-logit-architecture',
         choices=['linear', 'mlp'],
@@ -1689,7 +1697,9 @@ if __name__ == '__main__':
             args.resume is None
             and args.proposal_semantic_init_from_sada is None
             and args.proposal_semantic_continue_from_sada is None
-            and args.proposal_semantic_mode != 'vlm_cotrain'
+            and args.proposal_semantic_mode not in (
+                'vlm_cotrain', 'vlm_dual_stream'
+            )
         ):
             raise ValueError(
                 'a proposal semantic run requires a proposal-semantic start '
@@ -1701,6 +1711,9 @@ if __name__ == '__main__':
             or args.proposal_semantic_direct_weight < 0.0
             or args.proposal_semantic_adapter_bottleneck <= 0
             or args.proposal_semantic_logit_max_delta <= 0.0
+            or args.proposal_semantic_dual_hidden_dim <= 0
+            or args.proposal_semantic_dual_hidden_dim % 4
+            or args.proposal_semantic_dual_global_tokens <= 0
             or args.proposal_semantic_target_start_epoch < 1
             or not 0.0 < args.proposal_semantic_score_threshold <= 1.0
             or args.proposal_semantic_max_proposals < 1
@@ -1812,7 +1825,7 @@ if __name__ == '__main__':
                     )
                 proposal_selection_mode = 'fixed_external_teacher'
     elif (
-        args.proposal_semantic_mode == 'vlm_cotrain'
+        args.proposal_semantic_mode in ('vlm_cotrain', 'vlm_dual_stream')
         and target_cache_payload is not None
     ):
         if not args.proposal_semantic_external_selection:
@@ -1831,7 +1844,7 @@ if __name__ == '__main__':
             )
         )
         or (
-            args.proposal_semantic_mode == 'vlm_cotrain'
+            args.proposal_semantic_mode in ('vlm_cotrain', 'vlm_dual_stream')
             and target_cache_payload is not None
         )
     ):
@@ -1852,6 +1865,8 @@ if __name__ == '__main__':
         'direct_weight': args.proposal_semantic_direct_weight,
         'adapter_bottleneck': args.proposal_semantic_adapter_bottleneck,
         'logit_max_delta': args.proposal_semantic_logit_max_delta,
+        'dual_hidden_dim': args.proposal_semantic_dual_hidden_dim,
+        'dual_global_tokens': args.proposal_semantic_dual_global_tokens,
         'logit_architecture': args.proposal_semantic_logit_architecture,
         'logit_gate': args.proposal_semantic_logit_gate,
         'direct_loss_type': args.proposal_semantic_direct_loss,

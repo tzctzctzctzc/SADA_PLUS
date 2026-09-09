@@ -478,11 +478,22 @@ def freeze_sada_except_validity_head(model):
 
 
 def clip_grad_norm_with_isolated_validity_head(model, max_norm):
-    """Clip base-model and Validity Head gradients without norm coupling."""
+    """Clip auxiliary heads without coupling their norm to the detector."""
+    isolated_modules = []
     validity_head = getattr(model, "validity_head", None)
-    if validity_head is None:
+    if validity_head is not None:
+        isolated_modules.append(validity_head)
+    if getattr(model, "proposal_semantic_mode", None) == "vlm_dual_stream":
+        semantic_branch = getattr(model, "proposal_semantic_branch", None)
+        if semantic_branch is not None:
+            isolated_modules.append(semantic_branch)
+    if not isolated_modules:
         return torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm), None
-    head_parameters = tuple(validity_head.parameters())
+    head_parameters = tuple(
+        parameter
+        for module in isolated_modules
+        for parameter in module.parameters()
+    )
     head_parameter_ids = {id(parameter) for parameter in head_parameters}
     base_parameters = tuple(
         parameter
