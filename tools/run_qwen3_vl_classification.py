@@ -21,6 +21,18 @@ LABEL_TO_ID = {label: index for index, label in enumerate(LABELS)}
 DIGITS = tuple(str(index) for index in range(len(LABELS)))
 PROMPT_VERSION = "qwen3-vl-8b-ordered-images-digit-logits-v1"
 WIRE_API = "qwen3-vl-next-token-classification"
+PHASE_ACTION_DESCRIPTIONS = (
+    "the main object starts resting or not held, the hand grasps it, and it ends held or moved away",
+    "the main object starts held, the hand places it, and it ends resting or released; ignore opening or closing a container when that is only an enabling sub-action",
+    "the object is cleaned through a sustained sequence such as rinsing, rubbing, or washing",
+    "the container, door, lid, or barrier itself changes from closed to open; do not choose this when opening is only incidental to moving another object",
+    "the container, door, lid, or barrier itself changes from open to closed; do not choose this when closing is only incidental to moving another object",
+    "the main object starts outside a slot, opening, or container and ends inserted inside it",
+    "a device, light, flame, or flow changes from inactive or off to active or on",
+    "a cutting tool repeatedly contacts an object and divides or slices it",
+    "a device, light, flame, or flow changes from active or on to inactive or off",
+    "a container tilts and its contents visibly flow or are transferred out",
+)
 PROMPT_SHA256 = hashlib.sha256(
     json.dumps(
         {
@@ -33,6 +45,32 @@ PROMPT_SHA256 = hashlib.sha256(
 ).hexdigest()
 
 
+def prompt_protocol(base_version, prompt_mode="baseline", frame_order="forward"):
+    if prompt_mode not in ("baseline", "phase_transition"):
+        raise ValueError("unknown prompt mode: {}".format(prompt_mode))
+    if frame_order not in ("forward", "reverse"):
+        raise ValueError("unknown frame order: {}".format(frame_order))
+    version = base_version
+    if prompt_mode == "phase_transition":
+        version = version.replace(
+            "-digit-logits-v1", "-phase-transition-digit-logits-v1"
+        )
+    if frame_order == "reverse":
+        version = version.replace("-digit-logits-v1", "-reverse-digit-logits-v1")
+    phrases = (
+        ACTION_PHRASES
+        if prompt_mode == "baseline"
+        else PHASE_ACTION_DESCRIPTIONS
+    )
+    payload = {"version": version, "labels": LABELS, "phrases": phrases}
+    if prompt_mode != "baseline" or frame_order != "forward":
+        payload.update({"prompt_mode": prompt_mode, "frame_order": frame_order})
+    prompt_hash = hashlib.sha256(
+        json.dumps(payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return version, prompt_hash
+
+
 def digit_to_label(candidate_id):
     """Deterministically shuffle label positions to cancel digit-position bias."""
     seed = int.from_bytes(
@@ -43,20 +81,36 @@ def digit_to_label(candidate_id):
     return tuple(labels)
 
 
-def build_prompt(candidate_id, frame_count=8):
+def build_prompt(candidate_id, frame_count=8, prompt_mode="baseline"):
     if frame_count <= 0:
         raise ValueError("frame_count must be positive")
     mapping = digit_to_label(candidate_id)
-    definitions = {label: phrase for label, phrase in zip(LABELS, ACTION_PHRASES)}
+    if prompt_mode == "baseline":
+        phrases = ACTION_PHRASES
+    elif prompt_mode == "phase_transition":
+        phrases = PHASE_ACTION_DESCRIPTIONS
+    else:
+        raise ValueError("unknown prompt mode: {}".format(prompt_mode))
+    definitions = {label: phrase for label, phrase in zip(LABELS, phrases)}
     options = [
         "{}: {} ({})".format(digit, label, definitions[label])
         for digit, label in zip(DIGITS, mapping)
     ]
-    intro = (
-        "The {} images above are frames sampled uniformly from one temporal proposal "
-        "in chronological order. Classify the single dominant hand-object action. "
-        "Choose exactly one option below.\n"
-    ).format(frame_count)
+    if prompt_mode == "baseline":
+        intro = (
+            "The {} images above are frames sampled uniformly from one temporal proposal "
+            "in chronological order. Classify the single dominant hand-object action. "
+            "Choose exactly one option below.\n"
+        ).format(frame_count)
+    else:
+        intro = (
+            "The {} images above are frames sampled uniformly from one temporal proposal "
+            "in chronological order. Infer the dominant goal-level hand-object action from "
+            "the change between the early, middle, and late frames. Track the main object's "
+            "state before and after the interaction. Ignore visually salient opening, closing, "
+            "or hand motions when they are only incidental steps toward moving another object. "
+            "Choose the option whose full state transition best matches the sequence.\n"
+        ).format(frame_count)
     return (
         intro
         + "\n".join(options)
@@ -65,10 +119,18 @@ def build_prompt(candidate_id, frame_count=8):
     )
 
 
-def prompt_sha256(candidate_id, frame_count=8):
+def prompt_sha256(candidate_id, frame_count=8, prompt_mode="baseline"):
     return hashlib.sha256(
-        build_prompt(candidate_id, frame_count).encode("utf-8")
+        build_prompt(candidate_id, frame_count, prompt_mode).encode("utf-8")
     ).hexdigest()
+
+
+def ordered_frame_paths(paths, frame_order="forward"):
+    if frame_order == "forward":
+        return list(paths)
+    if frame_order == "reverse":
+        return list(reversed(paths))
+    raise ValueError("unknown frame order: {}".format(frame_order))
 
 
 def build_messages(paths, prompt, min_pixels, max_pixels):
@@ -172,7 +234,8 @@ def load_qwen3(args):
 
 def infer_one(runtime, paths, candidate_id, args):
     torch = runtime["torch"]
-    prompt = build_prompt(candidate_id, args.frame_count)
+    prompt_mode = getattr(args, "prompt_mode", "baseline")
+    prompt = build_prompt(candidate_id, args.frame_count, prompt_mode)
     mapping = digit_to_label(candidate_id)
     messages = build_messages(paths, prompt, args.min_pixels, args.max_pixels)
     chat_template_kwargs = runtime.get("chat_template_kwargs", {})
@@ -222,13 +285,14 @@ def infer_one(runtime, paths, candidate_id, args):
 def prediction_is_current(row, args):
     candidate_id = row.get("candidate_id")
     frame_count = getattr(args, "frame_count", 8)
+    prompt_mode = getattr(args, "prompt_mode", "baseline")
     return bool(
         candidate_id
         and row.get("status") == "ok"
         and row.get("model") == args.model_path
         and row.get("prompt_version") == PROMPT_VERSION
         and row.get("prompt_sha256") == prompt_sha256(
-            candidate_id, frame_count
+            candidate_id, frame_count, prompt_mode
         )
         and row.get("wire_api") == WIRE_API
     )
@@ -256,6 +320,9 @@ def score_manifest(runtime, manifest_path, output_path, frame_cache,
                 cache_namespace,
                 row["candidate_id"],
                 frame_count=args.frame_count,
+            )
+            paths = ordered_frame_paths(
+                paths, getattr(args, "frame_order", "forward")
             )
             scores = infer_one(runtime, paths, row["candidate_id"], args)
             result = {
@@ -412,6 +479,14 @@ def parse_args():
         "--dtype", choices=("auto", "bfloat16", "float16"), default="bfloat16"
     )
     parser.add_argument("--frame-count", type=int, default=8)
+    parser.add_argument(
+        "--prompt-mode",
+        choices=("baseline", "phase_transition"),
+        default="baseline",
+    )
+    parser.add_argument(
+        "--frame-order", choices=("forward", "reverse"), default="forward"
+    )
     parser.add_argument("--min-pixels", type=int, default=224 * 224)
     parser.add_argument("--max-pixels", type=int, default=448 * 448)
     parser.add_argument("--score-temperature", type=float, default=1.0)
@@ -428,6 +503,7 @@ def parse_args():
 
 
 def main():
+    global PROMPT_VERSION, PROMPT_SHA256
     args = parse_args()
     if args.frame_count <= 0:
         raise ValueError("frame count must be positive")
@@ -435,6 +511,9 @@ def main():
         raise ValueError("pixel limits must satisfy 0 < min <= max")
     if args.score_temperature <= 0:
         raise ValueError("score temperature must be positive")
+    PROMPT_VERSION, PROMPT_SHA256 = prompt_protocol(
+        PROMPT_VERSION, args.prompt_mode, args.frame_order
+    )
     runtime = load_qwen3(args)
     score_manifest(
         runtime,

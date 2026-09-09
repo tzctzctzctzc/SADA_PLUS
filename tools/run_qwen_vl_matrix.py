@@ -1,8 +1,6 @@
 """Run one local Qwen classifier across the six SADA shifts with one load."""
 
 import argparse
-import hashlib
-import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,7 +10,12 @@ from tools import run_qwen3_vl_classification as base
 SHIFT_NAMES = ("S1", "S2", "S3", "S4", "S5", "S6")
 
 
-def protocol(model_family, frame_count=8):
+def protocol(
+    model_family,
+    frame_count=8,
+    prompt_mode="baseline",
+    frame_order="forward",
+):
     if model_family == "qwen3-8b":
         version = "qwen3-vl-8b-ordered-images-digit-logits-v1"
         wire_api = "qwen3-vl-next-token-classification"
@@ -28,16 +31,9 @@ def protocol(model_family, frame_count=8):
         version = version.replace(
             "-digit-logits-v1", "-{}f-digit-logits-v1".format(frame_count)
         )
-    prompt_sha = hashlib.sha256(
-        json.dumps(
-            {
-                "version": version,
-                "labels": base.LABELS,
-                "phrases": base.ACTION_PHRASES,
-            },
-            sort_keys=True,
-        ).encode("utf-8")
-    ).hexdigest()
+    version, prompt_sha = base.prompt_protocol(
+        version, prompt_mode, frame_order
+    )
     return version, wire_api, prompt_sha
 
 
@@ -86,6 +82,14 @@ def parse_args():
         "--dtype", choices=("auto", "bfloat16", "float16"), default="bfloat16"
     )
     parser.add_argument("--frame-count", type=int, default=8)
+    parser.add_argument(
+        "--prompt-mode",
+        choices=("baseline", "phase_transition"),
+        default="baseline",
+    )
+    parser.add_argument(
+        "--frame-order", choices=("forward", "reverse"), default="forward"
+    )
     parser.add_argument("--min-pixels", type=int, default=224 * 224)
     parser.add_argument("--max-pixels", type=int, default=448 * 448)
     parser.add_argument("--score-temperature", type=float, default=1.0)
@@ -109,7 +113,10 @@ def main():
     if args.frame_count <= 0 or args.min_pixels <= 0 or args.max_pixels < args.min_pixels:
         raise ValueError("invalid frame or pixel limits")
     version, wire_api, prompt_sha = protocol(
-        args.model_family, args.frame_count
+        args.model_family,
+        args.frame_count,
+        args.prompt_mode,
+        args.frame_order,
     )
     base.PROMPT_VERSION = version
     base.PROMPT_SHA256 = prompt_sha

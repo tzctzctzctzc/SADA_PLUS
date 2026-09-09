@@ -8,10 +8,13 @@ from tools.run_qwen3_vl_classification import (
     build_prompt,
     digit_to_label,
     normalize_digit_logits,
+    ordered_frame_paths,
     prediction_is_current,
+    prompt_protocol,
     prompt_sha256,
     resolve_digit_token_ids,
 )
+from tools.analyze_phase_counterfactual import counterfactual_probabilities
 from tools.run_qwen_vl_matrix import protocol
 
 
@@ -43,6 +46,29 @@ def test_prompt_reflects_dense_frame_count():
     assert prompt_sha256("proposal-1", frame_count=16) != prompt_sha256(
         "proposal-1", frame_count=8
     )
+
+
+def test_phase_prompt_describes_state_transitions_and_incidental_actions():
+    prompt = build_prompt("proposal-1", prompt_mode="phase_transition")
+    assert "early, middle, and late frames" in prompt
+    assert "starts resting or not held" in prompt
+    assert "only an enabling sub-action" in prompt
+    assert prompt_sha256(
+        "proposal-1", prompt_mode="phase_transition"
+    ) != prompt_sha256("proposal-1")
+
+
+def test_reverse_order_and_protocol_are_explicit():
+    assert ordered_frame_paths([1, 2, 3], "reverse") == [3, 2, 1]
+    version, prompt_hash = prompt_protocol(
+        "qwen3-vl-8b-ordered-images-digit-logits-v1",
+        "phase_transition",
+        "reverse",
+    )
+    assert version == (
+        "qwen3-vl-8b-ordered-images-phase-transition-reverse-digit-logits-v1"
+    )
+    assert len(prompt_hash) == 64
 
 
 def test_build_messages_keeps_eight_images_separate_and_ordered(tmp_path):
@@ -102,3 +128,13 @@ def test_qwen3_8b_and_32b_use_the_same_wire_protocol():
 def test_dense_frame_protocol_is_versioned():
     version, _, _ = protocol("qwen3-32b", frame_count=16)
     assert version == "qwen3-vl-32b-ordered-images-16f-digit-logits-v1"
+
+
+def test_counterfactual_fusion_maps_reverse_directional_classes():
+    forward = [0.01] * len(LABELS)
+    reverse = [0.01] * len(LABELS)
+    forward[LABELS.index("TAKE")] = 0.91
+    reverse[LABELS.index("PUT")] = 0.91
+    fused = counterfactual_probabilities(forward, reverse)
+    assert LABELS[max(range(len(LABELS)), key=fused.__getitem__)] == "TAKE"
+    assert abs(sum(fused) - 1.0) < 1e-8
