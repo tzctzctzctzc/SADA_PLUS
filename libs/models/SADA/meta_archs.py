@@ -47,6 +47,11 @@ from .target_adapter import (
     load_vlm_target_adapter_cache,
 )
 from .conditional_alignment import aggregate_conditional_class_losses
+from .vlm_relation import (
+    load_vlm_relation_cache,
+    proposal_relation_loss,
+    relation_proposals_for_videos,
+)
 from .proposal_semantic import (
     PROPOSAL_SEMANTIC_MODES,
     ProposalLogitAdapter,
@@ -650,6 +655,48 @@ class SADA(nn.Module):
                 self.vlm_target_adapter_cache_sha256,
                 self.vlm_target_adapter_payload,
             ) = load_vlm_target_adapter_cache(cache_path)
+        relation_cfg = cfg.get('vlm_relation', {})
+        self.vlm_relation_enabled = bool(relation_cfg.get('enabled', False))
+        self.vlm_relation_weight = float(relation_cfg.get('weight', 0.1))
+        self.vlm_relation_start_epoch = int(
+            relation_cfg.get('start_epoch', 5)
+        )
+        self.vlm_relation_ramp_epochs = int(
+            relation_cfg.get('ramp_epochs', 5)
+        )
+        self.vlm_relation_levels = tuple(
+            int(level) for level in relation_cfg.get('levels', [0, 1, 2])
+        )
+        self.vlm_relation_max_gap_seconds = float(
+            relation_cfg.get('max_gap_seconds', 30.0)
+        )
+        if (
+            self.vlm_relation_weight <= 0.0
+            or self.vlm_relation_start_epoch < 1
+            or self.vlm_relation_ramp_epochs < 1
+            or self.vlm_relation_max_gap_seconds <= 0.0
+            or not self.vlm_relation_levels
+            or len(set(self.vlm_relation_levels)) != len(self.vlm_relation_levels)
+            or any(
+                level < 0 or level >= self.n_levels
+                for level in self.vlm_relation_levels
+            )
+        ):
+            raise ValueError('VLM relation configuration is invalid')
+        self.vlm_relation_cache = {}
+        self.vlm_relation_entry_count = 0
+        self.vlm_relation_cache_sha256 = None
+        self.vlm_relation_payload = None
+        if self.vlm_relation_enabled:
+            cache_path = relation_cfg.get('cache_path')
+            if not cache_path:
+                raise ValueError('VLM relation supervision requires a cache')
+            (
+                self.vlm_relation_cache,
+                self.vlm_relation_entry_count,
+                self.vlm_relation_cache_sha256,
+                self.vlm_relation_payload,
+            ) = load_vlm_relation_cache(cache_path)
         proposal_cfg = cfg.get('proposal_semantic', {})
         self.proposal_semantic_mode = proposal_cfg.get('mode', 'off')
         if self.proposal_semantic_mode not in PROPOSAL_SEMANTIC_MODES:
@@ -989,6 +1036,22 @@ class SADA(nn.Module):
         ):
             raise ValueError(
                 'proposal semantics require an otherwise original SADA run'
+            )
+        if self.vlm_relation_enabled and (
+            self.stage1_enabled
+            or vlm_cfg.get('enabled', False)
+            or self.vlm_target_adapter_enabled
+            or self.proposal_semantic_enabled
+            or self.conditional_paired_support
+            or self.oracle_routing_mode != 'off'
+            or self.oracle_forgetting_mode != 'off'
+            or self.oracle_target_regression_mode != 'off'
+            or self.oracle_target_distillation_mode != 'off'
+            or self.binary_band_oracle_mode != 'off'
+            or cfg.get('validity_head', {}).get('enabled', False)
+        ):
+            raise ValueError(
+                'VLM relation supervision requires an otherwise original SADA run'
             )
         assert len(self.fpn_strides) == len(self.reg_range)
         self.scale_factor = scale_factor
@@ -2921,6 +2984,54 @@ class SADA(nn.Module):
                         'proposal_semantic_background_anchor_loss',
                         losses['downstream_loss'] * 0.0,
                     )
+                )
+            if mode == 'train' and self.vlm_relation_enabled:
+                relation_ramp = 0.0
+                relation_stats = {
+                    'pair_count': 0,
+                    'target_distance': losses['downstream_loss'].detach() * 0.0,
+                    'model_distance': losses['downstream_loss'].detach() * 0.0,
+                }
+                relation_loss = losses['downstream_loss'] * 0.0
+                if curr_epoch >= self.vlm_relation_start_epoch:
+                    relation_proposals = relation_proposals_for_videos(
+                        self.vlm_relation_cache,
+                        video_list_tgt,
+                        self.n_levels,
+                        fpn_feats_tgt[0].device,
+                        fpn_feats_tgt[0].dtype,
+                        self.vlm_relation_levels,
+                    )
+                    relation_loss, relation_stats = proposal_relation_loss(
+                        fpn_feats_tgt,
+                        relation_proposals,
+                        self.fpn_strides,
+                        self.vlm_relation_max_gap_seconds,
+                    )
+                    relation_ramp = min(
+                        1.0,
+                        float(
+                            curr_epoch - self.vlm_relation_start_epoch + 1
+                        ) / self.vlm_relation_ramp_epochs,
+                    )
+                weighted_relation_loss = (
+                    self.vlm_relation_weight * relation_ramp * relation_loss
+                )
+                losses['loss_vlm_relation'] = relation_loss
+                losses['vlm_relation_weighted_loss'] = weighted_relation_loss
+                losses['vlm_relation_pair_count'] = torch.as_tensor(
+                    relation_stats['pair_count'],
+                    device=fpn_feats_tgt[0].device,
+                    dtype=fpn_feats_tgt[0].dtype,
+                )
+                losses['vlm_relation_target_distance'] = (
+                    relation_stats['target_distance']
+                )
+                losses['vlm_relation_model_distance'] = (
+                    relation_stats['model_distance']
+                )
+                losses['downstream_loss'] = (
+                    losses['downstream_loss'] + weighted_relation_loss
                 )
             
             # Return the GTs of the target domain as well, to be used to compute the anchors

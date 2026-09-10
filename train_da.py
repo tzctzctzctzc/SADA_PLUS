@@ -39,6 +39,7 @@ from libs.models.SADA.target_adapter import (
     validate_vlm_target_adapter_resume,
 )
 from libs.models.SADA.proposal_semantic import load_proposal_semantic_cache
+from libs.models.SADA.vlm_relation import load_vlm_relation_cache
 
 os.environ['NUMBA_NUM_THREADS'] = "8"
 
@@ -1172,6 +1173,15 @@ def create_argparser():
         ),
     )
     parser.add_argument(
+        '--vlm-relation-cache', default=None,
+        help='prompt-free frozen VLM intermediate features for target relations',
+    )
+    parser.add_argument('--vlm-relation-weight', type=float, default=0.1)
+    parser.add_argument('--vlm-relation-start-epoch', type=int, default=5)
+    parser.add_argument('--vlm-relation-ramp-epochs', type=int, default=5)
+    parser.add_argument('--vlm-relation-levels', default='0,1,2')
+    parser.add_argument('--vlm-relation-max-gap', type=float, default=30.0)
+    parser.add_argument(
         '--proposal-semantic-init-weights',
         choices=['student', 'ema'],
         default='ema',
@@ -1693,6 +1703,70 @@ if __name__ == '__main__':
         'selection_rule': args.vlm_target_adapter_policy,
         'selection_provenance_mode': selection_mode,
     }
+    vlm_relation_enabled = args.vlm_relation_cache is not None
+    relation_levels = [
+        int(level.strip())
+        for level in args.vlm_relation_levels.split(',')
+        if level.strip()
+    ]
+    if (
+        not relation_levels
+        or len(set(relation_levels)) != len(relation_levels)
+        or any(level < 0 or level > 5 for level in relation_levels)
+        or args.vlm_relation_weight <= 0.0
+        or args.vlm_relation_start_epoch < 1
+        or args.vlm_relation_ramp_epochs < 1
+        or args.vlm_relation_max_gap <= 0.0
+    ):
+        raise ValueError('VLM relation configuration is invalid')
+    relation_cache_sha256 = None
+    relation_entry_count = 0
+    relation_payload = None
+    if vlm_relation_enabled:
+        if (
+            config_dict.get('dataset_name') != 'epic'
+            or config_dict['dataset'].get('action_subsampling')
+            != '10_majority_classes'
+        ):
+            raise ValueError(
+                'VLM relation supervision currently requires '
+                'EPIC 10-majority-classes'
+            )
+        (
+            _, relation_entry_count, relation_cache_sha256, relation_payload,
+        ) = load_vlm_relation_cache(args.vlm_relation_cache)
+        if (
+            vlm_enabled
+            or vlm_target_adapter_enabled
+            or effective_stage1 != 'off'
+            or args.oracle_routing != 'off'
+            or args.oracle_forgetting != 'off'
+            or args.oracle_target_regression != 'off'
+            or args.oracle_target_distillation != 'off'
+            or args.binary_band_oracle != 'off'
+            or args.conditional_paired_support
+            or args.conditional_paired_fixed_denominator
+        ):
+            raise ValueError(
+                'VLM relation supervision requires original SADA routing'
+            )
+    config_dict['vlm_relation'] = {
+        'enabled': vlm_relation_enabled,
+        'cache_path': args.vlm_relation_cache,
+        'cache_sha256': relation_cache_sha256,
+        'entry_count': relation_entry_count,
+        'feature_layer': (
+            relation_payload.get('feature_layer') if relation_payload else None
+        ),
+        'selection_provenance_mode': (
+            'fixed_external_teacher' if vlm_relation_enabled else None
+        ),
+        'weight': args.vlm_relation_weight,
+        'start_epoch': args.vlm_relation_start_epoch,
+        'ramp_epochs': args.vlm_relation_ramp_epochs,
+        'levels': relation_levels,
+        'max_gap_seconds': args.vlm_relation_max_gap,
+    }
     proposal_semantic_enabled = args.proposal_semantic_mode != 'off'
     proposal_levels = [
         int(level.strip())
@@ -1708,6 +1782,10 @@ if __name__ == '__main__':
             'proposal semantic levels must be unique values from 0 to 5'
         )
     if proposal_semantic_enabled:
+        if vlm_relation_enabled:
+            raise ValueError(
+                'VLM relation and proposal semantic experiments are mutually exclusive'
+            )
         if (
             config_dict.get('dataset_name') != 'epic'
             or config_dict['dataset'].get('action_subsampling')
