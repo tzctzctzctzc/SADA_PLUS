@@ -22,7 +22,7 @@ manifest=${SADA_TARGET_MANIFEST:-artifacts/matrix_manifests/S5/target_train_mani
 cache=${SADA_QWEN_RELATION_CACHE:-$feature_root/target_deepstack0_relation.npz}
 artifact_root=${SADA_RELATION_ARTIFACT_ROOT:-artifacts/s5_qwen_relation_20260910}
 gpu=${GPU:-4}
-name=s5_trident_qwen8_relation_deepstack0_e50_seed123_20260910
+name=s5_trident_qwen8_relation_deepstack0_e50_seed123_v2_20260910
 log="$artifact_root/logs/${name}.log"
 
 cd "$root"

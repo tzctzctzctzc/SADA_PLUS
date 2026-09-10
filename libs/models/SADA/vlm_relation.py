@@ -125,29 +125,21 @@ def relation_proposals_for_videos(cache, videos, n_levels, device, dtype, levels
                     [[row[0], row[1]] for row in rows], device=device, dtype=dtype
                 ),
                 "levels": torch.tensor(
-                    [row[2] for row in rows], device=device, dtype=torch.long
+                    [row[2] for row in rows], dtype=torch.long
                 ),
                 "centers": torch.tensor(
-                    [row[3] for row in rows], device=device, dtype=dtype
-                ),
-                "teacher_scores": torch.tensor(
-                    [row[4] for row in rows], device=device, dtype=dtype
+                    [row[3] for row in rows], dtype=torch.float32
                 ),
                 "static_features": torch.stack([row[5] for row in rows]).to(
-                    device=device, dtype=dtype
-                ),
-                "transition_features": torch.stack([row[6] for row in rows]).to(
                     device=device, dtype=dtype
                 ),
             })
         else:
             output.append({
                 "segments": torch.zeros((0, 2), device=device, dtype=dtype),
-                "levels": torch.empty(0, device=device, dtype=torch.long),
-                "centers": torch.empty(0, device=device, dtype=dtype),
-                "teacher_scores": torch.empty(0, device=device, dtype=dtype),
+                "levels": torch.empty(0, dtype=torch.long),
+                "centers": torch.empty(0, dtype=torch.float32),
                 "static_features": torch.empty((0, 0), device=device, dtype=dtype),
-                "transition_features": torch.empty((0, 0), device=device, dtype=dtype),
             })
     return output
 
@@ -185,33 +177,46 @@ def proposal_relation_loss(
     losses, target_distances, model_distances = [], [], []
     for batch_index, proposal in enumerate(proposals):
         count = proposal["segments"].shape[0]
-        for left in range(max(count - 1, 0)):
-            right = left + 1
-            if float(proposal["centers"][right] - proposal["centers"][left]) > max_gap_seconds:
-                continue
-            left_level = int(proposal["levels"][left])
-            right_level = int(proposal["levels"][right])
-            left_feature = _pool_proposal(
-                fpn_feats, batch_index, proposal["segments"][left],
-                left_level, fpn_strides,
+        if count < 2:
+            continue
+        level_values = proposal["levels"].tolist()
+        center_values = proposal["centers"].tolist()
+        pooled_features = torch.stack([
+            _pool_proposal(
+                fpn_feats,
+                batch_index,
+                proposal["segments"][index],
+                int(level_values[index]),
+                fpn_strides,
             )
-            right_feature = _pool_proposal(
-                fpn_feats, batch_index, proposal["segments"][right],
-                right_level, fpn_strides,
-            )
-            model_distance = 1.0 - F.cosine_similarity(
-                left_feature[None], right_feature[None]
-            )[0]
-            target_distance = 1.0 - F.cosine_similarity(
-                proposal["static_features"][left][None],
-                proposal["static_features"][right][None],
-            )[0]
-            losses.append(F.smooth_l1_loss(
-                model_distance / distance_scale,
-                target_distance.detach() / distance_scale,
-            ))
-            target_distances.append(target_distance.detach())
-            model_distances.append(model_distance.detach())
+            for index in range(count)
+        ])
+        model_distance = 1.0 - F.cosine_similarity(
+            pooled_features[:-1], pooled_features[1:], dim=-1
+        )
+        target_distance = 1.0 - F.cosine_similarity(
+            proposal["static_features"][:-1],
+            proposal["static_features"][1:],
+            dim=-1,
+        )
+        valid_values = [
+            center_values[index + 1] - center_values[index] <= max_gap_seconds
+            for index in range(count - 1)
+        ]
+        if not any(valid_values):
+            continue
+        valid = torch.tensor(
+            valid_values, device=model_distance.device, dtype=torch.bool
+        )
+        model_distance = model_distance[valid]
+        target_distance = target_distance[valid]
+        losses.append(F.smooth_l1_loss(
+            model_distance / distance_scale,
+            target_distance.detach() / distance_scale,
+            reduction="none",
+        ))
+        target_distances.append(target_distance.detach())
+        model_distances.append(model_distance.detach())
     if not losses:
         zero = sum(feature.sum() * 0.0 for feature in fpn_feats)
         return zero, {
@@ -219,8 +224,11 @@ def proposal_relation_loss(
             "target_distance": zero.detach(),
             "model_distance": zero.detach(),
         }
-    return torch.stack(losses).mean(), {
-        "pair_count": len(losses),
-        "target_distance": torch.stack(target_distances).mean(),
-        "model_distance": torch.stack(model_distances).mean(),
+    losses = torch.cat(losses)
+    target_distances = torch.cat(target_distances)
+    model_distances = torch.cat(model_distances)
+    return losses.mean(), {
+        "pair_count": int(losses.numel()),
+        "target_distance": target_distances.mean(),
+        "model_distance": model_distances.mean(),
     }
