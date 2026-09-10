@@ -31,7 +31,7 @@ def test_relation_loss_is_zero_when_cosine_geometry_matches():
     assert stats["pair_count"] == 1
 
 
-def test_relation_cache_rejects_target_gt_provenance(tmp_path):
+def test_relation_cache_loads_valid_data_and_rejects_target_gt(tmp_path):
     path = tmp_path / "cache.npz"
     np.savez_compressed(
         path,
@@ -49,13 +49,21 @@ def test_relation_cache_rejects_target_gt_provenance(tmp_path):
         "schema_version": CACHE_SCHEMA,
         "domain": "target",
         "split": "train",
-        "target_gt_usage": "used",
+        "target_gt_usage": "forbidden",
         "selection_uses_gt": False,
         "entry_count": 1,
         "feature_dim": 2,
         "calibration_max_gap_seconds": 30.0,
         "relation_calibration": {"distance_scale": 1.0},
     }
+    (tmp_path / "cache.npz.meta.json").write_text(json.dumps(meta))
+    cache, count, digest, payload = load_vlm_relation_cache(path)
+    assert count == 1
+    assert len(digest) == 64
+    assert payload["relation_calibration"]["distance_scale"] == 1.0
+    assert cache["v1"][0]["candidate_id"] == "p1"
+
+    meta["target_gt_usage"] = "used"
     (tmp_path / "cache.npz.meta.json").write_text(json.dumps(meta))
     try:
         load_vlm_relation_cache(path)
