@@ -75,18 +75,31 @@ def slowfast_variants(rows, feature_root, fps, stride, num_frames):
 
 
 def group_linear_probe(features, labels, groups, folds):
-    from sklearn.linear_model import LogisticRegression
     from sklearn.metrics import accuracy_score, balanced_accuracy_score
     from sklearn.model_selection import GroupKFold
 
     splitter = GroupKFold(n_splits=min(folds, len(set(groups))))
     predictions = np.full(len(labels), -1, dtype=np.int64)
     for train, test in splitter.split(features, labels, groups):
-        model = LogisticRegression(
-            C=1.0, class_weight="balanced", max_iter=2000, solver="lbfgs"
+        train_features = features[train]
+        train_labels = labels[train]
+        classes = np.unique(train_labels)
+        targets = np.empty((len(train), len(classes)), dtype=np.float32)
+        for column, class_id in enumerate(classes):
+            positive = train_labels == class_id
+            positive_count = max(int(positive.sum()), 1)
+            negative_count = max(int((~positive).sum()), 1)
+            targets[:, column] = np.where(
+                positive,
+                len(train) / (2.0 * positive_count),
+                -len(train) / (2.0 * negative_count),
+            )
+        kernel = train_features @ train_features.T
+        dual_weights = np.linalg.solve(
+            kernel + np.eye(len(train), dtype=np.float32), targets
         )
-        model.fit(features[train], labels[train])
-        predictions[test] = model.predict(features[test])
+        scores = features[test] @ train_features.T @ dual_weights
+        predictions[test] = classes[scores.argmax(axis=1)]
     return {
         "accuracy": float(accuracy_score(labels, predictions)),
         "macro_recall": float(balanced_accuracy_score(labels, predictions)),

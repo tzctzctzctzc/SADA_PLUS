@@ -1,6 +1,10 @@
 import numpy as np
 
-from tools.evaluate_qwen3_vl_proposal_features import normalize, summarize_frames
+from tools.evaluate_qwen3_vl_proposal_features import (
+    group_linear_probe,
+    normalize,
+    summarize_frames,
+)
 
 
 def test_summarize_frames_separates_static_and_transition_components():
@@ -30,3 +34,11 @@ def test_single_frame_has_no_artificial_transition():
     assert np.allclose(static, [0.6, 0.8])
     assert np.all(transition == 0.0)
     assert combined.shape == (4,)
+
+
+def test_dual_ridge_probe_generalizes_across_groups():
+    features = np.asarray([[1.0, 0.0], [0.0, 1.0]] * 4)
+    labels = np.asarray([0, 1] * 4)
+    groups = np.repeat(np.arange(4), 2)
+    result = group_linear_probe(features, labels, groups, folds=4)
+    assert result["accuracy"] == 1.0
