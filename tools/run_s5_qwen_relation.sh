@@ -36,7 +36,7 @@ if [[ "$observed" -ne "$expected" ]]; then
     exit 1
 fi
 
-"$python" tools/build_vlm_relation_cache.py \
+PYTHONPATH=. "$python" tools/build_vlm_relation_cache.py \
     --manifest "$manifest" \
     --manifest-meta "$manifest.meta.json" \
     --feature-index "$feature_root/target_index.jsonl" \
