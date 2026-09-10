@@ -697,6 +697,17 @@ class SADA(nn.Module):
                 self.vlm_relation_cache_sha256,
                 self.vlm_relation_payload,
             ) = load_vlm_relation_cache(cache_path)
+        self.vlm_relation_distance_scale = float(
+            self.vlm_relation_payload['relation_calibration']['distance_scale']
+            if self.vlm_relation_payload is not None else 1.0
+        )
+        if self.vlm_relation_payload is not None and not math.isclose(
+            float(self.vlm_relation_payload['calibration_max_gap_seconds']),
+            self.vlm_relation_max_gap_seconds,
+        ):
+            raise ValueError(
+                'VLM relation cache calibration and training max gap differ'
+            )
         proposal_cfg = cfg.get('proposal_semantic', {})
         self.proposal_semantic_mode = proposal_cfg.get('mode', 'off')
         if self.proposal_semantic_mode not in PROPOSAL_SEMANTIC_MODES:
@@ -3007,6 +3018,7 @@ class SADA(nn.Module):
                         relation_proposals,
                         self.fpn_strides,
                         self.vlm_relation_max_gap_seconds,
+                        self.vlm_relation_distance_scale,
                     )
                     relation_ramp = min(
                         1.0,

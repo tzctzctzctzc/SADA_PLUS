@@ -46,12 +46,19 @@ def load_vlm_relation_cache(path):
         raise ValueError("VLM relation cache arrays have inconsistent lengths")
     static = arrays["static_features"].astype(np.float32)
     transition = arrays["transition_features"].astype(np.float32)
+    calibration = meta.get("relation_calibration", {})
+    distance_scale = float(calibration.get("distance_scale", 0.0))
+    calibration_max_gap = float(meta.get("calibration_max_gap_seconds", 0.0))
     if (
         static.ndim != 2
         or transition.shape != static.shape
         or static.shape[1] != int(meta.get("feature_dim", -1))
         or not np.isfinite(static).all()
         or not np.isfinite(transition).all()
+        or not math.isfinite(distance_scale)
+        or distance_scale <= 1e-6
+        or not math.isfinite(calibration_max_gap)
+        or calibration_max_gap <= 0.0
     ):
         raise ValueError("VLM relation features are invalid")
     by_video = {}
@@ -166,7 +173,15 @@ def _pool_proposal(fpn_feats, batch_index, segment, level, fpn_strides):
     return _sample_sequence(fpn_feats[level][batch_index], positions).mean(dim=1)
 
 
-def proposal_relation_loss(fpn_feats, proposals, fpn_strides, max_gap_seconds):
+def proposal_relation_loss(
+    fpn_feats,
+    proposals,
+    fpn_strides,
+    max_gap_seconds,
+    distance_scale=1.0,
+):
+    if not math.isfinite(distance_scale) or distance_scale <= 0.0:
+        raise ValueError("relation distance scale must be positive")
     losses, target_distances, model_distances = [], [], []
     for batch_index, proposal in enumerate(proposals):
         count = proposal["segments"].shape[0]
@@ -191,7 +206,10 @@ def proposal_relation_loss(fpn_feats, proposals, fpn_strides, max_gap_seconds):
                 proposal["static_features"][left][None],
                 proposal["static_features"][right][None],
             )[0]
-            losses.append(F.smooth_l1_loss(model_distance, target_distance.detach()))
+            losses.append(F.smooth_l1_loss(
+                model_distance / distance_scale,
+                target_distance.detach() / distance_scale,
+            ))
             target_distances.append(target_distance.detach())
             model_distances.append(model_distance.detach())
     if not losses:

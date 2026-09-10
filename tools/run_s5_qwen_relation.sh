@@ -8,7 +8,9 @@ set -euo pipefail
 # - For temporally adjacent proposals (gap <= 30 s), match the cosine-distance
 #   geometry of target SADA FPN features to Qwen visual features.
 # - No VLM class logits, class pseudo-labels, or absolute feature projection.
-# - Weight 0.1, enabled at epoch 5 and linearly ramped over 5 epochs.
+# - Normalize the loss by the target-only Qwen q90-q10 distance range so its
+#   gradient does not vanish merely because high-dimensional cosine distances
+#   are numerically small.  Weight 0.1, epoch 5 start, 5-epoch linear ramp.
 # - Compare against the paired seed-123 from-scratch Trident-SADA control;
 #   checkpoint selection remains the original source-validation loss rule.
 
@@ -50,4 +52,3 @@ CUDA_VISIBLE_DEVICES="$gpu" PYTHONPATH=. "$python" -u train_da.py \
     --vlm-relation-ramp-epochs 5 \
     --vlm-relation-levels 0,1,2 \
     --vlm-relation-max-gap 30.0 >"$log" 2>&1
-

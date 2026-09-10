@@ -46,6 +46,34 @@ def feature_rows(index_path):
     }
 
 
+def relation_distance_calibration(video_ids, centers, features, max_gap_seconds):
+    by_video = {}
+    for video_id, center, feature in zip(video_ids, centers, features):
+        by_video.setdefault(video_id, []).append((float(center), feature))
+    distances = []
+    for entries in by_video.values():
+        entries.sort(key=lambda item: item[0])
+        for left, right in zip(entries, entries[1:]):
+            if right[0] - left[0] <= max_gap_seconds:
+                left_feature = np.asarray(left[1], dtype=np.float32)
+                right_feature = np.asarray(right[1], dtype=np.float32)
+                distances.append(1.0 - float(np.dot(left_feature, right_feature)))
+    if not distances:
+        raise ValueError("relation cache contains no temporally adjacent pairs")
+    q10, q90 = np.quantile(distances, [0.1, 0.9])
+    scale = float(q90 - q10)
+    if not np.isfinite(scale) or scale <= 1e-6:
+        raise ValueError("VLM relation distance scale is degenerate")
+    return {
+        "pair_count": len(distances),
+        "distance_mean": float(np.mean(distances)),
+        "distance_std": float(np.std(distances)),
+        "distance_q10": float(q10),
+        "distance_q90": float(q90),
+        "distance_scale": scale,
+    }
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", required=True)
@@ -101,6 +129,14 @@ def main():
     if len(model_revisions) != 1:
         raise ValueError("relation features mix model revisions")
 
+    calibration_max_gap_seconds = 30.0
+    calibration = relation_distance_calibration(
+        video_ids,
+        centers,
+        static_features,
+        calibration_max_gap_seconds,
+    )
+
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix(output.suffix + ".tmp")
@@ -131,6 +167,8 @@ def main():
         "model_revision": next(iter(model_revisions)),
         "entry_count": len(rows),
         "feature_dim": int(static_features[0].shape[0]),
+        "calibration_max_gap_seconds": calibration_max_gap_seconds,
+        "relation_calibration": calibration,
     }
     write_json(str(output) + ".meta.json", cache_meta)
     print(json.dumps(cache_meta, indent=2, sort_keys=True))

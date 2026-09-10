@@ -53,6 +53,8 @@ def test_relation_cache_rejects_target_gt_provenance(tmp_path):
         "selection_uses_gt": False,
         "entry_count": 1,
         "feature_dim": 2,
+        "calibration_max_gap_seconds": 30.0,
+        "relation_calibration": {"distance_scale": 1.0},
     }
     (tmp_path / "cache.npz.meta.json").write_text(json.dumps(meta))
     try:
