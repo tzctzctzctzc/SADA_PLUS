@@ -42,6 +42,18 @@ def test_proposal_timestamps_reject_invalid_interval():
         })
 
 
+def test_context_timestamps_form_four_eight_four_sampling():
+    timestamps = proposal_timestamps(
+        {"proposal_start_sec": 2.0, "proposal_end_sec": 4.0},
+        frame_count=16,
+        context_ratio=0.5,
+    )
+
+    assert len([value for value in timestamps if value < 2.0]) == 4
+    assert len([value for value in timestamps if 2.0 <= value <= 4.0]) == 8
+    assert len([value for value in timestamps if value > 4.0]) == 4
+
+
 def test_video_sharding_is_stable_and_bounded():
     first = shard_for_video("P01_101", 3)
     assert first == shard_for_video("P01_101", 3)

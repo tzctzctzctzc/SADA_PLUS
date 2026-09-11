@@ -10,8 +10,10 @@ def test_prepare_video_keeps_source_cache_root(tmp_path, monkeypatch):
     source_root = tmp_path / "frames" / "source"
     calls = []
 
-    def fake_prepare(row, video, cache_root, namespace, frame_count):
-        calls.append((row, video, cache_root, namespace, frame_count))
+    def fake_prepare(row, video, cache_root, namespace, frame_count, context_ratio):
+        calls.append((
+            row, video, cache_root, namespace, frame_count, context_ratio
+        ))
 
     monkeypatch.setattr(prepare_vlm_frames, "prepare_frames", fake_prepare)
     args = SimpleNamespace(
@@ -19,6 +21,7 @@ def test_prepare_video_keeps_source_cache_root(tmp_path, monkeypatch):
         download_retries=0,
         download_connections=1,
         frame_count=16,
+        context_ratio=0.5,
     )
 
     video_id, count, error = prepare_vlm_frames._prepare_video(
@@ -29,4 +32,4 @@ def test_prepare_video_keeps_source_cache_root(tmp_path, monkeypatch):
     )
 
     assert (video_id, count, error) == ("P01_01", 1, None)
-    assert calls[0][2:] == (source_root, "s5_source", 16)
+    assert calls[0][2:] == (source_root, "s5_source", 16, 0.5)

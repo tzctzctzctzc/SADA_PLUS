@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import shutil
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import defaultdict
@@ -46,6 +47,7 @@ def prepare_manifest(manifest_path, frame_cache, namespace, args, old_splits):
                         frame_cache,
                         namespace,
                         args.frame_count,
+                        args.context_ratio,
                     )
                     complete += 1
                 print("{} {} proposals ready".format(namespace, complete), flush=True)
@@ -84,7 +86,10 @@ def _link_reused_frames(source, destination):
     if destination.exists() or destination.is_symlink():
         return
     destination.parent.mkdir(parents=True, exist_ok=True)
-    os.symlink(Path(source), destination, target_is_directory=True)
+    try:
+        os.symlink(Path(source), destination, target_is_directory=True)
+    except OSError:
+        shutil.copytree(source, destination)
 
 
 def _prepare_video(video_id, rows, args, old_splits):
@@ -110,6 +115,7 @@ def _prepare_video(video_id, rows, args, old_splits):
                     cache_root,
                     namespace,
                     args.frame_count,
+                    args.context_ratio,
                 )
                 complete += 1
             return video_id, complete, None
@@ -207,6 +213,12 @@ def parse_args():
     parser.add_argument("--epic55-splits", required=True)
     parser.add_argument("--frame-count", type=int, default=8)
     parser.add_argument(
+        "--context-ratio",
+        type=float,
+        default=0.0,
+        help="context added before and after as a fraction of proposal duration",
+    )
+    parser.add_argument(
         "--shifts",
         nargs="+",
         choices=SHIFT_NAMES,
@@ -236,6 +248,8 @@ def main():
     args = parse_args()
     if args.frame_count <= 0:
         raise ValueError("frame count must be positive")
+    if args.context_ratio < 0.0:
+        raise ValueError("context ratio must be non-negative")
     Path(args.video_root).mkdir(parents=True, exist_ok=True)
     old_splits = epic_55_splits(args.epic55_splits)
     if args.workers <= 0:

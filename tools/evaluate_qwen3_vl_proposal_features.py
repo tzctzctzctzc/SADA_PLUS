@@ -32,6 +32,17 @@ def summarize_frames(frames):
     return static, transition, np.concatenate((static, transition))
 
 
+def summarize_frame_quarters(frames):
+    """Preserve before/early/late/after state for 4+8+4 context frames."""
+    frames = normalize(frames)
+    if frames.shape[0] < 4 or frames.shape[0] % 4:
+        raise ValueError("context features require a frame count divisible by four")
+    return np.concatenate([
+        normalize(part.mean(axis=0, keepdims=True))[0]
+        for part in np.split(frames, 4)
+    ])
+
+
 def load_feature_variants(index_path, feature_root):
     variants = defaultdict(dict)
     for row in read_jsonl(index_path):
@@ -49,6 +60,10 @@ def load_feature_variants(index_path, feature_root):
             variants[name + "_static"][row["candidate_id"]] = static
             variants[name + "_transition"][row["candidate_id"]] = transition
             variants[name + "_combined"][row["candidate_id"]] = combined
+            if frames.shape[0] >= 4 and frames.shape[0] % 4 == 0:
+                variants[name + "_quarters"][
+                    row["candidate_id"]
+                ] = summarize_frame_quarters(frames)
     return variants
 
 
@@ -236,11 +251,11 @@ def group_ridge_predictions(blocks, targets, groups, folds=5, alpha=1.0):
 
 
 def proposal_quality_gate(rows, qwen, slowfast, folds, min_auc_gain,
-                          min_spearman_gain):
+                          min_spearman_gain, qwen_variant):
     candidates = [
         row for row in rows
         if row["candidate_id"] in slowfast["slowfast_combined"]
-        and row["candidate_id"] in qwen["deepstack_0_combined"]
+        and row["candidate_id"] in qwen[qwen_variant]
     ]
     groups = np.asarray([row["video_id"] for row in candidates])
     structure = np.asarray([
@@ -263,7 +278,7 @@ def proposal_quality_gate(rows, qwen, slowfast, folds, min_auc_gain,
         "structure_qwen_deepstack0": {
             "structure": structure,
             "qwen": np.asarray([
-                qwen["deepstack_0_combined"][key] for key in candidate_ids
+                qwen[qwen_variant][key] for key in candidate_ids
             ]),
         },
         "structure_slowfast_qwen_deepstack0": {
@@ -272,11 +287,15 @@ def proposal_quality_gate(rows, qwen, slowfast, folds, min_auc_gain,
                 slowfast["slowfast_combined"][key] for key in candidate_ids
             ]),
             "qwen": np.asarray([
-                qwen["deepstack_0_combined"][key] for key in candidate_ids
+                qwen[qwen_variant][key] for key in candidate_ids
             ]),
         },
     }
-    report = {"count": len(candidates), "targets": {}}
+    report = {
+        "count": len(candidates),
+        "qwen_variant": qwen_variant,
+        "targets": {},
+    }
     for target_name in ("quality_iou_any", "quality_iou_class"):
         targets = np.asarray([row[target_name] for row in candidates], dtype=np.float32)
         methods = {
@@ -344,6 +363,9 @@ def parse_args():
     )
     parser.add_argument("--min-quality-auc-gain", type=float, default=0.02)
     parser.add_argument("--min-quality-spearman-gain", type=float, default=0.03)
+    parser.add_argument(
+        "--quality-qwen-variant", default="deepstack_0_combined"
+    )
     return parser.parse_args()
 
 
@@ -443,6 +465,7 @@ def main():
         args.folds,
         args.min_quality_auc_gain,
         args.min_quality_spearman_gain,
+        args.quality_qwen_variant,
     )
     report = {
         "protocol_version": PROTOCOL_VERSION,

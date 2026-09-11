@@ -40,3 +40,10 @@ def test_group_ridge_never_trains_on_held_out_group():
     )
     assert predictions.shape == targets.shape
     assert np.isfinite(predictions).all()
+
+
+def test_context_summary_preserves_four_temporal_quarters():
+    frames = np.eye(4, dtype=np.float32).repeat(4, axis=0)
+    summary = qwen_quality.summarize_frame_quarters(frames)
+    assert summary.shape == (16,)
+    assert np.allclose(summary.reshape(4, 4), np.eye(4))

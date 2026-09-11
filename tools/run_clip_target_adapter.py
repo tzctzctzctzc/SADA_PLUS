@@ -53,11 +53,16 @@ def read_jsonl(path):
     ]
 
 
-def proposal_timestamps(row, frame_count=8):
+def proposal_timestamps(row, frame_count=8, context_ratio=0.0):
     start = float(row["proposal_start_sec"])
     end = float(row["proposal_end_sec"])
     if not 0.0 <= start < end:
         raise ValueError("proposal interval must satisfy 0 <= start < end")
+    if float(context_ratio) < 0.0:
+        raise ValueError("context ratio must be non-negative")
+    span = end - start
+    start -= float(context_ratio) * span
+    end += float(context_ratio) * span
     span = end - start
     return [start + span * (index + 0.5) / frame_count for index in range(frame_count)]
 
@@ -156,12 +161,13 @@ def video_duration(path):
     return float(result.stdout.strip())
 
 
-def prepare_frames(row, video, cache_root, namespace, frame_count=8):
+def prepare_frames(row, video, cache_root, namespace, frame_count=8,
+                   context_ratio=0.0):
     duration = video_duration(video)
     output_dir = Path(cache_root) / namespace / row["candidate_id"]
     output_dir.mkdir(parents=True, exist_ok=True)
     frames = []
-    timestamps = proposal_timestamps(row, frame_count)
+    timestamps = proposal_timestamps(row, frame_count, context_ratio)
     for index, timestamp in enumerate(timestamps, 1):
         timestamp = min(max(timestamp, 0.0), duration)
         frame = output_dir / "frame_{:02d}.jpg".format(index)
