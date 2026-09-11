@@ -179,7 +179,8 @@ def _rank_metrics(targets, predictions, threshold=0.5):
     binary = targets >= float(threshold)
     auc = float(roc_auc_score(binary, predictions)) if len(set(binary)) == 2 else None
     ap = float(average_precision_score(binary, predictions)) if binary.any() else None
-    correlation = spearmanr(targets, predictions).statistic
+    correlation_result = spearmanr(targets, predictions)
+    correlation = getattr(correlation_result, "statistic", correlation_result[0])
     return {
         "roc_auc_iou_0.5": auc,
         "average_precision_iou_0.5": ap,
