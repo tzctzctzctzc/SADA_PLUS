@@ -315,6 +315,11 @@ def parse_args():
     parser.add_argument("--min-pixels", type=int, default=224 * 224)
     parser.add_argument("--max-pixels", type=int, default=448 * 448)
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument(
+        "--score-only",
+        action="store_true",
+        help="reuse completed predictions and run only the source quality gate",
+    )
     parser.add_argument("--folds", type=int, default=5)
     parser.add_argument("--fps", type=float, default=30.0)
     parser.add_argument("--feat-stride", type=float, default=16.0)
@@ -326,8 +331,9 @@ def parse_args():
 
 def main():
     args = parse_args()
-    runtime = load_qwen3(args)
-    score_manifest(runtime, args)
+    if not args.score_only:
+        runtime = load_qwen3(args)
+        score_manifest(runtime, args)
     report = evaluate_gate(args)
     print(json.dumps(report, indent=2, sort_keys=True), flush=True)
 

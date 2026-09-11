@@ -25,3 +25,16 @@ def test_completeness_logits_follow_rotated_mapping():
     probabilities, prediction = normalize_logits([0, 0, 8, 0, 0], mapping)
     assert prediction == mapping[2]
     assert abs(sum(probabilities.values()) - 1.0) < 1e-6
+
+
+def test_score_only_argument_skips_inference(monkeypatch):
+    import sys
+    import tools.run_qwen3_vl_completeness_gate as module
+
+    monkeypatch.setattr(sys, "argv", [
+        "gate", "--manifest", "m", "--frame-cache", "f", "--output", "o",
+        "--gate-output", "g", "--model-path", "q", "--slowfast-root", "s",
+        "--score-only",
+    ])
+    args = module.parse_args()
+    assert args.score_only is True
