@@ -46,6 +46,10 @@ from .target_adapter import (
     build_vlm_target_distillation,
     load_vlm_target_adapter_cache,
 )
+from .oracle_task import (
+    ORACLE_TARGET_TASK_MODES,
+    compose_oracle_target_task_loss,
+)
 from .conditional_alignment import aggregate_conditional_class_losses
 from .vlm_relation import (
     load_vlm_relation_cache,
@@ -379,6 +383,26 @@ class SADA(nn.Module):
         self.n_levels = len(self.fpn_strides)
         self.warmup_adv = cfg['train_cfg'].get('warmup_adv', 0)
         diagnostic_cfg = cfg.get('diagnostic', {})
+        self.oracle_target_task_mode = diagnostic_cfg.get(
+            'oracle_target_task', 'off'
+        )
+        if self.oracle_target_task_mode not in ORACLE_TARGET_TASK_MODES:
+            raise ValueError(
+                'unknown Oracle target task mode: {}'.format(
+                    self.oracle_target_task_mode
+                )
+            )
+        self.supervised_upper_bound_mode = diagnostic_cfg.get(
+            'supervised_upper_bound', 'off'
+        )
+        if self.supervised_upper_bound_mode not in (
+            'off', 'target_only', 'source_target'
+        ):
+            raise ValueError(
+                'unknown supervised upper-bound mode: {}'.format(
+                    self.supervised_upper_bound_mode
+                )
+            )
         self.oracle_forgetting_mode = diagnostic_cfg.get(
             'oracle_forgetting', 'off'
         )
@@ -3321,12 +3345,20 @@ class SADA(nn.Module):
         out_actionness_src = [out_off[:bs] for out_off in out_actionness]
         out_actionness_tgt = [out_off[bs:] for out_off in out_actionness]
         
-        # Compute the two following only if we are using the Trident loss
+        # Keep both domains.  Target-supervised diagnostics must decode target
+        # boundaries with target boundary logits, not the source half.
         if out_start is not None:
             out_start_src = [os[:bs] if os is not None else None for os in out_start]
-        
+            out_start_tgt = [os[bs:] if os is not None else None for os in out_start]
+        else:
+            out_start_src = None
+            out_start_tgt = None
         if out_end is not None:
             out_end_src = [oe[:bs] if oe is not None else None for oe in out_end]
+            out_end_tgt = [oe[bs:] if oe is not None else None for oe in out_end]
+        else:
+            out_end_src = None
+            out_end_tgt = None
         
         # Now separate the GTs
         gt_cls_labels_src = gt_cls_labels[:bs]
@@ -3342,11 +3374,11 @@ class SADA(nn.Module):
         valid_mask_src = torch.cat(fpn_masks_src, dim=1)    # shape: B x FT_i
         valid_mask_tgt = torch.cat(fpn_masks_tgt, dim=1)
 
-        if self.use_trident_head:
-            out_start_logits = []
-            out_end_logits = []
-            for i in range(len(out_start_src)):
-                x = (F.pad(out_start_src[i], (self.num_bins, 0), mode='constant', value=0)).unsqueeze(-1)  # pad left
+        def build_trident_boundary_logits(start_outputs, end_outputs):
+            start_logits = []
+            end_logits = []
+            for i in range(len(start_outputs)):
+                x = (F.pad(start_outputs[i], (self.num_bins, 0), mode='constant', value=0)).unsqueeze(-1)  # pad left
                 x_size = list(x.size())  # bz, cls_num, T+num_bins, 1
                 x_size[-1] = self.num_bins + 1  # bz, cls_num, T+num_bins, num_bins + 1
                 x_size[-2] = x_size[-2] - self.num_bins  # bz, cls_num, T+num_bins, num_bins + 1
@@ -3354,14 +3386,25 @@ class SADA(nn.Module):
                 x_stride[-2] = x_stride[-1]
 
                 x = x.as_strided(size=x_size, stride=x_stride)
-                out_start_logits.append(x.permute(0, 2, 1, 3))
+                start_logits.append(x.permute(0, 2, 1, 3))
 
-                x = (F.pad(out_end_src[i], (0, self.num_bins), mode='constant', value=0)).unsqueeze(-1)  # pad right
+                x = (F.pad(end_outputs[i], (0, self.num_bins), mode='constant', value=0)).unsqueeze(-1)  # pad right
                 x = x.as_strided(size=x_size, stride=x_stride)
-                out_end_logits.append(x.permute(0, 2, 1, 3))
+                end_logits.append(x.permute(0, 2, 1, 3))
+            return start_logits, end_logits
+
+        if self.use_trident_head:
+            out_start_logits_src, out_end_logits_src = (
+                build_trident_boundary_logits(out_start_src, out_end_src)
+            )
+            out_start_logits_tgt, out_end_logits_tgt = (
+                build_trident_boundary_logits(out_start_tgt, out_end_tgt)
+            )
         else:
-            out_start_logits = None
-            out_end_logits = None
+            out_start_logits_src = None
+            out_end_logits_src = None
+            out_start_logits_tgt = None
+            out_end_logits_tgt = None
 
         # 1. classification loss
         # stack the list -> (B, FT) -> (# Valid, )
@@ -3377,12 +3420,16 @@ class SADA(nn.Module):
             out_offsets = out_offsets_src
             out_actionness = out_actionness_src
             valid_mask = valid_mask_src
+            out_start_logits = out_start_logits_src
+            out_end_logits = out_end_logits_src
         else:
             gt_offsets = gt_offsets_tgt
             gt_cls = gt_cls_tgt
             out_offsets = out_offsets_tgt
             out_actionness = out_actionness_tgt
             valid_mask = valid_mask_tgt
+            out_start_logits = out_start_logits_tgt
+            out_end_logits = out_end_logits_tgt
             
         pos_mask = torch.logical_and((gt_cls.sum(-1) > 0), valid_mask)  # Apply regression only on the ones that we have not discard (so not on the background ones, this is why they are so)
         pos_mask_tgt = torch.logical_and((gt_cls_tgt.sum(-1) > 0), valid_mask_tgt)
@@ -3407,7 +3454,7 @@ class SADA(nn.Module):
             # Problem: During inference the batch is smaller, so the sum is smaller, and thus the losses are super small
             self.loss_normalizer = self.loss_normalizer_momentum * self.loss_normalizer + (
                     1 - self.loss_normalizer_momentum) * max(num_pos, 1)
-            self.loss_normalizer_pseudo_labels = self.loss_normalizer_momentum * self.loss_normalizer + (
+            self.loss_normalizer_pseudo_labels = self.loss_normalizer_momentum * self.loss_normalizer_pseudo_labels + (
                     1 - self.loss_normalizer_momentum) * max(num_pos_tgt, 1)
 
         # gt_cls_src is already one hot encoded now, simply masking out
@@ -3504,6 +3551,140 @@ class SADA(nn.Module):
             + reg_loss * loss_reg_weight
             + self.validity_head_loss_weight * validity_loss
         )
+
+        source_gt_downstream_loss = downstream_loss
+        target_gt_zero = downstream_loss * 0.0
+        target_gt_cls_loss = target_gt_zero
+        target_gt_reg_loss = target_gt_zero
+        target_gt_reg_weight = target_gt_zero.detach()
+        target_gt_downstream_loss = target_gt_zero
+        oracle_target_task_loss = target_gt_zero
+        need_target_gt_task = (
+            mode == 'train'
+            and (
+                self.oracle_target_task_mode != 'off'
+                or self.supervised_upper_bound_mode == 'source_target'
+            )
+        )
+        if need_target_gt_task:
+            target_class_enabled = (
+                self.oracle_target_task_mode in ('class', 'joint')
+                or self.supervised_upper_bound_mode == 'source_target'
+            )
+            target_boundary_enabled = (
+                self.oracle_target_task_mode in ('boundary', 'joint')
+                or self.supervised_upper_bound_mode == 'source_target'
+            )
+            target_gt = None
+            target_cls_terms = None
+            if target_class_enabled:
+                target_gt = gt_cls_tgt_full[valid_mask_tgt].clone()
+                target_gt *= 1 - train_label_smoothing
+                target_gt += (
+                    train_label_smoothing / (self.num_class_orig + 1)
+                )
+                target_logits = torch.cat(
+                    out_cls_logits_tgt, dim=1
+                )[valid_mask_tgt]
+                target_cls_terms = sigmoid_focal_loss(
+                    target_logits,
+                    target_gt,
+                    reduction='none',
+                    alpha=0.25,
+                    gamma=self.cfg['model'].get('focal_loss_gamma', 2.0),
+                )
+
+            if target_boundary_enabled:
+                target_predictions = self.decode_offset(
+                    out_offsets_tgt,
+                    out_start_logits_tgt,
+                    out_end_logits_tgt,
+                    mode=mode,
+                )[pos_mask_tgt]
+                target_offsets_tensor = torch.stack(
+                    gt_offsets_tgt
+                )[pos_mask_tgt]
+                if self.use_trident_head:
+                    if self.oracle_target_task_mode == 'boundary':
+                        # Boundary-only reveals foreground extent, not class.
+                        # Select the class-conditioned channel with the model's
+                        # own prediction instead of the hidden target label.
+                        target_positive_logits = torch.cat(
+                            out_cls_logits_tgt, dim=1
+                        )[pos_mask_tgt]
+                        predicted_classes = target_positive_logits.argmax(dim=-1)
+                        positive_indices = torch.arange(
+                            target_predictions.shape[0],
+                            device=target_predictions.device,
+                        )
+                        target_predictions = target_predictions[
+                            positive_indices, predicted_classes
+                        ]
+                    else:
+                        target_positive_labels = gt_cls_tgt_full[pos_mask_tgt]
+                        target_predictions = target_predictions[
+                            target_positive_labels.bool()
+                        ]
+                        target_video_indices = torch.where(
+                            target_positive_labels
+                        )[0]
+                        target_offsets_tensor = target_offsets_tensor[
+                            target_video_indices
+                        ]
+                        if target_predictions.numel() > 0:
+                            target_iou_rate = ctr_giou_loss_1d(
+                                target_predictions,
+                                target_offsets_tensor,
+                                reduction='none',
+                            )
+                            target_rated_mask = target_gt > (
+                                train_label_smoothing
+                                / (self.num_class_orig + 1)
+                            )
+                            target_cls_terms[target_rated_mask] *= (
+                                1 - target_iou_rate
+                            ) ** self.iou_weight_power
+                if target_predictions.numel() > 0:
+                    target_gt_reg_loss = ctr_diou_loss_1d(
+                        target_predictions,
+                        target_offsets_tensor,
+                        reduction='sum',
+                    ) / self.loss_normalizer_pseudo_labels
+
+            if target_class_enabled:
+                target_gt_cls_loss = (
+                    target_cls_terms.sum()
+                    / self.loss_normalizer_pseudo_labels
+                )
+            if self.supervised_upper_bound_mode == 'source_target':
+                if self.train_loss_reg_weight > 0:
+                    target_gt_reg_weight = target_gt_cls_loss.new_tensor(
+                        self.train_loss_reg_weight
+                    )
+                else:
+                    target_gt_reg_weight = (
+                        target_gt_cls_loss.detach()
+                        / max(target_gt_reg_loss.item(), 0.01)
+                    )
+            else:
+                target_gt_reg_weight = target_gt_cls_loss.new_tensor(
+                    loss_reg_weight
+                )
+            target_gt_downstream_loss = (
+                target_gt_cls_loss
+                + target_gt_reg_weight * target_gt_reg_loss
+            )
+            if self.oracle_target_task_mode != 'off':
+                downstream_loss = compose_oracle_target_task_loss(
+                    source_gt_downstream_loss,
+                    target_gt_cls_loss,
+                    target_gt_reg_loss,
+                    loss_reg_weight,
+                    self.oracle_target_task_mode,
+                )
+                oracle_target_task_loss = (
+                    downstream_loss - source_gt_downstream_loss
+                )
 
         target_distill_zero = downstream_loss * 0.0
         oracle_target_distill_raw_loss = target_distill_zero
@@ -3685,6 +3866,12 @@ class SADA(nn.Module):
         
         losses =  {'cls_loss': cls_loss,
                    'reg_loss': reg_loss,
+                   'source_gt_downstream_loss': source_gt_downstream_loss,
+                   'target_gt_cls_loss': target_gt_cls_loss,
+                   'target_gt_reg_loss': target_gt_reg_loss,
+                   'target_gt_reg_weight': target_gt_reg_weight,
+                   'target_gt_downstream_loss': target_gt_downstream_loss,
+                   'oracle_target_task_loss': oracle_target_task_loss,
                    'validity_loss': validity_loss,
                    'validity_count': torch.tensor(
                        float(validity_stats['count']), device=self.device

@@ -318,6 +318,14 @@ class Trainer(BaseTrainerDA):
     
     def _phantom_train_epoch(self):
         # to make the data_loader behave in a reproducible way when training is resumed. It simulates an epoch-worth of data_loader iteration.
+        supervised_mode = self.cfg.get('diagnostic', {}).get(
+            'supervised_upper_bound', 'off'
+        )
+        if supervised_mode == 'target_only':
+            iter_tgt = itertools.cycle(iter(self.train_loader_tgt))
+            for _ in range(len(self.train_loader_tgt)):
+                next(iter_tgt)
+            return
         iter_src = itertools.cycle(iter(self.train_loader_src))
         iter_tgt = itertools.cycle(iter(self.train_loader_tgt))
         for _ in range(max(len(self.train_loader_src), len(self.train_loader_tgt))):
@@ -348,18 +356,25 @@ class Trainer(BaseTrainerDA):
         iter_src = itertools.cycle(iter_src)
         iter_tgt = itertools.cycle(iter_tgt)
         
-        # Compute the number of iterations as the maximum of both train_loader_src and train_loader_tgt
-        num_iters = max(len(self.train_loader_src), len(self.train_loader_tgt))
+        supervised_mode = self.cfg.get('diagnostic', {}).get(
+            'supervised_upper_bound', 'off'
+        )
+        if supervised_mode == 'target_only':
+            num_iters = len(self.train_loader_tgt)
+        else:
+            num_iters = max(len(self.train_loader_src), len(self.train_loader_tgt))
         
         counter = 0
         for iter_idx in tqdm(range(num_iters)):
             self.conditional_class_batch_count += 1
             # Get the video data of each of the datasets and move to device
-            video_list_src = next(iter_src)
-            video_list_src = move_to_device(video_list_src, self.model.device)
-            
             video_list_tgt = next(iter_tgt)
             video_list_tgt = move_to_device(video_list_tgt, self.model.device)
+            if supervised_mode == 'target_only':
+                video_list_src = video_list_tgt
+            else:
+                video_list_src = next(iter_src)
+                video_list_src = move_to_device(video_list_src, self.model.device)
             
             # forward / backward the model
             vlm_routes = None
@@ -397,6 +412,11 @@ class Trainer(BaseTrainerDA):
             losses, _, _, _, _, _, _ = self.model(video_list_src = video_list_src,
                                 video_list_tgt = video_list_tgt,
                                 mode='train',
+                                domain=(
+                                    'tgt'
+                                    if supervised_mode == 'target_only'
+                                    else 'src'
+                                ),
                                 curr_epoch=curr_epoch,
                                 cls_static_anchors=cls_static_anchors,
                                 mean_class_conf=mean_class_conf,
@@ -415,7 +435,17 @@ class Trainer(BaseTrainerDA):
             task_loss = losses['downstream_loss'] * 0.0
             alignment_loss = losses['downstream_loss'] * 0.0
             alignment_components = []
-            if curr_epoch < warmup_adv:
+            if supervised_mode == 'target_only':
+                task_loss = losses['downstream_loss']
+                final_loss = task_loss
+            elif supervised_mode == 'source_target':
+                task_loss = 0.5 * (
+                    losses['source_gt_downstream_loss']
+                    + losses['target_gt_downstream_loss']
+                )
+                losses['downstream_loss'] = task_loss
+                final_loss = task_loss
+            elif curr_epoch < warmup_adv:
                 # Apply the source only training 
                 task_loss = losses['downstream_loss']
                 final_loss += task_loss
@@ -482,6 +512,8 @@ class Trainer(BaseTrainerDA):
             self.optimizer_disc.zero_grad(set_to_none=True)
             
             use_harmonization = (
+                supervised_mode == 'off'
+                and
                 curr_epoch >= warmup_adv
                 and self.gradient_harmonization_mode != 'off'
                 and alignment_loss.requires_grad
@@ -562,7 +594,9 @@ class Trainer(BaseTrainerDA):
                     self.cfg['train_cfg']['clip_grad_l2norm'],
                 )
             
-            if curr_epoch < warmup_adv:
+            if supervised_mode != 'off':
+                self.optimizer_gen_source.step()
+            elif curr_epoch < warmup_adv:
                 self.optimizer_gen_source.step()
                 
             else:
@@ -619,9 +653,12 @@ class Trainer(BaseTrainerDA):
             # OPTIONAL: Update the learning rate
             if self.lr_scheduler_gen_source is not None:
                 self.lr_scheduler_gen_source.step()  # once per epoch
-            if self.lr_scheduler_gen_source_alignment is not None:
+            if (
+                supervised_mode == 'off'
+                and self.lr_scheduler_gen_source_alignment is not None
+            ):
                 self.lr_scheduler_gen_source_alignment.step()  # once per epoch
-            if self.lr_scheduler_disc is not None:
+            if supervised_mode == 'off' and self.lr_scheduler_disc is not None:
                 self.lr_scheduler_disc.step()  # once per epoch
            
                 

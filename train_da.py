@@ -232,7 +232,13 @@ def main(cfg, resume, project_name='sada', debug=False):
     for module in model.disc_dom_conditional_adv:
         disc_params += list(module.parameters())
     
-    num_iters_epoch = max(len(train_loader_src), len(train_loader_tgt))
+    supervised_mode = cfg.get('diagnostic', {}).get(
+        'supervised_upper_bound', 'off'
+    )
+    if supervised_mode == 'target_only':
+        num_iters_epoch = len(train_loader_tgt)
+    else:
+        num_iters_epoch = max(len(train_loader_src), len(train_loader_tgt))
     
     optimizer_gen_source = make_optimizer(model, cfg['opt'], cfg['opt']['learning_rate'], exclude_params = ['disc_dom_adv', 'disc_dom_conditional_adv', 'learnable_embeddings'])
     scheduler_gen_source = make_scheduler(optimizer_gen_source, cfg['opt'], num_iters_epoch)
@@ -1114,6 +1120,21 @@ def create_argparser():
     parser.add_argument(
         '--oracle-target-distillation-levels', default='0,1,2',
         help='comma-separated FPN levels for diagnostic target distillation',
+    )
+    parser.add_argument(
+        '--oracle-target-task',
+        choices=['off', 'class', 'boundary', 'joint'],
+        default='off',
+        help=(
+            'diagnostic full-strength target GT task component added to SADA; '
+            'not an unsupervised method'
+        ),
+    )
+    parser.add_argument(
+        '--supervised-upper-bound',
+        choices=['off', 'target_only', 'source_target'],
+        default='off',
+        help='diagnostic training with target GT; not an unsupervised method',
     )
     parser.add_argument(
         '--vlm-target-adapter-cache', default=None,
@@ -2066,6 +2087,39 @@ if __name__ == '__main__':
     }
     if vlm_enabled and effective_stage1 != 'off':
         raise ValueError('VLM routing and Stage 1 stability cannot both be enabled')
+    target_gt_diagnostic = (
+        args.oracle_target_task != 'off'
+        or args.supervised_upper_bound != 'off'
+    )
+    if target_gt_diagnostic:
+        conflicting_diagnostics = (
+            effective_stage1 != 'off'
+            or vlm_enabled
+            or vlm_target_adapter_enabled
+            or vlm_relation_enabled
+            or proposal_semantic_enabled
+            or validity_head_enabled
+            or args.transport_alignment != 'off'
+            or args.oracle_routing != 'off'
+            or args.oracle_forgetting != 'off'
+            or args.oracle_target_regression != 'off'
+            or args.oracle_target_distillation != 'off'
+            or args.binary_band_oracle != 'off'
+            or args.conditional_paired_support
+            or args.conditional_paired_fixed_denominator
+            or args.gradient_harmonization != 'off'
+        )
+        if conflicting_diagnostics:
+            raise ValueError(
+                'target-GT Oracle ladder requires an otherwise clean SADA run'
+            )
+        if (
+            args.oracle_target_task != 'off'
+            and args.supervised_upper_bound != 'off'
+        ):
+            raise ValueError(
+                'Oracle target task and supervised upper bound are mutually exclusive'
+            )
     if (
         effective_stage1 != 'off'
         and (
@@ -2265,6 +2319,8 @@ if __name__ == '__main__':
             args.oracle_target_distillation_budget
         ),
         'target_distillation_levels': target_distillation_levels,
+        'oracle_target_task': args.oracle_target_task,
+        'supervised_upper_bound': args.supervised_upper_bound,
         'stop_after_epoch': args.stop_after_epoch,
         'no_conditional_update': args.diagnostic_no_ca,
         'alignment_levels': diagnostic_levels,
