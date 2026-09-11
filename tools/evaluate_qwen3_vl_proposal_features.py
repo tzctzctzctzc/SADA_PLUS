@@ -328,7 +328,7 @@ def parse_args():
     parser.add_argument("--feature-index", required=True)
     parser.add_argument("--feature-root", required=True)
     parser.add_argument("--slowfast-root", required=True)
-    parser.add_argument("--logit-predictions", required=True)
+    parser.add_argument("--logit-predictions", default=None)
     parser.add_argument("--output", required=True)
     parser.add_argument("--folds", type=int, default=5)
     parser.add_argument("--max-pair-gap", type=float, default=30.0)
@@ -387,14 +387,19 @@ def main():
         )
     logits = {
         row["candidate_id"]: int(row["class_id"])
-        for row in read_jsonl(args.logit_predictions)
+        for row in (
+            read_jsonl(args.logit_predictions) if args.logit_predictions else []
+        )
         if row.get("status") == "ok"
     }
     logit_rows = [row for row in candidates if row["candidate_id"] in logits]
-    logit_accuracy = sum(
-        logits[row["candidate_id"]] in row["gt_assigned_class_ids"]
-        for row in logit_rows
-    ) / len(logit_rows)
+    logit_accuracy = (
+        sum(
+            logits[row["candidate_id"]] in row["gt_assigned_class_ids"]
+            for row in logit_rows
+        ) / len(logit_rows)
+        if logit_rows else None
+    )
     relation = {
         name: relation_auc(candidates, values, args.max_pair_gap)
         for name, values in all_variants.items()
