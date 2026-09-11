@@ -1,6 +1,7 @@
 param(
     [int]$WaitForPid = 0,
-    [string]$DataRoot = "F:\SADA"
+    [string]$DataRoot = "F:\SADA",
+    [switch]$SkipRepair
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,23 +28,25 @@ if ($WaitForPid -gt 0) {
 }
 
 Set-Location -LiteralPath $repo
-Set-Content -LiteralPath $stageFile -Value "S5_SOURCE_MD5_REPAIR"
-$repair = Start-Process -FilePath $python -WindowStyle Hidden -Wait -PassThru `
-    -ArgumentList (@(
-        "-u", "-m", "tools.download_epic_manifest_videos",
-        "--scenario-root", $manifestRoot,
-        "--video-root", $videoRoot,
-        "--epic55-splits", $splitFile,
-        "--md5-csv", $md5File,
-        "--verify-cached-md5",
-        "--workers", "6", "--connections", "8", "--retries", "3",
-        "--shifts", "S5", "--video-ids"
-    ) + $repairIds) `
-    -RedirectStandardOutput (Join-Path $DataRoot "repair_S5_source_md5_20260911.stdout.log") `
-    -RedirectStandardError (Join-Path $DataRoot "repair_S5_source_md5_20260911.stderr.log")
-if ($repair.ExitCode -ne 0) {
-    Set-Content -LiteralPath $stageFile -Value "S5_SOURCE_MD5_REPAIR_FAILED exit=$($repair.ExitCode)"
-    exit $repair.ExitCode
+if (-not $SkipRepair) {
+    Set-Content -LiteralPath $stageFile -Value "S5_SOURCE_MD5_REPAIR"
+    $repair = Start-Process -FilePath $python -WindowStyle Hidden -Wait -PassThru `
+        -ArgumentList (@(
+            "-u", "-m", "tools.download_epic_manifest_videos",
+            "--scenario-root", $manifestRoot,
+            "--video-root", $videoRoot,
+            "--epic55-splits", $splitFile,
+            "--md5-csv", $md5File,
+            "--verify-cached-md5",
+            "--workers", "6", "--connections", "8", "--retries", "3",
+            "--shifts", "S5", "--video-ids"
+        ) + $repairIds) `
+        -RedirectStandardOutput (Join-Path $DataRoot "repair_S5_source_md5_20260911.stdout.log") `
+        -RedirectStandardError (Join-Path $DataRoot "repair_S5_source_md5_20260911.stderr.log")
+    if ($repair.ExitCode -ne 0) {
+        Set-Content -LiteralPath $stageFile -Value "S5_SOURCE_MD5_REPAIR_FAILED exit=$($repair.ExitCode)"
+        exit $repair.ExitCode
+    }
 }
 
 Set-Content -LiteralPath $stageFile -Value "S5_SOURCE_16_FRAME_EXTRACTION"
@@ -86,17 +89,3 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Set-Content -LiteralPath $stageFile -Value "S5_SOURCE_16_READY archive=$archive"
-
-$followup = Start-Process -FilePath $python -WindowStyle Hidden -PassThru `
-    -ArgumentList @(
-        "-u", "-m", "tools.download_epic_manifest_videos",
-        "--scenario-root", $manifestRoot,
-        "--video-root", $videoRoot,
-        "--epic55-splits", $splitFile,
-        "--md5-csv", $md5File,
-        "--workers", "16", "--connections", "8", "--retries", "3",
-        "--shifts", "S1", "S2", "S6"
-    ) `
-    -RedirectStandardOutput (Join-Path $DataRoot "download_S1_S2_S6_followup_20260911.stdout.log") `
-    -RedirectStandardError (Join-Path $DataRoot "download_S1_S2_S6_followup_20260911.stderr.log")
-Set-Content -LiteralPath (Join-Path $DataRoot "download_S1S6_priority.pid") -Value $followup.Id
