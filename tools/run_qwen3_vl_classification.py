@@ -54,7 +54,8 @@ PROMPT_SHA256 = hashlib.sha256(
 
 
 def prompt_protocol(base_version, prompt_mode="baseline", frame_order="forward",
-                    input_mode="images", sample_fps=1.0):
+                    input_mode="images", sample_fps=1.0,
+                    sample_fps_mode="fixed"):
     if prompt_mode not in (
         "baseline", "phase_transition", "contrastive_transition"
     ):
@@ -65,9 +66,13 @@ def prompt_protocol(base_version, prompt_mode="baseline", frame_order="forward",
         raise ValueError("unknown input mode: {}".format(input_mode))
     if sample_fps <= 0.0:
         raise ValueError("sample fps must be positive")
+    if sample_fps_mode not in ("fixed", "proposal"):
+        raise ValueError("unknown sample fps mode: {}".format(sample_fps_mode))
     version = base_version
     if input_mode == "native_video":
         version = version.replace("ordered-images", "native-video")
+        if sample_fps_mode == "proposal":
+            version = version.replace("native-video", "native-video-proposal-fps")
     if prompt_mode in ("phase_transition", "contrastive_transition"):
         version = version.replace(
             "-digit-logits-v1", "-{}-digit-logits-v1".format(
@@ -87,7 +92,9 @@ def prompt_protocol(base_version, prompt_mode="baseline", frame_order="forward",
     if prompt_mode != "baseline" or frame_order != "forward":
         payload.update({"prompt_mode": prompt_mode, "frame_order": frame_order})
     if input_mode == "native_video":
-        payload.update({"input_mode": input_mode, "sample_fps": float(sample_fps)})
+        payload.update({"input_mode": input_mode, "sample_fps_mode": sample_fps_mode})
+        if sample_fps_mode == "fixed":
+            payload["sample_fps"] = float(sample_fps)
     prompt_hash = hashlib.sha256(
         json.dumps(payload, sort_keys=True).encode("utf-8")
     ).hexdigest()
@@ -290,15 +297,26 @@ def load_qwen3(args):
     }
 
 
-def infer_one(runtime, paths, candidate_id, args):
+def proposal_sample_fps(row, args):
+    if getattr(args, "sample_fps_mode", "fixed") == "fixed":
+        return float(args.sample_fps)
+    duration = float(row["proposal_end_sec"]) - float(row["proposal_start_sec"])
+    if duration <= 0.0:
+        raise ValueError("proposal duration must be positive")
+    return max((int(args.frame_count) - 1) / duration, 1e-6)
+
+
+def infer_one(runtime, paths, candidate_id, args, sample_fps=None):
     torch = runtime["torch"]
     prompt_mode = getattr(args, "prompt_mode", "baseline")
     input_mode = getattr(args, "input_mode", "images")
     prompt = build_prompt(candidate_id, args.frame_count, prompt_mode, input_mode)
     mapping = digit_to_label(candidate_id)
     if input_mode == "native_video":
+        if sample_fps is None:
+            sample_fps = float(args.sample_fps)
         messages = build_native_video_messages(
-            paths, prompt, args.min_pixels, args.max_pixels, args.sample_fps
+            paths, prompt, args.min_pixels, args.max_pixels, sample_fps
         )
     else:
         messages = build_messages(paths, prompt, args.min_pixels, args.max_pixels)
@@ -365,6 +383,12 @@ def prediction_is_current(row, args):
     prompt_mode = getattr(args, "prompt_mode", "baseline")
     input_mode = getattr(args, "input_mode", "images")
     sample_fps = getattr(args, "sample_fps", 1.0)
+    sample_fps_mode = getattr(args, "sample_fps_mode", "fixed")
+    expected_sample_fps = (
+        proposal_sample_fps(row, args)
+        if input_mode == "native_video" and sample_fps_mode == "proposal"
+        else float(sample_fps)
+    )
     return bool(
         candidate_id
         and row.get("status") == "ok"
@@ -376,7 +400,10 @@ def prediction_is_current(row, args):
         and row.get("input_mode", "images") == input_mode
         and (
             input_mode != "native_video"
-            or float(row.get("sample_fps", -1.0)) == float(sample_fps)
+            or math.isclose(
+                float(row.get("sample_fps", -1.0)), expected_sample_fps,
+                rel_tol=1e-9, abs_tol=1e-9,
+            )
         )
         and row.get("wire_api") == WIRE_API
     )
@@ -408,7 +435,10 @@ def score_manifest(runtime, manifest_path, output_path, frame_cache,
             paths = ordered_frame_paths(
                 paths, getattr(args, "frame_order", "forward")
             )
-            scores = infer_one(runtime, paths, row["candidate_id"], args)
+            actual_sample_fps = proposal_sample_fps(row, args)
+            scores = infer_one(
+                runtime, paths, row["candidate_id"], args, actual_sample_fps
+            )
             result = {
                 **row,
                 "status": "ok",
@@ -419,7 +449,8 @@ def score_manifest(runtime, manifest_path, output_path, frame_cache,
                 "base_prompt_sha256": PROMPT_SHA256,
                 "frame_count": args.frame_count,
                 "input_mode": getattr(args, "input_mode", "images"),
-                "sample_fps": float(getattr(args, "sample_fps", 1.0)),
+                "sample_fps": actual_sample_fps,
+                "sample_fps_mode": getattr(args, "sample_fps_mode", "fixed"),
                 "frame_paths": [str(path) for path in paths],
                 "min_pixels": args.min_pixels,
                 "max_pixels": args.max_pixels,
@@ -570,6 +601,9 @@ def parse_args():
     )
     parser.add_argument("--sample-fps", type=float, default=1.0)
     parser.add_argument(
+        "--sample-fps-mode", choices=("fixed", "proposal"), default="fixed"
+    )
+    parser.add_argument(
         "--prompt-mode",
         choices=("baseline", "phase_transition", "contrastive_transition"),
         default="baseline",
@@ -610,7 +644,7 @@ def main():
         raise ValueError("sample fps must be positive")
     PROMPT_VERSION, PROMPT_SHA256 = prompt_protocol(
         PROMPT_VERSION, args.prompt_mode, args.frame_order,
-        args.input_mode, args.sample_fps,
+        args.input_mode, args.sample_fps, args.sample_fps_mode,
     )
     runtime = load_qwen3(args)
     score_manifest(

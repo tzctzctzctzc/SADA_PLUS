@@ -11,6 +11,7 @@ from tools.run_qwen3_vl_classification import (
     normalize_digit_logits,
     ordered_frame_paths,
     prediction_is_current,
+    proposal_sample_fps,
     prompt_protocol,
     prompt_sha256,
     resolve_digit_token_ids,
@@ -120,6 +121,21 @@ def test_native_video_protocol_and_prompt_are_explicit():
     assert "video above contains 8 frames" in build_prompt(
         "proposal-1", input_mode="native_video"
     )
+
+
+def test_proposal_fps_uses_true_proposal_duration():
+    args = SimpleNamespace(frame_count=8, sample_fps=1.0, sample_fps_mode="proposal")
+    row = {"proposal_start_sec": 10.0, "proposal_end_sec": 13.5}
+    assert proposal_sample_fps(row, args) == 2.0
+
+
+def test_proposal_fps_protocol_is_separate_from_fixed_fps():
+    version, _ = prompt_protocol(
+        "qwen3-vl-8b-ordered-images-digit-logits-v1",
+        input_mode="native_video",
+        sample_fps_mode="proposal",
+    )
+    assert version == "qwen3-vl-8b-native-video-proposal-fps-digit-logits-v1"
 
 
 def test_digit_logits_are_mapped_back_to_dataset_class_order():
