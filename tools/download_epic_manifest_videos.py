@@ -56,7 +56,8 @@ def backup_corrupt(path):
 
 
 def download_one(video_id, rows, output_root, old_splits, retries, connections,
-                 frame_cache, frame_count, expected_md5=None):
+                 frame_cache, frame_count, expected_md5=None,
+                 verify_cached_md5=False):
     existing = video_path(output_root, video_id)
     control = Path(str(existing) + ".aria2") if existing is not None else None
     try:
@@ -64,6 +65,7 @@ def download_one(video_id, rows, output_root, old_splits, retries, connections,
             existing is not None
             and not control.exists()
             and expected_md5
+            and verify_cached_md5
             and file_md5(existing) != expected_md5
         ):
             backup_corrupt(existing)
@@ -104,7 +106,12 @@ def parse_args():
     parser.add_argument(
         "--md5-csv",
         default=None,
-        help="official checksum CSV; cached and downloaded videos are verified when set",
+        help="official checksum CSV used to verify newly downloaded videos",
+    )
+    parser.add_argument(
+        "--verify-cached-md5",
+        action="store_true",
+        help="also hash cached videos and preserve mismatches as .corrupt_md5 backups",
     )
     parser.add_argument("--shifts", nargs="+", choices=SHIFT_NAMES, default=list(SHIFT_NAMES))
     parser.add_argument(
@@ -126,6 +133,8 @@ def main():
     args = parse_args()
     if args.workers <= 0 or args.connections <= 0 or args.frame_count <= 0:
         raise ValueError("workers, connections, and frame count must be positive")
+    if args.verify_cached_md5 and not args.md5_csv:
+        raise ValueError("--verify-cached-md5 requires --md5-csv")
     output_root = Path(args.video_root)
     output_root.mkdir(parents=True, exist_ok=True)
     old_splits = epic_55_splits(args.epic55_splits)
@@ -156,6 +165,7 @@ def main():
                 args.frame_cache,
                 args.frame_count,
                 expected_md5s.get(video_id),
+                args.verify_cached_md5,
             )
             for video_id in video_ids
         ]

@@ -87,7 +87,7 @@ def _link_reused_frames(source, destination):
     os.symlink(Path(source), destination, target_is_directory=True)
 
 
-def _prepare_video(video_id, rows, frame_cache, args, old_splits):
+def _prepare_video(video_id, rows, args, old_splits):
     """Download one video, extract all requested proposals, then delete it."""
     complete = 0
     with tempfile.TemporaryDirectory(prefix="vlm-frame-video-") as temporary:
@@ -103,11 +103,11 @@ def _prepare_video(video_id, rows, frame_cache, args, old_splits):
                     connections=args.download_connections,
                 )
                 downloaded = True
-            for row, namespace in rows:
+            for row, namespace, cache_root in rows:
                 prepare_frames(
                     row,
                     local_video,
-                    frame_cache,
+                    cache_root,
                     namespace,
                     args.frame_count,
                 )
@@ -157,7 +157,7 @@ def prepare_all_manifests(scenario_root, frame_cache, args, old_splits):
                 _link_reused_frames(old_frames, destination)
                 reused += 1
                 continue
-            jobs[row["video_id"]].append((row, namespace))
+            jobs[row["video_id"]].append((row, namespace, cache_root))
 
     print(
         "{} proposals, reused {}, need {} unique videos".format(
@@ -173,7 +173,6 @@ def prepare_all_manifests(scenario_root, frame_cache, args, old_splits):
                 _prepare_video,
                 video_id,
                 rows,
-                Path(frame_cache),
                 args,
                 old_splits,
             )
