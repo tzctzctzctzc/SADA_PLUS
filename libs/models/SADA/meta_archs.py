@@ -58,6 +58,7 @@ from .vlm_relation import (
     proposal_relation_loss,
     relation_proposals_for_videos,
 )
+from .trident_quality import boundary_peak_quality
 from .proposal_semantic import (
     PROPOSAL_SEMANTIC_MODES,
     ProposalLogitAdapter,
@@ -1247,6 +1248,11 @@ class SADA(nn.Module):
         self.test_multiclass_nms = cfg['test_cfg']['multiclass_nms']
         self.test_nms_sigma = cfg['test_cfg']['nms_sigma']
         self.test_voting_thresh = cfg['test_cfg']['voting_thresh']
+        self.test_trident_quality_gamma = float(
+            cfg['test_cfg'].get('trident_quality_gamma', 0.0)
+        )
+        if self.test_trident_quality_gamma < 0.0:
+            raise ValueError('trident_quality_gamma must be non-negative')
         self.num_bins = cfg['model']['num_bins']
         self.use_trident_head = cfg['model']['use_trident_head']
         if self.oracle_target_regression_mode != 'off' and self.use_trident_head:
@@ -5009,6 +5015,7 @@ class SADA(nn.Module):
         segs_all = []
         scores_all = []
         cls_idxs_all = []
+        qualities_all = []
 
         # loop over fpn levels
         for cls_i, offsets_i, pts_i, mask_i, sb_cls_i, eb_cls_i in zip(out_cls_logits, out_offsets, points, fpn_masks, lb_logits_per_vid, rb_logits_per_vid):
@@ -5064,8 +5071,17 @@ class SADA(nn.Module):
             # pick topk output from the prediction
             if self.use_trident_head:
                 offsets = decoded_offsets[cls_idxs, pt_idxs]
+                boundary_quality = boundary_peak_quality(
+                    offsets_i, pred_start_neighbours, pred_end_neighbours
+                )[cls_idxs, pt_idxs]
             else:
                 offsets = decoded_offsets[pt_idxs]
+                boundary_quality = torch.ones_like(pred_prob)
+
+            if self.test_trident_quality_gamma > 0.0:
+                pred_prob = pred_prob * boundary_quality.clamp_min(1e-8).pow(
+                    self.test_trident_quality_gamma
+                )
 
             pts = pts_i[pt_idxs]
 
@@ -5083,14 +5099,17 @@ class SADA(nn.Module):
             segs_all.append(pred_segs[keep_idxs2])
             scores_all.append(pred_prob[keep_idxs2])
             cls_idxs_all.append(cls_idxs[keep_idxs2])
+            qualities_all.append(boundary_quality[keep_idxs2])
 
         # cat along the FPN levels (F N_i, C)
         segs_all, scores_all, cls_idxs_all = [
             torch.cat(x) for x in [segs_all, scores_all, cls_idxs_all]
         ]
+        qualities_all = torch.cat(qualities_all)
         results = {'segments': segs_all,
                    'scores': scores_all,
-                   'labels': cls_idxs_all}
+                   'labels': cls_idxs_all,
+                   'qualities': qualities_all}
 
         return results
 
@@ -5113,6 +5132,7 @@ class SADA(nn.Module):
             segs_pre_nms = results_per_vid['segments'].detach().cpu()
             scores_pre_nms = results_per_vid['scores'].detach().cpu()
             labels_pre_nms = results_per_vid['labels'].detach().cpu()
+            qualities_pre_nms = results_per_vid['qualities'].detach().cpu()
             if self.test_nms_method != 'none':
                 # 2: batched nms (only implemented on CPU)
                 segs, scores, labels = batched_nms(
@@ -5151,7 +5171,8 @@ class SADA(nn.Module):
                  'labels': labels,
                  'segments_pre_nms': segs_pre_nms,
                  'scores_pre_nms': scores_pre_nms,
-                 'labels_pre_nms': labels_pre_nms}
+                 'labels_pre_nms': labels_pre_nms,
+                 'qualities_pre_nms': qualities_pre_nms}
             )
 
         return processed_results
