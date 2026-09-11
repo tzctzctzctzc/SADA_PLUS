@@ -197,7 +197,7 @@ def prepare_all_manifests(scenario_root, frame_cache, args, old_splits):
                     flush=True,
                 )
     print("prepared {} / {} proposals".format(prepared, total_rows), flush=True)
-    return prepared
+    return prepared, total_rows
 
 
 def parse_args():
@@ -241,8 +241,10 @@ def main():
     old_splits = epic_55_splits(args.epic55_splits)
     if args.workers <= 0:
         raise ValueError("workers must be positive")
-    prepare_all_manifests(args.scenario_root, args.frame_cache, args, old_splits)
-    return 0
+    prepared, total = prepare_all_manifests(
+        args.scenario_root, args.frame_cache, args, old_splits
+    )
+    return 0 if prepared == total else 1
 
 
 if __name__ == "__main__":
