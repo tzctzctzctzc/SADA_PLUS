@@ -95,3 +95,34 @@ def test_proposal_ceiling_emits_one_exact_row_per_covered_gt():
         [0.0, 5.0],
         [10.0, 15.0],
     ]
+
+
+def test_detection_error_taxonomy_is_score_aware():
+    ground_truth = pd.DataFrame(
+        [
+            ["v1", 0.0, 5.0, 0],
+            ["v1", 10.0, 15.0, 1],
+        ],
+        columns=["video-id", "t-start", "t-end", "label"],
+    )
+    predictions = pd.DataFrame(
+        [
+            ["v1", 0.0, 5.0, 0, 0.9],
+            ["v1", 0.0, 5.0, 0, 0.8],
+            ["v1", 10.0, 15.0, 0, 0.7],
+            ["v1", 3.0, 6.0, 0, 0.6],
+            ["v1", 8.0, 12.0, 0, 0.5],
+            ["v1", 30.0, 31.0, 0, 0.4],
+        ],
+        columns=oracle.PRED_COLUMNS,
+    )
+    assert oracle.detection_error_labels(
+        predictions, ground_truth, tiou_threshold=0.5, min_overlap=0.1
+    ).tolist() == [
+        "true_positive",
+        "double_detection",
+        "wrong_label",
+        "localization",
+        "confusion",
+        "background",
+    ]

@@ -24,6 +24,14 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 PRED_COLUMNS = ["video-id", "t-start", "t-end", "label", "score"]
+ERROR_TYPES = (
+    "true_positive",
+    "double_detection",
+    "wrong_label",
+    "localization",
+    "confusion",
+    "background",
+)
 
 
 def file_sha256(path):
@@ -98,12 +106,16 @@ def apply_match_oracle(
     replace_boundary=False,
     drop_invalid=False,
     rerank=False,
+    matches=None,
 ):
     """Apply a transparent GT counterfactual to a prediction table."""
     result = predictions.copy().reset_index(drop=True)
-    gt_index, match_iou = prediction_matches(
-        result, ground_truth, class_aware=class_aware
-    )
+    if matches is None:
+        gt_index, match_iou = prediction_matches(
+            result, ground_truth, class_aware=class_aware
+        )
+    else:
+        gt_index, match_iou = matches
     valid = (gt_index >= 0) & (match_iou >= float(min_iou))
     matched_rows = gt_index[valid]
     if replace_label:
@@ -192,6 +204,104 @@ def proposal_ceiling(predictions, ground_truth, min_iou, class_aware=False):
             }
         )
     return pd.DataFrame(rows, columns=PRED_COLUMNS)
+
+
+def detection_error_labels(
+    predictions,
+    ground_truth,
+    tiou_threshold=0.5,
+    min_overlap=0.1,
+):
+    """Classify ranked detections using the DETAD error taxonomy.
+
+    Matching is greedy within each predicted class, as in AP evaluation.  The
+    returned label for every prediction is therefore score-aware.
+    """
+    errors = pd.Series("background", index=predictions.index, dtype="object")
+    gt_by_video = {
+        video_id: group
+        for video_id, group in ground_truth.groupby("video-id", sort=False)
+    }
+    for label, pred_group in predictions.groupby("label", sort=False):
+        matched_gt = set()
+        for pred_index, pred in pred_group.sort_values(
+            "score", ascending=False, kind="mergesort"
+        ).iterrows():
+            gt_group = gt_by_video.get(pred["video-id"])
+            if gt_group is None or gt_group.empty:
+                continue
+            ious = temporal_iou(
+                (pred["t-start"], pred["t-end"]),
+                gt_group[["t-start", "t-end"]].to_numpy(dtype=np.float64),
+            )
+            gt_labels = gt_group["label"].to_numpy(dtype=np.int64)
+            same_class = gt_labels == int(label)
+            same_iou = np.where(same_class, ious, -1.0)
+            best_same_local = int(np.argmax(same_iou))
+            best_same_iou = float(same_iou[best_same_local])
+            best_any_iou = float(ious.max())
+
+            if best_same_iou >= tiou_threshold:
+                gt_index = int(gt_group.index[best_same_local])
+                if gt_index in matched_gt:
+                    errors.at[pred_index] = "double_detection"
+                else:
+                    errors.at[pred_index] = "true_positive"
+                    matched_gt.add(gt_index)
+            elif best_any_iou >= tiou_threshold:
+                errors.at[pred_index] = "wrong_label"
+            elif best_same_iou >= min_overlap:
+                errors.at[pred_index] = "localization"
+            elif best_any_iou >= min_overlap:
+                errors.at[pred_index] = "confusion"
+    return errors
+
+
+def detection_error_profile(
+    predictions,
+    ground_truth,
+    tiou_threshold=0.5,
+    min_overlap=0.1,
+    rank_budget_per_gt=10,
+):
+    """Summarize DETAD errors among the top K*G detections per class."""
+    errors = detection_error_labels(
+        predictions,
+        ground_truth,
+        tiou_threshold=tiou_threshold,
+        min_overlap=min_overlap,
+    )
+    selected = []
+    gt_counts = ground_truth.groupby("label").size().to_dict()
+    for label, pred_group in predictions.groupby("label", sort=False):
+        budget = int(rank_budget_per_gt * gt_counts.get(label, 0))
+        if budget <= 0:
+            continue
+        selected.extend(
+            pred_group.sort_values(
+                "score", ascending=False, kind="mergesort"
+            ).head(budget).index.tolist()
+        )
+    selected_errors = errors.loc[selected]
+    selected_scores = predictions.loc[selected, "score"]
+    total = len(selected_errors)
+    summary = {}
+    for error_type in ERROR_TYPES:
+        mask = selected_errors == error_type
+        values = selected_scores.loc[mask]
+        summary[error_type] = {
+            "count": int(mask.sum()),
+            "percent": float(mask.mean() * 100.0) if total else 0.0,
+            "mean_score": float(values.mean()) if len(values) else None,
+        }
+    return {
+        "tiou_threshold": float(tiou_threshold),
+        "min_overlap": float(min_overlap),
+        "rank_budget_per_gt_per_class": int(rank_budget_per_gt),
+        "evaluated_predictions": int(total),
+        "total_predictions": int(len(predictions)),
+        "errors": summary,
+    }
 
 
 def results_frame(outputs, pre_nms=False):
@@ -294,6 +404,12 @@ def metric_summary(evaluator, predictions):
 
 def build_oracles(post_predictions, ground_truth, min_iou):
     """Build non-additive counterfactuals with explicit semantics."""
+    class_agnostic_matches = prediction_matches(
+        post_predictions, ground_truth, class_aware=False
+    )
+    class_aware_matches = prediction_matches(
+        post_predictions, ground_truth, class_aware=True
+    )
     return {
         "baseline": post_predictions,
         "class_oracle": apply_match_oracle(
@@ -302,6 +418,7 @@ def build_oracles(post_predictions, ground_truth, min_iou):
             class_aware=False,
             min_iou=min_iou,
             replace_label=True,
+            matches=class_agnostic_matches,
         ),
         "boundary_oracle": apply_match_oracle(
             post_predictions,
@@ -309,6 +426,7 @@ def build_oracles(post_predictions, ground_truth, min_iou):
             class_aware=True,
             min_iou=min_iou,
             replace_boundary=True,
+            matches=class_aware_matches,
         ),
         "ranking_oracle": apply_match_oracle(
             post_predictions,
@@ -316,6 +434,7 @@ def build_oracles(post_predictions, ground_truth, min_iou):
             class_aware=True,
             min_iou=min_iou,
             rerank=True,
+            matches=class_aware_matches,
         ),
         "validity_oracle": apply_match_oracle(
             post_predictions,
@@ -323,6 +442,7 @@ def build_oracles(post_predictions, ground_truth, min_iou):
             class_aware=True,
             min_iou=min_iou,
             drop_invalid=True,
+            matches=class_aware_matches,
         ),
         "class_validity_oracle": apply_match_oracle(
             post_predictions,
@@ -331,6 +451,7 @@ def build_oracles(post_predictions, ground_truth, min_iou):
             min_iou=min_iou,
             replace_label=True,
             drop_invalid=True,
+            matches=class_agnostic_matches,
         ),
         "class_validity_ranking_oracle": apply_match_oracle(
             post_predictions,
@@ -340,6 +461,7 @@ def build_oracles(post_predictions, ground_truth, min_iou):
             replace_label=True,
             drop_invalid=True,
             rerank=True,
+            matches=class_agnostic_matches,
         ),
         "class_boundary_oracle": apply_match_oracle(
             post_predictions,
@@ -348,6 +470,7 @@ def build_oracles(post_predictions, ground_truth, min_iou):
             min_iou=min_iou,
             replace_label=True,
             replace_boundary=True,
+            matches=class_agnostic_matches,
         ),
         "post_nms_proposal_ceiling": proposal_ceiling(
             post_predictions, ground_truth, min_iou, class_aware=False
@@ -430,6 +553,13 @@ def main():
     output = {
         "schema_version": "sada-inference-oracle-v1",
         "warning": "All non-baseline rows use target validation GT and are diagnostics, not UDA results.",
+        "oracle_definitions": {
+            "class_oracle": "Relabel every prediction overlapping any GT by at least min_match_iou; scores and boundaries are unchanged.",
+            "boundary_oracle": "Snap correctly classified overlapping predictions to matched GT boundaries; scores and labels are unchanged.",
+            "ranking_oracle": "Put correctly classified overlapping predictions ahead of invalid predictions and order them by IoU. This mixes validity filtering with IoU ordering and is not a pure ranking upper bound.",
+            "validity_oracle": "Drop predictions without a same-class GT overlap of at least min_match_iou; remaining scores are unchanged.",
+            "proposal_ceiling": "Emit one perfect detection for each GT covered by at least one proposal. This measures candidate-set coverage, not attainable detector performance.",
+        },
         "checkpoint": str(Path(args.checkpoint).resolve()),
         "checkpoint_sha256": file_sha256(args.checkpoint),
         "checkpoint_epoch": checkpoint.get("epoch"),
@@ -456,6 +586,13 @@ def main():
                 pre_predictions, ground_truth, thresholds, class_aware=True
             ),
         },
+        "detection_error_profile": detection_error_profile(
+            post_predictions,
+            ground_truth,
+            tiou_threshold=0.5,
+            min_overlap=args.min_match_iou,
+            rank_budget_per_gt=10,
+        ),
         "oracles": {
             name: metric_summary(evaluator, frame)
             for name, frame in oracle_frames.items()
