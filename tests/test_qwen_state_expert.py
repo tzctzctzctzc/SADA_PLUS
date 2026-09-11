@@ -31,6 +31,8 @@ def test_prompt_mapping_is_deterministic_and_complete():
     assert set(option_mapping("proposal-1")) == set(EXPERT_LABELS)
     prompt = build_prompt("proposal-1", 8)
     assert "PUT" in prompt and "INSERT" in prompt and "POUR" in prompt
+    assert "drawer, bag, appliance" in prompt
+    assert "Apply this precedence" in prompt
     assert "0 to 3" in prompt
 
 

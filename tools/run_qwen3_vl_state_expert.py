@@ -20,7 +20,7 @@ from tools.run_qwen3_vl_classification import build_messages, load_qwen3
 
 EXPERT_LABELS = ("PUT", "INSERT", "POUR", "OTHER")
 ROUTED_CLASS_IDS = tuple(LABELS.index(label) for label in EXPERT_LABELS[:3])
-PROMPT_VERSION = "qwen3-vl-put-insert-pour-state-expert-v1"
+PROMPT_VERSION = "qwen3-vl-put-insert-pour-state-expert-v2"
 WIRE_API = "qwen3-vl-next-token-state-expert"
 DEFAULT_ALPHAS = (0.0, 0.25, 0.5, 1.0, 2.0)
 
@@ -38,13 +38,15 @@ def build_prompt(candidate_id, frame_count=8):
     mapping = option_mapping(candidate_id)
     descriptions = {
         "PUT": (
-            "a solid object starts held or moving and ends resting or released at a "
-            "location; there is no visible flowing material and no distinct fitted "
-            "entry through a narrow opening"
+            "a solid object starts held or moving and ends resting or released on a "
+            "surface or another non-enclosing location; do not choose PUT when the "
+            "object crosses from outside to inside a container, drawer, bag, appliance, "
+            "cup, slot, or hole"
         ),
         "INSERT": (
-            "a solid object visibly passes from outside through a distinct slot, "
-            "socket, hole, or constrained opening and ends inside or fitted into it"
+            "a solid object visibly moves from outside to inside an enclosing destination, "
+            "including a container, drawer, bag, appliance, cup, slot, or hole; the "
+            "opening need not be narrow and the object need not be fitted"
         ),
         "POUR": (
             "a source vessel tilts and its contents visibly flow or transfer into "
@@ -65,7 +67,10 @@ def build_prompt(candidate_id, frame_count=8):
         "Judge the visible state transition, not the object identity or an unseen "
         "intention. Compare the object's state in the early and late frames. Treat "
         "opening or closing a container as incidental when the main transition is "
-        "placing or inserting another object. Choose exactly one option.\n{}\n"
+        "placing or inserting another object. Apply this precedence: visible contents "
+        "flowing from a tilted vessel is POUR; otherwise crossing from outside to inside "
+        "an enclosing destination is INSERT; otherwise setting down at a non-enclosing "
+        "location is PUT. Choose exactly one option.\n{}\n"
         "Answer immediately with exactly one digit from 0 to 3."
     ).format(frame_count, options)
 
