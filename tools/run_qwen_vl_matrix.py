@@ -94,6 +94,11 @@ def parse_args():
     parser.add_argument("--max-pixels", type=int, default=448 * 448)
     parser.add_argument("--score-temperature", type=float, default=1.0)
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument(
+        "--source-only",
+        action="store_true",
+        help="score source manifests and skip target inference",
+    )
     parser.add_argument("--force-target", action="store_true")
     parser.add_argument("--min-success-rate", type=float, default=0.95)
     parser.add_argument("--min-consensus-coverage", type=float, default=0.20)
@@ -140,6 +145,9 @@ def main():
             current,
         )
         print("{} source gate={}".format(shift, gate["adapter_pass"]), flush=True)
+        if current.source_only:
+            print("{} source-only complete; target skipped".format(shift), flush=True)
+            continue
         if not gate["adapter_pass"] and not current.force_target:
             print("{} target skipped by source gate".format(shift), flush=True)
             continue
