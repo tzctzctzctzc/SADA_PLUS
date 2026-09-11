@@ -98,15 +98,23 @@ def epic_video_url(video_id, old_splits):
     )
 
 
-def download_video(video_id, old_splits, output, retries=3, connections=8):
+def file_md5(path):
+    digest = hashlib.md5()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def download_video(video_id, old_splits, output, retries=3, connections=8,
+                   expected_md5=None):
     url = epic_video_url(video_id, old_splits)
     output = Path(output)
     partial = output.with_suffix(output.suffix + ".part")
     for attempt in range(retries + 1):
         try:
             if shutil.which("aria2c"):
-                subprocess.run(
-                    [
+                command = [
                         "aria2c", "--quiet=true", "--allow-overwrite=true",
                         "--auto-file-renaming=false", "--file-allocation=none",
                         "--continue=true", "--timeout=60", "--connect-timeout=20",
@@ -115,20 +123,20 @@ def download_video(video_id, old_splits, output, retries=3, connections=8):
                         "--split={}".format(connections),
                         "--min-split-size=1M", "--dir", str(output.parent),
                         "--out", output.name, url,
-                    ],
-                    check=True,
-                )
+                    ]
+                if expected_md5:
+                    command.insert(-4, "--checksum=md5={}".format(expected_md5))
+                subprocess.run(command, check=True)
             else:
                 with urllib.request.urlopen(url, timeout=180) as source, partial.open("wb") as sink:
                     shutil.copyfileobj(source, sink, length=1024 * 1024)
+                if expected_md5 and file_md5(partial) != expected_md5.lower():
+                    raise ValueError("downloaded MD5 mismatch for {}".format(video_id))
                 partial.replace(output)
             return output
         except Exception:
             if partial.exists():
                 partial.unlink()
-            control = Path(str(output) + ".aria2")
-            if control.exists():
-                control.unlink()
             if attempt == retries:
                 raise
             time.sleep(2 ** attempt)
