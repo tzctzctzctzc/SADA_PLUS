@@ -5,6 +5,7 @@ from tools.run_qwen3_vl_classification import (
     DIGITS,
     LABELS,
     build_messages,
+    build_native_video_messages,
     build_prompt,
     digit_to_label,
     normalize_digit_logits,
@@ -92,6 +93,33 @@ def test_build_messages_keeps_eight_images_separate_and_ordered(tmp_path):
     assert images[-1]["image"] == paths[-1].resolve().as_uri()
     assert all(item["min_pixels"] == 100 for item in images)
     assert all(item["max_pixels"] == 200 for item in images)
+
+
+def test_native_video_messages_keep_frames_in_one_temporal_input(tmp_path):
+    paths = []
+    for index in range(1, 9):
+        path = tmp_path / "frame_{:02d}.jpg".format(index)
+        path.write_bytes(b"jpeg")
+        paths.append(path)
+    messages = build_native_video_messages(paths, "prompt", 100, 200, 2.0)
+    video = messages[0]["content"][0]
+    assert video["type"] == "video"
+    assert len(video["video"]) == 8
+    assert video["sample_fps"] == 2.0
+    assert messages[0]["content"][1]["text"] == "prompt"
+
+
+def test_native_video_protocol_and_prompt_are_explicit():
+    version, prompt_hash = prompt_protocol(
+        "qwen3-vl-8b-ordered-images-digit-logits-v1",
+        input_mode="native_video",
+        sample_fps=2.0,
+    )
+    assert version == "qwen3-vl-8b-native-video-digit-logits-v1"
+    assert len(prompt_hash) == 64
+    assert "video above contains 8 frames" in build_prompt(
+        "proposal-1", input_mode="native_video"
+    )
 
 
 def test_digit_logits_are_mapped_back_to_dataset_class_order():

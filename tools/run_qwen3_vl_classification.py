@@ -53,14 +53,21 @@ PROMPT_SHA256 = hashlib.sha256(
 ).hexdigest()
 
 
-def prompt_protocol(base_version, prompt_mode="baseline", frame_order="forward"):
+def prompt_protocol(base_version, prompt_mode="baseline", frame_order="forward",
+                    input_mode="images", sample_fps=1.0):
     if prompt_mode not in (
         "baseline", "phase_transition", "contrastive_transition"
     ):
         raise ValueError("unknown prompt mode: {}".format(prompt_mode))
     if frame_order not in ("forward", "reverse"):
         raise ValueError("unknown frame order: {}".format(frame_order))
+    if input_mode not in ("images", "native_video"):
+        raise ValueError("unknown input mode: {}".format(input_mode))
+    if sample_fps <= 0.0:
+        raise ValueError("sample fps must be positive")
     version = base_version
+    if input_mode == "native_video":
+        version = version.replace("ordered-images", "native-video")
     if prompt_mode in ("phase_transition", "contrastive_transition"):
         version = version.replace(
             "-digit-logits-v1", "-{}-digit-logits-v1".format(
@@ -79,6 +86,8 @@ def prompt_protocol(base_version, prompt_mode="baseline", frame_order="forward")
         payload["contrastive_rules"] = CONTRASTIVE_TRANSITION_RULES
     if prompt_mode != "baseline" or frame_order != "forward":
         payload.update({"prompt_mode": prompt_mode, "frame_order": frame_order})
+    if input_mode == "native_video":
+        payload.update({"input_mode": input_mode, "sample_fps": float(sample_fps)})
     prompt_hash = hashlib.sha256(
         json.dumps(payload, sort_keys=True).encode("utf-8")
     ).hexdigest()
@@ -95,10 +104,13 @@ def digit_to_label(candidate_id):
     return tuple(labels)
 
 
-def build_prompt(candidate_id, frame_count=8, prompt_mode="baseline"):
+def build_prompt(candidate_id, frame_count=8, prompt_mode="baseline",
+                 input_mode="images"):
     if frame_count <= 0:
         raise ValueError("frame_count must be positive")
     mapping = digit_to_label(candidate_id)
+    if input_mode not in ("images", "native_video"):
+        raise ValueError("unknown input mode: {}".format(input_mode))
     if prompt_mode in ("baseline", "contrastive_transition"):
         phrases = ACTION_PHRASES
     elif prompt_mode == "phase_transition":
@@ -111,29 +123,31 @@ def build_prompt(candidate_id, frame_count=8, prompt_mode="baseline"):
         for digit, label in zip(DIGITS, mapping)
     ]
     guidance = ""
+    subject = (
+        "The video above contains {} frames sampled uniformly from one temporal proposal"
+        if input_mode == "native_video"
+        else "The {} images above are frames sampled uniformly from one temporal proposal"
+    ).format(frame_count)
     if prompt_mode == "baseline":
         intro = (
-            "The {} images above are frames sampled uniformly from one temporal proposal "
-            "in chronological order. Classify the single dominant hand-object action. "
+            "{} in chronological order. Classify the single dominant hand-object action. "
             "Choose exactly one option below.\n"
-        ).format(frame_count)
+        ).format(subject)
     elif prompt_mode == "phase_transition":
         intro = (
-            "The {} images above are frames sampled uniformly from one temporal proposal "
-            "in chronological order. Infer the dominant goal-level hand-object action from "
+            "{} in chronological order. Infer the dominant goal-level hand-object action from "
             "the change between the early, middle, and late frames. Track the main object's "
             "state before and after the interaction. Ignore visually salient opening, closing, "
             "or hand motions when they are only incidental steps toward moving another object. "
             "Choose the option whose full state transition best matches the sequence.\n"
-        ).format(frame_count)
+        ).format(subject)
     else:
         intro = (
-            "The {} images above are frames sampled uniformly from one temporal proposal "
-            "in chronological order. Classify the single dominant hand-object action that "
+            "{} in chronological order. Classify the single dominant hand-object action that "
             "is visibly supported. The proposal may contain only part of an action, so do "
             "not invent an unseen intention or require a complete ideal action sequence. "
             "Use temporal order only to resolve the specific confusing pairs below.\n"
-        ).format(frame_count)
+        ).format(subject)
         guidance = "\nTemporal disambiguation rules:\n" + "\n".join(
             "- " + rule for rule in CONTRASTIVE_TRANSITION_RULES
         )
@@ -146,9 +160,10 @@ def build_prompt(candidate_id, frame_count=8, prompt_mode="baseline"):
     )
 
 
-def prompt_sha256(candidate_id, frame_count=8, prompt_mode="baseline"):
+def prompt_sha256(candidate_id, frame_count=8, prompt_mode="baseline",
+                  input_mode="images"):
     return hashlib.sha256(
-        build_prompt(candidate_id, frame_count, prompt_mode).encode("utf-8")
+        build_prompt(candidate_id, frame_count, prompt_mode, input_mode).encode("utf-8")
     ).hexdigest()
 
 
@@ -172,6 +187,22 @@ def build_messages(paths, prompt, min_pixels, max_pixels):
         })
     content.append({"type": "text", "text": prompt})
     return [{"role": "user", "content": content}]
+
+
+def build_native_video_messages(paths, prompt, min_pixels, max_pixels, sample_fps):
+    return [{
+        "role": "user",
+        "content": [
+            {
+                "type": "video",
+                "video": [Path(path).resolve().as_uri() for path in paths],
+                "sample_fps": float(sample_fps),
+                "min_pixels": int(min_pixels),
+                "max_pixels": int(max_pixels),
+            },
+            {"type": "text", "text": prompt},
+        ],
+    }]
 
 
 def resolve_digit_token_ids(tokenizer):
@@ -262,9 +293,15 @@ def load_qwen3(args):
 def infer_one(runtime, paths, candidate_id, args):
     torch = runtime["torch"]
     prompt_mode = getattr(args, "prompt_mode", "baseline")
-    prompt = build_prompt(candidate_id, args.frame_count, prompt_mode)
+    input_mode = getattr(args, "input_mode", "images")
+    prompt = build_prompt(candidate_id, args.frame_count, prompt_mode, input_mode)
     mapping = digit_to_label(candidate_id)
-    messages = build_messages(paths, prompt, args.min_pixels, args.max_pixels)
+    if input_mode == "native_video":
+        messages = build_native_video_messages(
+            paths, prompt, args.min_pixels, args.max_pixels, args.sample_fps
+        )
+    else:
+        messages = build_messages(paths, prompt, args.min_pixels, args.max_pixels)
     chat_template_kwargs = runtime.get("chat_template_kwargs", {})
     text = runtime["processor"].apply_chat_template(
         messages,
@@ -272,16 +309,29 @@ def infer_one(runtime, paths, candidate_id, args):
         add_generation_prompt=True,
         **chat_template_kwargs
     )
-    image_inputs, video_inputs = runtime["process_vision_info"](
-        messages, image_patch_size=16
-    )
-    inputs = runtime["processor"](
-        text=[text],
-        images=image_inputs,
-        videos=video_inputs,
-        padding=True,
-        return_tensors="pt",
-    ).to(runtime["device"])
+    if input_mode == "native_video":
+        image_inputs, video_inputs, video_kwargs = runtime["process_vision_info"](
+            messages, image_patch_size=16, return_video_kwargs=True,
+            return_video_metadata=True,
+        )
+        if video_inputs is not None:
+            video_inputs, video_metadata = zip(*video_inputs)
+            video_inputs, video_metadata = list(video_inputs), list(video_metadata)
+        else:
+            video_metadata = None
+        inputs = runtime["processor"](
+            text=[text], images=image_inputs, videos=video_inputs,
+            video_metadata=video_metadata, padding=True, return_tensors="pt",
+            do_resize=False, **video_kwargs
+        ).to(runtime["device"])
+    else:
+        image_inputs, video_inputs = runtime["process_vision_info"](
+            messages, image_patch_size=16
+        )
+        inputs = runtime["processor"](
+            text=[text], images=image_inputs, videos=video_inputs,
+            padding=True, return_tensors="pt",
+        ).to(runtime["device"])
     with torch.inference_mode():
         output = runtime["model"](
             **inputs, use_cache=False, logits_to_keep=1, return_dict=True
@@ -313,13 +363,20 @@ def prediction_is_current(row, args):
     candidate_id = row.get("candidate_id")
     frame_count = getattr(args, "frame_count", 8)
     prompt_mode = getattr(args, "prompt_mode", "baseline")
+    input_mode = getattr(args, "input_mode", "images")
+    sample_fps = getattr(args, "sample_fps", 1.0)
     return bool(
         candidate_id
         and row.get("status") == "ok"
         and row.get("model") == args.model_path
         and row.get("prompt_version") == PROMPT_VERSION
         and row.get("prompt_sha256") == prompt_sha256(
-            candidate_id, frame_count, prompt_mode
+            candidate_id, frame_count, prompt_mode, input_mode
+        )
+        and row.get("input_mode", "images") == input_mode
+        and (
+            input_mode != "native_video"
+            or float(row.get("sample_fps", -1.0)) == float(sample_fps)
         )
         and row.get("wire_api") == WIRE_API
     )
@@ -361,6 +418,8 @@ def score_manifest(runtime, manifest_path, output_path, frame_cache,
                 "prompt_version": PROMPT_VERSION,
                 "base_prompt_sha256": PROMPT_SHA256,
                 "frame_count": args.frame_count,
+                "input_mode": getattr(args, "input_mode", "images"),
+                "sample_fps": float(getattr(args, "sample_fps", 1.0)),
                 "frame_paths": [str(path) for path in paths],
                 "min_pixels": args.min_pixels,
                 "max_pixels": args.max_pixels,
@@ -507,6 +566,10 @@ def parse_args():
     )
     parser.add_argument("--frame-count", type=int, default=8)
     parser.add_argument(
+        "--input-mode", choices=("images", "native_video"), default="images"
+    )
+    parser.add_argument("--sample-fps", type=float, default=1.0)
+    parser.add_argument(
         "--prompt-mode",
         choices=("baseline", "phase_transition", "contrastive_transition"),
         default="baseline",
@@ -543,8 +606,11 @@ def main():
         raise ValueError("pixel limits must satisfy 0 < min <= max")
     if args.score_temperature <= 0:
         raise ValueError("score temperature must be positive")
+    if args.sample_fps <= 0:
+        raise ValueError("sample fps must be positive")
     PROMPT_VERSION, PROMPT_SHA256 = prompt_protocol(
-        PROMPT_VERSION, args.prompt_mode, args.frame_order
+        PROMPT_VERSION, args.prompt_mode, args.frame_order,
+        args.input_mode, args.sample_fps,
     )
     runtime = load_qwen3(args)
     score_manifest(
