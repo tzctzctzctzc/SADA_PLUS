@@ -200,6 +200,20 @@ def main(cfg, resume, project_name='sada', debug=False):
             raise ValueError(
                 'proposal Oracle adapter isolation failed: {}'.format(trainable)
             )
+    if cfg.get('vlm_relation', {}).get('adapter_only', False):
+        model.requires_grad_(False)
+        model.vlm_relation_boundary_adapters.requires_grad_(True)
+        trainable = [
+            name for name, parameter in model.named_parameters()
+            if parameter.requires_grad
+        ]
+        if not trainable or any(
+            not name.startswith('vlm_relation_boundary_adapters.')
+            for name in trainable
+        ):
+            raise ValueError(
+                'VLM relation boundary isolation failed: {}'.format(trainable)
+            )
     
     # Optimizer hyperaparameters
     weight_decay=1e-3
@@ -444,6 +458,65 @@ def main(cfg, resume, project_name='sada', debug=False):
         
 
     """4. Resume from model / Misc"""
+    if args.vlm_relation_init_from_sada:
+        initialization_path = args.vlm_relation_init_from_sada
+        if not os.path.isfile(initialization_path):
+            raise ValueError(
+                'SADA VLM relation initialization checkpoint not found: {}'.format(
+                    initialization_path
+                )
+            )
+        checkpoint = torch.load(initialization_path, map_location=device)
+        state_key = (
+            'ema_state_dict'
+            if args.vlm_relation_init_weights == 'ema'
+            else 'state_dict'
+        )
+        if state_key not in checkpoint:
+            raise ValueError('SADA checkpoint has no {}'.format(state_key))
+
+        def load_relation_boundary_parent(module):
+            incompatible = module.load_state_dict(
+                checkpoint[state_key], strict=False
+            )
+            invalid_missing = [
+                key for key in incompatible.missing_keys
+                if not key.startswith('vlm_relation_boundary_adapters.')
+            ]
+            if invalid_missing or incompatible.unexpected_keys:
+                raise ValueError(
+                    'VLM relation boundary parent differs outside the new '
+                    'adapter: missing={} unexpected={}'.format(
+                        invalid_missing, incompatible.unexpected_keys
+                    )
+                )
+            if not incompatible.missing_keys:
+                raise ValueError(
+                    'initialization checkpoint already contains the VLM '
+                    'relation boundary adapter; use --resume instead'
+                )
+
+        load_relation_boundary_parent(model)
+        if use_ema:
+            load_relation_boundary_parent(model_ema.module)
+            model_ema.module.vlm_relation_boundary_adapters.load_state_dict(
+                model.vlm_relation_boundary_adapters.state_dict()
+            )
+        args.start_epoch = 1
+        cfg.config['vlm_relation']['initialization'] = {
+            'checkpoint': initialization_path,
+            'checkpoint_sha256': file_sha256(initialization_path),
+            'checkpoint_epoch': int(checkpoint.get('epoch', -1)),
+            'weights': args.vlm_relation_init_weights,
+            'trajectory': 'new_optimizer_and_scheduler_from_pretrained_weights',
+        }
+        print(
+            "=> initialized VLM relation boundary adapter from '{}' {} weights".format(
+                initialization_path, args.vlm_relation_init_weights
+            )
+        )
+        del checkpoint
+
     proposal_semantic_parent = (
         args.proposal_semantic_init_from_sada
         or args.proposal_semantic_continue_from_sada
@@ -938,6 +1011,13 @@ def create_argparser():
         ),
     )
     start_group.add_argument(
+        '--vlm-relation-init-from-sada', default=None, type=str,
+        help=(
+            'initialize a zero-start VLM relation boundary residual from an '
+            'ordinary SADA checkpoint'
+        ),
+    )
+    start_group.add_argument(
         '--transport-continue-from-sada', default=None, type=str,
         help=(
             'continue an ordinary SADA checkpoint with zero-initialized '
@@ -1197,11 +1277,21 @@ def create_argparser():
         '--vlm-relation-cache', default=None,
         help='prompt-free frozen VLM intermediate features for target relations',
     )
+    parser.add_argument(
+        '--vlm-relation-mode', choices=['geometry', 'boundary'],
+        default='geometry',
+    )
     parser.add_argument('--vlm-relation-weight', type=float, default=0.1)
     parser.add_argument('--vlm-relation-start-epoch', type=int, default=5)
     parser.add_argument('--vlm-relation-ramp-epochs', type=int, default=5)
     parser.add_argument('--vlm-relation-levels', default='0,1,2')
     parser.add_argument('--vlm-relation-max-gap', type=float, default=30.0)
+    parser.add_argument('--vlm-relation-boundary-max-delta', type=float, default=1.0)
+    parser.add_argument('--vlm-relation-boundary-min-strength', type=float, default=0.5)
+    parser.add_argument(
+        '--vlm-relation-init-weights', choices=['student', 'ema'], default='ema'
+    )
+    parser.add_argument('--vlm-relation-freeze-base', action='store_true')
     parser.add_argument(
         '--proposal-semantic-init-weights',
         choices=['student', 'ema'],
@@ -1738,6 +1828,8 @@ if __name__ == '__main__':
         or args.vlm_relation_start_epoch < 1
         or args.vlm_relation_ramp_epochs < 1
         or args.vlm_relation_max_gap <= 0.0
+        or args.vlm_relation_boundary_max_delta <= 0.0
+        or not 0.0 <= args.vlm_relation_boundary_min_strength <= 1.0
     ):
         raise ValueError('VLM relation configuration is invalid')
     relation_cache_sha256 = None
@@ -1771,8 +1863,24 @@ if __name__ == '__main__':
             raise ValueError(
                 'VLM relation supervision requires original SADA routing'
             )
+        if args.vlm_relation_mode == 'boundary' and not args.trident_head:
+            raise ValueError('VLM relation boundary mode requires --trident-head')
+    if args.vlm_relation_init_from_sada and (
+        not vlm_relation_enabled
+        or args.vlm_relation_mode != 'boundary'
+        or not args.vlm_relation_freeze_base
+    ):
+        raise ValueError(
+            '--vlm-relation-init-from-sada requires boundary mode, a cache, '
+            'and --vlm-relation-freeze-base'
+        )
+    if args.vlm_relation_freeze_base and not args.vlm_relation_init_from_sada:
+        raise ValueError(
+            '--vlm-relation-freeze-base requires --vlm-relation-init-from-sada'
+        )
     config_dict['vlm_relation'] = {
         'enabled': vlm_relation_enabled,
+        'mode': args.vlm_relation_mode,
         'cache_path': args.vlm_relation_cache,
         'cache_sha256': relation_cache_sha256,
         'entry_count': relation_entry_count,
@@ -1787,6 +1895,9 @@ if __name__ == '__main__':
         'ramp_epochs': args.vlm_relation_ramp_epochs,
         'levels': relation_levels,
         'max_gap_seconds': args.vlm_relation_max_gap,
+        'boundary_max_delta': args.vlm_relation_boundary_max_delta,
+        'boundary_min_strength': args.vlm_relation_boundary_min_strength,
+        'adapter_only': args.vlm_relation_freeze_base,
     }
     proposal_semantic_enabled = args.proposal_semantic_mode != 'off'
     proposal_levels = [

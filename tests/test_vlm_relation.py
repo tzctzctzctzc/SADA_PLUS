@@ -13,6 +13,7 @@ SPEC.loader.exec_module(vlm_relation)
 CACHE_SCHEMA = vlm_relation.CACHE_SCHEMA
 load_vlm_relation_cache = vlm_relation.load_vlm_relation_cache
 proposal_relation_loss = vlm_relation.proposal_relation_loss
+proposal_boundary_change_loss = vlm_relation.proposal_boundary_change_loss
 
 
 def test_relation_loss_is_zero_when_cosine_geometry_matches():
@@ -71,3 +72,29 @@ def test_relation_cache_loads_valid_data_and_rejects_target_gt(tmp_path):
         assert "provenance" in str(error)
     else:
         raise AssertionError("target GT cache should be rejected")
+
+
+def test_boundary_change_loss_rewards_start_and_end_at_semantic_change():
+    proposals = [{
+        "segments": torch.tensor([[0.0, 4.0], [5.0, 9.0]]),
+        "levels": torch.tensor([0, 0]),
+        "centers": torch.tensor([1.0, 2.0]),
+        "static_features": torch.tensor([[1.0, 0.0], [0.0, 1.0]]),
+    }]
+    neutral = [torch.zeros(1, 2, 10)]
+    aligned = [torch.zeros(1, 2, 10)]
+    aligned[0][0, 1, 4] = 2.0
+    aligned[0][0, 0, 5] = 2.0
+    neutral_loss, neutral_stats = proposal_boundary_change_loss(
+        neutral, proposals, [1], 30.0, 1.0, min_strength=0.5
+    )
+    aligned_loss, aligned_stats = proposal_boundary_change_loss(
+        aligned, proposals, [1], 30.0, 1.0, min_strength=0.5
+    )
+    assert aligned_loss < neutral_loss
+    assert neutral_stats["pair_count"] == aligned_stats["pair_count"] == 1
+
+
+def test_boundary_adapter_is_exactly_zero_at_initialization():
+    adapter = vlm_relation.VLMRelationBoundaryAdapter(4, max_delta=1.0)
+    assert torch.equal(adapter(torch.randn(2, 4, 7)), torch.zeros(2, 2, 7))

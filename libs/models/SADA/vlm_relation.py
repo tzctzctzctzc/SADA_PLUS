@@ -7,10 +7,25 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 
 CACHE_SCHEMA = "vlm-cross-proposal-relation-cache-v1"
+
+
+class VLMRelationBoundaryAdapter(nn.Module):
+    """Class-agnostic start/end residual driven by detached TAL features."""
+
+    def __init__(self, channels, max_delta=1.0):
+        super().__init__()
+        self.max_delta = float(max_delta)
+        self.weight = nn.Parameter(torch.zeros(2, channels, 1))
+        self.bias = nn.Parameter(torch.zeros(2))
+
+    def forward(self, features):
+        residual = F.conv1d(features.detach(), self.weight, self.bias)
+        return self.max_delta * torch.tanh(residual)
 
 
 def _sha256_file(path):
@@ -231,4 +246,85 @@ def proposal_relation_loss(
         "pair_count": int(losses.numel()),
         "target_distance": target_distances.mean(),
         "model_distance": model_distances.mean(),
+    }
+
+
+def proposal_boundary_change_loss(
+    boundary_residuals,
+    proposals,
+    fpn_strides,
+    max_gap_seconds,
+    distance_scale,
+    distance_floor=0.0,
+    min_strength=0.5,
+):
+    """Turn high VLM semantic changes into sparse start/end evidence.
+
+    Unlike relation geometry matching, this loss does not reshape the TAL
+    representation.  It trains only a bounded residual: the right edge of the
+    left proposal is an end candidate and the left edge of the right proposal
+    is a start candidate.  Low-change pairs are ignored rather than treated as
+    hard negatives.
+    """
+    losses, strengths = [], []
+    for batch_index, proposal in enumerate(proposals):
+        count = int(proposal["segments"].shape[0])
+        if count < 2:
+            continue
+        centers = proposal["centers"].tolist()
+        levels = proposal["levels"].tolist()
+        features = proposal["static_features"]
+        distances = 1.0 - F.cosine_similarity(
+            features[:-1], features[1:], dim=-1
+        )
+        normalized = ((distances - float(distance_floor)) / float(
+            distance_scale
+        )).clamp(0.0, 1.0)
+        for index, strength in enumerate(normalized):
+            if (
+                centers[index + 1] - centers[index] > max_gap_seconds
+                or float(strength.detach()) < min_strength
+            ):
+                continue
+            left = proposal["segments"][index]
+            right = proposal["segments"][index + 1]
+            left_level = int(levels[index])
+            right_level = int(levels[index + 1])
+
+            end_sequence = boundary_residuals[left_level][batch_index, 1:2]
+            start_sequence = boundary_residuals[right_level][batch_index, 0:1]
+            end_value = _sample_sequence(
+                end_sequence,
+                (left[1] / float(fpn_strides[left_level])).reshape(1),
+            ).reshape(())
+            start_value = _sample_sequence(
+                start_sequence,
+                (right[0] / float(fpn_strides[right_level])).reshape(1),
+            ).reshape(())
+            left_inside = _sample_sequence(
+                end_sequence,
+                (left.mean() / float(fpn_strides[left_level])).reshape(1),
+            ).reshape(())
+            right_inside = _sample_sequence(
+                start_sequence,
+                (right.mean() / float(fpn_strides[right_level])).reshape(1),
+            ).reshape(())
+            positive = 0.5 * (
+                F.softplus(-end_value) + F.softplus(-start_value)
+            )
+            rank = 0.5 * (
+                F.softplus(left_inside - end_value)
+                + F.softplus(right_inside - start_value)
+            )
+            losses.append(0.5 * (positive + rank) * strength.detach())
+            strengths.append(strength.detach())
+    if not losses:
+        zero = sum(residual.sum() * 0.0 for residual in boundary_residuals)
+        return zero, {
+            "pair_count": 0,
+            "mean_strength": zero.detach(),
+        }
+    return torch.stack(losses).mean(), {
+        "pair_count": len(losses),
+        "mean_strength": torch.stack(strengths).mean(),
     }

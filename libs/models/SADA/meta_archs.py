@@ -52,7 +52,9 @@ from .oracle_task import (
 )
 from .conditional_alignment import aggregate_conditional_class_losses
 from .vlm_relation import (
+    VLMRelationBoundaryAdapter,
     load_vlm_relation_cache,
+    proposal_boundary_change_loss,
     proposal_relation_loss,
     relation_proposals_for_videos,
 )
@@ -681,6 +683,7 @@ class SADA(nn.Module):
             ) = load_vlm_target_adapter_cache(cache_path)
         relation_cfg = cfg.get('vlm_relation', {})
         self.vlm_relation_enabled = bool(relation_cfg.get('enabled', False))
+        self.vlm_relation_mode = relation_cfg.get('mode', 'geometry')
         self.vlm_relation_weight = float(relation_cfg.get('weight', 0.1))
         self.vlm_relation_start_epoch = int(
             relation_cfg.get('start_epoch', 5)
@@ -694,11 +697,20 @@ class SADA(nn.Module):
         self.vlm_relation_max_gap_seconds = float(
             relation_cfg.get('max_gap_seconds', 30.0)
         )
+        self.vlm_relation_boundary_max_delta = float(
+            relation_cfg.get('boundary_max_delta', 1.0)
+        )
+        self.vlm_relation_boundary_min_strength = float(
+            relation_cfg.get('boundary_min_strength', 0.5)
+        )
         if (
-            self.vlm_relation_weight <= 0.0
+            self.vlm_relation_mode not in ('geometry', 'boundary')
+            or self.vlm_relation_weight <= 0.0
             or self.vlm_relation_start_epoch < 1
             or self.vlm_relation_ramp_epochs < 1
             or self.vlm_relation_max_gap_seconds <= 0.0
+            or self.vlm_relation_boundary_max_delta <= 0.0
+            or not 0.0 <= self.vlm_relation_boundary_min_strength <= 1.0
             or not self.vlm_relation_levels
             or len(set(self.vlm_relation_levels)) != len(self.vlm_relation_levels)
             or any(
@@ -725,6 +737,11 @@ class SADA(nn.Module):
             self.vlm_relation_payload['relation_calibration']['distance_scale']
             if self.vlm_relation_payload is not None else 1.0
         )
+        self.vlm_relation_distance_floor = float(
+            self.vlm_relation_payload['relation_calibration'].get(
+                'distance_q10', 0.0
+            ) if self.vlm_relation_payload is not None else 0.0
+        )
         if self.vlm_relation_payload is not None and not math.isclose(
             float(self.vlm_relation_payload['calibration_max_gap_seconds']),
             self.vlm_relation_max_gap_seconds,
@@ -732,6 +749,9 @@ class SADA(nn.Module):
             raise ValueError(
                 'VLM relation cache calibration and training max gap differ'
             )
+        if self.vlm_relation_enabled and self.vlm_relation_mode == 'boundary':
+            if not use_trident_head:
+                raise ValueError('VLM relation boundary mode requires Trident')
         proposal_cfg = cfg.get('proposal_semantic', {})
         self.proposal_semantic_mode = proposal_cfg.get('mode', 'off')
         if self.proposal_semantic_mode not in PROPOSAL_SEMANTIC_MODES:
@@ -1409,6 +1429,15 @@ class SADA(nn.Module):
                     with_ln=head_with_ln,
                     num_bins=0
             )
+
+        self.vlm_relation_boundary_adapters = nn.ModuleList()
+        if self.vlm_relation_enabled and self.vlm_relation_mode == 'boundary':
+            self.vlm_relation_boundary_adapters = nn.ModuleList([
+                VLMRelationBoundaryAdapter(
+                    fpn_dim, self.vlm_relation_boundary_max_delta
+                )
+                for _ in range(self.n_levels)
+            ])
 
         self.cls_head_target = self.cls_head
         self.reg_head_target = self.reg_head
@@ -2775,12 +2804,44 @@ class SADA(nn.Module):
         if self.use_trident_head:
             out_lb_logits_src, _ = self.start_head(fpn_feats_src, fpn_masks_src)
             out_lb_logits_tgt, _ = self.start_head(fpn_feats_tgt, fpn_masks_tgt)
+            vlm_relation_boundary_residuals = None
+            if (
+                self.vlm_relation_enabled
+                and self.vlm_relation_mode == 'boundary'
+            ):
+                enabled_levels = set(self.vlm_relation_levels)
+                vlm_relation_boundary_residuals = [
+                    (
+                        adapter(features)
+                        if level in enabled_levels
+                        else features.new_zeros(
+                            (features.shape[0], 2, features.shape[-1])
+                        )
+                    )
+                    for level, (adapter, features) in enumerate(zip(
+                        self.vlm_relation_boundary_adapters, fpn_feats_tgt
+                    ))
+                ]
+                out_lb_logits_tgt = [
+                    logits + residual[:, 0:1]
+                    for logits, residual in zip(
+                        out_lb_logits_tgt, vlm_relation_boundary_residuals
+                    )
+                ]
             out_lb_logits = [torch.cat((out_lb_logits_src[i], out_lb_logits_tgt[i]), dim=0) for i in range(len(out_lb_logits_src))]
             
             out_rb_logits_src, _ = self.end_head(fpn_feats_src, fpn_masks_src)
             out_rb_logits_tgt, _ = self.end_head(fpn_feats_tgt, fpn_masks_tgt)
+            if vlm_relation_boundary_residuals is not None:
+                out_rb_logits_tgt = [
+                    logits + residual[:, 1:2]
+                    for logits, residual in zip(
+                        out_rb_logits_tgt, vlm_relation_boundary_residuals
+                    )
+                ]
             out_rb_logits = [torch.cat((out_rb_logits_src[i], out_rb_logits_tgt[i]), dim=0) for i in range(len(out_rb_logits_src))]
         else:
+            vlm_relation_boundary_residuals = None
             out_lb_logits_src = None
             out_lb_logits_tgt = None
             out_lb_logits = None
@@ -3037,13 +3098,26 @@ class SADA(nn.Module):
                         fpn_feats_tgt[0].dtype,
                         self.vlm_relation_levels,
                     )
-                    relation_loss, relation_stats = proposal_relation_loss(
-                        fpn_feats_tgt,
-                        relation_proposals,
-                        self.fpn_strides,
-                        self.vlm_relation_max_gap_seconds,
-                        self.vlm_relation_distance_scale,
-                    )
+                    if self.vlm_relation_mode == 'boundary':
+                        relation_loss, relation_stats = (
+                            proposal_boundary_change_loss(
+                                vlm_relation_boundary_residuals,
+                                relation_proposals,
+                                self.fpn_strides,
+                                self.vlm_relation_max_gap_seconds,
+                                self.vlm_relation_distance_scale,
+                                self.vlm_relation_distance_floor,
+                                self.vlm_relation_boundary_min_strength,
+                            )
+                        )
+                    else:
+                        relation_loss, relation_stats = proposal_relation_loss(
+                            fpn_feats_tgt,
+                            relation_proposals,
+                            self.fpn_strides,
+                            self.vlm_relation_max_gap_seconds,
+                            self.vlm_relation_distance_scale,
+                        )
                     relation_ramp = min(
                         1.0,
                         float(
@@ -3061,10 +3135,17 @@ class SADA(nn.Module):
                     dtype=fpn_feats_tgt[0].dtype,
                 )
                 losses['vlm_relation_target_distance'] = (
-                    relation_stats['target_distance']
+                    relation_stats.get(
+                        'target_distance', relation_loss.detach() * 0.0
+                    )
                 )
                 losses['vlm_relation_model_distance'] = (
-                    relation_stats['model_distance']
+                    relation_stats.get(
+                        'model_distance', relation_loss.detach() * 0.0
+                    )
+                )
+                losses['vlm_relation_mean_strength'] = relation_stats.get(
+                    'mean_strength', relation_loss.detach() * 0.0
                 )
                 losses['downstream_loss'] = (
                     losses['downstream_loss'] + weighted_relation_loss
