@@ -518,6 +518,11 @@ def parse_args():
     parser.add_argument("--max-pixels", type=int, default=448 * 448)
     parser.add_argument("--score-temperature", type=float, default=1.0)
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument(
+        "--source-only",
+        action="store_true",
+        help="score source and write its gate report without running target inference",
+    )
     parser.add_argument("--force-target", action="store_true")
     parser.add_argument("--min-success-rate", type=float, default=0.95)
     parser.add_argument("--min-consensus-coverage", type=float, default=0.20)
@@ -557,6 +562,9 @@ def main():
         args,
     )
     print(json.dumps(gate, indent=2, sort_keys=True), flush=True)
+    if args.source_only:
+        print("source-only 完成，跳过 target", flush=True)
+        return 0
     if not gate["adapter_pass"] and not args.force_target:
         print("source gate 未通过，跳过 target；如需强制运行请加 --force-target", flush=True)
         return 0
