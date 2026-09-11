@@ -125,7 +125,7 @@ def download_video(video_id, old_splits, output, retries=3, connections=8,
                         "--out", output.name, url,
                     ]
                 if expected_md5:
-                    command.insert(-4, "--checksum=md5={}".format(expected_md5))
+                    command.insert(1, "--checksum=md5={}".format(expected_md5))
                 subprocess.run(command, check=True)
             else:
                 with urllib.request.urlopen(url, timeout=180) as source, partial.open("wb") as sink:

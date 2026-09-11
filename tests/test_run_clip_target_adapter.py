@@ -1,10 +1,26 @@
 import pytest
 
 from tools.run_clip_target_adapter import (
+    download_video,
     epic_video_url,
     proposal_timestamps,
     shard_for_video,
 )
+
+
+def test_download_video_passes_checksum_as_an_aria2_option(tmp_path, monkeypatch):
+    commands = []
+    monkeypatch.setattr("tools.run_clip_target_adapter.shutil.which", lambda _: "aria2c")
+    monkeypatch.setattr(
+        "tools.run_clip_target_adapter.subprocess.run",
+        lambda command, check: commands.append(command),
+    )
+
+    output = tmp_path / "P01_101.MP4"
+    download_video("P01_101", {}, output, retries=0, expected_md5="abc123")
+
+    assert commands[0][1] == "--checksum=md5=abc123"
+    assert commands[0][-1].endswith("/P01/videos/P01_101.MP4")
 
 
 def test_proposal_timestamps_are_eight_ordered_inside_samples():
