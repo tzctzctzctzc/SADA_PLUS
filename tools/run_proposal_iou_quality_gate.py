@@ -28,6 +28,7 @@ from libs.models.SADA.proposal_quality import (
     quality_weighted_scores,
     same_class_temporal_iou,
     soft_iou_quality_loss,
+    video_class_rank_weighted_scores,
 )
 from libs.models.SADA.trident_quality import boundary_peak_quality
 from libs.models.SADA.vlm_routing import file_sha256
@@ -53,6 +54,11 @@ def parse_args():
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--pool-samples", type=int, default=4)
     parser.add_argument("--gammas", type=float, nargs="+", default=(0.25, 0.5, 1.0, 2.0))
+    parser.add_argument(
+        "--score-fusion",
+        choices=("power", "video_class_rank"),
+        default="power",
+    )
     parser.add_argument("--min-source-map-gain", type=float, default=0.005)
     parser.add_argument("--min-source-high-tiou-gain", type=float, default=0.005)
     parser.add_argument("--max-train-videos", type=int, default=None)
@@ -414,8 +420,17 @@ def evaluate_heads(model, heads, dataset, domain, cfg, args, topk):
                 "feat_num_frames": metadata["feat_num_frames"],
                 "use_temporal_grid_feats": metadata["use_temporal_grid_feats"],
                 "segments": candidates["segments"],
-                "scores": quality_weighted_scores(
-                    candidates["scores"], quality, gamma
+                "scores": (
+                    video_class_rank_weighted_scores(
+                        candidates["scores"],
+                        quality,
+                        candidates["labels"],
+                        gamma,
+                    )
+                    if args.score_fusion == "video_class_rank"
+                    else quality_weighted_scores(
+                        candidates["scores"], quality, gamma
+                    )
                 ),
                 "labels": candidates["labels"],
                 "qualities": quality,
@@ -542,6 +557,7 @@ def main():
         "train_mean_iou": float(train_targets.mean()),
         "selected_epoch": best_variant[0],
         "selected_gamma": best_variant[1],
+        "score_fusion": args.score_fusion,
         "source_baseline": baseline,
         "source_selected": best,
         "source_average_mAP_gain": average_gain,

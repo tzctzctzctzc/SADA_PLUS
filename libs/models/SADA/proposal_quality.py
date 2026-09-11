@@ -155,3 +155,28 @@ def quality_weighted_scores(scores, qualities, gamma):
     if gamma == 0:
         return scores
     return scores * qualities.clamp_min(1e-5).pow(float(gamma))
+
+
+def video_class_rank_weighted_scores(scores, qualities, labels, strength):
+    """Apply a bounded quality residual within each video/class candidate set.
+
+    Absolute quality calibration does not transfer reliably across videos.  TAL
+    NMS, however, mainly needs the ordering of competing same-class proposals.
+    Percentile ranks preserve that evidence while limiting every score change to
+    ``exp(-strength) .. exp(strength)``.
+    """
+    if strength < 0:
+        raise ValueError("strength must be non-negative")
+    if strength == 0:
+        return scores
+    residual = torch.zeros_like(qualities)
+    for class_index in labels.unique().tolist():
+        selected = labels == class_index
+        count = int(selected.sum())
+        if count < 2:
+            continue
+        order = qualities[selected].argsort(stable=True)
+        ranks = torch.empty_like(order, dtype=qualities.dtype)
+        ranks[order] = torch.arange(count, device=qualities.device, dtype=qualities.dtype)
+        residual[selected] = 2.0 * ranks / float(count - 1) - 1.0
+    return scores * torch.exp(float(strength) * residual)

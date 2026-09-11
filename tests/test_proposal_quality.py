@@ -7,6 +7,7 @@ from libs.models.SADA.proposal_quality import (
     quality_weighted_scores,
     same_class_temporal_iou,
     soft_iou_quality_loss,
+    video_class_rank_weighted_scores,
 )
 
 
@@ -52,3 +53,14 @@ def test_quality_score_gamma_zero_is_exact_identity():
     qualities = torch.tensor([0.9, 0.1])
     assert torch.equal(quality_weighted_scores(scores, qualities, 0), scores)
     assert quality_weighted_scores(scores, qualities, 1)[0] > 0
+
+
+def test_video_class_rank_fusion_is_bounded_and_class_local():
+    scores = torch.ones(4)
+    qualities = torch.tensor([0.1, 0.9, 0.8, 0.2])
+    labels = torch.tensor([0, 0, 1, 1])
+    fused = video_class_rank_weighted_scores(scores, qualities, labels, 0.2)
+    assert fused[1] > fused[0]
+    assert fused[2] > fused[3]
+    assert fused.max() <= torch.exp(torch.tensor(0.2))
+    assert fused.min() >= torch.exp(torch.tensor(-0.2))
