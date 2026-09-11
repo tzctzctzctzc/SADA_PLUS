@@ -133,6 +133,194 @@ def relation_auc(rows, feature_by_id, max_gap_seconds):
     return {"auc": auc, "pair_count": len(labels), "change_count": sum(labels)}
 
 
+def temporal_iou(segment, reference):
+    intersection = max(
+        0.0, min(segment[1], reference[1]) - max(segment[0], reference[0])
+    )
+    union = max(segment[1], reference[1]) - min(segment[0], reference[0])
+    return intersection / union if union > 0.0 else 0.0
+
+
+def proposal_quality_targets(rows, database, num_known_classes=10):
+    """Attach GT IoU targets for source-only proposal-quality diagnostics."""
+    output = []
+    for row in rows:
+        proposal = (
+            float(row["proposal_start_sec"]), float(row["proposal_end_sec"])
+        )
+        known = []
+        for annotation in database[row["video_id"]].get("annotations", []):
+            label = int(annotation["label_id"])
+            if label < int(num_known_classes):
+                known.append((
+                    tuple(float(value) for value in annotation["segment"]), label
+                ))
+        scored = [(temporal_iou(proposal, segment), segment, label)
+                  for segment, label in known]
+        best_any = max(scored, default=(0.0, None, None), key=lambda item: item[0])
+        predicted_class = int(row["teacher_top1_class"])
+        same_class = [item for item in scored if item[2] == predicted_class]
+        best_class = max(
+            same_class, default=(0.0, None, None), key=lambda item: item[0]
+        )
+        enriched = dict(row)
+        enriched["quality_iou_any"] = float(best_any[0])
+        enriched["quality_iou_class"] = float(best_class[0])
+        output.append(enriched)
+    return output
+
+
+def _rank_metrics(targets, predictions, threshold=0.5):
+    from scipy.stats import spearmanr
+    from sklearn.metrics import average_precision_score, roc_auc_score
+
+    targets = np.asarray(targets, dtype=np.float32)
+    predictions = np.asarray(predictions, dtype=np.float32)
+    binary = targets >= float(threshold)
+    auc = float(roc_auc_score(binary, predictions)) if len(set(binary)) == 2 else None
+    ap = float(average_precision_score(binary, predictions)) if binary.any() else None
+    correlation = spearmanr(targets, predictions).statistic
+    return {
+        "roc_auc_iou_0.5": auc,
+        "average_precision_iou_0.5": ap,
+        "spearman_iou": (
+            float(correlation) if np.isfinite(correlation) else None
+        ),
+        "mae_iou": float(np.abs(targets - predictions).mean()),
+        "positive_count_iou_0.5": int(binary.sum()),
+        "count": int(len(targets)),
+    }
+
+
+def group_ridge_predictions(blocks, targets, groups, folds=5, alpha=1.0):
+    """Group-CV linear-kernel ridge with fold-local feature normalization."""
+    from sklearn.model_selection import GroupKFold
+
+    targets = np.asarray(targets, dtype=np.float32)
+    groups = np.asarray(groups)
+    block_items = [(name, np.asarray(values, dtype=np.float32))
+                   for name, values in blocks.items()]
+    if not block_items or any(len(values) != len(targets) for _, values in block_items):
+        raise ValueError("quality feature blocks have inconsistent lengths")
+    split_count = min(int(folds), len(set(groups)))
+    if split_count < 2:
+        raise ValueError("quality gate requires at least two source videos")
+    predictions = np.zeros_like(targets)
+    splitter = GroupKFold(n_splits=split_count)
+    dummy = np.zeros((len(targets), 1), dtype=np.float32)
+    for train, test in splitter.split(dummy, targets, groups):
+        train_parts, test_parts = [], []
+        for name, values in block_items:
+            train_values, test_values = values[train], values[test]
+            if name == "structure":
+                mean = train_values.mean(axis=0, keepdims=True)
+                std = train_values.std(axis=0, keepdims=True)
+                train_values = (train_values - mean) / np.maximum(std, 1e-6)
+                test_values = (test_values - mean) / np.maximum(std, 1e-6)
+            else:
+                train_values = normalize(train_values)
+                test_values = normalize(test_values)
+            train_parts.append(train_values)
+            test_parts.append(test_values)
+        train_features = np.concatenate(train_parts, axis=1)
+        test_features = np.concatenate(test_parts, axis=1)
+        center = float(targets[train].mean())
+        kernel = train_features @ train_features.T
+        dual = np.linalg.solve(
+            kernel + float(alpha) * np.eye(len(train), dtype=np.float32),
+            targets[train] - center,
+        )
+        predictions[test] = center + test_features @ train_features.T @ dual
+    return predictions
+
+
+def proposal_quality_gate(rows, qwen, slowfast, folds, min_auc_gain,
+                          min_spearman_gain):
+    candidates = [
+        row for row in rows
+        if row["candidate_id"] in slowfast["slowfast_combined"]
+        and row["candidate_id"] in qwen["deepstack_0_combined"]
+    ]
+    groups = np.asarray([row["video_id"] for row in candidates])
+    structure = np.asarray([
+        [
+            float(row["teacher_score"]),
+            np.log1p(float(row["proposal_end_sec"]) - float(row["proposal_start_sec"])),
+            *[float(int(row["source_fpn_levels"][0]) == level) for level in range(3)],
+        ]
+        for row in candidates
+    ], dtype=np.float32)
+    candidate_ids = [row["candidate_id"] for row in candidates]
+    feature_sets = {
+        "structure": {"structure": structure},
+        "structure_slowfast": {
+            "structure": structure,
+            "slowfast": np.asarray([
+                slowfast["slowfast_combined"][key] for key in candidate_ids
+            ]),
+        },
+        "structure_qwen_deepstack0": {
+            "structure": structure,
+            "qwen": np.asarray([
+                qwen["deepstack_0_combined"][key] for key in candidate_ids
+            ]),
+        },
+        "structure_slowfast_qwen_deepstack0": {
+            "structure": structure,
+            "slowfast": np.asarray([
+                slowfast["slowfast_combined"][key] for key in candidate_ids
+            ]),
+            "qwen": np.asarray([
+                qwen["deepstack_0_combined"][key] for key in candidate_ids
+            ]),
+        },
+    }
+    report = {"count": len(candidates), "targets": {}}
+    for target_name in ("quality_iou_any", "quality_iou_class"):
+        targets = np.asarray([row[target_name] for row in candidates], dtype=np.float32)
+        methods = {
+            "teacher_score": _rank_metrics(
+                targets, [row["teacher_score"] for row in candidates]
+            )
+        }
+        for name, blocks in feature_sets.items():
+            predictions = group_ridge_predictions(blocks, targets, groups, folds)
+            methods[name] = _rank_metrics(targets, predictions)
+        baseline = methods["structure_slowfast"]
+        fusion = methods["structure_slowfast_qwen_deepstack0"]
+        auc_gain = (
+            fusion["roc_auc_iou_0.5"] - baseline["roc_auc_iou_0.5"]
+            if fusion["roc_auc_iou_0.5"] is not None
+            and baseline["roc_auc_iou_0.5"] is not None else None
+        )
+        spearman_gain = (
+            fusion["spearman_iou"] - baseline["spearman_iou"]
+            if fusion["spearman_iou"] is not None
+            and baseline["spearman_iou"] is not None else None
+        )
+        report["targets"][target_name] = {
+            "methods": methods,
+            "predeclared_fusion_vs_slowfast": {
+                "auc_gain": auc_gain,
+                "spearman_gain": spearman_gain,
+            },
+        }
+    evidence = report["targets"]["quality_iou_any"][
+        "predeclared_fusion_vs_slowfast"
+    ]
+    report["thresholds"] = {
+        "min_auc_gain": float(min_auc_gain),
+        "min_spearman_gain": float(min_spearman_gain),
+    }
+    report["source_gate_pass"] = bool(
+        evidence["auc_gain"] is not None
+        and evidence["auc_gain"] >= float(min_auc_gain)
+        and evidence["spearman_gain"] is not None
+        and evidence["spearman_gain"] >= float(min_spearman_gain)
+    )
+    return report
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", required=True)
@@ -149,12 +337,23 @@ def parse_args():
     parser.add_argument("--fps", type=float, default=30.0)
     parser.add_argument("--feat-stride", type=float, default=16.0)
     parser.add_argument("--feat-num-frames", type=float, default=32.0)
+    parser.add_argument(
+        "--annotation-json",
+        default="data/ek100_slowfast/annotations/epic_kitchens_100_verb_detailed_split.json",
+    )
+    parser.add_argument("--min-quality-auc-gain", type=float, default=0.02)
+    parser.add_argument("--min-quality-spearman-gain", type=float, default=0.03)
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    rows = [row for row in read_jsonl(args.manifest) if row.get("gt_assigned_class_ids")]
+    all_rows = read_jsonl(args.manifest)
+    database = json.loads(Path(args.annotation_json).read_text(encoding="utf-8"))[
+        "database"
+    ]
+    quality_rows = proposal_quality_targets(all_rows, database)
+    rows = [row for row in quality_rows if row.get("gt_assigned_class_ids")]
     qwen = load_feature_variants(args.feature_index, args.feature_root)
     slowfast = slowfast_variants(
         rows, args.slowfast_root, args.fps, args.feat_stride, args.feat_num_frames
@@ -225,6 +424,20 @@ def main():
         and relation_gain >= args.min_relation_gain
         and qwen_relation["pair_count"] >= args.min_relation_pairs
     )
+    quality_gate = proposal_quality_gate(
+        quality_rows,
+        qwen,
+        slowfast_variants(
+            quality_rows,
+            args.slowfast_root,
+            args.fps,
+            args.feat_stride,
+            args.feat_num_frames,
+        ),
+        args.folds,
+        args.min_quality_auc_gain,
+        args.min_quality_spearman_gain,
+    )
     report = {
         "protocol_version": PROTOCOL_VERSION,
         "selection_split": "source_val",
@@ -246,6 +459,7 @@ def main():
             "max_pair_gap_seconds": args.max_pair_gap,
         },
         "source_gate_pass": gate,
+        "proposal_quality_gate": quality_gate,
     }
     write_json(args.output, report)
     print(json.dumps(report, indent=2, sort_keys=True))
