@@ -125,20 +125,22 @@ def prepare_all_manifests(scenario_root, frame_cache, args, old_splits):
     manifests = []
     for shift in args.shifts:
         root = Path(scenario_root) / shift
-        manifests.append(
-            (
-                root / "source_val_manifest.jsonl",
-                Path(frame_cache) / "source",
-                "{}_source".format(shift.lower()),
-            ),
-        )
-        manifests.append(
-            (
-                root / "target_train_manifest.jsonl",
-                Path(frame_cache) / "target",
-                shift.lower(),
-            ),
-        )
+        if "source" in args.parts:
+            manifests.append(
+                (
+                    root / "source_val_manifest.jsonl",
+                    Path(frame_cache) / "source",
+                    "{}_source".format(shift.lower()),
+                ),
+            )
+        if "target" in args.parts:
+            manifests.append(
+                (
+                    root / "target_train_manifest.jsonl",
+                    Path(frame_cache) / "target",
+                    shift.lower(),
+                ),
+            )
 
     reuse_index = _build_reuse_index(args.reuse_root, args.frame_count)
     jobs = defaultdict(list)
@@ -211,6 +213,13 @@ def parse_args():
         choices=SHIFT_NAMES,
         default=list(SHIFT_NAMES),
         help="shift(s) to prepare; defaults to all S1--S6",
+    )
+    parser.add_argument(
+        "--parts",
+        nargs="+",
+        choices=("source", "target"),
+        default=["source", "target"],
+        help="manifest parts to prepare; defaults to source and target",
     )
     parser.add_argument("--download-retries", type=int, default=3)
     parser.add_argument("--download-connections", type=int, default=8)
