@@ -22,11 +22,14 @@ from libs.evaluation import ANETdetection
 from libs.models.SADA import make_meta_arch
 from libs.models.SADA.proposal_quality import (
     PROTOCOL_VERSION,
+    ProposalBoundaryResidualHead,
     ProposalIoUQualityHead,
+    apply_boundary_residuals,
+    boundary_residual_targets,
     proposal_region_context,
     proposal_scalar_features,
     quality_weighted_scores,
-    same_class_temporal_iou,
+    same_class_temporal_match,
     soft_iou_quality_loss,
     video_class_rank_weighted_scores,
 )
@@ -53,6 +56,11 @@ def parse_args():
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--pool-samples", type=int, default=4)
+    parser.add_argument(
+        "--head-task", choices=("quality", "boundary"), default="quality"
+    )
+    parser.add_argument("--boundary-min-iou", type=float, default=0.1)
+    parser.add_argument("--boundary-max-delta", type=float, default=0.5)
     parser.add_argument("--gammas", type=float, nargs="+", default=(0.25, 0.5, 1.0, 2.0))
     parser.add_argument(
         "--score-fusion",
@@ -231,8 +239,12 @@ def _level_candidates(
         "boundary_quality": boundary,
     }
     if with_targets:
-        result["targets"] = same_class_temporal_iou(
+        quality_targets, matched_segments = same_class_temporal_match(
             segments, class_indices, gt_segments, gt_labels
+        )
+        result["targets"] = quality_targets
+        result["boundary_targets"] = boundary_residual_targets(
+            segments, matched_segments
         )
     return result
 
@@ -277,6 +289,9 @@ def extract_video_candidates(
     result = {key: torch.cat([row[key] for row in rows]) for key in keys}
     if with_targets:
         result["targets"] = torch.cat([row["targets"] for row in rows])
+        result["boundary_targets"] = torch.cat(
+            [row["boundary_targets"] for row in rows]
+        )
     return result
 
 
@@ -294,8 +309,13 @@ def collect_training_candidates(model, dataset, args):
             args.pool_samples,
             with_targets=True,
         )
-        features.append(candidates["features"].cpu().half())
-        targets.append(candidates["targets"].cpu().float())
+        if args.head_task == "boundary":
+            selected = candidates["targets"] >= args.boundary_min_iou
+            features.append(candidates["features"][selected].cpu().half())
+            targets.append(candidates["boundary_targets"][selected].cpu().float())
+        else:
+            features.append(candidates["features"].cpu().half())
+            targets.append(candidates["targets"].cpu().float())
         if (index + 1) % 10 == 0 or index + 1 == video_count:
             print(
                 "training extraction {}/{}: {} candidates".format(
@@ -310,9 +330,17 @@ def fit_quality_heads(features, targets, args):
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    head = ProposalIoUQualityHead(
-        features.shape[-1], args.hidden_dim, args.dropout
-    ).to(args.device)
+    if args.head_task == "boundary":
+        head = ProposalBoundaryResidualHead(
+            features.shape[-1],
+            args.hidden_dim,
+            args.dropout,
+            args.boundary_max_delta,
+        ).to(args.device)
+    else:
+        head = ProposalIoUQualityHead(
+            features.shape[-1], args.hidden_dim, args.dropout
+        ).to(args.device)
     optimizer = torch.optim.AdamW(
         head.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
     )
@@ -328,7 +356,12 @@ def fit_quality_heads(features, targets, args):
             batch_features = features[indices].to(args.device, dtype=torch.float32)
             batch_targets = targets[indices].to(args.device)
             optimizer.zero_grad(set_to_none=True)
-            loss = soft_iou_quality_loss(head(batch_features), batch_targets)
+            predictions = head(batch_features)
+            loss = (
+                torch.nn.functional.smooth_l1_loss(predictions, batch_targets)
+                if args.head_task == "boundary"
+                else soft_iou_quality_loss(predictions, batch_targets)
+            )
             loss.backward()
             optimizer.step()
             total_loss += float(loss) * len(indices)
@@ -400,17 +433,20 @@ def evaluate_heads(model, heads, dataset, domain, cfg, args, topk):
             args.pool_samples,
             with_targets=False,
         )
-        qualities = {
-            epoch: head(candidates["features"].float()).sigmoid()
+        head_outputs = {
+            epoch: head(candidates["features"].float())
             for epoch, head in device_heads.items()
         }
         metadata = raw_video["metadata"]
         for epoch, gamma in variants:
-            quality = (
-                torch.ones_like(candidates["scores"])
-                if epoch == 0
-                else qualities[epoch]
-            )
+            quality = torch.ones_like(candidates["scores"])
+            segments = candidates["segments"]
+            if epoch != 0 and args.head_task == "boundary":
+                segments = apply_boundary_residuals(
+                    segments, head_outputs[epoch], gamma
+                )
+            elif epoch != 0:
+                quality = head_outputs[epoch].sigmoid()
             raw_result = {
                 "video_id": metadata["video_id"],
                 "fps": metadata["fps"],
@@ -419,8 +455,8 @@ def evaluate_heads(model, heads, dataset, domain, cfg, args, topk):
                 "feat_stride": metadata["feat_stride"],
                 "feat_num_frames": metadata["feat_num_frames"],
                 "use_temporal_grid_feats": metadata["use_temporal_grid_feats"],
-                "segments": candidates["segments"],
-                "scores": (
+                "segments": segments,
+                "scores": candidates["scores"] if args.head_task == "boundary" else (
                     video_class_rank_weighted_scores(
                         candidates["scores"],
                         quality,
@@ -479,18 +515,21 @@ def main():
     train_features, train_targets = collect_training_candidates(
         model, source_train, args
     )
-    print(
-        json.dumps(
-            {
-                "train_candidates": len(train_targets),
-                "positive_iou_fraction": float((train_targets > 0).float().mean()),
-                "mean_iou": float(train_targets.mean()),
-                "input_dim": train_features.shape[-1],
-            },
-            indent=2,
-        ),
-        flush=True,
-    )
+    extraction_report = {
+        "head_task": args.head_task,
+        "train_candidates": len(train_targets),
+        "input_dim": train_features.shape[-1],
+    }
+    if args.head_task == "boundary":
+        extraction_report["mean_absolute_boundary_target"] = float(
+            train_targets.abs().mean()
+        )
+    else:
+        extraction_report["positive_iou_fraction"] = float(
+            (train_targets > 0).float().mean()
+        )
+        extraction_report["mean_iou"] = float(train_targets.mean())
+    print(json.dumps(extraction_report, indent=2), flush=True)
     heads = fit_quality_heads(train_features, train_targets, args)
     source_reports = evaluate_heads(
         model, heads, source_val, "source", cfg, args, eval_topk
@@ -554,7 +593,10 @@ def main():
         "checkpoint_sha256": file_sha256(args.checkpoint),
         "weights": args.weights,
         "train_candidates": len(train_targets),
-        "train_mean_iou": float(train_targets.mean()),
+        "train_target_mean": float(train_targets.mean()),
+        "head_task": args.head_task,
+        "boundary_min_iou": args.boundary_min_iou,
+        "boundary_max_delta": args.boundary_max_delta,
         "selected_epoch": best_variant[0],
         "selected_gamma": best_variant[1],
         "score_fusion": args.score_fusion,

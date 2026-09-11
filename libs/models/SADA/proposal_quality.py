@@ -99,9 +99,10 @@ def proposal_scalar_features(
     return torch.cat((continuous, class_one_hot, level_one_hot), dim=-1)
 
 
-def same_class_temporal_iou(segments, class_indices, gt_segments, gt_labels):
-    """Maximum IoU with a same-class GT segment; unmatched proposals get zero."""
+def same_class_temporal_match(segments, class_indices, gt_segments, gt_labels):
+    """Return maximum same-class IoU and its matched segment."""
     result = segments.new_zeros(len(segments))
+    matches = segments.clone()
     for class_index in class_indices.unique().tolist():
         proposal_mask = class_indices == class_index
         gt_mask = gt_labels == class_index
@@ -120,8 +121,18 @@ def same_class_temporal_iou(segments, class_indices, gt_segments, gt_labels):
             - targets[None, :, 0]
             - intersection
         ).clamp_min(1e-6)
-        result[proposal_mask] = (intersection / union).amax(dim=1)
-    return result
+        ious = intersection / union
+        best_iou, best_index = ious.max(dim=1)
+        result[proposal_mask] = best_iou
+        matches[proposal_mask] = targets[best_index]
+    return result, matches
+
+
+def same_class_temporal_iou(segments, class_indices, gt_segments, gt_labels):
+    """Maximum IoU with a same-class GT segment; unmatched proposals get zero."""
+    return same_class_temporal_match(
+        segments, class_indices, gt_segments, gt_labels
+    )[0]
 
 
 class ProposalIoUQualityHead(nn.Module):
@@ -139,6 +150,42 @@ class ProposalIoUQualityHead(nn.Module):
 
     def forward(self, features):
         return self.network(features).squeeze(-1)
+
+
+class ProposalBoundaryResidualHead(nn.Module):
+    """Predict bounded left/right corrections relative to proposal duration."""
+
+    def __init__(self, input_dim, hidden_dim=256, dropout=0.1, max_delta=0.5):
+        super().__init__()
+        self.max_delta = float(max_delta)
+        self.network = nn.Sequential(
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, 2),
+        )
+
+    def forward(self, features):
+        return self.network(features).tanh() * self.max_delta
+
+
+def boundary_residual_targets(segments, matched_segments, max_delta=0.5):
+    duration = (segments[:, 1] - segments[:, 0]).clamp_min(1e-4)
+    return ((matched_segments - segments) / duration[:, None]).clamp(
+        -float(max_delta), float(max_delta)
+    )
+
+
+def apply_boundary_residuals(segments, residuals, strength):
+    if strength < 0:
+        raise ValueError("strength must be non-negative")
+    duration = (segments[:, 1] - segments[:, 0]).clamp_min(1e-4)
+    corrected = segments + float(strength) * residuals * duration[:, None]
+    center = segments.mean(dim=-1)
+    left = torch.minimum(corrected[:, 0], center - 5e-5)
+    right = torch.maximum(corrected[:, 1], center + 5e-5)
+    return torch.stack((left, right), dim=-1)
 
 
 def soft_iou_quality_loss(logits, targets):
