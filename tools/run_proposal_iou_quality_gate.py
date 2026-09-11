@@ -33,7 +33,7 @@ from libs.models.SADA.proposal_quality import (
     soft_iou_quality_loss,
     video_class_rank_weighted_scores,
 )
-from libs.models.SADA.trident_quality import boundary_peak_quality
+from libs.models.SADA.trident_quality import boundary_peak_quality, center_only_offsets
 from libs.models.SADA.vlm_routing import file_sha256
 from libs.utils.utils import _update_config, read_yaml
 from tools.audit_original_sada_pseudolabels import move_video
@@ -57,7 +57,9 @@ def parse_args():
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--pool-samples", type=int, default=4)
     parser.add_argument(
-        "--head-task", choices=("quality", "boundary"), default="quality"
+        "--head-task",
+        choices=("quality", "boundary", "trident_center"),
+        default="quality",
     )
     parser.add_argument("--boundary-min-iou", type=float, default=0.1)
     parser.add_argument("--boundary-max-delta", type=float, default=0.5)
@@ -188,9 +190,11 @@ def _level_candidates(
         boundary = boundary_peak_quality(
             offsets, start_windows, end_windows
         )[class_indices, point_indices]
+        agnostic_offsets = center_only_offsets(offsets)[point_indices]
     else:
         selected_offsets = offsets[point_indices]
         boundary = torch.ones_like(scores)
+        agnostic_offsets = selected_offsets
     selected_points = points[point_indices, 0]
     stride = points[0, 3]
     segments = torch.stack(
@@ -208,6 +212,7 @@ def _level_candidates(
     class_indices = class_indices[duration_mask]
     selected_points = selected_points[duration_mask]
     segments = segments[duration_mask]
+    agnostic_offsets = agnostic_offsets[duration_mask]
     boundary = boundary[duration_mask]
     if not len(scores):
         return None
@@ -237,6 +242,13 @@ def _level_candidates(
         "scores": scores,
         "labels": class_indices,
         "boundary_quality": boundary,
+        "agnostic_segments": torch.stack(
+            (
+                selected_points - agnostic_offsets[:, 0] * stride,
+                selected_points + agnostic_offsets[:, 1] * stride,
+            ),
+            dim=-1,
+        ),
     }
     if with_targets:
         quality_targets, matched_segments = same_class_temporal_match(
@@ -285,7 +297,14 @@ def extract_video_candidates(
         )
         if row is not None:
             rows.append(row)
-    keys = ("features", "segments", "scores", "labels", "boundary_quality")
+    keys = (
+        "features",
+        "segments",
+        "agnostic_segments",
+        "scores",
+        "labels",
+        "boundary_quality",
+    )
     result = {key: torch.cat([row[key] for row in rows]) for key in keys}
     if with_targets:
         result["targets"] = torch.cat([row["targets"] for row in rows])
@@ -414,9 +433,13 @@ def _finalize_predictions(storage):
 
 @torch.inference_mode()
 def evaluate_heads(model, heads, dataset, domain, cfg, args, topk):
-    variants = [(0, 0.0)] + [
-        (epoch, gamma) for epoch in sorted(heads) for gamma in args.gammas
-    ]
+    variants = [(0, 0.0)] + (
+        [(0, gamma) for gamma in args.gammas]
+        if args.head_task == "trident_center"
+        else [
+            (epoch, gamma) for epoch in sorted(heads) for gamma in args.gammas
+        ]
+    )
     predictions = {variant: _empty_predictions() for variant in variants}
     device_heads = {
         epoch: copy.deepcopy(head).to(args.device).eval() for epoch, head in heads.items()
@@ -441,7 +464,12 @@ def evaluate_heads(model, heads, dataset, domain, cfg, args, topk):
         for epoch, gamma in variants:
             quality = torch.ones_like(candidates["scores"])
             segments = candidates["segments"]
-            if epoch != 0 and args.head_task == "boundary":
+            if args.head_task == "trident_center" and gamma > 0:
+                segments = (
+                    (1.0 - gamma) * segments
+                    + gamma * candidates["agnostic_segments"]
+                )
+            elif epoch != 0 and args.head_task == "boundary":
                 segments = apply_boundary_residuals(
                     segments, head_outputs[epoch], gamma
                 )
@@ -456,7 +484,9 @@ def evaluate_heads(model, heads, dataset, domain, cfg, args, topk):
                 "feat_num_frames": metadata["feat_num_frames"],
                 "use_temporal_grid_feats": metadata["use_temporal_grid_feats"],
                 "segments": segments,
-                "scores": candidates["scores"] if args.head_task == "boundary" else (
+                "scores": candidates["scores"] if args.head_task in (
+                    "boundary", "trident_center"
+                ) else (
                     video_class_rank_weighted_scores(
                         candidates["scores"],
                         quality,
@@ -512,25 +542,33 @@ def main():
     source_val = make_dataset(
         cfg["dataset_name"], False, cfg["src_val_split"], **cfg["dataset"]
     )
-    train_features, train_targets = collect_training_candidates(
-        model, source_train, args
-    )
-    extraction_report = {
-        "head_task": args.head_task,
-        "train_candidates": len(train_targets),
-        "input_dim": train_features.shape[-1],
-    }
-    if args.head_task == "boundary":
-        extraction_report["mean_absolute_boundary_target"] = float(
-            train_targets.abs().mean()
-        )
+    train_features = None
+    train_targets = None
+    if args.head_task == "trident_center":
+        if not model.use_trident_head:
+            raise ValueError("trident_center requires a Trident checkpoint")
+        heads = {}
+        extraction_report = {"head_task": args.head_task, "train_candidates": 0}
     else:
-        extraction_report["positive_iou_fraction"] = float(
-            (train_targets > 0).float().mean()
+        train_features, train_targets = collect_training_candidates(
+            model, source_train, args
         )
-        extraction_report["mean_iou"] = float(train_targets.mean())
+        extraction_report = {
+            "head_task": args.head_task,
+            "train_candidates": len(train_targets),
+            "input_dim": train_features.shape[-1],
+        }
+        if args.head_task == "boundary":
+            extraction_report["mean_absolute_boundary_target"] = float(
+                train_targets.abs().mean()
+            )
+        else:
+            extraction_report["positive_iou_fraction"] = float(
+                (train_targets > 0).float().mean()
+            )
+            extraction_report["mean_iou"] = float(train_targets.mean())
+        heads = fit_quality_heads(train_features, train_targets, args)
     print(json.dumps(extraction_report, indent=2), flush=True)
-    heads = fit_quality_heads(train_features, train_targets, args)
     source_reports = evaluate_heads(
         model, heads, source_val, "source", cfg, args, eval_topk
     )
@@ -556,7 +594,10 @@ def main():
         target_val = make_dataset(
             cfg["dataset_name"], False, cfg["tgt_val_split"], **cfg["dataset"]
         )
-        selected_heads = {best_variant[0]: heads[best_variant[0]]}
+        selected_heads = (
+            {} if args.head_task == "trident_center"
+            else {best_variant[0]: heads[best_variant[0]]}
+        )
         selected_args = copy.copy(args)
         selected_args.gammas = (best_variant[1],)
         target_reports = evaluate_heads(
@@ -574,12 +615,17 @@ def main():
     torch.save(
         {
             "protocol_version": PROTOCOL_VERSION,
-            "input_dim": int(train_features.shape[-1]),
+            "input_dim": (
+                int(train_features.shape[-1]) if train_features is not None else None
+            ),
             "hidden_dim": args.hidden_dim,
             "dropout": args.dropout,
             "epoch": best_variant[0],
             "gamma": best_variant[1],
-            "state_dict": heads[best_variant[0]].state_dict(),
+            "state_dict": (
+                heads[best_variant[0]].state_dict()
+                if args.head_task != "trident_center" else None
+            ),
             "source_gate_pass": source_gate_pass,
             "checkpoint_sha256": file_sha256(args.checkpoint),
         },
@@ -592,8 +638,10 @@ def main():
         "checkpoint_epoch": checkpoint.get("epoch"),
         "checkpoint_sha256": file_sha256(args.checkpoint),
         "weights": args.weights,
-        "train_candidates": len(train_targets),
-        "train_target_mean": float(train_targets.mean()),
+        "train_candidates": len(train_targets) if train_targets is not None else 0,
+        "train_target_mean": (
+            float(train_targets.mean()) if train_targets is not None else None
+        ),
         "head_task": args.head_task,
         "boundary_min_iou": args.boundary_min_iou,
         "boundary_max_delta": args.boundary_max_delta,
