@@ -107,6 +107,12 @@ def parse_args():
         help="official checksum CSV; cached and downloaded videos are verified when set",
     )
     parser.add_argument("--shifts", nargs="+", choices=SHIFT_NAMES, default=list(SHIFT_NAMES))
+    parser.add_argument(
+        "--video-ids",
+        nargs="+",
+        default=None,
+        help="download only these manifest video IDs",
+    )
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--connections", type=int, default=4)
     parser.add_argument("--retries", type=int, default=3)
@@ -125,7 +131,13 @@ def main():
     old_splits = epic_55_splits(args.epic55_splits)
     expected_md5s = video_md5s(args.md5_csv)
     rows_by_video = manifest_rows(args.scenario_root, args.shifts)
-    video_ids = sorted(rows_by_video)
+    if args.video_ids:
+        missing_ids = sorted(set(args.video_ids).difference(rows_by_video))
+        if missing_ids:
+            raise ValueError("video IDs absent from manifests: {}".format(missing_ids))
+        video_ids = sorted(set(args.video_ids))
+    else:
+        video_ids = sorted(rows_by_video)
     if args.limit_videos > 0:
         video_ids = video_ids[:args.limit_videos]
 
