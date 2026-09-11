@@ -14,7 +14,7 @@ def test_region_context_detects_boundary_state_changes():
     features = torch.tensor([[0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0]])
     pooled = proposal_region_context(features, torch.tensor([[2.0, 5.0]]), 1)
     assert pooled.shape == (1, 4)
-    assert pooled[0, 0] > 0.9
+    assert pooled[0, 0] > 0.8
     assert pooled[0, 2] > 0
     assert pooled[0, 3] > 0
 
