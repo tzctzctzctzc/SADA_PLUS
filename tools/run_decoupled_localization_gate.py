@@ -23,6 +23,7 @@ from libs.models.SADA.decoupled_localization import (
     DirectLocalizationHead,
     balanced_soft_quality_loss,
     fuse_class_and_quality,
+    initialize_from_trident_regression_trunk,
 )
 from libs.models.SADA.losses_aux import ctr_diou_loss_1d, ctr_giou_loss_1d
 from libs.models.SADA.vlm_routing import file_sha256
@@ -57,6 +58,7 @@ def parse_args():
     parser.add_argument("--num-layers", type=int, default=3)
     parser.add_argument("--kernel-size", type=int, default=3)
     parser.add_argument("--quality-loss-weight", type=float, default=0.5)
+    parser.add_argument("--init-trunk-from-parent", action="store_true")
     parser.add_argument("--quality-gammas", type=float, nargs="+", default=(0.0, 0.25, 0.5, 1.0))
     parser.add_argument("--min-source-map-gain", type=float, default=0.005)
     parser.add_argument("--min-source-high-tiou-gain", type=float, default=0.005)
@@ -124,7 +126,7 @@ def localization_loss(predicted_offsets, quality_logits, example, quality_weight
     return regression + quality_weight * quality_loss, regression, quality_loss
 
 
-def fit_heads(examples, input_dim, fpn_levels, args):
+def fit_heads(examples, input_dim, fpn_levels, args, parent_reg_head=None):
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -136,6 +138,10 @@ def fit_heads(examples, input_dim, fpn_levels, args):
         args.kernel_size,
         with_ln=True,
     ).to(args.device)
+    if args.init_trunk_from_parent:
+        if parent_reg_head is None:
+            raise ValueError("parent regression head is required for trunk initialization")
+        initialize_from_trident_regression_trunk(head, parent_reg_head)
     optimizer = torch.optim.AdamW(
         head.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
     )
@@ -284,7 +290,9 @@ def main():
         model, source_train, args.device, args.max_train_videos
     )
     input_dim = examples[0]["features"][0].shape[1]
-    heads = fit_heads(examples, input_dim, len(model.fpn_strides), args)
+    heads = fit_heads(
+        examples, input_dim, len(model.fpn_strides), args, model.reg_head
+    )
     source_reports = evaluate_heads(model, heads, source_val, "source", cfg, args)
     baseline = source_reports[(0, -1.0)]
     best_variant = max(
@@ -341,6 +349,7 @@ def main():
         "source_train_videos": len(examples),
         "source_positive_points": positive_points,
         "source_valid_points": valid_points,
+        "init_trunk_from_parent": args.init_trunk_from_parent,
         "selected_epoch": best_variant[0],
         "selected_gamma": best_variant[1],
         "source_baseline": baseline,

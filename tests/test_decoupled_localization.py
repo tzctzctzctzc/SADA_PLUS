@@ -4,6 +4,7 @@ from libs.models.SADA.decoupled_localization import (
     DirectLocalizationHead,
     balanced_soft_quality_loss,
     fuse_class_and_quality,
+    initialize_from_trident_regression_trunk,
 )
 
 
@@ -35,3 +36,19 @@ def test_quality_fusion_is_pointwise_and_bounded():
     assert torch.allclose(
         fuse_class_and_quality(classes, quality_logits, gamma=0.0), classes
     )
+
+
+def test_trident_trunk_initialization_copies_shared_layers_only():
+    source = DirectLocalizationHead(8, 16, 2, num_layers=3, kernel_size=3)
+    destination = DirectLocalizationHead(8, 16, 2, num_layers=3, kernel_size=3)
+
+    class Parent:
+        head = source.convs
+        norm = source.norms
+        scale = source.scales
+
+    old_output = destination.offset_head.conv.weight.detach().clone()
+    initialize_from_trident_regression_trunk(destination, Parent())
+    for left, right in zip(destination.convs, source.convs):
+        assert torch.equal(left.conv.weight, right.conv.weight)
+    assert torch.equal(destination.offset_head.conv.weight, old_output)

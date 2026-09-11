@@ -65,6 +65,22 @@ class DirectLocalizationHead(nn.Module):
         return offsets, quality_logits
 
 
+def initialize_from_trident_regression_trunk(head, trident_reg_head):
+    """Reuse the parent's localization-specific temporal trunk and level scales."""
+
+    if len(head.convs) != len(trident_reg_head.head):
+        raise ValueError("parent and direct localization trunks have different depth")
+    if len(head.scales) != len(trident_reg_head.scale):
+        raise ValueError("parent and direct localization heads have different levels")
+    for destination, source in zip(head.convs, trident_reg_head.head):
+        destination.load_state_dict(source.state_dict())
+    for destination, source in zip(head.norms, trident_reg_head.norm):
+        destination.load_state_dict(source.state_dict())
+    for destination, source in zip(head.scales, trident_reg_head.scale):
+        destination.load_state_dict(source.state_dict())
+    return head
+
+
 def balanced_soft_quality_loss(logits, targets, positive_mask, valid_mask):
     """Balance assigned action points and background for soft IoU supervision."""
 
