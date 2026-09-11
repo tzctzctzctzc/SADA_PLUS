@@ -320,6 +320,11 @@ def parse_args():
         action="store_true",
         help="reuse completed predictions and run only the source quality gate",
     )
+    parser.add_argument(
+        "--inference-only",
+        action="store_true",
+        help="write predictions without importing source-gate dependencies",
+    )
     parser.add_argument("--folds", type=int, default=5)
     parser.add_argument("--fps", type=float, default=30.0)
     parser.add_argument("--feat-stride", type=float, default=16.0)
@@ -334,6 +339,8 @@ def main():
     if not args.score_only:
         runtime = load_qwen3(args)
         score_manifest(runtime, args)
+    if args.inference_only:
+        return
     report = evaluate_gate(args)
     print(json.dumps(report, indent=2, sort_keys=True), flush=True)
 

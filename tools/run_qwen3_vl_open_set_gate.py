@@ -264,6 +264,7 @@ def parse_args():
     parser.add_argument("--max-pixels", type=int, default=448 * 448)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--score-only", action="store_true")
+    parser.add_argument("--inference-only", action="store_true")
     parser.add_argument("--folds", type=int, default=5)
     parser.add_argument("--fps", type=float, default=30.0)
     parser.add_argument("--feat-stride", type=float, default=16.0)
@@ -277,6 +278,8 @@ def main():
     args = parse_args()
     if not args.score_only:
         score_manifest(load_qwen3(args), args)
+    if args.inference_only:
+        return
     report = evaluate_gate(args)
     print(json.dumps(report, indent=2, sort_keys=True), flush=True)
 
