@@ -89,10 +89,20 @@ worker() {
     done
 }
 
+pids=()
 for index in "${!gpus[@]}"; do
     worker "$index" "${gpus[$index]}" &
+    pids+=("$!")
     echo "$!" >"$artifact_root/pids/worker_${gpus[$index]}.pid"
 done
-wait
+
+status=0
+for pid in "${pids[@]}"; do
+    wait "$pid" || status=1
+done
+if (( status != 0 )); then
+    echo "stage 0 failed; inspect per-seed logs" >&2
+    exit "$status"
+fi
 
 echo "stage 0 complete"
