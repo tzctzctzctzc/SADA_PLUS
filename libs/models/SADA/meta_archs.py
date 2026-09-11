@@ -750,7 +750,7 @@ class SADA(nn.Module):
                 'VLM relation cache calibration and training max gap differ'
             )
         if self.vlm_relation_enabled and self.vlm_relation_mode == 'boundary':
-            if not use_trident_head:
+            if not cfg['model'].get('use_trident_head', False):
                 raise ValueError('VLM relation boundary mode requires Trident')
         proposal_cfg = cfg.get('proposal_semantic', {})
         self.proposal_semantic_mode = proposal_cfg.get('mode', 'off')
