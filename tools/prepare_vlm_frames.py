@@ -151,12 +151,14 @@ def prepare_all_manifests(scenario_root, frame_cache, args, old_splits):
     reuse_index = _build_reuse_index(args.reuse_root, args.frame_count)
     jobs = defaultdict(list)
     total_rows = 0
+    existing = 0
     reused = 0
     for manifest_path, cache_root, namespace in manifests:
         for row in read_jsonl(manifest_path):
             total_rows += 1
             destination = Path(cache_root) / namespace / row["candidate_id"]
             if _frame_dir_complete(destination, args.frame_count):
+                existing += 1
                 continue
             old_frames = reuse_index.get(row["candidate_id"])
             if old_frames is not None:
@@ -166,12 +168,12 @@ def prepare_all_manifests(scenario_root, frame_cache, args, old_splits):
             jobs[row["video_id"]].append((row, namespace, cache_root))
 
     print(
-        "{} proposals, reused {}, need {} unique videos".format(
-            total_rows, reused, len(jobs)
+        "{} proposals, existing {}, reused {}, need {} unique videos".format(
+            total_rows, existing, reused, len(jobs)
         ),
         flush=True,
     )
-    prepared = reused
+    prepared = existing + reused
     workers = max(1, args.workers)
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = [
