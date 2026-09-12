@@ -104,6 +104,12 @@ def load_proposal_semantic_cache(path, num_classes):
                 raise ValueError("proposal semantic cache has invalid probabilities")
             if label not in KNOWN_LABELS[:known_label_count]:
                 raise ValueError("special proposal label cannot have class probabilities")
+        quality_weight = float(entry.get("proposal_quality_weight", 1.0))
+        if not math.isfinite(quality_weight) or quality_weight <= 0.0:
+            raise ValueError("proposal semantic cache has invalid quality weight")
+        teacher_score = float(entry.get("teacher_score", 1.0))
+        if not math.isfinite(teacher_score) or teacher_score < 0.0:
+            raise ValueError("proposal semantic cache has invalid teacher score")
         by_video.setdefault(video_id, []).append({
             "candidate_id": candidate_id,
             "absolute_feature_index": int(entry["absolute_feature_index"]),
@@ -113,6 +119,8 @@ def load_proposal_semantic_cache(path, num_classes):
             "semantic_label": label,
             "source_fpn_levels": levels,
             "class_probabilities": probabilities,
+            "proposal_quality_weight": quality_weight,
+            "teacher_score": teacher_score,
         })
     return by_video, len(seen), hashlib.sha256(raw).hexdigest(), payload
 
@@ -268,6 +276,7 @@ def cached_proposals_for_videos(cache, videos, num_classes, n_levels, device, dt
                 entry["semantic_label"], entry["candidate_id"],
                 entry.get("class_probabilities"),
                 entry.get("teacher_score", 1.0),
+                entry.get("proposal_quality_weight", 1.0),
             ))
         if rows:
             segments = torch.tensor(
@@ -285,18 +294,23 @@ def cached_proposals_for_videos(cache, videos, num_classes, n_levels, device, dt
             teacher_scores = torch.tensor(
                 [row[6] for row in rows], device=device, dtype=dtype
             )
+            quality_weights = torch.tensor(
+                [row[7] for row in rows], device=device, dtype=dtype
+            )
         else:
             segments = torch.zeros((0, 2), device=device, dtype=dtype)
             levels = torch.empty(0, device=device, dtype=torch.long)
             evidence = torch.zeros((0, num_classes + 4), device=device, dtype=dtype)
             eligible = torch.empty(0, device=device, dtype=torch.bool)
             teacher_scores = torch.empty(0, device=device, dtype=dtype)
+            quality_weights = torch.empty(0, device=device, dtype=dtype)
         proposals.append({
             "segments": segments,
             "levels": levels,
             "evidence": evidence,
             "evidence_eligible": eligible,
             "teacher_scores": teacher_scores,
+            "quality_weights": quality_weights,
         })
     return proposals
 
@@ -624,6 +638,7 @@ def proposal_detection_loss(
         "positive_bce_rank",
         "positive_bce_rank_advantage",
         "positive_bce_rank_teacher_score",
+        "positive_bce_rank_quality",
         "positive_bce_outer_anchor",
         "top2_positive_bce",
         "soft_positive_bce",
@@ -636,6 +651,7 @@ def proposal_detection_loss(
     pooled_outer_delta_sq = []
     pooled_base_logits = []
     pooled_teacher_scores = []
+    pooled_quality_weights = []
     pooled_targets = []
     for batch_index, proposal in enumerate(proposals):
         targets = proposal.get("targets")
@@ -644,8 +660,12 @@ def proposal_detection_loss(
         teacher_scores = proposal.get("teacher_scores")
         if teacher_scores is None:
             teacher_scores = targets.new_ones(targets.shape[0])
-        for segment, level, target, teacher_score in zip(
-            proposal["segments"], proposal["levels"], targets, teacher_scores
+        quality_weights = proposal.get("quality_weights")
+        if quality_weights is None:
+            quality_weights = targets.new_ones(targets.shape[0])
+        for segment, level, target, teacher_score, quality_weight in zip(
+            proposal["segments"], proposal["levels"], targets, teacher_scores,
+            quality_weights,
         ):
             if float(target.sum()) <= 0.0:
                 continue
@@ -670,9 +690,11 @@ def proposal_detection_loss(
                 pooled = sampled.mean(dim=0)
             pooled_logits.append(pooled)
             pooled_teacher_scores.append(teacher_score.detach())
+            pooled_quality_weights.append(quality_weight.detach())
             if loss_type in (
-                "positive_bce_rank", "positive_bce_rank_advantage",
-                "positive_bce_rank_teacher_score",
+            "positive_bce_rank", "positive_bce_rank_advantage",
+            "positive_bce_rank_teacher_score",
+            "positive_bce_rank_quality",
                 "positive_bce_outer_anchor"
             ):
                 outer_positions = torch.stack((
@@ -751,6 +773,7 @@ def proposal_detection_loss(
     elif loss_type in (
         "positive_bce", "positive_bce_rank",
         "positive_bce_rank_advantage", "positive_bce_rank_teacher_score",
+        "positive_bce_rank_quality",
         "positive_bce_outer_anchor"
     ):
         top_targets, top_classes = targets.max(dim=-1)
@@ -758,7 +781,8 @@ def proposal_detection_loss(
         loss = F.softplus(-top_logits) * top_targets.detach()
         if loss_type in (
             "positive_bce_rank", "positive_bce_rank_advantage",
-            "positive_bce_rank_teacher_score"
+            "positive_bce_rank_teacher_score",
+            "positive_bce_rank_quality",
         ):
             outer_logits = torch.stack(pooled_outer_logits).gather(
                 1, top_classes.unsqueeze(1)
@@ -780,6 +804,12 @@ def proposal_detection_loss(
                     min=1e-6
                 )
                 loss = loss * teacher_weights.detach()
+            elif loss_type == "positive_bce_rank_quality":
+                quality_weights = torch.stack(pooled_quality_weights)
+                quality_weights = quality_weights / quality_weights.mean().clamp(
+                    min=1e-6
+                )
+                loss = loss * quality_weights.detach()
         elif loss_type == "positive_bce_outer_anchor":
             outer_anchor = torch.stack(pooled_outer_delta_sq).gather(
                 1, top_classes.unsqueeze(1)

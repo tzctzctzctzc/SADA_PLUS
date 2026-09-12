@@ -303,6 +303,30 @@ def test_teacher_score_continuously_reweights_without_dropping_proposals():
     assert high_gradient > 3 * low_gradient
 
 
+def test_vlm_quality_continuously_reweights_without_dropping_proposals():
+    adapted = [torch.zeros(2, 5, 1, requires_grad=True)]
+    proposals = [{
+        "segments": torch.tensor([[1.0, 2.0]]),
+        "levels": torch.tensor([0]),
+        "targets": torch.tensor([[1.0]]),
+        "quality_weights": torch.tensor([weight]),
+    } for weight in (0.5, 1.5)]
+
+    loss, count = proposal_semantic.proposal_detection_loss(
+        adapted,
+        proposals,
+        (1,),
+        loss_type="positive_bce_rank_quality",
+        pooling="top1",
+    )
+    loss.backward()
+
+    low_gradient = adapted[0].grad[0].abs().sum()
+    high_gradient = adapted[0].grad[1].abs().sum()
+    assert count == 2
+    assert high_gradient > 2.5 * low_gradient
+
+
 def test_outer_anchor_penalizes_only_residual_leakage():
     base = [torch.zeros(1, 5, 1)]
     localized = [base[0].clone()]
@@ -916,6 +940,8 @@ def test_cache_loader_keeps_only_semantics_and_proposal_geometry(tmp_path):
             "proposal_end_sec": 2.0,
             "source_fpn_levels": [0],
             "semantic_label": "PUT",
+            "teacher_score": 0.4,
+            "proposal_quality_weight": 1.25,
         }],
     }
     path = tmp_path / "cache.json"
@@ -931,6 +957,8 @@ def test_cache_loader_keeps_only_semantics_and_proposal_geometry(tmp_path):
         "gt_assigned_class_ids", "center_all_gt_class_ids", "semantic_gt_kind"
     })
     assert cache["v"][0]["semantic_label"] == "PUT"
+    assert cache["v"][0]["teacher_score"] == pytest.approx(0.4)
+    assert cache["v"][0]["proposal_quality_weight"] == pytest.approx(1.25)
 
 
 def test_vlm_anchor_routes_use_absolute_point_not_cached_boundaries():

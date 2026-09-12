@@ -876,6 +876,7 @@ class SADA(nn.Module):
                     'known_top1_ce', 'positive_bce',
                     'positive_bce_rank', 'positive_bce_rank_advantage',
                     'positive_bce_rank_teacher_score',
+                    'positive_bce_rank_quality',
                     'positive_bce_outer_anchor',
                     'top2_positive_bce',
                     'soft_positive_bce'
@@ -2134,7 +2135,10 @@ class SADA(nn.Module):
 
     @staticmethod
     def _merge_proposals(primary, extra):
-        keys = ('segments', 'levels', 'evidence', 'evidence_eligible', 'targets')
+        keys = (
+            'segments', 'levels', 'evidence', 'evidence_eligible', 'targets',
+            'teacher_scores', 'quality_weights',
+        )
         merged = []
         for first, second in zip(primary, extra):
             row = dict(first)
@@ -2155,7 +2159,10 @@ class SADA(nn.Module):
         )
         for proposal in proposals:
             if proposal['segments'].shape[0] > self.proposal_semantic_max_proposals:
-                for key in ('segments', 'levels', 'evidence', 'evidence_eligible'):
+                for key in (
+                    'segments', 'levels', 'evidence', 'evidence_eligible',
+                    'teacher_scores', 'quality_weights',
+                ):
                     proposal[key] = proposal[key][
                         :self.proposal_semantic_max_proposals
                     ]

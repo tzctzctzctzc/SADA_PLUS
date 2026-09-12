@@ -1353,6 +1353,7 @@ def create_argparser():
             'positive_bce', 'positive_bce_rank',
             'positive_bce_rank_advantage', 'positive_bce_outer_anchor',
             'positive_bce_rank_teacher_score',
+            'positive_bce_rank_quality',
             'top2_positive_bce',
             'soft_positive_bce',
         ],
