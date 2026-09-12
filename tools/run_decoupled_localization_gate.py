@@ -196,8 +196,24 @@ def _raw_direct_result(
     scores = []
     labels = []
     qualities = []
-    for point_level, mask_level, logit_level, offset_level, quality_level in zip(
-        points, masks, logits, offsets, quality
+    for (
+        point_level,
+        mask_level,
+        logit_level,
+        offset_level,
+        quality_level,
+        parent_offset_level,
+        parent_start_level,
+        parent_end_level,
+    ) in zip(
+        points,
+        masks,
+        logits,
+        offsets,
+        quality,
+        parent_offsets,
+        parent_starts,
+        parent_ends,
     ):
         class_probabilities = logit_level[0].transpose(0, 1).sigmoid()
         class_probabilities *= mask_level[0, 0].unsqueeze(-1)
@@ -220,10 +236,10 @@ def _raw_direct_result(
             if not model.use_trident_head:
                 raise ValueError("boundary blending requires a Trident parent")
             start_windows, end_windows = _trident_windows(
-                model, parent_starts[0], parent_ends[0]
+                model, parent_start_level[0], parent_end_level[0]
             )
             parent_decoded = model.decode_offset(
-                parent_offsets[0].transpose(0, 1),
+                parent_offset_level[0].transpose(0, 1),
                 start_windows,
                 end_windows,
                 mode="test",
