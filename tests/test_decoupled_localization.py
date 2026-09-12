@@ -3,6 +3,7 @@ import torch
 from libs.models.SADA.decoupled_localization import (
     DirectLocalizationHead,
     balanced_soft_quality_loss,
+    blend_localization_offsets,
     fuse_class_and_quality,
     initialize_from_trident_regression_trunk,
 )
@@ -52,3 +53,14 @@ def test_trident_trunk_initialization_copies_shared_layers_only():
     for left, right in zip(destination.convs, source.convs):
         assert torch.equal(left.conv.weight, right.conv.weight)
     assert torch.equal(destination.offset_head.conv.weight, old_output)
+
+
+def test_localization_offset_blend_is_bounded_correction():
+    parent = torch.tensor([[2.0, 4.0]])
+    direct = torch.tensor([[6.0, 8.0]])
+    assert torch.equal(blend_localization_offsets(parent, direct, 0.0), parent)
+    assert torch.equal(blend_localization_offsets(parent, direct, 1.0), direct)
+    assert torch.allclose(
+        blend_localization_offsets(parent, direct, 0.25),
+        torch.tensor([[3.0, 5.0]]),
+    )

@@ -107,3 +107,12 @@ def fuse_class_and_quality(class_probabilities, quality_logits, gamma):
     if gamma <= 0:
         return class_probabilities
     return class_probabilities * quality.clamp_min(1e-8).pow(float(gamma)).unsqueeze(-1)
+
+
+def blend_localization_offsets(parent_offsets, direct_offsets, alpha):
+    """Use a learned class-agnostic stream as a bounded Trident correction."""
+
+    alpha = float(alpha)
+    if not 0.0 <= alpha <= 1.0:
+        raise ValueError("boundary blend alpha must lie in [0, 1]")
+    return (1.0 - alpha) * parent_offsets + alpha * direct_offsets

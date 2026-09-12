@@ -22,6 +22,7 @@ from libs.datasets import make_dataset
 from libs.models.SADA.decoupled_localization import (
     DirectLocalizationHead,
     balanced_soft_quality_loss,
+    blend_localization_offsets,
     fuse_class_and_quality,
     initialize_from_trident_regression_trunk,
 )
@@ -32,6 +33,7 @@ from tools.run_proposal_iou_quality_gate import (
     _domain_outputs,
     _empty_predictions,
     _finalize_predictions,
+    _trident_windows,
     evaluator_for,
     load_config,
     load_detector,
@@ -60,6 +62,7 @@ def parse_args():
     parser.add_argument("--quality-loss-weight", type=float, default=0.5)
     parser.add_argument("--init-trunk-from-parent", action="store_true")
     parser.add_argument("--quality-gammas", type=float, nargs="+", default=(0.0, 0.25, 0.5, 1.0))
+    parser.add_argument("--direct-boundary-alpha", type=float, default=1.0)
     parser.add_argument("--min-source-map-gain", type=float, default=0.005)
     parser.add_argument("--min-source-high-tiou-gain", type=float, default=0.005)
     parser.add_argument("--max-train-videos", type=int, default=None)
@@ -175,7 +178,20 @@ def fit_heads(examples, input_dim, fpn_levels, args, parent_reg_head=None):
     return snapshots
 
 
-def _raw_direct_result(model, video, points, masks, logits, offsets, quality, gamma):
+def _raw_direct_result(
+    model,
+    video,
+    points,
+    masks,
+    logits,
+    offsets,
+    quality,
+    gamma,
+    boundary_alpha,
+    parent_offsets,
+    parent_starts,
+    parent_ends,
+):
     segments = []
     scores = []
     labels = []
@@ -200,6 +216,21 @@ def _raw_direct_result(model, video, points, masks, logits, offsets, quality, ga
         )
         class_indices = torch.fmod(indices, model.num_class_orig)
         direct_offsets = offset_level[0].transpose(0, 1)[point_indices]
+        if boundary_alpha < 1.0:
+            if not model.use_trident_head:
+                raise ValueError("boundary blending requires a Trident parent")
+            start_windows, end_windows = _trident_windows(
+                model, parent_starts[0], parent_ends[0]
+            )
+            parent_decoded = model.decode_offset(
+                parent_offsets[0].transpose(0, 1),
+                start_windows,
+                end_windows,
+                mode="test",
+            )[class_indices, point_indices]
+            direct_offsets = blend_localization_offsets(
+                parent_decoded, direct_offsets, boundary_alpha
+            )
         selected_points = point_level[point_indices]
         left = selected_points[:, 0] - direct_offsets[:, 0] * selected_points[:, 3]
         right = selected_points[:, 0] + direct_offsets[:, 1] * selected_points[:, 3]
@@ -253,7 +284,18 @@ def evaluate_heads(model, heads, dataset, domain, cfg, args):
             direct_offsets, quality = head(fpn, masks)
             for gamma in args.quality_gammas:
                 raw = _raw_direct_result(
-                    model, video, points, masks, logits, direct_offsets, quality, gamma
+                    model,
+                    video,
+                    points,
+                    masks,
+                    logits,
+                    direct_offsets,
+                    quality,
+                    gamma,
+                    args.direct_boundary_alpha,
+                    parent_offsets,
+                    starts,
+                    ends,
                 )
                 result = model.postprocessing([raw])[0]
                 _append_predictions(predictions[(epoch, gamma)], result)
@@ -350,6 +392,7 @@ def main():
         "source_positive_points": positive_points,
         "source_valid_points": valid_points,
         "init_trunk_from_parent": args.init_trunk_from_parent,
+        "direct_boundary_alpha": args.direct_boundary_alpha,
         "selected_epoch": best_variant[0],
         "selected_gamma": best_variant[1],
         "source_baseline": baseline,
