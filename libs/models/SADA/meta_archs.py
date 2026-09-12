@@ -53,6 +53,7 @@ from .oracle_task import (
 from .conditional_alignment import aggregate_conditional_class_losses
 from .vlm_relation import (
     VLMRelationBoundaryAdapter,
+    VLMProposalFeatureAligner,
     load_vlm_relation_cache,
     proposal_boundary_change_loss,
     proposal_relation_loss,
@@ -704,13 +705,17 @@ class SADA(nn.Module):
         self.vlm_relation_boundary_min_strength = float(
             relation_cfg.get('boundary_min_strength', 0.5)
         )
+        self.vlm_relation_temperature = float(
+            relation_cfg.get('temperature', 0.07)
+        )
         if (
-            self.vlm_relation_mode not in ('geometry', 'boundary')
+            self.vlm_relation_mode not in ('geometry', 'boundary', 'feature')
             or self.vlm_relation_weight <= 0.0
             or self.vlm_relation_start_epoch < 1
             or self.vlm_relation_ramp_epochs < 1
             or self.vlm_relation_max_gap_seconds <= 0.0
             or self.vlm_relation_boundary_max_delta <= 0.0
+            or self.vlm_relation_temperature <= 0.0
             or not 0.0 <= self.vlm_relation_boundary_min_strength <= 1.0
             or not self.vlm_relation_levels
             or len(set(self.vlm_relation_levels)) != len(self.vlm_relation_levels)
@@ -1437,6 +1442,7 @@ class SADA(nn.Module):
             )
 
         self.vlm_relation_boundary_adapters = nn.ModuleList()
+        self.vlm_proposal_feature_aligner = None
         if self.vlm_relation_enabled and self.vlm_relation_mode == 'boundary':
             self.vlm_relation_boundary_adapters = nn.ModuleList([
                 VLMRelationBoundaryAdapter(
@@ -1444,6 +1450,14 @@ class SADA(nn.Module):
                 )
                 for _ in range(self.n_levels)
             ])
+        elif self.vlm_relation_enabled and self.vlm_relation_mode == 'feature':
+            with torch.random.fork_rng(devices=[]):
+                torch.manual_seed(0)
+                self.vlm_proposal_feature_aligner = VLMProposalFeatureAligner(
+                    fpn_dim,
+                    int(self.vlm_relation_payload['feature_dim']),
+                    temperature=self.vlm_relation_temperature,
+                )
 
         self.cls_head_target = self.cls_head
         self.reg_head_target = self.reg_head
@@ -3116,13 +3130,21 @@ class SADA(nn.Module):
                                 self.vlm_relation_boundary_min_strength,
                             )
                         )
-                    else:
+                    elif self.vlm_relation_mode == 'geometry':
                         relation_loss, relation_stats = proposal_relation_loss(
                             fpn_feats_tgt,
                             relation_proposals,
                             self.fpn_strides,
                             self.vlm_relation_max_gap_seconds,
                             self.vlm_relation_distance_scale,
+                        )
+                    else:
+                        relation_loss, relation_stats = (
+                            self.vlm_proposal_feature_aligner(
+                                fpn_feats_tgt,
+                                relation_proposals,
+                                self.fpn_strides,
+                            )
                         )
                     relation_ramp = min(
                         1.0,
@@ -3152,6 +3174,20 @@ class SADA(nn.Module):
                 )
                 losses['vlm_relation_mean_strength'] = relation_stats.get(
                     'mean_strength', relation_loss.detach() * 0.0
+                )
+                losses['vlm_feature_proposal_count'] = torch.as_tensor(
+                    relation_stats.get('proposal_count', 0),
+                    device=fpn_feats_tgt[0].device,
+                    dtype=fpn_feats_tgt[0].dtype,
+                )
+                losses['vlm_feature_retrieval_accuracy'] = relation_stats.get(
+                    'retrieval_accuracy', relation_loss.detach() * 0.0
+                )
+                losses['vlm_feature_positive_similarity'] = relation_stats.get(
+                    'positive_similarity', relation_loss.detach() * 0.0
+                )
+                losses['vlm_feature_negative_similarity'] = relation_stats.get(
+                    'negative_similarity', relation_loss.detach() * 0.0
                 )
                 losses['downstream_loss'] = (
                     losses['downstream_loss'] + weighted_relation_loss

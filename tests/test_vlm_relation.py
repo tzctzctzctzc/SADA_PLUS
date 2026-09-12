@@ -14,6 +14,7 @@ CACHE_SCHEMA = vlm_relation.CACHE_SCHEMA
 load_vlm_relation_cache = vlm_relation.load_vlm_relation_cache
 proposal_relation_loss = vlm_relation.proposal_relation_loss
 proposal_boundary_change_loss = vlm_relation.proposal_boundary_change_loss
+VLMProposalFeatureAligner = vlm_relation.VLMProposalFeatureAligner
 
 
 def test_relation_loss_is_zero_when_cosine_geometry_matches():
@@ -98,3 +99,27 @@ def test_boundary_change_loss_rewards_start_and_end_at_semantic_change():
 def test_boundary_adapter_is_exactly_zero_at_initialization():
     adapter = vlm_relation.VLMRelationBoundaryAdapter(4, max_delta=1.0)
     assert torch.equal(adapter(torch.randn(2, 4, 7)), torch.zeros(2, 2, 7))
+
+
+def test_feature_aligner_matches_exact_proposals_and_updates_fpn():
+    aligner = VLMProposalFeatureAligner(2, 2, temperature=0.05)
+    with torch.no_grad():
+        aligner.input_norm = torch.nn.Identity()
+        aligner.projection.weight.copy_(torch.eye(2))
+    features = torch.tensor([[[1.0, 1.0, 0.0, 0.0],
+                              [0.0, 0.0, 1.0, 1.0]]], requires_grad=True)
+    proposals = [{
+        "segments": torch.tensor([[0.0, 1.0], [2.0, 3.0]]),
+        "levels": torch.tensor([0, 0]),
+        "static_features": torch.tensor([[1.0, 0.0], [0.0, 1.0]]),
+        "fully_visible": torch.tensor([True, True]),
+    }]
+    matched, stats = aligner([features], proposals, [1])
+    swapped = dict(proposals[0])
+    swapped["static_features"] = proposals[0]["static_features"].flip(0)
+    mismatched, _ = aligner([features], [swapped], [1])
+    assert matched < mismatched
+    assert stats["proposal_count"] == 2
+    assert torch.isclose(stats["retrieval_accuracy"], torch.tensor(1.0))
+    matched.backward()
+    assert features.grad is not None and features.grad.abs().sum() > 0

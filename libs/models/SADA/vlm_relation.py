@@ -28,6 +28,76 @@ class VLMRelationBoundaryAdapter(nn.Module):
         return self.max_delta * torch.tanh(residual)
 
 
+class VLMProposalFeatureAligner(nn.Module):
+    """Project TAL proposal features into a frozen VLM visual space."""
+
+    # Match the eight frozen Qwen frames: bin centers uniformly inside the
+    # proposal, without silently adding context that the VLM did not observe.
+    sample_ratios = tuple((index + 0.5) / 8.0 for index in range(8))
+
+    def __init__(self, input_dim, vlm_dim, temperature=0.07):
+        super().__init__()
+        if input_dim <= 0 or vlm_dim <= 0 or temperature <= 0.0:
+            raise ValueError("VLM proposal feature alignment is invalid")
+        self.temperature = float(temperature)
+        self.input_norm = nn.LayerNorm(int(input_dim))
+        self.projection = nn.Linear(int(input_dim), int(vlm_dim), bias=False)
+
+    def forward(self, fpn_feats, proposals, fpn_strides):
+        tal_rows, vlm_rows = [], []
+        for batch_index, proposal in enumerate(proposals):
+            fully_visible = proposal.get("fully_visible")
+            for index, (segment, level) in enumerate(zip(
+                proposal["segments"], proposal["levels"]
+            )):
+                if fully_visible is not None and not bool(fully_visible[index]):
+                    continue
+                level = int(level)
+                duration = (segment[1] - segment[0]).clamp(min=1.0)
+                positions = torch.stack([
+                    segment[0] + ratio * duration
+                    for ratio in self.sample_ratios
+                ]) / float(fpn_strides[level])
+                tal_rows.append(_sample_sequence(
+                    fpn_feats[level][batch_index], positions
+                ).mean(dim=1))
+                vlm_rows.append(proposal["static_features"][index])
+        if len(tal_rows) < 2:
+            zero = sum(feature.sum() * 0.0 for feature in fpn_feats)
+            return zero, {
+                "proposal_count": len(tal_rows),
+                "retrieval_accuracy": zero.detach(),
+                "positive_similarity": zero.detach(),
+                "negative_similarity": zero.detach(),
+            }
+
+        tal = F.normalize(
+            self.projection(self.input_norm(torch.stack(tal_rows))), dim=-1
+        )
+        vlm = F.normalize(torch.stack(vlm_rows).detach().float(), dim=-1)
+        vlm = vlm.to(device=tal.device, dtype=tal.dtype)
+        logits = tal @ vlm.transpose(0, 1) / self.temperature
+        labels = torch.arange(logits.shape[0], device=logits.device)
+        loss = 0.5 * (
+            F.cross_entropy(logits, labels)
+            + F.cross_entropy(logits.transpose(0, 1), labels)
+        )
+        diagonal = logits.diagonal() * self.temperature
+        negatives = ~torch.eye(
+            logits.shape[0], device=logits.device, dtype=torch.bool
+        )
+        return loss, {
+            "proposal_count": int(logits.shape[0]),
+            "retrieval_accuracy": (
+                logits.argmax(dim=-1) == labels
+            ).float().mean().detach(),
+            "positive_similarity": diagonal.mean().detach(),
+            "negative_similarity": (
+                logits[negatives] * self.temperature
+            ).mean().detach(),
+        }
+
+
 def _sha256_file(path):
     digest = hashlib.sha256()
     with Path(path).open("rb") as stream:
@@ -129,10 +199,12 @@ def relation_proposals_for_videos(cache, videos, n_levels, device, dtype, levels
             end -= crop_start
             if end <= 0.0 or start >= crop_length:
                 continue
+            fully_visible = start >= 0.0 and end <= crop_length
             rows.append((
                 max(start, 0.0), min(end, crop_length), level,
                 entry["absolute_center_time"], entry["teacher_score"],
                 entry["static_feature"], entry["transition_feature"],
+                fully_visible,
             ))
         if rows:
             output.append({
@@ -148,6 +220,9 @@ def relation_proposals_for_videos(cache, videos, n_levels, device, dtype, levels
                 "static_features": torch.stack([row[5] for row in rows]).to(
                     device=device, dtype=dtype
                 ),
+                "fully_visible": torch.tensor(
+                    [row[7] for row in rows], device=device, dtype=torch.bool
+                ),
             })
         else:
             output.append({
@@ -155,6 +230,7 @@ def relation_proposals_for_videos(cache, videos, n_levels, device, dtype, levels
                 "levels": torch.empty(0, dtype=torch.long),
                 "centers": torch.empty(0, dtype=torch.float32),
                 "static_features": torch.empty((0, 0), device=device, dtype=dtype),
+                "fully_visible": torch.empty(0, device=device, dtype=torch.bool),
             })
     return output
 
