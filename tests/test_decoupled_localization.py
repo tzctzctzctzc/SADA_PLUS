@@ -1,6 +1,8 @@
 import torch
 
 from libs.models.SADA.decoupled_localization import (
+    BoundarySensitiveLocalizationNeck,
+    DecoupledLocalizationSystem,
     DirectLocalizationHead,
     balanced_soft_quality_loss,
     blend_localization_offsets,
@@ -64,3 +66,15 @@ def test_localization_offset_blend_is_bounded_correction():
         blend_localization_offsets(parent, direct, 0.25),
         torch.tensor([[3.0, 5.0]]),
     )
+
+
+def test_boundary_sensitive_localization_neck_and_system_shapes():
+    neck = BoundarySensitiveLocalizationNeck(8, 2)
+    head = DirectLocalizationHead(8, 16, 2, num_layers=3, kernel_size=3)
+    system = DecoupledLocalizationSystem(head, neck)
+    features = [torch.randn(2, 8, 11), torch.randn(2, 8, 6)]
+    masks = [torch.ones(2, 1, 11, dtype=torch.bool), torch.ones(2, 1, 6, dtype=torch.bool)]
+    offsets, quality = system(features, masks)
+    assert [tuple(value.shape) for value in offsets] == [(2, 2, 11), (2, 2, 6)]
+    assert [tuple(value.shape) for value in quality] == [(2, 1, 11), (2, 1, 6)]
+    assert all(torch.isfinite(value).all() for value in offsets + quality)

@@ -65,6 +65,68 @@ class DirectLocalizationHead(nn.Module):
         return offsets, quality_logits
 
 
+class BoundarySensitiveLocalizationNeck(nn.Module):
+    """Build a localization-only representation from temporal state changes."""
+
+    def __init__(self, channels, fpn_levels):
+        super().__init__()
+        self.fpn_levels = int(fpn_levels)
+        self.input_norms = nn.ModuleList(
+            [LayerNorm(channels) for _ in range(self.fpn_levels)]
+        )
+        self.mixers = nn.ModuleList(
+            [
+                MaskedConv1D(3 * channels, channels, 1, bias=False)
+                for _ in range(self.fpn_levels)
+            ]
+        )
+        self.temporal_convs = nn.ModuleList(
+            [
+                MaskedConv1D(
+                    channels,
+                    channels,
+                    5,
+                    padding=2,
+                    groups=channels,
+                    bias=False,
+                )
+                for _ in range(self.fpn_levels)
+            ]
+        )
+        self.output_norms = nn.ModuleList(
+            [LayerNorm(channels) for _ in range(self.fpn_levels)]
+        )
+
+    def forward(self, backbone_feats, fpn_masks):
+        if len(backbone_feats) != self.fpn_levels:
+            raise ValueError("backbone pyramid level count does not match the neck")
+        outputs = []
+        for level, (features, mask) in enumerate(zip(backbone_feats, fpn_masks)):
+            base = self.input_norms[level](features)
+            left = F.pad(base[..., 1:] - base[..., :-1], (1, 0))
+            right = F.pad(base[..., :-1] - base[..., 1:], (0, 1))
+            changes = torch.cat((base, left, right), dim=1)
+            mixed, _ = self.mixers[level](changes, mask)
+            mixed = F.relu(mixed)
+            mixed, _ = self.temporal_convs[level](mixed, mask)
+            outputs.append(self.output_norms[level](base + mixed))
+        return outputs
+
+
+class DecoupledLocalizationSystem(nn.Module):
+    """Optional boundary-sensitive neck followed by the direct localization head."""
+
+    def __init__(self, head, neck=None):
+        super().__init__()
+        self.neck = neck
+        self.head = head
+
+    def forward(self, features, masks):
+        if self.neck is not None:
+            features = self.neck(features, masks)
+        return self.head(features, masks)
+
+
 def initialize_from_trident_regression_trunk(head, trident_reg_head):
     """Reuse the parent's localization-specific temporal trunk and level scales."""
 

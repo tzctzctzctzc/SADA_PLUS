@@ -20,6 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from libs.datasets import make_dataset
 from libs.models.SADA.decoupled_localization import (
+    BoundarySensitiveLocalizationNeck,
+    DecoupledLocalizationSystem,
     DirectLocalizationHead,
     balanced_soft_quality_loss,
     blend_localization_offsets,
@@ -28,9 +30,9 @@ from libs.models.SADA.decoupled_localization import (
 )
 from libs.models.SADA.losses_aux import ctr_diou_loss_1d, ctr_giou_loss_1d
 from libs.models.SADA.vlm_routing import file_sha256
+from tools.audit_original_sada_pseudolabels import move_video
 from tools.run_proposal_iou_quality_gate import (
     _append_predictions,
-    _domain_outputs,
     _empty_predictions,
     _finalize_predictions,
     _trident_windows,
@@ -61,6 +63,11 @@ def parse_args():
     parser.add_argument("--kernel-size", type=int, default=3)
     parser.add_argument("--quality-loss-weight", type=float, default=0.5)
     parser.add_argument("--init-trunk-from-parent", action="store_true")
+    parser.add_argument(
+        "--localization-neck",
+        choices=("none", "boundary_difference"),
+        default="none",
+    )
     parser.add_argument("--quality-gammas", type=float, nargs="+", default=(0.0, 0.25, 0.5, 1.0))
     parser.add_argument("--direct-boundary-alpha", type=float, default=1.0)
     parser.add_argument("--min-source-map-gain", type=float, default=0.005)
@@ -71,16 +78,63 @@ def parse_args():
     return parser.parse_args()
 
 
+def _detector_outputs(model, raw_video, domain, device):
+    video = move_video(raw_video, device)
+    inputs, masks = model.preprocessing([video], mode="eval")
+    if domain == "source":
+        backbone, backbone_masks, _ = model.backbone_source(inputs, masks)
+        fpn, fpn_masks = model.neck_source(backbone, backbone_masks)
+        logits, _ = model.cls_head(fpn, fpn_masks)
+        offsets, _ = model.reg_head(fpn, fpn_masks)
+    else:
+        backbone, backbone_masks, _ = model.backbone_target(inputs, masks)
+        fpn, fpn_masks = model.neck_target(backbone, backbone_masks)
+        logits, _ = model.cls_head_target(fpn, fpn_masks)
+        offsets, _ = model.reg_head_target(fpn, fpn_masks)
+    points = model.point_generator(fpn)
+    if model.use_trident_head:
+        starts, _ = model.start_head(fpn, fpn_masks)
+        ends, _ = model.end_head(fpn, fpn_masks)
+    else:
+        starts = [None] * len(fpn)
+        ends = [None] * len(fpn)
+    return (
+        video,
+        backbone,
+        backbone_masks,
+        fpn,
+        fpn_masks,
+        logits,
+        offsets,
+        starts,
+        ends,
+        points,
+    )
+
+
 @torch.inference_mode()
-def extract_source_examples(model, dataset, device, limit=None):
+def extract_source_examples(model, dataset, device, localization_neck, limit=None):
     examples = []
     count = min(len(dataset), limit or len(dataset))
     positive_points = 0
     valid_points = 0
     for index in range(count):
-        video, fpn, masks, _, _, _, _, points = _domain_outputs(
+        (
+            video,
+            backbone,
+            backbone_masks,
+            fpn,
+            masks,
+            _,
+            _,
+            _,
+            _,
+            points,
+        ) = _detector_outputs(
             model, dataset[index], "source", device
         )
+        training_features = backbone if localization_neck != "none" else fpn
+        training_masks = backbone_masks if localization_neck != "none" else masks
         gt_classes, gt_offsets = model.label_points(
             points, [video["segments"]], [video["labels"]]
         )
@@ -91,8 +145,8 @@ def extract_source_examples(model, dataset, device, limit=None):
         valid_points += sum(int(mask.sum()) for mask in masks)
         examples.append(
             {
-                "features": [value.cpu().half() for value in fpn],
-                "masks": [value.cpu().bool() for value in masks],
+                "features": [value.cpu().half() for value in training_features],
+                "masks": [value.cpu().bool() for value in training_masks],
                 "positive": [value.sum(-1).gt(0).cpu() for value in split_classes],
                 "offsets": [value.cpu().float() for value in split_offsets],
             }
@@ -140,11 +194,17 @@ def fit_heads(examples, input_dim, fpn_levels, args, parent_reg_head=None):
         args.num_layers,
         args.kernel_size,
         with_ln=True,
-    ).to(args.device)
+    )
     if args.init_trunk_from_parent:
         if parent_reg_head is None:
             raise ValueError("parent regression head is required for trunk initialization")
         initialize_from_trident_regression_trunk(head, parent_reg_head)
+    neck = (
+        BoundarySensitiveLocalizationNeck(input_dim, fpn_levels)
+        if args.localization_neck == "boundary_difference"
+        else None
+    )
+    head = DecoupledLocalizationSystem(head, neck).to(args.device)
     optimizer = torch.optim.AdamW(
         head.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
     )
@@ -282,7 +342,18 @@ def evaluate_heads(model, heads, dataset, domain, cfg, args):
     }
     count = min(len(dataset), args.max_eval_videos or len(dataset))
     for index in range(count):
-        video, fpn, masks, logits, parent_offsets, starts, ends, points = _domain_outputs(
+        (
+            video,
+            backbone,
+            backbone_masks,
+            fpn,
+            masks,
+            logits,
+            parent_offsets,
+            starts,
+            ends,
+            points,
+        ) = _detector_outputs(
             model, dataset[index], domain, args.device
         )
         original_trident = model.use_trident_head
@@ -297,7 +368,13 @@ def evaluate_heads(model, heads, dataset, domain, cfg, args):
         )[0]
         _append_predictions(predictions[(0, -1.0)], parent_result)
         for epoch, head in device_heads.items():
-            direct_offsets, quality = head(fpn, masks)
+            direct_features = (
+                backbone if args.localization_neck != "none" else fpn
+            )
+            direct_masks = (
+                backbone_masks if args.localization_neck != "none" else masks
+            )
+            direct_offsets, quality = head(direct_features, direct_masks)
             for gamma in args.quality_gammas:
                 raw = _raw_direct_result(
                     model,
@@ -345,7 +422,11 @@ def main():
         cfg["dataset_name"], False, cfg["src_val_split"], **cfg["dataset"]
     )
     examples, positive_points, valid_points = extract_source_examples(
-        model, source_train, args.device, args.max_train_videos
+        model,
+        source_train,
+        args.device,
+        args.localization_neck,
+        args.max_train_videos,
     )
     input_dim = examples[0]["features"][0].shape[1]
     heads = fit_heads(
@@ -408,6 +489,7 @@ def main():
         "source_positive_points": positive_points,
         "source_valid_points": valid_points,
         "init_trunk_from_parent": args.init_trunk_from_parent,
+        "localization_neck": args.localization_neck,
         "direct_boundary_alpha": args.direct_boundary_alpha,
         "selected_epoch": best_variant[0],
         "selected_gamma": best_variant[1],
