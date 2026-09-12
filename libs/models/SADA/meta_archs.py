@@ -3158,7 +3158,9 @@ class SADA(nn.Module):
                 losses['loss_vlm_relation'] = relation_loss
                 losses['vlm_relation_weighted_loss'] = weighted_relation_loss
                 losses['vlm_relation_pair_count'] = torch.as_tensor(
-                    relation_stats['pair_count'],
+                    relation_stats.get(
+                        'pair_count', relation_stats.get('proposal_count', 0)
+                    ),
                     device=fpn_feats_tgt[0].device,
                     dtype=fpn_feats_tgt[0].dtype,
                 )
