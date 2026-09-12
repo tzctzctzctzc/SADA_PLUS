@@ -1278,7 +1278,7 @@ def create_argparser():
         help='prompt-free frozen VLM intermediate features for target relations',
     )
     parser.add_argument(
-        '--vlm-relation-mode', choices=['geometry', 'boundary'],
+        '--vlm-relation-mode', choices=['geometry', 'boundary', 'feature'],
         default='geometry',
     )
     parser.add_argument('--vlm-relation-weight', type=float, default=0.1)
@@ -1288,6 +1288,7 @@ def create_argparser():
     parser.add_argument('--vlm-relation-max-gap', type=float, default=30.0)
     parser.add_argument('--vlm-relation-boundary-max-delta', type=float, default=1.0)
     parser.add_argument('--vlm-relation-boundary-min-strength', type=float, default=0.5)
+    parser.add_argument('--vlm-relation-temperature', type=float, default=0.07)
     parser.add_argument(
         '--vlm-relation-init-weights', choices=['student', 'ema'], default='ema'
     )
@@ -1829,6 +1830,7 @@ if __name__ == '__main__':
         or args.vlm_relation_ramp_epochs < 1
         or args.vlm_relation_max_gap <= 0.0
         or args.vlm_relation_boundary_max_delta <= 0.0
+        or args.vlm_relation_temperature <= 0.0
         or not 0.0 <= args.vlm_relation_boundary_min_strength <= 1.0
     ):
         raise ValueError('VLM relation configuration is invalid')
@@ -1897,6 +1899,7 @@ if __name__ == '__main__':
         'max_gap_seconds': args.vlm_relation_max_gap,
         'boundary_max_delta': args.vlm_relation_boundary_max_delta,
         'boundary_min_strength': args.vlm_relation_boundary_min_strength,
+        'temperature': args.vlm_relation_temperature,
         'adapter_only': args.vlm_relation_freeze_base,
     }
     proposal_semantic_enabled = args.proposal_semantic_mode != 'off'
