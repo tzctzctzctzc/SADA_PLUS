@@ -77,7 +77,11 @@ def video_path(root, video_id):
         return None
     for suffix in (".MP4", ".mp4"):
         path = Path(root) / (video_id + suffix)
-        if path.is_file() and path.stat().st_size:
+        if (
+            path.is_file()
+            and path.stat().st_size
+            and not Path(str(path) + ".aria2").exists()
+        ):
             return path
     return None
 

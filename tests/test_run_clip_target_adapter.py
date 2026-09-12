@@ -5,6 +5,7 @@ from tools.run_clip_target_adapter import (
     epic_video_url,
     proposal_timestamps,
     shard_for_video,
+    video_path,
 )
 
 
@@ -58,6 +59,17 @@ def test_video_sharding_is_stable_and_bounded():
     first = shard_for_video("P01_101", 3)
     assert first == shard_for_video("P01_101", 3)
     assert 0 <= first < 3
+
+
+def test_video_path_rejects_active_aria2_download(tmp_path):
+    video = tmp_path / "P01_101.MP4"
+    video.write_bytes(b"preallocated")
+    (tmp_path / "P01_101.MP4.aria2").write_bytes(b"control")
+
+    assert video_path(tmp_path, "P01_101") is None
+
+    (tmp_path / "P01_101.MP4.aria2").unlink()
+    assert video_path(tmp_path, "P01_101") == video
 
 
 def test_epic_video_url_handles_old_and_extension_videos():
