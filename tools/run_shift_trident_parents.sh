@@ -42,7 +42,7 @@ for shift in "${shifts[@]}"; do
 done
 
 run_task() {
-    local gpu=$1 task=$2 shift seed config shift_lower name log checkpoint_dir checkpoint
+    local gpu=$1 task=$2 shift seed config shift_lower name log checkpoint_dir checkpoint best
     IFS=':' read -r shift seed config <<<"$task"
     shift_lower=${shift,,}
     name="${shift_lower}_trident_parent_e10_repro_seed${seed}_20260912"
@@ -50,7 +50,7 @@ run_task() {
     checkpoint_dir="$artifact_root/checkpoints/${shift_lower}_seed${seed}"
     mkdir -p "$checkpoint_dir"
 
-    checkpoint=$(find "$checkpoint_dir" -maxdepth 1 -type l -o -type f 2>/dev/null | head -1 || true)
+    checkpoint="$checkpoint_dir/epoch10.pt"
     if [[ -n "$checkpoint" && -e "$checkpoint" ]]; then
         echo "skip completed shift=$shift seed=$seed checkpoint=$checkpoint"
         return
@@ -61,11 +61,18 @@ run_task() {
         --stop-after-epoch 10 >"$log" 2>&1
 
     checkpoint=$(find "model_results/$name" \
+        -path '*/saved_ckpt/latest_ckpt/checkpoint-epoch10.pt' \
+        -type f -print -quit)
+    test -n "$checkpoint" || { echo "epoch-10 checkpoint missing for $shift seed=$seed" >&2; return 1; }
+    ln -sfn "$(realpath "$checkpoint")" "$checkpoint_dir/epoch10.pt"
+    sha256sum "$checkpoint" >"$checkpoint_dir/epoch10.sha256"
+
+    best=$(find "model_results/$name" \
         -path '*/saved_ckpt/best_ckpt/checkpoint-epoch*.pt' \
         -type f -print | sort -V | tail -1)
-    test -n "$checkpoint" || { echo "best checkpoint missing for $shift seed=$seed" >&2; return 1; }
-    ln -sfn "$(realpath "$checkpoint")" "$checkpoint_dir/best.pt"
-    sha256sum "$checkpoint" >"$checkpoint_dir/best.sha256"
+    if [[ -n "$best" ]]; then
+        ln -sfn "$(realpath "$best")" "$checkpoint_dir/best_source_val.pt"
+    fi
 }
 
 worker() {
