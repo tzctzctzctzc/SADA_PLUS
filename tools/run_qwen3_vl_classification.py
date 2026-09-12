@@ -299,7 +299,7 @@ def load_qwen3(args):
 
 def proposal_sample_fps(row, args):
     if getattr(args, "sample_fps_mode", "fixed") == "fixed":
-        return float(args.sample_fps)
+        return float(getattr(args, "sample_fps", 1.0))
     duration = float(row["proposal_end_sec"]) - float(row["proposal_start_sec"])
     if duration <= 0.0:
         raise ValueError("proposal duration must be positive")

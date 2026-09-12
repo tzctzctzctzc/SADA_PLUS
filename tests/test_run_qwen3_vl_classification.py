@@ -129,6 +129,10 @@ def test_proposal_fps_uses_true_proposal_duration():
     assert proposal_sample_fps(row, args) == 2.0
 
 
+def test_fixed_fps_defaults_for_image_matrix_namespace():
+    assert proposal_sample_fps({}, SimpleNamespace(frame_count=8)) == 1.0
+
+
 def test_proposal_fps_protocol_is_separate_from_fixed_fps():
     version, _ = prompt_protocol(
         "qwen3-vl-8b-ordered-images-digit-logits-v1",
