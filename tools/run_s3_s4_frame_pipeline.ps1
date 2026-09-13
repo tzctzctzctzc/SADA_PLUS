@@ -1,6 +1,8 @@
 param(
     [int]$WaitForPid = 0,
-    [string]$DataRoot = "F:\SADA"
+    [string]$DataRoot = "F:\SADA",
+    [int]$VideoWorkers = 4,
+    [int]$VideoConnections = 16
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,7 +37,7 @@ $verify = Start-Process -FilePath $python -WindowStyle Hidden -Wait -PassThru `
         "--epic55-splits", $splitFile,
         "--md5-csv", $md5File,
         "--verify-cached-md5",
-        "--workers", "3", "--connections", "8", "--retries", "3",
+        "--workers", "$VideoWorkers", "--connections", "$VideoConnections", "--retries", "3",
         "--shifts", "S3", "S4"
     ) `
     -RedirectStandardOutput (Join-Path $DataRoot "verify_repair_S3_S4_20260912.stdout.log") `
