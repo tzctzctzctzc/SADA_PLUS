@@ -55,11 +55,26 @@ def backup_corrupt(path):
     return backup
 
 
+def frame_rows_complete(rows, frame_cache, frame_count):
+    root = Path(frame_cache)
+    for row, scope, namespace in rows:
+        directory = root / scope / namespace / row["candidate_id"]
+        if not all(
+            (directory / "frame_{:02d}.jpg".format(index)).is_file()
+            and (directory / "frame_{:02d}.jpg".format(index)).stat().st_size
+            for index in range(1, frame_count + 1)
+        ):
+            return False
+    return True
+
+
 def download_one(video_id, rows, output_root, old_splits, retries, connections,
                  frame_cache, frame_count, expected_md5=None,
-                 verify_cached_md5=False):
+                 verify_cached_md5=False,
+                 delete_downloaded_after_frames=False):
     existing = video_path(output_root, video_id)
     control = Path(str(existing) + ".aria2") if existing is not None else None
+    downloaded = False
     try:
         if (
             existing is not None
@@ -83,6 +98,8 @@ def download_one(video_id, rows, output_root, old_splits, retries, connections,
                 expected_md5=expected_md5,
             )
             status = "downloaded"
+            downloaded = True
+        size = Path(path).stat().st_size
         if frame_cache:
             for row, scope, namespace in rows:
                 prepare_frames(
@@ -93,7 +110,13 @@ def download_one(video_id, rows, output_root, old_splits, retries, connections,
                     frame_count,
                 )
             status += "+frames"
-        return video_id, status, Path(path).stat().st_size, None
+        if delete_downloaded_after_frames and downloaded and frame_cache:
+            Path(path).unlink()
+            sidecar = Path(str(path) + ".aria2")
+            if sidecar.exists():
+                sidecar.unlink()
+            status += "+deleted"
+        return video_id, status, size, None
     except Exception as error:
         return video_id, "failed", 0, "{}: {}".format(type(error).__name__, error)
 
@@ -126,6 +149,16 @@ def parse_args():
     parser.add_argument("--limit-videos", type=int, default=0)
     parser.add_argument("--frame-cache", default=None)
     parser.add_argument("--frame-count", type=int, default=8)
+    parser.add_argument(
+        "--delete-downloaded-after-frames",
+        action="store_true",
+        help="delete only newly downloaded videos after all requested frames are ready",
+    )
+    parser.add_argument(
+        "--skip-complete-frame-videos",
+        action="store_true",
+        help="skip videos whose requested proposal frame directories are already complete",
+    )
     return parser.parse_args()
 
 
@@ -135,6 +168,8 @@ def main():
         raise ValueError("workers, connections, and frame count must be positive")
     if args.verify_cached_md5 and not args.md5_csv:
         raise ValueError("--verify-cached-md5 requires --md5-csv")
+    if args.skip_complete_frame_videos and not args.frame_cache:
+        raise ValueError("--skip-complete-frame-videos requires --frame-cache")
     output_root = Path(args.video_root)
     output_root.mkdir(parents=True, exist_ok=True)
     old_splits = epic_55_splits(args.epic55_splits)
@@ -147,6 +182,14 @@ def main():
         video_ids = sorted(set(args.video_ids))
     else:
         video_ids = sorted(rows_by_video)
+    if args.skip_complete_frame_videos:
+        video_ids = [
+            video_id
+            for video_id in video_ids
+            if not frame_rows_complete(
+                rows_by_video[video_id], args.frame_cache, args.frame_count
+            )
+        ]
     if args.limit_videos > 0:
         video_ids = video_ids[:args.limit_videos]
 
@@ -166,6 +209,7 @@ def main():
                 args.frame_count,
                 expected_md5s.get(video_id),
                 args.verify_cached_md5,
+                args.delete_downloaded_after_frames,
             )
             for video_id in video_ids
         ]
