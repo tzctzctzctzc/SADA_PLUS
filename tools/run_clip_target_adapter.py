@@ -165,6 +165,30 @@ def video_duration(path):
     return float(result.stdout.strip())
 
 
+def _extract_frame(video, timestamp, frame):
+    command = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-ss", "{:.3f}".format(timestamp), "-i", str(video),
+        "-frames:v", "1", "-q:v", "3", str(frame),
+    ]
+    try:
+        subprocess.run(command, check=True)
+    except subprocess.CalledProcessError:
+        # Some official EPIC files contain difficult-to-seek GOPs.  Retry
+        # with accurate decode after opening the stream instead of discarding
+        # an otherwise MD5-valid video.
+        if frame.exists():
+            frame.unlink()
+        subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                "-i", str(video), "-ss", "{:.3f}".format(timestamp),
+                "-frames:v", "1", "-q:v", "3", str(frame),
+            ],
+            check=True,
+        )
+
+
 def prepare_frames(row, video, cache_root, namespace, frame_count=8,
                    context_ratio=0.0):
     duration = video_duration(video)
@@ -176,14 +200,7 @@ def prepare_frames(row, video, cache_root, namespace, frame_count=8,
         timestamp = min(max(timestamp, 0.0), duration)
         frame = output_dir / "frame_{:02d}.jpg".format(index)
         if not frame.is_file() or not frame.stat().st_size:
-            subprocess.run(
-                [
-                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                    "-ss", "{:.3f}".format(timestamp), "-i", str(video),
-                    "-frames:v", "1", "-q:v", "3", str(frame),
-                ],
-                check=True,
-            )
+            _extract_frame(video, timestamp, frame)
         frames.append(frame)
     return frames, timestamps
 
