@@ -114,7 +114,7 @@ class BaseTrainerDA:
                 )
             except ImportError:
                 self.logger.warning("TensorBoard is unavailable; CSV/JSON logging remains active")
-        if self.cfg.get('vlm_routing', {}).get('enabled', False):
+        if self._vlm_logging_enabled():
             try:
                 from torch.utils.tensorboard import SummaryWriter
                 self.vlm_writer = SummaryWriter(
@@ -132,6 +132,27 @@ class BaseTrainerDA:
 
         # Set the iterating flag of the discriminator loss
         self.discriminator_updates = 0
+
+    def _vlm_logging_enabled(self):
+        return any((
+            self.cfg.get('benchmark_audit', {}).get('enabled', False),
+            self.cfg.get('vlm_routing', {}).get('enabled', False),
+            self.cfg.get('vlm_target_adapter', {}).get('enabled', False),
+            self.cfg.get('vlm_relation', {}).get('enabled', False),
+            self.cfg.get('proposal_semantic', {}).get('mode', 'off') != 'off',
+        ))
+
+    def _append_benchmark_jsonl(self, filename, record):
+        if not self.cfg.get('benchmark_audit', {}).get('enabled', False):
+            return
+        path = os.path.join(self.cfg.save_dir, filename)
+        with open(path, 'a', encoding='utf-8') as handle:
+            handle.write(json.dumps(
+                record,
+                ensure_ascii=False,
+                sort_keys=True,
+                default=lambda value: value.item(),
+            ) + '\n')
 
     @abstractmethod
     def _train_epoch(self, epoch):
@@ -382,6 +403,44 @@ class BaseTrainerDA:
             if vlm_mid > 0:
                 vlm_summary['t_vlm_semantic_hit_rate'] = vlm_known / vlm_mid
                 vlm_summary['t_vlm_mid_rescue_rate'] = vlm_rescued / vlm_mid
+            target_cache_hits = vlm_summary.get(
+                't_vlm_target_cache_hits_total', 0.0
+            )
+            target_samples = vlm_summary.get(
+                't_vlm_target_samples_total', 0.0
+            )
+            if target_cache_hits > 0:
+                vlm_summary['t_vlm_target_selection_rate'] = (
+                    target_samples / target_cache_hits
+                )
+                vlm_summary['t_vlm_target_agreement_rate'] = (
+                    vlm_summary.get('t_vlm_target_agreement_total', 0.0)
+                    / target_cache_hits
+                )
+            if target_samples > 0:
+                vlm_summary['t_vlm_target_mean_selected_weight'] = (
+                    vlm_summary.get('t_vlm_target_weight_sum_total', 0.0)
+                    / target_samples
+                )
+                vlm_summary['t_vlm_target_boundary_rate'] = (
+                    vlm_summary.get(
+                        't_vlm_target_boundary_samples_total', 0.0
+                    ) / target_samples
+                )
+            proposal_eligible = vlm_summary.get(
+                't_proposal_semantic_eligible_count_total', 0.0
+            )
+            if proposal_eligible > 0:
+                vlm_summary['t_proposal_semantic_selection_rate'] = (
+                    vlm_summary.get(
+                        't_proposal_semantic_selected_count_total', 0.0
+                    ) / proposal_eligible
+                )
+                vlm_summary['t_proposal_semantic_agreement_rate'] = (
+                    vlm_summary.get(
+                        't_proposal_semantic_agreement_count_total', 0.0
+                    ) / proposal_eligible
+                )
             log_data.update(vlm_summary)
             if self.cfg.get('diagnostic', {}).get('class_support', False):
                 class_report = build_conditional_class_report(
@@ -422,7 +481,7 @@ class BaseTrainerDA:
                         for key, value in stage1_values.items():
                             if key != 'epoch':
                                 self.stage1_writer.add_scalar(key, value, epoch)
-            if self.cfg.get('vlm_routing', {}).get('enabled', False):
+            if self._vlm_logging_enabled():
                 vlm_log = os.path.join(
                     self.cfg.save_dir, 'vlm_epoch_metrics.jsonl'
                 )
@@ -448,6 +507,14 @@ class BaseTrainerDA:
                         for key, value in vlm_values.items():
                             if key != 'epoch':
                                 self.vlm_writer.add_scalar(key, value, epoch)
+            self._append_benchmark_jsonl(
+                'benchmark_epoch_metrics.jsonl',
+                {
+                    'run_name': self.cfg.get('name'),
+                    'benchmark_audit': self.cfg.get('benchmark_audit', {}),
+                    **log_data,
+                },
+            )
             
             # print logged informations to the screen
             t = time.time() - t0
@@ -463,6 +530,13 @@ class BaseTrainerDA:
 
             # Evaluate the model (for debugging purposes)
             if (self.test_freq != -1 and epoch % self.test_freq == 0):
+                benchmark_evaluation = {
+                    'run_name': self.cfg.get('name'),
+                    'epoch': epoch,
+                    'checkpoint_selection_metric': 'source_validation_loss',
+                    'target_gt_role': 'reporting_only',
+                    'target_gt_used_for_selection': False,
+                }
                 if not self.test_target_val_only:
                     # Full protocol retained for final reporting runs.
                     source_metrics_train = self._test_epoch(
@@ -472,6 +546,7 @@ class BaseTrainerDA:
                         't_src_'+k: v for k, v in source_metrics_train.items()
                     }
                     wandb.log(source_metrics_train, step=epoch)
+                    benchmark_evaluation.update(source_metrics_train)
 
                     source_metrics_val = self._test_epoch(
                         epoch, self.val_loader_src, 'test', domain='src'
@@ -480,6 +555,7 @@ class BaseTrainerDA:
                         'v_src_'+k: v for k, v in source_metrics_val.items()
                     }
                     wandb.log(source_metrics_val, step=epoch)
+                    benchmark_evaluation.update(source_metrics_val)
 
                     target_metrics_train = self._test_epoch(
                         epoch, self.train_loader_tgt2, 'train', domain='tgt'
@@ -488,11 +564,16 @@ class BaseTrainerDA:
                         't_tgt_'+k: v for k, v in target_metrics_train.items()
                     }
                     wandb.log(target_metrics_train, step=epoch)
+                    benchmark_evaluation.update(target_metrics_train)
                 
                 # Evaluate on the test split of the target domain (Not seen during training)
                 target_metrics_val = self._test_epoch(epoch, self.val_loader_tgt, 'test', domain='tgt')
                 target_metrics_val = {'v_tgt_'+k : v for k, v in list(target_metrics_val.items())}
                 wandb.log(target_metrics_val, step=epoch)
+                benchmark_evaluation.update(target_metrics_val)
+                self._append_benchmark_jsonl(
+                    'benchmark_eval_metrics.jsonl', benchmark_evaluation
+                )
 
         # Save the last model
         self.save_ckpt(mode='latest', epoch=epoch)

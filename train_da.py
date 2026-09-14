@@ -1527,6 +1527,13 @@ def create_argparser():
         '--stop-after-epoch', type=int, default=None,
         help='stop after this epoch without changing the scheduler horizon',
     )
+    parser.add_argument(
+        '--benchmark-audit-log', action='store_true',
+        help=(
+            'persist local epoch/evaluation JSONL for benchmark analysis; '
+            'target validation remains reporting-only'
+        ),
+    )
 
     add_dict_to_argparser(parser, ARGS_TYPES)
 
@@ -1904,6 +1911,10 @@ if __name__ == '__main__':
         'adapter_only': args.vlm_relation_freeze_base,
     }
     proposal_semantic_enabled = args.proposal_semantic_mode != 'off'
+    from_scratch_proposal_modes = (
+        'vlm_cotrain', 'vlm_dual_stream', 'vlm_semantic_transport',
+        'vlm_logit_soft', 'vlm_logit_confident', 'vlm_logit_agree',
+    )
     proposal_levels = [
         int(level.strip())
         for level in args.proposal_semantic_levels.split(',')
@@ -1934,9 +1945,7 @@ if __name__ == '__main__':
             args.resume is None
             and args.proposal_semantic_init_from_sada is None
             and args.proposal_semantic_continue_from_sada is None
-            and args.proposal_semantic_mode not in (
-                'vlm_cotrain', 'vlm_dual_stream', 'vlm_semantic_transport'
-            )
+            and args.proposal_semantic_mode not in from_scratch_proposal_modes
         ):
             raise ValueError(
                 'a proposal semantic run requires a proposal-semantic start '
@@ -2066,9 +2075,7 @@ if __name__ == '__main__':
                     )
                 proposal_selection_mode = 'fixed_external_teacher'
     elif (
-        args.proposal_semantic_mode in (
-            'vlm_cotrain', 'vlm_dual_stream', 'vlm_semantic_transport'
-        )
+        args.proposal_semantic_mode in from_scratch_proposal_modes
         and target_cache_payload is not None
     ):
         if not args.proposal_semantic_external_selection:
@@ -2087,9 +2094,7 @@ if __name__ == '__main__':
             )
         )
         or (
-            args.proposal_semantic_mode in (
-                'vlm_cotrain', 'vlm_dual_stream', 'vlm_semantic_transport'
-            )
+            args.proposal_semantic_mode in from_scratch_proposal_modes
             and target_cache_payload is not None
         )
     ):
@@ -2454,6 +2459,34 @@ if __name__ == '__main__':
     }
     config_dict['gradient_harmonization'] = {
         'mode': args.gradient_harmonization,
+    }
+    initialization_inputs = {
+        'resume': args.resume,
+        'vlm_continue_from_sada': args.vlm_continue_from_sada,
+        'proposal_semantic_init_from_sada': (
+            args.proposal_semantic_init_from_sada
+        ),
+        'proposal_semantic_continue_from_sada': (
+            args.proposal_semantic_continue_from_sada
+        ),
+        'vlm_relation_init_from_sada': args.vlm_relation_init_from_sada,
+        'transport_continue_from_sada': args.transport_continue_from_sada,
+        'validity_head_init_from_sada': args.validity_head_init_from_sada,
+    }
+    active_initialization_inputs = {
+        key: value for key, value in initialization_inputs.items() if value
+    }
+    config_dict['benchmark_audit'] = {
+        'enabled': args.benchmark_audit_log,
+        'training_initialization': (
+            'random' if not active_initialization_inputs else 'checkpoint'
+        ),
+        'initialization_inputs': active_initialization_inputs,
+        'checkpoint_selection_metric': 'source_validation_loss',
+        'target_gt_role': 'reporting_only',
+        'target_gt_used_for_selection': False,
+        'vlm_target_adapter_selection_provenance': selection_mode,
+        'proposal_semantic_selection_provenance': proposal_selection_mode,
     }
 
     update_config_with_arguments(config_dict, args, ARGS_TYPES, ARGS_CONFIGPATH)

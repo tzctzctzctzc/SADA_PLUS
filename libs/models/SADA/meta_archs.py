@@ -41,6 +41,7 @@ from .vlm_residual import (
 )
 from .target_adapter import (
     ORACLE_TARGET_DISTILLATION_MODES,
+    TARGET_CLASS_NAMES,
     VLM_TARGET_ADAPTER_POLICIES,
     build_oracle_target_distillation,
     build_vlm_target_distillation,
@@ -3890,6 +3891,9 @@ class SADA(nn.Module):
         vlm_target_weight_sum = vlm_target_zero.detach()
         vlm_target_boundary_raw_loss = vlm_target_zero
         vlm_target_boundary_samples = vlm_target_zero.detach()
+        vlm_target_class_counts = vlm_target_zero.new_zeros(
+            len(TARGET_CLASS_NAMES)
+        )
         if mode == 'train' and self.vlm_target_adapter_enabled:
             if video_list_tgt is None:
                 raise ValueError('VLM target adapter requires target video metadata')
@@ -3910,6 +3914,10 @@ class SADA(nn.Module):
             vlm_target_samples = selected.sum().float()
             vlm_target_weight_sum = vlm_target['weights'][selected].sum()
             if selected.any():
+                vlm_target_class_counts = torch.bincount(
+                    vlm_target['targets'][selected].argmax(dim=-1),
+                    minlength=len(TARGET_CLASS_NAMES),
+                ).to(dtype=vlm_target_zero.dtype)
                 target_logits = torch.cat(out_cls_logits_tgt, dim=1)
                 target_losses = sigmoid_focal_loss(
                     target_logits[selected],
@@ -4034,6 +4042,12 @@ class SADA(nn.Module):
                    'vlm_target_boundary_raw_loss': vlm_target_boundary_raw_loss.detach(),
                    'vlm_target_boundary_samples': vlm_target_boundary_samples,
                    'downstream_loss': downstream_loss}
+        losses.update({
+            'vlm_target_class_{}_samples'.format(class_name.lower()): count
+            for class_name, count in zip(
+                TARGET_CLASS_NAMES, vlm_target_class_counts
+            )
+        })
 
         transport_loss = losses['downstream_loss'] * 0.0
         transport_mass = losses['downstream_loss'] * 0.0

@@ -643,7 +643,7 @@ class Trainer(BaseTrainerDA):
                     self.stage1_epoch_summary[key] = (
                         self.stage1_epoch_summary.get(key, 0.0) + loss_tr.item()
                     )
-                if raw_loss_name.startswith('vlm_'):
+                if raw_loss_name.startswith(('vlm_', 'proposal_semantic_')):
                     key = 't_' + raw_loss_name + '_total'
                     self.vlm_epoch_summary[key] = (
                         self.vlm_epoch_summary.get(key, 0.0) + loss_tr.item()
