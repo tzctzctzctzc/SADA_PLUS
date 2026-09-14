@@ -42,7 +42,7 @@ ulimit -n 65535
 run_task() {
     local gpu=$1 task=$2 shift=${2%%:*} seed=${2##*:}
     local shift_lower=${shift,,} config cache parent_name parent_log parent_dir
-    local parent parent_epoch target_start stop_epoch name log final_ckpt
+    local parent parent_epoch target_start stop_epoch name log
 
     config=$(config_for_shift "$shift")
     cache="$cache_root/$shift/qwen32_proposal_semantic.json"
@@ -79,11 +79,8 @@ run_task() {
 
     name="${shift_lower}_qwen32_top1_posrank_no_trident_from_repro_seed${seed}_20260914"
     log="$artifact_root/logs/${name}.log"
-    final_ckpt=$(find "model_results/$name" \
-        -path "*/saved_ckpt/latest_ckpt/checkpoint-epoch${stop_epoch}.pt" \
-        -type f -print -quit 2>/dev/null || true)
-    if [[ -n "$final_ckpt" ]]; then
-        echo "skip completed VLM shift=$shift seed=$seed checkpoint=$final_ckpt"
+    if grep -q 'Training finished!' "$log" 2>/dev/null; then
+        echo "skip completed VLM shift=$shift seed=$seed"
         return
     fi
 
@@ -111,14 +108,10 @@ run_task() {
         --diagnostic-test-target-val-only \
         --stop-after-epoch "$stop_epoch" >"$log" 2>&1
 
-    final_ckpt=$(find "model_results/$name" \
-        -path "*/saved_ckpt/latest_ckpt/checkpoint-epoch${stop_epoch}.pt" \
-        -type f -print -quit)
-    test -n "$final_ckpt" || { echo "final checkpoint missing for shift=$shift seed=$seed" >&2; return 1; }
-    ln -sfn "$(realpath "$final_ckpt")" \
-        "$artifact_root/checkpoints/${shift_lower}_seed${seed}_final.pt"
-    sha256sum "$final_ckpt" > \
-        "$artifact_root/checkpoints/${shift_lower}_seed${seed}_final.sha256"
+    grep -q 'Training finished!' "$log" || {
+        echo "VLM training did not finish for shift=$shift seed=$seed" >&2
+        return 1
+    }
     echo "done VLM shift=$shift gpu=$gpu seed=$seed"
 }
 
