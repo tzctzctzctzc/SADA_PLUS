@@ -9,7 +9,7 @@ set -euo pipefail
 root=${SADA_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 python=${SADA_PYTHON:-/home1/gyy/vlms/SADA_STAGE2_20260727/env/sada/bin/python}
 cache_root=${CACHE_ROOT:-artifacts/shift_vlm_best_20260912/caches}
-artifact_root=${SADA_VLM_ARTIFACT_ROOT:-artifacts/shift_vlm_no_trident_20260914}
+artifact_root=${SADA_VLM_ARTIFACT_ROOT:-artifacts/shift_vlm_no_trident_fulllevels_20260914}
 IFS=',' read -r -a shifts <<<"${SHIFTS:-S3,S4}"
 IFS=',' read -r -a gpus <<<"${GPUS:-3,4,5,6}"
 seeds=(123 456 789)
@@ -48,7 +48,7 @@ run_task() {
     cache="$cache_root/$shift/qwen32_proposal_semantic.json"
     test -s "$cache" || { echo "missing cache: $cache" >&2; return 2; }
 
-    parent_name="${shift_lower}_repro_sada_no_trident_e15_seed${seed}_20260914"
+    parent_name="${shift_lower}_repro_sada_no_trident_fulllevels_e15_seed${seed}_20260914"
     parent_log="$artifact_root/logs/${parent_name}.log"
     parent_dir="model_results/$parent_name"
 
@@ -56,6 +56,7 @@ run_task() {
         echo "start parent shift=$shift gpu=$gpu seed=$seed"
         CUDA_VISIBLE_DEVICES="$gpu" PYTHONPATH=. "$python" -u train_da.py \
             -c "$config" -n "$parent_name" -s "$seed" -i 0 -d \
+            --diagnostic-alignment-levels 0,1,2,3,4,5 \
             --stop-after-epoch 15 >"$parent_log" 2>&1
     fi
 
@@ -77,7 +78,7 @@ run_task() {
         -path '*/saved_ckpt/latest_ckpt/checkpoint-epoch*.pt' \
         -type f -delete
 
-    name="${shift_lower}_qwen32_top1_posrank_no_trident_from_repro_seed${seed}_20260914"
+    name="${shift_lower}_qwen32_top1_posrank_no_trident_from_repro_fulllevels_seed${seed}_20260914"
     log="$artifact_root/logs/${name}.log"
     if grep -q 'Training finished!' "$log" 2>/dev/null; then
         echo "skip completed VLM shift=$shift seed=$seed"
@@ -104,7 +105,7 @@ run_task() {
         --proposal-semantic-direct-pooling top1 \
         --proposal-semantic-logit-max-delta 1.0 \
         --proposal-semantic-freeze-base \
-        --diagnostic-alignment-levels 0,1,2 \
+        --diagnostic-alignment-levels 0,1,2,3,4,5 \
         --diagnostic-test-target-val-only \
         --stop-after-epoch "$stop_epoch" >"$log" 2>&1
 
