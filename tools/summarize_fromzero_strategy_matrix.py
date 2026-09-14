@@ -78,7 +78,17 @@ def write_csv(path, rows):
         writer.writerows(rows)
 
 
-def read_runs(model_results):
+def load_run_status(path):
+    if not path.is_file():
+        return {}
+    with path.open("r", newline="", encoding="utf-8") as handle:
+        return {
+            row["run_name"]: row["status"]
+            for row in csv.DictReader(handle, delimiter="\t")
+        }
+
+
+def read_runs(model_results, run_status):
     rows = []
     incomplete = []
     for eval_path in sorted(model_results.rglob("benchmark_eval_metrics.jsonl")):
@@ -89,6 +99,13 @@ def read_runs(model_results):
         run_name = str(eval_records[-1].get("run_name", ""))
         match = RUN_RE.match(run_name)
         if not match:
+            continue
+        status = run_status.get(run_name)
+        if status not in ("completed", "completed_existing"):
+            incomplete.append({
+                "run_name": run_name,
+                "reason": "run_status_{}".format(status or "missing"),
+            })
             continue
         selected_epoch = best_epoch(run_dir)
         if selected_epoch is None:
@@ -209,7 +226,8 @@ def main():
     output_dir = args.output_dir or args.artifact_root / "summary"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    rows, incomplete = read_runs(args.model_results)
+    run_status = load_run_status(args.artifact_root / "run_status.tsv")
+    rows, incomplete = read_runs(args.model_results, run_status)
     aggregates = aggregate_runs(rows)
     write_csv(output_dir / "per_run.csv", rows)
     write_csv(output_dir / "aggregate.csv", aggregates)
