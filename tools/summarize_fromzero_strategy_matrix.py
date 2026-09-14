@@ -83,14 +83,17 @@ def read_runs(model_results):
     incomplete = []
     for eval_path in sorted(model_results.rglob("benchmark_eval_metrics.jsonl")):
         run_dir = eval_path.parent
-        match = RUN_RE.match(run_dir.name)
+        eval_records = load_jsonl(eval_path)
+        if not eval_records:
+            continue
+        run_name = str(eval_records[-1].get("run_name", ""))
+        match = RUN_RE.match(run_name)
         if not match:
             continue
         selected_epoch = best_epoch(run_dir)
         if selected_epoch is None:
-            incomplete.append({"run_name": run_dir.name, "reason": "missing_best_ckpt"})
+            incomplete.append({"run_name": run_name, "reason": "missing_best_ckpt"})
             continue
-        eval_records = load_jsonl(eval_path)
         selected_eval = next(
             (
                 record for record in reversed(eval_records)
@@ -100,7 +103,7 @@ def read_runs(model_results):
         )
         if selected_eval is None:
             incomplete.append({
-                "run_name": run_dir.name,
+                "run_name": run_name,
                 "reason": f"missing_eval_at_source_selected_epoch_{selected_epoch}",
             })
             continue
@@ -114,7 +117,7 @@ def read_runs(model_results):
             train_records[-1] if train_records else {},
         )
         row = {
-            "run_name": run_dir.name,
+            "run_name": run_name,
             "shift": match.group(1).upper(),
             "model": match.group(2),
             "strategy": match.group(3),
