@@ -14,6 +14,7 @@ initial_qwen32_pid=${INITIAL_QWEN32_PID:-}
 prefill_clip_pid=${PREFILL_CLIP_PID:-}
 prefill_qwen32_pid0=${PREFILL_QWEN32_PID0:-}
 prefill_qwen32_pid1=${PREFILL_QWEN32_PID1:-}
+skip_data_recovery=${SKIP_DATA_RECOVERY:-0}
 
 if [[ "$gpu0" == "$gpu1" ]]; then
     echo "GPU0 and GPU1 must be different" >&2
@@ -45,30 +46,38 @@ video_ids=(
     P29_03 P31_07 P31_12 P32_05
 )
 
-wait_external download "$download_pid"
-wait_external initial_qwen32 "$initial_qwen32_pid"
-wait_external prefill_clip "$prefill_clip_pid"
-wait_external prefill_qwen32_0 "$prefill_qwen32_pid0"
-wait_external prefill_qwen32_1 "$prefill_qwen32_pid1"
+if [[ "$skip_data_recovery" != 1 ]]; then
+    wait_external download "$download_pid"
+    wait_external initial_qwen32 "$initial_qwen32_pid"
+    wait_external prefill_clip "$prefill_clip_pid"
+    wait_external prefill_qwen32_0 "$prefill_qwen32_pid0"
+    wait_external prefill_qwen32_1 "$prefill_qwen32_pid1"
 
-echo "$(date --iso-8601=seconds) verify_and_resume_downloads"
-"$sada_python" tools/download_epic_manifest_videos.py \
-    --scenario-root "$artifact/download_scenario" \
-    --video-root "$video_root" \
-    --epic55-splits /vepfs/vlms/data/EPIC_KITCHENS/epic_55_splits.csv \
-    --md5-csv /vepfs/vlms/data/EPIC_KITCHENS/epic_md5.csv \
-    --shifts S1 --video-ids "${video_ids[@]}" \
-    --workers 8 --connections 8 --retries 5
+    echo "$(date --iso-8601=seconds) verify_and_resume_downloads"
+    "$sada_python" tools/download_epic_manifest_videos.py \
+        --scenario-root "$artifact/download_scenario" \
+        --video-root "$video_root" \
+        --epic55-splits /vepfs/vlms/data/EPIC_KITCHENS/epic_55_splits.csv \
+        --md5-csv /vepfs/vlms/data/EPIC_KITCHENS/epic_md5.csv \
+        --shifts S1 --video-ids "${video_ids[@]}" \
+        --workers 8 --connections 8 --retries 5
 
-echo "$(date --iso-8601=seconds) rebuild_recovered_frames"
-frame_args=()
-for video_id in "${video_ids[@]}"; do
-    frame_args+=(--video-id "$video_id")
-done
+    echo "$(date --iso-8601=seconds) rebuild_recovered_frames"
+    frame_args=()
+    for video_id in "${video_ids[@]}"; do
+        frame_args+=(--video-id "$video_id")
+    done
+    "$sada_python" tools/prepare_rq1_frames.py \
+        --manifest "$manifest" --video-root "$video_root" \
+        --frame-cache "$frame_cache" --cache-namespace rq1_8f \
+        --frame-count 8 --workers 8 --force "${frame_args[@]}"
+fi
+
+echo "$(date --iso-8601=seconds) verify_all_frames"
 "$sada_python" tools/prepare_rq1_frames.py \
     --manifest "$manifest" --video-root "$video_root" \
     --frame-cache "$frame_cache" --cache-namespace rq1_8f \
-    --frame-count 8 --workers 8 --force "${frame_args[@]}"
+    --frame-count 8 --workers 8
 
 shard_pending() {
     local output=$1 prefix=$2
@@ -86,7 +95,9 @@ shard_pending() {
 run_qwen_pair() {
     local family=$1 model_path=$2 output=$3 tag=$4
     local prefix=$recovery/${tag}_manifest
-    shard_pending "$output" "$prefix" "$output"
+    shard_pending "$output" "$prefix" \
+        "$output" "$recovery/${tag}_output_0.jsonl" \
+        "$recovery/${tag}_output_1.jsonl"
     pids=()
     for index in 0 1; do
         shard=${prefix}_${index}.jsonl
@@ -111,7 +122,8 @@ run_clip_pair() {
     local output=$artifact/clip_vit_b16.jsonl
     local prefix=$recovery/clip_manifest
     shard_pending "$output" "$prefix" \
-        "$output" "$recovery/clip_prefill.jsonl"
+        "$output" "$recovery/clip_prefill.jsonl" \
+        "$recovery/clip_output_0.jsonl" "$recovery/clip_output_1.jsonl"
     pids=()
     for index in 0 1; do
         shard=${prefix}_${index}.jsonl
@@ -136,7 +148,9 @@ run_clip_pair() {
 echo "$(date --iso-8601=seconds) complete_qwen32"
 qwen32_prefill_inputs=(--input "$artifact/qwen3_vl_32b.jsonl")
 for path in "$recovery"/qwen32_prefill_output_0.jsonl \
-            "$recovery"/qwen32_prefill_output_1.jsonl; do
+            "$recovery"/qwen32_prefill_output_1.jsonl \
+            "$recovery"/qwen32_output_0.jsonl \
+            "$recovery"/qwen32_output_1.jsonl; do
     [[ -s "$path" ]] && qwen32_prefill_inputs+=(--input "$path")
 done
 "$python" tools/merge_and_shard_rq1.py \
