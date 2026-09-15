@@ -71,6 +71,8 @@ def main():
                 C=1.0, class_weight="balanced", max_iter=args.max_iter,
                 random_state=args.seed, solver="lbfgs",
             ).fit(np.stack(train_features), np.asarray(train_labels))
+            if list(classifier.classes_) != list(range(len(LABELS))):
+                raise RuntimeError("linear probe did not observe all ten classes")
             shift_rows = [
                 row for row in manifest if any(role["shift"] == shift for role in row["memberships"])
             ]

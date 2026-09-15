@@ -5,6 +5,7 @@ from tools.compare_rq1_frame_counts import paired_bootstrap
 from tools.evaluate_rq2_boundaries import prediction_interval, temporal_iou
 from tools.run_rq2_clip import localize_peak
 from tools.run_rq2_qwen import parse_interval
+from tools.run_rq2_slowfast import timestamp_features
 
 
 def test_context_ratios_are_deterministic_independent_and_in_range():
@@ -44,6 +45,14 @@ def test_boundary_positions_convert_to_seconds_and_tiou():
     )
     assert interval == (14.0, 22.0)
     assert temporal_iou(interval, (16.0, 24.0)) == 0.6
+
+
+def test_slowfast_timestamp_sampling_uses_nearest_feature_center():
+    features = np.eye(3, dtype=np.float32)
+    sampled = timestamp_features(
+        features, [0.0, 1.0, 2.0], fps=1.0, feat_stride=1.0, num_frames=0.0
+    )
+    assert np.allclose(sampled, features)
 
 
 def test_paired_video_bootstrap_detects_uniform_improvement():
