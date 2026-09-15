@@ -2,15 +2,14 @@
 set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-/vepfs/vlms/SADA_PLUS}"
-PYTHON_BIN="${PYTHON_BIN:-/vepfs/vlms/envs/sada/bin/python}"
-RQ1_SITE_PACKAGES="${RQ1_SITE_PACKAGES:-/vepfs/vlms/envs/rq1/site-packages}"
+PYTHON_BIN="${PYTHON_BIN:-/vepfs/vlms/envs/rq1-cu121/bin/python}"
 VIDEO_ROOT="${VIDEO_ROOT:-/vepfs/vlms/data/EPIC_KITCHENS/videos}"
 CACHE_ROOT="${CACHE_ROOT:-/vepfs/vlms/cache/rq1}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${REPO_ROOT}/artifacts/rq1_semantic_20260915}"
 FRAME_COUNT="${FRAME_COUNT:-8}"
 FRAME_WORKERS="${FRAME_WORKERS:-4}"
 
-export PYTHONPATH="${RQ1_SITE_PACKAGES}:${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
+export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 export HF_HOME="${HF_HOME:-/vepfs/vlms/cache/huggingface}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-${HF_HOME}/hub}"
 export TOKENIZERS_PARALLELISM=false
