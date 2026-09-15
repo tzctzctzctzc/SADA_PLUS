@@ -21,7 +21,7 @@ def frames_complete(output_dir, frame_count):
     )
 
 
-def prepare_video(video_id, rows, video_root, output_root, frame_count):
+def prepare_video(video_id, rows, video_root, output_root, frame_count, force=False):
     import cv2
 
     video = None
@@ -43,14 +43,14 @@ def prepare_video(video_id, rows, video_root, output_root, frame_count):
     try:
         for row in sorted(rows, key=lambda item: float(item["proposal_start_sec"])):
             output_dir = Path(output_root) / row["candidate_id"]
-            if frames_complete(output_dir, frame_count):
+            if not force and frames_complete(output_dir, frame_count):
                 prepared += 1
                 continue
             output_dir.mkdir(parents=True, exist_ok=True)
             timestamps = proposal_timestamps(row, frame_count)
             for index, timestamp in enumerate(timestamps, 1):
                 output = frame_path(output_dir, index)
-                if output.is_file() and output.stat().st_size:
+                if not force and output.is_file() and output.stat().st_size:
                     continue
                 safe_time = max(0.0, float(timestamp))
                 if duration is not None:
@@ -79,6 +79,17 @@ def parse_args():
     parser.add_argument("--cache-namespace", default="rq1_8f")
     parser.add_argument("--frame-count", type=int, default=8)
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument(
+        "--video-id",
+        action="append",
+        default=[],
+        help="Only prepare this video ID; may be repeated.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing frames for the selected videos.",
+    )
     return parser.parse_args()
 
 
@@ -92,6 +103,14 @@ def main():
     grouped = defaultdict(list)
     for row in rows:
         grouped[row["video_id"]].append(row)
+    if args.video_id:
+        requested = set(args.video_id)
+        unknown = requested.difference(grouped)
+        if unknown:
+            raise ValueError("video IDs not in manifest: {}".format(sorted(unknown)))
+        grouped = defaultdict(list, {
+            video_id: grouped[video_id] for video_id in sorted(requested)
+        })
     output_root = Path(args.frame_cache) / args.cache_namespace
     output_root.mkdir(parents=True, exist_ok=True)
     completed = 0
@@ -105,6 +124,7 @@ def main():
                 args.video_root,
                 output_root,
                 args.frame_count,
+                args.force,
             ): video_id
             for video_id, video_rows in grouped.items()
         }

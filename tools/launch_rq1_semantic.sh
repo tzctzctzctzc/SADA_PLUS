@@ -10,6 +10,7 @@ FRAME_COUNT="${FRAME_COUNT:-8}"
 FRAME_WORKERS="${FRAME_WORKERS:-4}"
 
 export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
+export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 export HF_HOME="${HF_HOME:-/vepfs/vlms/cache/huggingface}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-${HF_HOME}/hub}"
 export TOKENIZERS_PARALLELISM=false
