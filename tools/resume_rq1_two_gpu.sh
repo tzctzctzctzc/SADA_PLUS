@@ -12,6 +12,8 @@ gpu1=${GPU1:-1}
 download_pid=${DOWNLOAD_PID:-}
 initial_qwen32_pid=${INITIAL_QWEN32_PID:-}
 prefill_clip_pid=${PREFILL_CLIP_PID:-}
+prefill_qwen32_pid0=${PREFILL_QWEN32_PID0:-}
+prefill_qwen32_pid1=${PREFILL_QWEN32_PID1:-}
 
 if [[ "$gpu0" == "$gpu1" ]]; then
     echo "GPU0 and GPU1 must be different" >&2
@@ -46,6 +48,8 @@ video_ids=(
 wait_external download "$download_pid"
 wait_external initial_qwen32 "$initial_qwen32_pid"
 wait_external prefill_clip "$prefill_clip_pid"
+wait_external prefill_qwen32_0 "$prefill_qwen32_pid0"
+wait_external prefill_qwen32_1 "$prefill_qwen32_pid1"
 
 echo "$(date --iso-8601=seconds) verify_and_resume_downloads"
 "$sada_python" tools/download_epic_manifest_videos.py \
@@ -130,6 +134,14 @@ run_clip_pair() {
 }
 
 echo "$(date --iso-8601=seconds) complete_qwen32"
+qwen32_prefill_inputs=(--input "$artifact/qwen3_vl_32b.jsonl")
+for path in "$recovery"/qwen32_prefill_output_0.jsonl \
+            "$recovery"/qwen32_prefill_output_1.jsonl; do
+    [[ -s "$path" ]] && qwen32_prefill_inputs+=(--input "$path")
+done
+"$python" tools/merge_and_shard_rq1.py \
+    --manifest "$manifest" "${qwen32_prefill_inputs[@]}" \
+    --output "$artifact/qwen3_vl_32b.jsonl"
 run_qwen_pair qwen3-32b Qwen/Qwen3-VL-32B-Instruct \
     "$artifact/qwen3_vl_32b.jsonl" qwen32
 echo "$(date --iso-8601=seconds) complete_qwen8"
