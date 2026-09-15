@@ -32,7 +32,9 @@ echo "$(date --iso-8601=seconds) prepare_rq1_16f"
 "$sada_python" tools/prepare_rq1_frames.py \
     --manifest "$manifest" --video-root "$video_root" \
     --frame-cache "$frame_cache" --cache-namespace "$namespace" \
-    --frame-count "$frame_count" --workers "$frame_workers"
+    --frame-count "$frame_count" --workers "$frame_workers" \
+    >"$recovery/logs/frames.log" 2>&1 &
+frame_pid=$!
 
 shard_pending() {
     local output=$1 prefix=$2
@@ -108,7 +110,12 @@ run_clip_pair() {
         "$output" "$recovery/clip_output_0.jsonl" "$recovery/clip_output_1.jsonl"
 }
 
-echo "$(date --iso-8601=seconds) rq1_16f_qwen32"
+echo "$(date --iso-8601=seconds) rq1_16f_qwen32_ready_overlap"
+run_qwen_pair qwen3-32b Qwen/Qwen3-VL-32B-Instruct \
+    "$artifact/qwen3_vl_32b_16f.jsonl" qwen32
+wait "$frame_pid"
+echo "$(date --iso-8601=seconds) rq1_16f_frames_complete"
+echo "$(date --iso-8601=seconds) rq1_16f_qwen32_remaining"
 run_qwen_pair qwen3-32b Qwen/Qwen3-VL-32B-Instruct \
     "$artifact/qwen3_vl_32b_16f.jsonl" qwen32
 echo "$(date --iso-8601=seconds) rq1_16f_qwen8"
