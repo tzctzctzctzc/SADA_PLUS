@@ -30,6 +30,18 @@ def prediction_interval(row, prediction):
     return window_start + start * scale, window_start + end * scale
 
 
+def position_prior(row):
+    mean_ratio = 0.5 * (
+        float(row["context_ratio_min"]) + float(row["context_ratio_max"])
+    )
+    denominator = 1.0 + 2.0 * mean_ratio
+    return {
+        "status": "ok",
+        "pred_start_position": row["frame_count"] * mean_ratio / denominator,
+        "pred_end_position": row["frame_count"] * (mean_ratio + 1.0) / denominator,
+    }
+
+
 def stable_seed(base_seed, *values):
     digest = hashlib.sha256("|".join(map(str, values)).encode("utf-8")).digest()
     return base_seed + int.from_bytes(digest[:4], "big")
@@ -60,11 +72,7 @@ def summarize(expected, prediction_index, shift, repeats, seed, prior=False):
     end_errors = []
     for row in expected:
         if prior:
-            prediction = {
-                "status": "ok",
-                "pred_start_position": row["frame_count"] * 0.625 / 2.25,
-                "pred_end_position": row["frame_count"] * 1.625 / 2.25,
-            }
+            prediction = position_prior(row)
         else:
             prediction = prediction_index.get((row["candidate_id"], shift))
             if prediction is None:
@@ -134,7 +142,7 @@ def main():
             for row in predictions if row.get("candidate_id")
         }))
     results = {
-        "protocol": "rq2-oracle-class-jittered-context-boundary-v1",
+        "protocol": "rq2-oracle-class-jittered-context-boundary-v2",
         "target_gt_role": "offline_evaluation_only",
         "models": {},
     }

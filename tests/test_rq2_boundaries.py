@@ -2,7 +2,7 @@ import numpy as np
 
 from tools.build_rq2_boundary_manifest import context_ratios, overlaps
 from tools.compare_rq1_frame_counts import paired_bootstrap
-from tools.evaluate_rq2_boundaries import prediction_interval, temporal_iou
+from tools.evaluate_rq2_boundaries import position_prior, prediction_interval, temporal_iou
 from tools.run_rq2_clip import localize_peak
 from tools.run_rq2_qwen import parse_interval
 from tools.run_rq2_slowfast import timestamp_features
@@ -12,7 +12,7 @@ def test_context_ratios_are_deterministic_independent_and_in_range():
     first = context_ratios("candidate-a")
     second = context_ratios("candidate-a")
     assert first == second
-    assert all(0.25 <= value <= 1.0 for value in first)
+    assert all(0.25 <= value <= 2.0 for value in first)
     assert first[0] != first[1]
 
 
@@ -45,6 +45,19 @@ def test_boundary_positions_convert_to_seconds_and_tiou():
     )
     assert interval == (14.0, 22.0)
     assert temporal_iou(interval, (16.0, 24.0)) == 0.6
+
+
+def test_position_prior_uses_registered_context_range():
+    row = {
+        "frame_count": 16,
+        "context_ratio_min": 0.25,
+        "context_ratio_max": 2.0,
+    }
+    assert position_prior(row) == {
+        "status": "ok",
+        "pred_start_position": 16 * 1.125 / 3.25,
+        "pred_end_position": 16 * 2.125 / 3.25,
+    }
 
 
 def test_slowfast_timestamp_sampling_uses_nearest_feature_center():

@@ -11,7 +11,7 @@ from tools.build_rq1_semantic_manifest import load_memberships, midpoint_labels
 from tools.run_clip_target_adapter import LABELS, proposal_timestamps
 
 
-def context_ratios(candidate_id, seed=20260915, minimum=0.25, maximum=1.0):
+def context_ratios(candidate_id, seed=20260915, minimum=0.25, maximum=2.0):
     payload = "{}|{}".format(seed, candidate_id).encode("utf-8")
     value = int.from_bytes(hashlib.sha256(payload).digest()[:8], "big")
     rng = random.Random(value)
@@ -22,7 +22,8 @@ def overlaps(first, second):
     return max(float(first[0]), float(second[0])) < min(float(first[1]), float(second[1]))
 
 
-def build_rows(annotation_path, repo_root, frame_count=16, seed=20260915):
+def build_rows(annotation_path, repo_root, frame_count=16, seed=20260915,
+               context_minimum=0.25, context_maximum=2.0):
     database = json.loads(Path(annotation_path).read_text(encoding="utf-8"))["database"]
     memberships, config_hashes = load_memberships(repo_root)
     rows = []
@@ -42,7 +43,9 @@ def build_rows(annotation_path, repo_root, frame_count=16, seed=20260915):
             if not 0.0 <= start < end <= duration:
                 raise ValueError("invalid segment {} {}".format(video_id, action["segment"]))
             candidate_id = "rq2-{}-{:05d}".format(video_id, annotation_index)
-            left_ratio, right_ratio = context_ratios(candidate_id, seed)
+            left_ratio, right_ratio = context_ratios(
+                candidate_id, seed, context_minimum, context_maximum
+            )
             window_start = max(0.0, start - left_ratio * action_duration)
             window_end = min(duration, end + right_ratio * action_duration)
             window_duration = window_end - window_start
@@ -68,6 +71,8 @@ def build_rows(annotation_path, repo_root, frame_count=16, seed=20260915):
                 "proposal_end_sec": window_end,
                 "context_left_ratio": left_ratio,
                 "context_right_ratio": right_ratio,
+                "context_ratio_min": context_minimum,
+                "context_ratio_max": context_maximum,
                 "gt_start_position": frame_count * (start - window_start) / window_duration,
                 "gt_end_position": frame_count * (end - window_start) / window_duration,
                 "frame_count": frame_count,
@@ -98,6 +103,8 @@ def parse_args():
     parser.add_argument("--output", required=True)
     parser.add_argument("--frame-count", type=int, default=16)
     parser.add_argument("--seed", type=int, default=20260915)
+    parser.add_argument("--context-ratio-min", type=float, default=0.25)
+    parser.add_argument("--context-ratio-max", type=float, default=2.0)
     return parser.parse_args()
 
 
@@ -109,18 +116,23 @@ def main():
     annotations = Path(args.annotations)
     if not annotations.is_absolute():
         annotations = root / annotations
-    rows, config_hashes = build_rows(annotations, root, args.frame_count, args.seed)
+    if not 0.0 <= args.context_ratio_min < args.context_ratio_max:
+        raise ValueError("invalid context ratio range")
+    rows, config_hashes = build_rows(
+        annotations, root, args.frame_count, args.seed,
+        args.context_ratio_min, args.context_ratio_max,
+    )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="utf-8") as stream:
         for row in rows:
             stream.write(json.dumps(row, sort_keys=True) + "\n")
     summary = {
-        "protocol": "rq2-oracle-class-jittered-context-boundary-v1",
+        "protocol": "rq2-oracle-class-jittered-context-boundary-v2",
         "target_gt_role": "offline_evaluation_only",
         "frame_count": args.frame_count,
         "seed": args.seed,
-        "context_ratio_range": [0.25, 1.0],
+        "context_ratio_range": [args.context_ratio_min, args.context_ratio_max],
         "unique_segments": len(rows),
         "unique_videos": len({row["video_id"] for row in rows}),
         "isolated_segments": sum(not row["is_challenge"] for row in rows),

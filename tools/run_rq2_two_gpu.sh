@@ -37,7 +37,8 @@ echo "$(date --iso-8601=seconds) compare_rq1_8f_16f"
 
 echo "$(date --iso-8601=seconds) build_rq2_manifest"
 "$python" tools/build_rq2_boundary_manifest.py \
-    --repo-root "$root" --output "$manifest" --frame-count 16
+    --repo-root "$root" --output "$manifest" --frame-count 16 \
+    --context-ratio-min 0.25 --context-ratio-max 2.0
 echo "$(date --iso-8601=seconds) prepare_rq2_frames"
 "$sada_python" tools/prepare_rq1_frames.py \
     --manifest "$manifest" --video-root "$video_root" \
