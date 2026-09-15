@@ -71,6 +71,7 @@ for seed in "${seeds[@]}"; do
 done
 
 git_commit=$(git rev-parse HEAD)
+launcher_sha256=$(sha256sum "${BASH_SOURCE[0]}" | cut -d' ' -f1)
 protocol="$artifact_root/protocol.tsv"
 printf 'key\tvalue\n' >"$protocol"
 printf 'architecture\toriginal_sada_no_trident\n' >>"$protocol"
@@ -80,6 +81,7 @@ printf 'proposal_provenance\texternal_frozen_teacher\n' >>"$protocol"
 printf 'checkpoint_selection\tsource_validation_loss\n' >>"$protocol"
 printf 'target_gt_role\treporting_only\n' >>"$protocol"
 printf 'git_commit\t%s\n' "$git_commit" >>"$protocol"
+printf 'launcher_sha256\t%s\n' "$launcher_sha256" >>"$protocol"
 printf 'epochs\t%s\n' "$epochs" >>"$protocol"
 printf 'run_tag\t%s\n' "$run_tag" >>"$protocol"
 printf 'include_control\t%s\n' "$include_control" >>"$protocol"
