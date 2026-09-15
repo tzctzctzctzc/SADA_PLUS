@@ -9,6 +9,7 @@ video_root=${VIDEO_ROOT:-/vepfs/vlms/data/EPIC_KITCHENS/videos}
 frame_cache=${FRAME_CACHE:-/vepfs/vlms/cache/rq1/frames}
 gpu0=${GPU0:-0}
 gpu1=${GPU1:-1}
+frame_workers=${FRAME_WORKERS:-16}
 frame_count=16
 namespace=rq1_16f
 manifest=$artifact/rq1_val_gt_segments.jsonl
@@ -31,7 +32,7 @@ echo "$(date --iso-8601=seconds) prepare_rq1_16f"
 "$sada_python" tools/prepare_rq1_frames.py \
     --manifest "$manifest" --video-root "$video_root" \
     --frame-cache "$frame_cache" --cache-namespace "$namespace" \
-    --frame-count "$frame_count" --workers 8
+    --frame-count "$frame_count" --workers "$frame_workers"
 
 shard_pending() {
     local output=$1 prefix=$2
