@@ -5,6 +5,8 @@ root=${SADA_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 python=${SADA_PYTHON:-/home1/gyy/vlms/SADA_STAGE2_20260727/env/sada/bin/python}
 artifact_root=${BENCHMARK_ARTIFACT_ROOT:-artifacts/fromzero_sada_strategy_matrix_20260914}
 epochs=${EPOCHS:-50}
+run_tag=${RUN_TAG:-20260914}
+include_control=${INCLUDE_CONTROL:-1}
 min_free_mib=${MIN_FREE_MIB:-30000}
 max_util=${MAX_GPU_UTIL:-10}
 IFS=',' read -r -a shifts <<<"${SHIFTS:-S3,S4,S5}"
@@ -15,6 +17,11 @@ IFS=',' read -r -a gpus <<<"${GPUS:-4}"
 
 if (( ${#gpus[@]} < 1 || ${#gpus[@]} > 4 )); then
     echo "GPUS must contain one to four comma-separated GPU ids" >&2
+    exit 2
+fi
+
+if [[ "$include_control" != 0 && "$include_control" != 1 ]]; then
+    echo "INCLUDE_CONTROL must be 0 or 1" >&2
     exit 2
 fi
 
@@ -52,7 +59,9 @@ tasks=()
 for seed in "${seeds[@]}"; do
     for shift in "${shifts[@]}"; do
         config_for_shift "$shift" >/dev/null
-        tasks+=("$shift control control $seed")
+        if [[ "$include_control" == 1 ]]; then
+            tasks+=("$shift control control $seed")
+        fi
         for model in "${models[@]}"; do
             for strategy in "${strategies[@]}"; do
                 tasks+=("$shift $model $strategy $seed")
@@ -72,6 +81,8 @@ printf 'checkpoint_selection\tsource_validation_loss\n' >>"$protocol"
 printf 'target_gt_role\treporting_only\n' >>"$protocol"
 printf 'git_commit\t%s\n' "$git_commit" >>"$protocol"
 printf 'epochs\t%s\n' "$epochs" >>"$protocol"
+printf 'run_tag\t%s\n' "$run_tag" >>"$protocol"
+printf 'include_control\t%s\n' "$include_control" >>"$protocol"
 printf 'hostname\t%s\n' "$(hostname)" >>"$protocol"
 printf 'python_version\t%s\n' "$($python --version 2>&1)" >>"$protocol"
 printf 'cuda_driver\t%s\n' "$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -n1 | tr -d ' ')" >>"$protocol"
@@ -85,7 +96,7 @@ printf 'run_name\tshift\tmodel\tstrategy\tseed\tconfig\tcache\tcache_sha256\n' >
 for task in "${tasks[@]}"; do
     read -r shift model strategy seed <<<"$task"
     shift_lower=${shift,,}
-    name="fromzero_sada_${shift_lower}_${model}_${strategy}_e${epochs}_seed${seed}_20260914"
+    name="fromzero_sada_${shift_lower}_${model}_${strategy}_e${epochs}_seed${seed}_${run_tag}"
     config=$(config_for_shift "$shift")
     cache='none'
     cache_sha256='none'
@@ -116,7 +127,7 @@ run_one() {
     local shift model strategy seed shift_lower name config cache log rc
     read -r shift model strategy seed <<<"$task"
     shift_lower=${shift,,}
-    name="fromzero_sada_${shift_lower}_${model}_${strategy}_e${epochs}_seed${seed}_20260914"
+    name="fromzero_sada_${shift_lower}_${model}_${strategy}_e${epochs}_seed${seed}_${run_tag}"
     config=$(config_for_shift "$shift")
     log="$artifact_root/logs/${name}.log"
 
