@@ -1,8 +1,12 @@
+import json
+from types import SimpleNamespace
+
 import numpy as np
 
 from tools.build_rq1_semantic_manifest import midpoint_labels
 from tools.evaluate_rq1_semantics import confusion_metrics, jensen_shannon
 from tools.merge_and_shard_rq1 import merge_rows, write_jsonl_atomic
+from tools import prepare_rq1_frames
 from tools.run_rq1_slowfast_probe import segment_feature
 
 
@@ -48,3 +52,32 @@ def test_merge_rows_keeps_only_latest_successful_prediction(tmp_path):
     merged = merge_rows([first, second])
     assert merged["a"]["value"] == 2
     assert merged["b"]["value"] == 3
+
+
+def test_prepare_frames_video_subset_uses_selected_segment_count(tmp_path, monkeypatch):
+    rows = [
+        {"video_id": "video_a", "candidate_id": "a"},
+        {"video_id": "video_b", "candidate_id": "b"},
+    ]
+    args = SimpleNamespace(
+        manifest="manifest.jsonl",
+        video_root="videos",
+        frame_cache=str(tmp_path),
+        cache_namespace="test",
+        frame_count=8,
+        workers=1,
+        video_id=["video_a"],
+        force=True,
+    )
+    monkeypatch.setattr(prepare_rq1_frames, "parse_args", lambda: args)
+    monkeypatch.setattr(prepare_rq1_frames, "read_jsonl", lambda _: rows)
+    monkeypatch.setattr(
+        prepare_rq1_frames,
+        "prepare_video",
+        lambda video_id, video_rows, *_: (video_id, len(video_rows), None),
+    )
+
+    assert prepare_rq1_frames.main() == 0
+    report = json.loads((tmp_path / "test_prepare_report.json").read_text(encoding="utf-8"))
+    assert report["total_segments"] == 1
+    assert report["prepared_segments"] == 1

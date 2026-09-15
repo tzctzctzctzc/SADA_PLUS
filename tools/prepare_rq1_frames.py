@@ -111,6 +111,7 @@ def main():
         grouped = defaultdict(list, {
             video_id: grouped[video_id] for video_id in sorted(requested)
         })
+    total_segments = sum(len(video_rows) for video_rows in grouped.values())
     output_root = Path(args.frame_cache) / args.cache_namespace
     output_root.mkdir(parents=True, exist_ok=True)
     completed = 0
@@ -143,7 +144,7 @@ def main():
         "manifest": str(Path(args.manifest).resolve()),
         "frame_count": args.frame_count,
         "unique_videos": len(grouped),
-        "total_segments": len(rows),
+        "total_segments": total_segments,
         "prepared_segments": completed,
         "errors": errors,
     }
@@ -151,7 +152,7 @@ def main():
         json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"
     )
     print(json.dumps(report, indent=2, sort_keys=True))
-    return 0 if completed == len(rows) and not errors else 1
+    return 0 if completed == total_segments and not errors else 1
 
 
 if __name__ == "__main__":
