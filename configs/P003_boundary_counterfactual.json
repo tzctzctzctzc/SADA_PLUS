@@ -1,0 +1,33 @@
+{
+  "id": "P003",
+  "status": "preregistered",
+  "date": "2026-09-17",
+  "purpose": "Mechanistic pilot only: test whether purified opening boundary reduces preceding-image sensitivity while preserving sensitivity to target image content. No accuracy or novelty claim.",
+  "data": "First 8 Mantis rows; retain first two images; replace one image with next row's corresponding image resized to identical dimensions; original benchmark questions not used.",
+  "prompt": "What is the main subject in the second image? Answer with only a short noun phrase.",
+  "conditions": [
+    "baseline",
+    "scale",
+    "canonical_start",
+    "canonical_end"
+  ],
+  "variants": [
+    "original",
+    "prefix_replaced",
+    "target_replaced"
+  ],
+  "dtype": "float32",
+  "max_pixels": 401408,
+  "measurements": [
+    "next-token distribution Jensen-Shannon divergence",
+    "normalized boundary/target-patch-mean/query representation cosine drift across layers",
+    "target-change response as anti-collapse control"
+  ],
+  "limitations": [
+    "Image resizing and prompt are synthetic diagnostic choices",
+    "Invariance alone does not prove correctness",
+    "Canonical end is a destructive-content control, not a proposed method",
+    "No evidence that canonicalization is novel or competitive yet"
+  ],
+  "decision": "Do not advance canonical boundary method solely from attention plots or an invariance gain. Require preservation of target sensitivity and actual benchmark benefit."
+}

@@ -1,7 +1,7 @@
 {
   "as_of": "2026-09-17",
   "goal_status": "active",
-  "phase": "文献深读与基线准备",
+  "phase": "真实模型机制检查已完成；完整固定参数基线运行中",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -31,6 +31,11 @@
       "statement": "跨图干扰与跨图推理可能依赖不同路径；保留来源信息的机制可能在归属任务与组合任务之间改善权衡",
       "status": "未验证",
       "risk": "直接阻断跨图 attention 或缩放 delimiter 已有相近工作；必须用反事实配对与跨任务验证区分。"
+    },
+    {
+      "id": "H2",
+      "statement": "delimiter 层后缩放等价于累积尺度倒数门控残差更新",
+      "status": "toy 和真实7B模型4个样本fp32支持；不证明创新或基准收益"
     }
   ],
   "evaluation_policy": {
@@ -39,17 +44,12 @@
     "completion": "需有经过文献核查的创新、强基线、跨数据集与模型验证、机制消融和统计不确定性；当前远未达到"
   },
   "jobs": {
-    "setup_env": {
-      "pid": 500194,
-      "log": "logs/setup_env.log"
-    },
-    "clone_delim": {
-      "pid": 500140,
-      "log": "logs/clone_delim.log"
-    },
-    "setup_io": {
-      "pid": 500293,
-      "log": "logs/setup_io.log"
+    "P002": {
+      "pid": 501501,
+      "driver": "scripts/run_P002.sh",
+      "log": "logs/P002_driver.log",
+      "exitcode": "runs/P002.exitcode",
+      "status": "running; verify PID before acting"
     }
   },
   "monitor": {
@@ -57,9 +57,19 @@
     "interval_minutes": 20
   },
   "next": [
-    "下载 Qwen2.5-VL-7B-Instruct 和 Mantis-Eval",
-    "核查官方 Delimiter Scaling 实现与论文配置",
-    "跑原模型和固定公开参数基线，建立逐样本配对记录",
-    "深读 SoFA、DTS、FOCUS、RSCD、Pathways，与跨领域因果干预和信息流理论对照"
-  ]
+    "完成P002并做配对统计，不能把3B示例参数移植7B称为精确论文复现",
+    "核验原作者7B参数和官方类与hook实现的一致性",
+    "检验开头分隔符受先前图像影响的程度；设计开头/结尾分离与反事实干预",
+    "独立开发集与未见确认集分离"
+  ],
+  "results": {
+    "P001": {
+      "n": 4,
+      "mode": "mechanism",
+      "complete": true,
+      "same_top1_rate": 1.0,
+      "max_abs_error": 8.296966552734375e-05,
+      "max_relative_l2_error": 7.883612852310762e-06
+    }
+  }
 }
