@@ -1,0 +1,36 @@
+{
+  "id": "P005",
+  "date": "2026-09-17",
+  "dataset": "MUIRBENCH/MUIRBENCH",
+  "split": "dev",
+  "split_config": "configs/muir_split_v1.json",
+  "n": 168,
+  "model": "Qwen2.5-VL-7B-Instruct",
+  "conditions": [
+    "baseline",
+    "scale"
+  ],
+  "scale": 8,
+  "layers": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "dtype": "bfloat16",
+  "max_pixels": 1605632,
+  "seed": 17,
+  "prompt_and_parser": "Official DTS Muir task, including strict initial A. extraction fallback to raw stripped response",
+  "max_new_tokens": 16,
+  "objectives": [
+    "Audit baseline behavior on an independent development dataset",
+    "Compare counterpart-pair accuracy and task groups",
+    "Identify failure mechanisms; no test-set method selection"
+  ],
+  "limitations": [
+    "Fixed example scaling is not established as the paper's 7B optimal setting",
+    "Development split does not contain Ordering examples; no generalization claim for that task",
+    "Canonical-start is not expanded to Muir: initial mechanism pilot lacked supporting evidence"
+  ],
+  "heldout_evaluation": false
+}
