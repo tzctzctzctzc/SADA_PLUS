@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T06:39:52.395495+08:00",
+  "as_of": "2026-09-16T22:52:34.061653+00:00",
   "goal_status": "active",
-  "phase": "独立验证未复现patch优势，停止该候选方法；继续逐图与专用检索强基线",
+  "phase": "逐图强基线118/256优于原始100/256；专用检索运行，核验分辨率与细粒度残余错误",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -251,7 +251,7 @@
       "n_image_records": 96
     },
     "P025": {
-      "status": "running",
+      "status": "completed",
       "driver_pid": 511022,
       "dependency_pid": 510581,
       "config": "configs/P025_pointwise_imagecode.json",
@@ -260,10 +260,11 @@
       "analysis": "results/P025_pointwise_imagecode.json",
       "preregister_commit": "50c59c1",
       "child_pid": 511028,
-      "data_amendment_sync_commit": "399a4ae"
+      "data_amendment_sync_commit": "399a4ae",
+      "exitcode": 0
     },
     "P026": {
-      "status": "waiting_for_live_P025",
+      "status": "completed",
       "driver_pid": 511023,
       "dependency_pid": 511022,
       "config": "configs/P026_annotation_slices.json",
@@ -271,7 +272,8 @@
       "analysis": "results/P026_annotation_slices.json",
       "preregister_commit": "941413e",
       "uses_gpu": false,
-      "amended_config_commit": "477e0d6"
+      "amended_config_commit": "477e0d6",
+      "exitcode": 0
     },
     "Qwen3_Reranker_download": {
       "status": "completed",
@@ -290,10 +292,10 @@
       "freeze": "runs/qwen3_environment_freeze.txt",
       "torch": "2.8.0+cu126",
       "transformers": "4.57.1",
-      "validation": "pip check and CPU import succeeded; GPU compatibility to be exercised by P027"
+      "validation": "pip check, CPU preprocessing, and actual GPU3 inference succeeded; P027 live PID 511395"
     },
     "P027": {
-      "status": "waiting_for_live_P025",
+      "status": "running",
       "driver_pid": 511024,
       "dependency_pid": 511022,
       "config": "configs/P027_qwen3_imagecode.json",
@@ -301,7 +303,8 @@
       "exitcode_file": "runs/P027.exitcode",
       "analysis": "results/P027_qwen3_imagecode.json",
       "expected_records": 512,
-      "protocol_preflight": "results/P027_protocol_cpu.json"
+      "protocol_preflight": "results/P027_protocol_cpu.json",
+      "child_pid": 511395
     }
   },
   "monitor": {
@@ -310,7 +313,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "Local automation gpu3 TOML inspected; active heartbeat every 20 minutes, silent on unchanged state"
   },
-  "next": "等待真实运行的P025逐图评分；P026按明确作者正标签切片，P027运行官方专用Qwen3检索模型。依据强基线错误确定是否存在可证伪的上下文证据问题；不继续patch读出参数扫描。保留尚未使用的392个验证源簇用于后续独立确认。",
+  "next": "完成P027；P028固定提高最小分辨率，先排查细节表征不足，避免把所有con题失败归因为跨图推理缺失。",
   "results": {
     "P001": {
       "n": 4,
@@ -937,6 +940,29 @@
       },
       "interpretation": "原始logits100/256，patch92，密度91，SigLIP2为84。patch相对原始-3.125个百分点，簇95CI[-8.203,1.953]；旧Mantis小样本收益没有在独立ImageCoDe复现。停止将patch-only读出作为候选新方法，不把普通all-span的102/103题当新贡献。",
       "decision": "停止patch-only分数调参和扩展；P025/P027用于定位强基线下仍存在的问题，不作为继续追逐旧收益的理由。"
+    },
+    "P025": {
+      "analysis": "results/P025_pointwise_imagecode.json",
+      "n": 256,
+      "matching_correct": 118,
+      "caption_correct": 99,
+      "raw_correct": 100,
+      "matching_minus_raw_pp": 7.03125,
+      "cluster_95ci_pp": [
+        0.78125,
+        13.28125
+      ],
+      "matching_top_ties": 24,
+      "matching_tie_expected_correct": 116.16666666666667
+    },
+    "P026": {
+      "analysis": "results/P026_annotation_slices.json",
+      "con_n": 49,
+      "con_matching": 8,
+      "con_caption": 9,
+      "con_raw": 10,
+      "con_patch": 10,
+      "interpretation": "正标签49题仍难；差值区间宽，不能据此宣布联合上下文有效。空白不是阴性。"
     }
   },
   "novelty_status": "仍无满足目标的新颖方法或SOTA；注意力校准、证据头与候选间判别性均有直接近邻。"

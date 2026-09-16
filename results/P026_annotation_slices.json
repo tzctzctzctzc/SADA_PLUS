@@ -1,0 +1,569 @@
+{
+  "complete": true,
+  "n_evaluation": 256,
+  "source_sha256": "39cfbd1cc81d3811bcb346bf4b84521ef1e8ae3641dcb1d05b397454d702b8a4",
+  "prediction_sha256": "2c22a7713dd2bf86418a6942b7100f17ff10aea704bdf6ccdab9e0bd0397c383",
+  "status_counts": {
+    "blank": 164,
+    "positive_codes": 87,
+    "missing": 5
+  },
+  "slices": {
+    "col": {
+      "n": 11,
+      "n_clusters": 11,
+      "correct": {
+        "raw_logits": 6,
+        "all_span_attention_calibrated": 5,
+        "patch_attention_calibrated": 4,
+        "patch_density_calibrated": 4,
+        "patch_on_total_layers": 4,
+        "code_AGD_raw": 5,
+        "SigLIP2": 7,
+        "all_span_attention_raw": 6,
+        "patch_attention_raw": 7,
+        "matching_score": 4,
+        "caption_logprob_mean": 6
+      },
+      "comparisons": {
+        "patch_attention_calibrated minus caption_logprob_mean": {
+          "difference_pp": -18.181818181818183,
+          "cluster_95ci_pp": [
+            -54.54545454545454,
+            18.181818181818183
+          ],
+          "gains": 1,
+          "losses": 3
+        },
+        "patch_density_calibrated minus caption_logprob_mean": {
+          "difference_pp": -18.181818181818183,
+          "cluster_95ci_pp": [
+            -54.54545454545454,
+            18.181818181818183
+          ],
+          "gains": 1,
+          "losses": 3
+        },
+        "raw_logits minus caption_logprob_mean": {
+          "difference_pp": 0.0,
+          "cluster_95ci_pp": [
+            -36.36363636363637,
+            36.36363636363637
+          ],
+          "gains": 2,
+          "losses": 2
+        },
+        "patch_attention_calibrated minus matching_score": {
+          "difference_pp": 0.0,
+          "cluster_95ci_pp": [
+            -27.27272727272727,
+            27.27272727272727
+          ],
+          "gains": 1,
+          "losses": 1
+        }
+      }
+    },
+    "con": {
+      "n": 49,
+      "n_clusters": 49,
+      "correct": {
+        "raw_logits": 10,
+        "all_span_attention_calibrated": 11,
+        "patch_attention_calibrated": 10,
+        "patch_density_calibrated": 10,
+        "patch_on_total_layers": 10,
+        "code_AGD_raw": 12,
+        "SigLIP2": 5,
+        "all_span_attention_raw": 10,
+        "patch_attention_raw": 8,
+        "matching_score": 8,
+        "caption_logprob_mean": 9
+      },
+      "comparisons": {
+        "patch_attention_calibrated minus caption_logprob_mean": {
+          "difference_pp": 2.0408163265306123,
+          "cluster_95ci_pp": [
+            -10.204081632653061,
+            14.285714285714285
+          ],
+          "gains": 5,
+          "losses": 4
+        },
+        "patch_density_calibrated minus caption_logprob_mean": {
+          "difference_pp": 2.0408163265306123,
+          "cluster_95ci_pp": [
+            -10.204081632653061,
+            14.285714285714285
+          ],
+          "gains": 5,
+          "losses": 4
+        },
+        "raw_logits minus caption_logprob_mean": {
+          "difference_pp": 2.0408163265306123,
+          "cluster_95ci_pp": [
+            -14.285714285714285,
+            18.367346938775512
+          ],
+          "gains": 8,
+          "losses": 7
+        },
+        "patch_attention_calibrated minus matching_score": {
+          "difference_pp": 4.081632653061225,
+          "cluster_95ci_pp": [
+            -8.16326530612245,
+            16.3265306122449
+          ],
+          "gains": 6,
+          "losses": 4
+        }
+      }
+    },
+    "cor": {
+      "n": 10,
+      "n_clusters": 10,
+      "correct": {
+        "raw_logits": 5,
+        "all_span_attention_calibrated": 5,
+        "patch_attention_calibrated": 3,
+        "patch_density_calibrated": 3,
+        "patch_on_total_layers": 3,
+        "code_AGD_raw": 5,
+        "SigLIP2": 5,
+        "all_span_attention_raw": 4,
+        "patch_attention_raw": 6,
+        "matching_score": 4,
+        "caption_logprob_mean": 4
+      },
+      "comparisons": {
+        "patch_attention_calibrated minus caption_logprob_mean": {
+          "difference_pp": -10.0,
+          "cluster_95ci_pp": [
+            -50.0,
+            30.0
+          ],
+          "gains": 2,
+          "losses": 3
+        },
+        "patch_density_calibrated minus caption_logprob_mean": {
+          "difference_pp": -10.0,
+          "cluster_95ci_pp": [
+            -50.0,
+            30.0
+          ],
+          "gains": 2,
+          "losses": 3
+        },
+        "raw_logits minus caption_logprob_mean": {
+          "difference_pp": 10.0,
+          "cluster_95ci_pp": [
+            -30.0,
+            50.0
+          ],
+          "gains": 3,
+          "losses": 2
+        },
+        "patch_attention_calibrated minus matching_score": {
+          "difference_pp": -10.0,
+          "cluster_95ci_pp": [
+            -30.0,
+            0.0
+          ],
+          "gains": 0,
+          "losses": 1
+        }
+      }
+    },
+    "img": {
+      "n": 5,
+      "n_clusters": 5,
+      "correct": {
+        "raw_logits": 2,
+        "all_span_attention_calibrated": 2,
+        "patch_attention_calibrated": 3,
+        "patch_density_calibrated": 3,
+        "patch_on_total_layers": 3,
+        "code_AGD_raw": 3,
+        "SigLIP2": 2,
+        "all_span_attention_raw": 3,
+        "patch_attention_raw": 3,
+        "matching_score": 1,
+        "caption_logprob_mean": 2
+      },
+      "comparisons": {
+        "patch_attention_calibrated minus caption_logprob_mean": {
+          "difference_pp": 20.0,
+          "cluster_95ci_pp": [
+            -40.0,
+            80.0
+          ],
+          "gains": 2,
+          "losses": 1
+        },
+        "patch_density_calibrated minus caption_logprob_mean": {
+          "difference_pp": 20.0,
+          "cluster_95ci_pp": [
+            -40.0,
+            80.0
+          ],
+          "gains": 2,
+          "losses": 1
+        },
+        "raw_logits minus caption_logprob_mean": {
+          "difference_pp": 0.0,
+          "cluster_95ci_pp": [
+            -80.0,
+            80.0
+          ],
+          "gains": 2,
+          "losses": 2
+        },
+        "patch_attention_calibrated minus matching_score": {
+          "difference_pp": 40.0,
+          "cluster_95ci_pp": [
+            0.0,
+            80.0
+          ],
+          "gains": 2,
+          "losses": 0
+        }
+      }
+    },
+    "n": {
+      "n": 30,
+      "n_clusters": 30,
+      "correct": {
+        "raw_logits": 8,
+        "all_span_attention_calibrated": 9,
+        "patch_attention_calibrated": 10,
+        "patch_density_calibrated": 10,
+        "patch_on_total_layers": 10,
+        "code_AGD_raw": 9,
+        "SigLIP2": 6,
+        "all_span_attention_raw": 7,
+        "patch_attention_raw": 8,
+        "matching_score": 4,
+        "caption_logprob_mean": 6
+      },
+      "comparisons": {
+        "patch_attention_calibrated minus caption_logprob_mean": {
+          "difference_pp": 13.333333333333334,
+          "cluster_95ci_pp": [
+            3.3333333333333335,
+            26.666666666666668
+          ],
+          "gains": 4,
+          "losses": 0
+        },
+        "patch_density_calibrated minus caption_logprob_mean": {
+          "difference_pp": 13.333333333333334,
+          "cluster_95ci_pp": [
+            3.3333333333333335,
+            26.666666666666668
+          ],
+          "gains": 4,
+          "losses": 0
+        },
+        "raw_logits minus caption_logprob_mean": {
+          "difference_pp": 6.666666666666667,
+          "cluster_95ci_pp": [
+            -10.0,
+            23.333333333333332
+          ],
+          "gains": 4,
+          "losses": 2
+        },
+        "patch_attention_calibrated minus matching_score": {
+          "difference_pp": 20.0,
+          "cluster_95ci_pp": [
+            6.666666666666667,
+            36.666666666666664
+          ],
+          "gains": 6,
+          "losses": 0
+        }
+      }
+    },
+    "neg": {
+      "n": 22,
+      "n_clusters": 22,
+      "correct": {
+        "raw_logits": 4,
+        "all_span_attention_calibrated": 6,
+        "patch_attention_calibrated": 4,
+        "patch_density_calibrated": 4,
+        "patch_on_total_layers": 4,
+        "code_AGD_raw": 5,
+        "SigLIP2": 4,
+        "all_span_attention_raw": 6,
+        "patch_attention_raw": 5,
+        "matching_score": 3,
+        "caption_logprob_mean": 3
+      },
+      "comparisons": {
+        "patch_attention_calibrated minus caption_logprob_mean": {
+          "difference_pp": 4.545454545454546,
+          "cluster_95ci_pp": [
+            -13.74999999999996,
+            22.727272727272727
+          ],
+          "gains": 3,
+          "losses": 2
+        },
+        "patch_density_calibrated minus caption_logprob_mean": {
+          "difference_pp": 4.545454545454546,
+          "cluster_95ci_pp": [
+            -13.74999999999996,
+            22.727272727272727
+          ],
+          "gains": 3,
+          "losses": 2
+        },
+        "raw_logits minus caption_logprob_mean": {
+          "difference_pp": 4.545454545454546,
+          "cluster_95ci_pp": [
+            -13.636363636363635,
+            22.727272727272727
+          ],
+          "gains": 3,
+          "losses": 2
+        },
+        "patch_attention_calibrated minus matching_score": {
+          "difference_pp": 4.545454545454546,
+          "cluster_95ci_pp": [
+            -9.090909090909092,
+            22.727272727272727
+          ],
+          "gains": 2,
+          "losses": 1
+        }
+      }
+    },
+    "q": {
+      "n": 12,
+      "n_clusters": 12,
+      "correct": {
+        "raw_logits": 8,
+        "all_span_attention_calibrated": 7,
+        "patch_attention_calibrated": 5,
+        "patch_density_calibrated": 5,
+        "patch_on_total_layers": 5,
+        "code_AGD_raw": 8,
+        "SigLIP2": 8,
+        "all_span_attention_raw": 6,
+        "patch_attention_raw": 8,
+        "matching_score": 6,
+        "caption_logprob_mean": 8
+      },
+      "comparisons": {
+        "patch_attention_calibrated minus caption_logprob_mean": {
+          "difference_pp": -25.0,
+          "cluster_95ci_pp": [
+            -50.0,
+            0.0
+          ],
+          "gains": 0,
+          "losses": 3
+        },
+        "patch_density_calibrated minus caption_logprob_mean": {
+          "difference_pp": -25.0,
+          "cluster_95ci_pp": [
+            -50.0,
+            0.0
+          ],
+          "gains": 0,
+          "losses": 3
+        },
+        "raw_logits minus caption_logprob_mean": {
+          "difference_pp": 0.0,
+          "cluster_95ci_pp": [
+            -25.0,
+            25.0
+          ],
+          "gains": 1,
+          "losses": 1
+        },
+        "patch_attention_calibrated minus matching_score": {
+          "difference_pp": -8.333333333333332,
+          "cluster_95ci_pp": [
+            -33.33333333333333,
+            16.666666666666664
+          ],
+          "gains": 1,
+          "losses": 2
+        }
+      }
+    },
+    "s": {
+      "n": 20,
+      "n_clusters": 20,
+      "correct": {
+        "raw_logits": 8,
+        "all_span_attention_calibrated": 7,
+        "patch_attention_calibrated": 7,
+        "patch_density_calibrated": 7,
+        "patch_on_total_layers": 7,
+        "code_AGD_raw": 9,
+        "SigLIP2": 9,
+        "all_span_attention_raw": 8,
+        "patch_attention_raw": 10,
+        "matching_score": 6,
+        "caption_logprob_mean": 9
+      },
+      "comparisons": {
+        "patch_attention_calibrated minus caption_logprob_mean": {
+          "difference_pp": -10.0,
+          "cluster_95ci_pp": [
+            -35.0,
+            15.0
+          ],
+          "gains": 2,
+          "losses": 4
+        },
+        "patch_density_calibrated minus caption_logprob_mean": {
+          "difference_pp": -10.0,
+          "cluster_95ci_pp": [
+            -35.0,
+            15.0
+          ],
+          "gains": 2,
+          "losses": 4
+        },
+        "raw_logits minus caption_logprob_mean": {
+          "difference_pp": -5.0,
+          "cluster_95ci_pp": [
+            -25.0,
+            15.0
+          ],
+          "gains": 2,
+          "losses": 3
+        },
+        "patch_attention_calibrated minus matching_score": {
+          "difference_pp": 5.0,
+          "cluster_95ci_pp": [
+            -15.0,
+            25.0
+          ],
+          "gains": 3,
+          "losses": 2
+        }
+      }
+    },
+    "t": {
+      "n": 4,
+      "n_clusters": 4,
+      "correct": {
+        "raw_logits": 2,
+        "all_span_attention_calibrated": 2,
+        "patch_attention_calibrated": 1,
+        "patch_density_calibrated": 1,
+        "patch_on_total_layers": 1,
+        "code_AGD_raw": 2,
+        "SigLIP2": 1,
+        "all_span_attention_raw": 1,
+        "patch_attention_raw": 1,
+        "matching_score": 0,
+        "caption_logprob_mean": 0
+      },
+      "comparisons": {
+        "patch_attention_calibrated minus caption_logprob_mean": {
+          "difference_pp": 25.0,
+          "cluster_95ci_pp": [
+            0.0,
+            75.0
+          ],
+          "gains": 1,
+          "losses": 0
+        },
+        "patch_density_calibrated minus caption_logprob_mean": {
+          "difference_pp": 25.0,
+          "cluster_95ci_pp": [
+            0.0,
+            75.0
+          ],
+          "gains": 1,
+          "losses": 0
+        },
+        "raw_logits minus caption_logprob_mean": {
+          "difference_pp": 50.0,
+          "cluster_95ci_pp": [
+            0.0,
+            100.0
+          ],
+          "gains": 2,
+          "losses": 0
+        },
+        "patch_attention_calibrated minus matching_score": {
+          "difference_pp": 25.0,
+          "cluster_95ci_pp": [
+            0.0,
+            75.0
+          ],
+          "gains": 1,
+          "losses": 0
+        }
+      }
+    },
+    "v": {
+      "n": 48,
+      "n_clusters": 48,
+      "correct": {
+        "raw_logits": 11,
+        "all_span_attention_calibrated": 13,
+        "patch_attention_calibrated": 13,
+        "patch_density_calibrated": 12,
+        "patch_on_total_layers": 13,
+        "code_AGD_raw": 13,
+        "SigLIP2": 9,
+        "all_span_attention_raw": 13,
+        "patch_attention_raw": 11,
+        "matching_score": 11,
+        "caption_logprob_mean": 10
+      },
+      "comparisons": {
+        "patch_attention_calibrated minus caption_logprob_mean": {
+          "difference_pp": 6.25,
+          "cluster_95ci_pp": [
+            -8.333333333333332,
+            20.833333333333336
+          ],
+          "gains": 8,
+          "losses": 5
+        },
+        "patch_density_calibrated minus caption_logprob_mean": {
+          "difference_pp": 4.166666666666666,
+          "cluster_95ci_pp": [
+            -10.416666666666668,
+            18.75
+          ],
+          "gains": 7,
+          "losses": 5
+        },
+        "raw_logits minus caption_logprob_mean": {
+          "difference_pp": 2.083333333333333,
+          "cluster_95ci_pp": [
+            -12.5,
+            14.583333333333334
+          ],
+          "gains": 6,
+          "losses": 5
+        },
+        "patch_attention_calibrated minus matching_score": {
+          "difference_pp": 4.166666666666666,
+          "cluster_95ci_pp": [
+            -8.333333333333332,
+            16.666666666666664
+          ],
+          "gains": 6,
+          "losses": 4
+        }
+      }
+    }
+  },
+  "limitations": [
+    "Only explicit positive annotation codes define slices. Missing/blank/absent codes are not negative labels.",
+    "Author context labels include gradability as well as other-frame grounding; this is not an irreducible-context gold label.",
+    "Small overlapping slices are diagnostic only, with no hyperparameter tuning or selection based on their results.",
+    "The frozen 256-question validation pilot is not the complete ImageCoDe evaluation."
+  ]
+}

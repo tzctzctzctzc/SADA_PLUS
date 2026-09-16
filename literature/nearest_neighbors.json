@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-17T06:34:30.825708+08:00",
+  "as_of": "2026-09-16T22:52:34.061653+00:00",
   "status": "Novelty not established; generic ordinal binding amplification and syntax/content source separation are already covered by close neighbors",
   "records": [
     {
@@ -227,6 +227,29 @@
       "evidence": "已读§2.1形式化、§2实验设置、§3.2–3.4与限制：MMLU四选项排序、删去选项的MED相似度、双序成对比较、传递性与反序一致性。",
       "overlap": "仅诊断添加候选导致排序变化不是新贡献；不能直接把视觉上下文依赖都判为错误。",
       "limitations": "偏好或MCQA候选删减不等于视觉证据删减；不能未经语义检查要求所有视觉context满足IIA。"
+    },
+    {
+      "id": "SelfRetrieval_TMLR2025",
+      "url": "https://arxiv.org/html/2409.03025v2",
+      "code": "https://github.com/manugaurdl/no-detail-left-behind",
+      "evidence": "已读主文方法、训练消融、ImageCoDe结果及附录B和C.1-C.3：ClipCap，图文检索对数softmax奖励，REINFORCE，视觉/语言LoRA rank32；逐渐增大难负例袋，结合人工描述锚定与CIDEr。",
+      "overlap": "用难负例训练细粒度caption、检索奖励与描述真实性权衡、袋大小课程已有。",
+      "limits": "TrueMatch是生成描述后CLIP自检索，与给定查询直接图像检索不同；ImageCoDe表8完整validation口径不能直接比较256题pilot，评测代码尚未核验。"
+    },
+    {
+      "id": "CausalityMatters_AAAI2026",
+      "url": "https://arxiv.org/html/2508.11576v2",
+      "code": "https://github.com/ANDgate99/Causality-Matters",
+      "evidence": "已读摘要、主文5.1与6：五层滑窗attention knockout；中层query仅看末帧、深层关闭帧间注意力、深层丢帧KV三种效率策略。",
+      "overlap": "跨帧因果掩码传播、末帧聚合、query中转与分阶段裁剪已有直接近邻。",
+      "limits": "尚未完整审计源码/复现；不能把掩码因果性与实验因果识别混为一谈。"
+    },
+    {
+      "id": "TemporalBenchmarkChannels_2026",
+      "url": "https://arxiv.org/html/2607.12304v1",
+      "evidence": "已读主文与附录A/B/C开头：比较像素序列、位置ID、时间戳各通道，Qwen3/Molmo2/PerceptionLM，TempCompass/TVBench；使用对应帧activation patching并处理DeepStack注入。",
+      "overlap": "独立干预视频帧顺序与位置、架构注意力掩码解释、patch恢复temporal现象已有。",
+      "unverified_question": "在视觉全双向且token/position/mask/附加特征共同置换时，query不变可能由置换等变性保证；真实模型是否满足前提仍需源码审计，不能据此声称论文错误。"
     }
   ]
 }

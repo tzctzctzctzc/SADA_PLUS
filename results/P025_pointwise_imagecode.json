@@ -1,0 +1,246 @@
+{
+  "complete": true,
+  "n_eval": 256,
+  "n_clusters": 256,
+  "correct": {
+    "raw_logits": 100,
+    "all_span_attention_calibrated": 102,
+    "patch_attention_calibrated": 92,
+    "patch_density_calibrated": 91,
+    "patch_on_total_layers": 91,
+    "code_AGD_raw": 99,
+    "SigLIP2": 84,
+    "all_span_attention_raw": 103,
+    "patch_attention_raw": 90,
+    "matching_score": 118,
+    "caption_logprob_mean": 99
+  },
+  "comparisons": {
+    "matching_score minus raw_logits": {
+      "difference_pp": 7.03125,
+      "cluster_95ci_pp": [
+        0.78125,
+        13.28125
+      ],
+      "gains": 43,
+      "losses": 25
+    },
+    "matching_score minus patch_attention_calibrated": {
+      "difference_pp": 10.15625,
+      "cluster_95ci_pp": [
+        3.515625,
+        16.796875
+      ],
+      "gains": 50,
+      "losses": 24
+    },
+    "matching_score minus patch_density_calibrated": {
+      "difference_pp": 10.546875,
+      "cluster_95ci_pp": [
+        4.296875,
+        16.796875
+      ],
+      "gains": 48,
+      "losses": 21
+    },
+    "matching_score minus code_AGD_raw": {
+      "difference_pp": 7.421875,
+      "cluster_95ci_pp": [
+        1.171875,
+        13.28125
+      ],
+      "gains": 42,
+      "losses": 23
+    },
+    "matching_score minus SigLIP2": {
+      "difference_pp": 13.28125,
+      "cluster_95ci_pp": [
+        6.6308593750000036,
+        19.921875
+      ],
+      "gains": 59,
+      "losses": 25
+    },
+    "caption_logprob_mean minus raw_logits": {
+      "difference_pp": -0.390625,
+      "cluster_95ci_pp": [
+        -6.640625,
+        5.859375
+      ],
+      "gains": 33,
+      "losses": 34
+    },
+    "caption_logprob_mean minus patch_attention_calibrated": {
+      "difference_pp": 2.734375,
+      "cluster_95ci_pp": [
+        -3.125,
+        8.984375
+      ],
+      "gains": 36,
+      "losses": 29
+    },
+    "caption_logprob_mean minus patch_density_calibrated": {
+      "difference_pp": 3.125,
+      "cluster_95ci_pp": [
+        -2.734375,
+        8.984375
+      ],
+      "gains": 35,
+      "losses": 27
+    },
+    "caption_logprob_mean minus code_AGD_raw": {
+      "difference_pp": 0.0,
+      "cluster_95ci_pp": [
+        -6.25,
+        6.25
+      ],
+      "gains": 35,
+      "losses": 35
+    },
+    "caption_logprob_mean minus SigLIP2": {
+      "difference_pp": 5.859375,
+      "cluster_95ci_pp": [
+        -1.171875,
+        12.5
+      ],
+      "gains": 46,
+      "losses": 31
+    }
+  },
+  "ties": {
+    "matching_score": {
+      "questions_with_top_ties": 24,
+      "expected_correct_uniform_tie": 116.16666666666667
+    },
+    "caption_logprob_mean": {
+      "questions_with_top_ties": 0,
+      "expected_correct_uniform_tie": 99.0
+    }
+  },
+  "by_kind": {
+    "static": {
+      "n": 56,
+      "correct": {
+        "raw_logits": 47,
+        "all_span_attention_calibrated": 45,
+        "patch_attention_calibrated": 42,
+        "patch_density_calibrated": 44,
+        "patch_on_total_layers": 43,
+        "code_AGD_raw": 45,
+        "SigLIP2": 39,
+        "all_span_attention_raw": 45,
+        "patch_attention_raw": 44,
+        "matching_score": 51,
+        "caption_logprob_mean": 51
+      }
+    },
+    "video": {
+      "n": 200,
+      "correct": {
+        "raw_logits": 53,
+        "all_span_attention_calibrated": 57,
+        "patch_attention_calibrated": 50,
+        "patch_density_calibrated": 47,
+        "patch_on_total_layers": 48,
+        "code_AGD_raw": 54,
+        "SigLIP2": 45,
+        "all_span_attention_raw": 58,
+        "patch_attention_raw": 46,
+        "matching_score": 67,
+        "caption_logprob_mean": 48
+      }
+    }
+  },
+  "limitations": [
+    "Same frozen P023 pilot, not full benchmark.",
+    "One-image scores lack cross-candidate and temporal context.",
+    "Caption likelihood is an established scoring baseline, not a new method."
+  ],
+  "cases": {
+    "patch_correct_pointwise_both_wrong": [
+      "MSR-VTT-videoTestVideo_video9469-shot0_3:8",
+      "YouCook-video0024-shot5_0:9",
+      "MSR-VTT-videoTestVideo_video9003-shot1_8:1",
+      "MSR-VTT-videoTestVideo_video9703-shot1_0:5",
+      "MSR-VTT-videoTestVideo_video7642-shot1_0:3",
+      "MSR-VTT-videoTestVideo_video8970-shot1_0:3",
+      "MSR-VTT-videoTestVideo_video9758-shot2_1:7",
+      "MSR-VTT-videoTestVideo_video8262-shot1_6:3",
+      "MSR-VTT-videoTestVideo_video8052-shot1_1:4",
+      "MSR-VTT-videoTestVideo_video7295-shot1_10:7",
+      "MSR-VTT-videoTestVideo_video7051-shot3_0:5",
+      "MSR-VTT-videoTestVideo_video7063-shot4_0:7"
+    ],
+    "listwise_correct_caption_wrong": [
+      "MSR-VTT-videoTestVideo_video8491-shot1_1:1",
+      "MSR-VTT-videoTestVideo_video7075-shot1_4:6",
+      "MSR-VTT-videoTestVideo_video7113-shot1_1:8",
+      "YouCook-video0024-shot5_0:9",
+      "MSR-VTT-videoTestVideo_video9203-shot1_0:6",
+      "open-images-2331_7fc026c02723e9ec:3",
+      "MSR-VTT-videoTestVideo_video9899-shot1_0:4",
+      "MSR-VTT-videoTestVideo_video9003-shot1_8:1",
+      "MSR-VTT-videoTestVideo_video9703-shot1_0:5",
+      "MSR-VTT-videoTestVideo_video9746-shot3_0:1",
+      "MSR-VTT-videoTestVideo_video7642-shot1_0:3",
+      "MSR-VTT-videoTestVideo_video7705-shot1_0:4",
+      "MSR-VTT-videoTestVideo_video8776-shot1_0:9",
+      "MSR-VTT-videoTestVideo_video8143-shot1_1:6",
+      "MSR-VTT-videoTestVideo_video9687-shot3_0:6",
+      "MSR-VTT-videoTestVideo_video9758-shot2_1:7",
+      "MSR-VTT-videoTestVideo_video9543-shot1_3:4",
+      "MSR-VTT-videoTestVideo_video9983-shot1_0:3",
+      "MSR-VTT-videoTestVideo_video8984-shot1_2:7",
+      "open-images-2751_0b5fa80868e8eb74:4",
+      "MSR-VTT-videoTestVideo_video7022-shot0_0:6",
+      "MSR-VTT-videoTestVideo_video8574-shot1_0:4",
+      "MSR-VTT-videoTestVideo_video8052-shot1_1:4",
+      "MSR-VTT-videoTestVideo_video8513-shot4_1:4",
+      "MSR-VTT-videoTestVideo_video9580-shot1_0:3",
+      "MSR-VTT-videoTestVideo_video9773-shot1_0:4",
+      "MSR-VTT-videoTestVideo_video9577-shot1_2:7",
+      "MSR-VTT-videoTestVideo_video9723-shot1_1:5",
+      "MSR-VTT-videoTestVideo_video8013-shot1_0:7",
+      "MSR-VTT-videoTestVideo_video8509-shot1_1:1",
+      "MSR-VTT-videoTestVideo_video8603-shot1_1:8",
+      "MSR-VTT-videoTestVideo_video7051-shot3_0:5",
+      "MSR-VTT-videoTestVideo_video8191-shot4_0:4",
+      "MSR-VTT-videoTestVideo_video7465-shot7_0:0"
+    ],
+    "caption_correct_listwise_wrong": [
+      "MSR-VTT-videoTestVideo_video7960-shot0_2:2",
+      "MSR-VTT-videoTestVideo_video8040-shot1_1:3",
+      "open-images-1430_0fe9f117ec4c4480:0",
+      "open-images-638_1626d26351c41a0f:0",
+      "MSR-VTT-videoTestVideo_video7168-shot1_1:5",
+      "MSR-VTT-videoTestVideo_video7564-shot1_0:2",
+      "MSR-VTT-videoTestVideo_video9652-shot1_0:6",
+      "MSR-VTT-videoTestVideo_video9875-shot6_0:6",
+      "MSR-VTT-videoTestVideo_video7020-shot1_1:4",
+      "MSR-VTT-videoTestVideo_video7321-shot1_3:7",
+      "MSR-VTT-videoTestVideo_video9169-shot2_0:2",
+      "MSR-VTT-videoTestVideo_video8006-shot1_1:5",
+      "MSR-VTT-videoTestVideo_video7689-shot1_0:2",
+      "MSR-VTT-videoTestVideo_video8156-shot3_1:4",
+      "MSR-VTT-videoTestVideo_video8525-shot1_1:5",
+      "MSR-VTT-videoTestVideo_video9248-shot0_1:4",
+      "MSR-VTT-videoTestVideo_video9921-shot1_3:7",
+      "MSR-VTT-videoTestVideo_video9837-shot1_0:3",
+      "open-images-1724_013efc66b15d181a:3",
+      "MSR-VTT-videoTestVideo_video8321-shot0_1:5",
+      "MSR-VTT-videoTestVideo_video9166-shot0_0:5",
+      "MSR-VTT-videoTestVideo_video9876-shot1_0:2",
+      "MSR-VTT-videoTestVideo_video9048-shot1_8:6",
+      "MSR-VTT-videoTestVideo_video8874-shot1_0:1",
+      "MSR-VTT-videoTestVideo_video7057-shot1_11:5",
+      "open-images-101_0fd92c490a73d328:0",
+      "open-images-1835_05c4519d1bdf8c4a:8",
+      "open-images-2454_a8c3a218e62e73fb:4",
+      "MSR-VTT-videoTestVideo_video9375-shot1_4:7",
+      "MSR-VTT-videoTestVideo_video8037-shot1_0:3",
+      "MSR-VTT-videoTestVideo_video7925-shot1_2:5",
+      "MSR-VTT-videoTestVideo_video8243-shot0_1:1",
+      "video-storytelling-videowedding_46xhFCXBMJs-shot88_0:2"
+    ]
+  }
+}

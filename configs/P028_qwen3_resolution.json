@@ -1,0 +1,25 @@
+{
+  "id": "P028",
+  "purpose": "Fixed input-resolution-floor diagnostic of the official pointwise reranker, not a proposed new method.",
+  "model_revision": "4bd860ac4f15ad1897a214615cccc700f8f71818",
+  "gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
+  "instruction": "Retrieve images or text relevant to the user's query.",
+  "settings": [
+    {
+      "name": "floor_448",
+      "min_pixels": 200704,
+      "max_pixels": 1843200
+    }
+  ],
+  "primary_score": "Official BF16 sigmoid scores; pre-sigmoid margin and tie-randomized expectations are secondary audits.",
+  "limits": [
+    "Interpolation adds no new image information; this is a preprocessing/compute control, not an architectural contribution.",
+    "The original 256 question pilot is now exploratory for future ideas; remaining 392 source clusters remain unused.",
+    "Raising the minimum may yield rounded image areas above 448^2; record actual grids/tokens.",
+    "Default upper pixel bound remains identical to P027; actual per-image compute can increase."
+  ],
+  "hypothesis": "Native small video frames may be under-resolved by the visual tokenizer; raising only max_pixels in P027 does not enlarge them.",
+  "primary_comparator": "P027 official_default, same model, query, images and max_pixels",
+  "decision": "Assess paired effect on all 256 fixed questions, then static/video and previously frozen positive con slice. No tuning on these results; any method requires the 392 unused clusters.",
+  "data_sha256": "55483767574f7b8e43b6bb562b690c0086491544aa1fcc95452026c5d4cb877c"
+}
