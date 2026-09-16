@@ -9,6 +9,8 @@ from tools.evaluate_rq1_semantics import confusion_metrics, jensen_shannon
 from tools.merge_and_shard_rq1 import merge_rows, write_jsonl_atomic
 from tools import prepare_rq1_frames
 from tools.run_rq1_slowfast_probe import segment_feature
+from tools.rq1_feature_store import FeatureStore, normalize, summarize_frame_features
+from tools.run_rq1_frozen_feature_probe import source_train_indices
 
 
 def test_midpoint_labels_marks_overlapping_top10_actions():
@@ -92,3 +94,43 @@ def test_frames_complete_rejects_a_truncated_jpeg(tmp_path):
     payload = path.read_bytes()
     path.write_bytes(payload[:-8])
     assert not prepare_rq1_frames.frames_complete(output, 1)
+
+
+def test_source_train_indices_excludes_validation_memberships():
+    rows = [
+        {
+            "memberships": [
+                {"shift": "S1", "role": "source_train"},
+                {"shift": "S2", "role": "source_val"},
+            ]
+        },
+        {"memberships": [{"shift": "S1", "role": "target_val"}]},
+    ]
+    assert source_train_indices(rows, "S1") == [0]
+    assert source_train_indices(rows, "S2") == []
+
+
+def test_frozen_feature_pooling_is_normalized_and_temporal():
+    frames = np.asarray([
+        [1.0, 0.0],
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [0.0, 1.0],
+    ])
+    static = summarize_frame_features(frames, "static")
+    combined = summarize_frame_features(frames, "static_transition")
+    assert np.allclose(static, normalize([1.0, 1.0]))
+    assert combined.shape == (4,)
+    assert combined[2] < 0.0 < combined[3]
+
+
+def test_feature_store_resumes_completed_rows(tmp_path):
+    manifest = tmp_path / "manifest.jsonl"
+    manifest.write_text('{"candidate_id":"a"}\n{"candidate_id":"b"}\n', encoding="utf-8")
+    rows = [{"candidate_id": "a"}, {"candidate_id": "b"}]
+    prefix = tmp_path / "features" / "clip"
+    store = FeatureStore(prefix, manifest, rows, "clip", 2, 8, "static")
+    store.write([0], [[1.0, 2.0]])
+    resumed = FeatureStore(prefix, manifest, rows, "clip", 2, 8, "static")
+    assert resumed.pending_indices() == [1]
+    assert np.allclose(resumed.features[0], [1.0, 2.0])
