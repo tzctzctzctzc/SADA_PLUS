@@ -1,0 +1,15 @@
+{
+  "id": "P020",
+  "model": "siglip2-so400m-patch14-384",
+  "model_revision": "e8e487298228002f3d8a82e0cd5c8ea9c567f57f",
+  "purpose": "Strong image-text encoder baseline on exactly the P015/P017 Mantis retrieval examples; not new data.",
+  "data_config": "configs/P015_lad_bridge.json",
+  "data_config_sha256": "806c79643fd687229fee94adfb941c7f71a4d1171d52a5ae8cd2ed7d05507195",
+  "image_batch_size": 16,
+  "precision": "float32",
+  "preprocessing": "Official model processor, raw captions, max_length64; no tuning or calibration.",
+  "permutations": "Encode images independently once, reorder scores for the same four cyclic permutations; intrinsic order invariance is not a new method.",
+  "comparison": "Paired exact-image clusters against both resolutions of P017 raw logits, official-code AGD and patch-only calibrated readout.",
+  "decision": "If a direct image-text encoder matches or exceeds patch readout, simple caption retrieval alone does not establish a useful LLM/VLM method advantage.",
+  "heldout_muir_used": false
+}

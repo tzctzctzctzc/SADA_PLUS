@@ -1,7 +1,7 @@
 {
   "as_of": "2026-09-17",
   "goal_status": "active",
-  "phase": "P014-P019完成；隔离方案被否定，patch读出保留为强基线候选",
+  "phase": "P020直接图文检索强基线；并审计LAD公式/实现",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -185,6 +185,18 @@
       "child_pid": 507888,
       "preregister_commit": "b51bf67",
       "analysis": "results/P019_backend_diagnostic.json"
+    },
+    "SigLIP2_download": {
+      "status": "completed",
+      "exitcode": 0,
+      "pid": 508061,
+      "model_revision": "e8e487298228002f3d8a82e0cd5c8ea9c567f57f",
+      "verification": "models/siglip2-so400m-patch14-384/verification.json"
+    },
+    "P020": {
+      "status": "preregistered",
+      "config": "configs/P020_siglip_retrieval.json",
+      "analysis": "results/P020_siglip_retrieval.json"
     }
   },
   "monitor": {
@@ -193,7 +205,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "Local automation gpu3 TOML inspected; active heartbeat every 20 minutes, silent on unchanged state"
   },
-  "next": "补足SigLIP2等直接图文检索强基线与真正独立数据，核查非边界/patch选层读出的已有方法；只有明确超出简单检索和现有LAD才形成新方案。不得将当前简单patch读出称创新或SOTA。",
+  "next": "完成SigLIP2与P017的配对比较；进一步核验默认repetition_penalty及论文概率混合和公开代码logit混合的差异。",
   "results": {
     "P001": {
       "n": 4,
