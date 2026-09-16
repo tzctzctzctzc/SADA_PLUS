@@ -1,7 +1,7 @@
 {
   "as_of": "2026-09-17",
   "goal_status": "active",
-  "phase": "P014运行：编码时隔离内容并保留来源结构",
+  "phase": "P014负结果已完成；补齐7B LAD读出校准强基线",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -149,7 +149,7 @@
       "analysis": "results/P013_cache_paths.json"
     },
     "P014": {
-      "status": "running",
+      "status": "completed",
       "config": "configs/P014_image_isolation.json",
       "n_records": 440,
       "analysis": "results/P014_image_isolation.json",
@@ -157,7 +157,8 @@
       "child_pid": 507047,
       "preregister_commit": "e2bb7aa",
       "log": "logs/P014_image_isolation.log",
-      "driver_log": "logs/P014_driver.log"
+      "driver_log": "logs/P014_driver.log",
+      "exitcode": 0
     }
   },
   "monitor": {
@@ -166,7 +167,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "Local automation gpu3 TOML inspected; active heartbeat every 20 minutes, silent on unchanged state"
   },
-  "next": "等待当前P014活进程完成，先审计full_mask与P011的数值一致性，再按预注册门槛判断结构保留是否值得扩大。",
+  "next": "P015沿P007冻结协议迁移7B，保持图像内容完整编码，检验内部检索与最终输出的差异；不把已有AGD当创新。",
   "results": {
     "P001": {
       "n": 4,
@@ -528,6 +529,26 @@
         ]
       },
       "limitations": "其余prefix包含视觉patch及end标记，非唯一自然路径证明。BF16拆分prefill与P011有3/88全文差异，微小精度变化不作收益。"
+    },
+    "P014": {
+      "analysis": "results/P014_image_isolation.json",
+      "n_records": 440,
+      "correct": {
+        "full_mask": 56,
+        "isolated": 22,
+        "isolated_labeled": 24,
+        "template": 42,
+        "skeleton": 23,
+        "baseline": 58,
+        "baseline_labeled": 59
+      },
+      "decision": "停止将当前隔离+template或skeleton作为涨点方法扩展；template只修复部分隔离损失。",
+      "mask_numerical_audit": {
+        "same_raw": 86,
+        "n": 88,
+        "max_candidate_score_error": 0.5
+      },
+      "limitations": "九个重复使用的图像簇；显式mask与原SDPA有2/88输出差异。内容隔离固定布局下成立，不涵盖改变图片尺寸。"
     }
   }
 }
