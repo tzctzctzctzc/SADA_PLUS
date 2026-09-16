@@ -96,6 +96,16 @@ def test_frames_complete_rejects_a_truncated_jpeg(tmp_path):
     assert not prepare_rq1_frames.frames_complete(output, 1)
 
 
+def test_prepare_video_rejects_an_active_aria_download(tmp_path):
+    video = tmp_path / "P01_01.MP4"
+    video.write_bytes(b"partial")
+    (tmp_path / "P01_01.MP4.aria2").write_bytes(b"progress")
+    video_id, count, error = prepare_rq1_frames.prepare_video(
+        "P01_01", [], tmp_path, tmp_path / "frames", 8
+    )
+    assert (video_id, count, error) == ("P01_01", 0, "video missing")
+
+
 def test_source_train_indices_excludes_validation_memberships():
     rows = [
         {

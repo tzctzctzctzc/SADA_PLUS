@@ -34,7 +34,11 @@ def prepare_video(video_id, rows, video_root, output_root, frame_count, force=Fa
     video = None
     for suffix in (".MP4", ".mp4"):
         candidate = Path(video_root) / (video_id + suffix)
-        if candidate.is_file() and candidate.stat().st_size:
+        if (
+            candidate.is_file()
+            and candidate.stat().st_size
+            and not Path(str(candidate) + ".aria2").exists()
+        ):
             video = candidate
             break
     if video is None:
