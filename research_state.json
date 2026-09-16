@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T05:59:26.439443+08:00",
+  "as_of": "2026-09-17T06:23:58.520169+08:00",
   "goal_status": "active",
-  "phase": "在独立ImageCoDe数据上检验注意力读出；先纠正解码规则和基线协议",
+  "phase": "独立ImageCoDe验证与强逐图基线对照；审核上下文标签，尚无创新成立",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -224,6 +224,33 @@
       "driver_pid": 509553,
       "dependency_pid": 509048,
       "exitcode_file": "runs/P023.exitcode"
+    },
+    "P024": {
+      "status": "completed",
+      "pid": 509674,
+      "exitcode": 0,
+      "analysis": "results/P024_pointwise.json",
+      "n_image_records": 96
+    },
+    "P025": {
+      "status": "waiting_for_live_P023",
+      "driver_pid": 509875,
+      "dependency_pid": 509553,
+      "config": "configs/P025_pointwise_imagecode.json",
+      "expected_images": 2960,
+      "exitcode_file": "runs/P025.exitcode",
+      "analysis": "results/P025_pointwise_imagecode.json",
+      "preregister_commit": "50c59c1"
+    },
+    "P026": {
+      "status": "waiting_for_live_P025",
+      "driver_pid": 510279,
+      "dependency_pid": 509875,
+      "config": "configs/P026_annotation_slices.json",
+      "exitcode_file": "runs/P026.exitcode",
+      "analysis": "results/P026_annotation_slices.json",
+      "preregister_commit": "941413e",
+      "uses_gpu": false
     }
   },
   "monitor": {
@@ -232,7 +259,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "Local automation gpu3 TOML inspected; active heartbeat every 20 minutes, silent on unchanged state"
   },
-  "next": "核验P023十图输入冒烟检查，启动依赖ImageCoDe下载的串行GPU3评测；比较纠正后的7B、LAD代码版、patch/密度校准与SigLIP2。若新数据优势消失，停止将旧19题收益作为方法线索。",
+  "next": "核验下载完成后的P023与P025串行GPU3实验；P026自动按作者正标注切片。先检验独立256题是否存在超出逐图评分的稳定优势，再决定是否保留patch方向或转向上下文证据问题。现代Qwen3-VL-Reranker仅已调研，尚未下载或运行。",
   "results": {
     "P001": {
       "n": 4,
@@ -798,6 +825,27 @@
       "rounded_argmax_mismatches": 0,
       "all_raw_bfloat16_representable": true,
       "interpretation": "六个设置18个真实GPU forward，processed分数精确重放；逆重复惩罚后回到BF16网格能精确恢复raw logits，未经舍入有两处并列答案被错误打破。"
+    },
+    "P024": {
+      "analysis": "results/P024_pointwise.json",
+      "correct": {
+        "matching": 44,
+        "caption_likelihood": 52,
+        "patch_native": 52,
+        "raw_native": 47
+      },
+      "n_permutations": 76,
+      "n_questions": 19,
+      "n_image_clusters": 15,
+      "interpretation": "同7B、同原生分辨率下，逐图描述条件似然52/76与patch52/76持平；差值簇区间[-21.875,17.045]个百分点。旧19题未证明超越简单同模型逐图基线。两种逐图评分无top ties。"
+    },
+    "P026_annotation_audit": {
+      "config": "configs/P026_annotation_slices.json",
+      "explicit_positive": 87,
+      "blank": 164,
+      "missing": 5,
+      "explicit_context_positive": 49,
+      "interpretation": "只按作者明确正标签切片，缺失、空白或无某代码不等于现象阴性；context也混合程度比较与跨帧指代，不能当不可逐图求解的真值。"
     }
   },
   "novelty_status": "仍无满足目标的新颖方法或SOTA；注意力校准、证据头与候选间判别性均有直接近邻。"

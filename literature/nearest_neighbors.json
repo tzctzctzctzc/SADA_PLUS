@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-17",
+  "as_of": "2026-09-17T06:23:58.520169+08:00",
   "status": "Novelty not established; generic ordinal binding amplification and syntax/content source separation are already covered by close neighbors",
   "records": [
     {
@@ -167,11 +167,64 @@
     },
     {
       "id": "ImageCoDe_ACL2022",
-      "url": "https://arxiv.org/abs/2203.15867",
+      "url": "https://arxiv.org/html/2203.15867v1",
       "code": "https://github.com/McGill-NLP/imagecode",
-      "evidence": "官方10图原版与2图simple版说明已读；固定GitHub 609f07611aed2599f946c30d730f40a41af1079b及HF b7b7a73dbc74b681b384048716232b243ad25a99。",
-      "overlap": "上下文相关的细粒度图像检索是已有任务；新评测本身不是创新。",
-      "unknown": "本轮论文只读摘要与官方任务说明，完整正文和ContextBLIP/NDCR基线仍需深入。"
+      "evidence": "已读§3数据构建、§4现象与§5基线：10图，视频原始时间顺序；同集负例训练、跨图Transformer与时间嵌入已有。context包括gradable描述与跨帧角色识别。",
+      "overlap": "上下文相关细粒度图像检索不是新任务；上下文正标签不自动证明跨图推理不可替代。",
+      "annotation": {
+        "path": "data/ImageCoDe/github/data/analysis/manual_annotation_valid.yaml",
+        "github_revision": "609f07611aed2599f946c30d730f40a41af1079b",
+        "blob_sha1": "692e3539c4708eeca785b8bee950e8df3c306be9",
+        "sha256": "39cfbd1cc81d3811bcb346bf4b84521ef1e8ae3641dcb1d05b397454d702b8a4",
+        "audit": "configs/P026_annotation_slices.json"
+      },
+      "unknown": "人工标注覆盖并非全部2302题；当前只使用明确正标注，未推断空白为负。"
+    },
+    {
+      "id": "NDCR_ACL2023",
+      "url": "https://arxiv.org/html/2305.02265v2",
+      "code": "https://github.com/YunxinLi/NDCR",
+      "evidence": "已读§3方法与§4主要结果、消融及限制：BART命题查询分解，CLIP视觉与OFA完整句状态，context Transformer、神经否定与合取门控。否定是MLP及KL间隔，不是严格逻辑。",
+      "overlap": "命题拆分、图间上下文融合与神经逻辑组合已有。",
+      "limitations": "test消融使用作者自标test*，不能和官方隐藏test混比较；源码尚未审计。"
+    },
+    {
+      "id": "ContextBLIP_FindingsACL2024",
+      "url": "https://arxiv.org/html/2405.19226v1",
+      "code": "https://github.com/LHL3341/ContextBLIP",
+      "evidence": "已读§1–4.7、限制及附录A/B/D：多层down adapter共享up adapter，ITM与最高attention的25%遮罩重建；预训练后ImageCoDe全模型微调20epoch，再冻结骨干训练2层上下文模块5epoch。",
+      "overlap": "细粒度视觉对齐与跨图context模块已有，注意力引导patch学习也已有。",
+      "reported_validation": {
+        "zero_shot_all": 30.6,
+        "zero_shot_video": 19.9,
+        "zero_shot_static": 77.0,
+        "finetuned_all": 38.5,
+        "finetuned_video": 28.7,
+        "finetuned_static": 81.2
+      },
+      "limitations": "本文附录Table15是全validation结果，当前256题pilot不得据此声称SOTA；Table4上下文模块消融24.4至23.4与视频口径数值一致，不能作为全体提升；未审源码/复现。"
+    },
+    {
+      "id": "PinPoint_CVPR2026",
+      "url": "https://github.com/pinterest/pinpoint-dataset",
+      "paper": "https://arxiv.org/abs/2603.04598",
+      "evidence": "已读官方README：Qwen2.5-VL-7B逐候选True/False评分范式；P024/P025采用自定固定提示，未完整复现PinPoint。",
+      "overlap": "逐图匹配属于基线，不能当本项目新方法。",
+      "unknown": "论文全文待读。"
+    },
+    {
+      "id": "Qwen3_VL_Reranker_2026",
+      "url": "https://arxiv.org/html/2601.04720v1",
+      "code": "https://github.com/QwenLM/Qwen3-VL-Embedding",
+      "model_card": "https://huggingface.co/Qwen/Qwen3-VL-Reranker-2B",
+      "evidence": "已读模型卡和报告架构、数据及§5.2：逐query-document二分类，sigmoid(logit_yes-logit_no)，检索专用训练。现代强基线候选。",
+      "implementation_status": "尚未下载模型或建立新环境；模型卡依赖torch2.8和transformers>=4.57，不得升级正在使用的main环境。"
+    },
+    {
+      "id": "LLM_Preferential_Consistency_2024",
+      "url": "https://arxiv.org/abs/2410.08851",
+      "evidence": "搜索摘要已确认包含transitivity/asymmetry/reversibility/IIA形式化，正文未读。",
+      "overlap": "仅诊断添加候选导致排序变化不是新贡献；不能直接把视觉上下文依赖都判为错误。"
     }
   ]
 }
