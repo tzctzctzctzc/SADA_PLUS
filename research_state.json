@@ -394,7 +394,8 @@
       "exitcode_file": "runs/P031.exitcode",
       "analysis": "results/P031_coral_transfer.json",
       "cpu_preflight": "runs/P031_coral_transfer/cpu_preflight.json",
-      "cpu_preflight_exitcode": 0
+      "cpu_preflight_exitcode": 0,
+      "input_fix": "text-only keeps literal original placeholders without malformed Product tags; no GPU scores existed"
     },
     "P032": {
       "status": "queued_waiting_for_P030",

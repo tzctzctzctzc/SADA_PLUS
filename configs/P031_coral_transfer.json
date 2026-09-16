@@ -27,7 +27,7 @@
   "backend": "sdpa",
   "pooling": "官方最终隐藏层的末token；经lm_head输入钩子取出，预检与hidden_states[-1]逐元素相同",
   "primary_scoring": "float32归一化和余弦；同时报告模型卡BF16归一化及点积，稳定并列维持原序",
-  "input_protocol": "在原指令的首次引用位置插入对应图，替换为Product编号；候选使用模型卡Represent the given product；无产品标题，不生成标题",
+  "input_protocol": "图像条件在原指令的首次引用位置插入对应图并替换为Product编号；纯文本条件原样保留<img1>/<img2>字面标记且不插图；候选使用模型卡Represent the given product；无产品标题，不生成标题",
   "ranking": "仅重排P030同一top20，21–50保持原样",
   "expected_embeddings_per_model": 1104,
   "primary_comparison": "coral/dual/float32_cosine minus base3b/dual/float32_cosine",

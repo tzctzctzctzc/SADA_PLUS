@@ -34,6 +34,8 @@ assert len(tasks)==cfg["expected_embeddings_per_model"]
 def message(task):
     if task["kind"]=="candidate":
         return [{"role":"user","content":[{"type":"text","text":"Represent the given product: "},{"type":"image"}]}]
+    if task["condition"]=="text_only":
+        return [{"role":"user","content":[{"type":"text","text":task["instruction"]}]}]
     # 参考图在指令中首次出现的位置插入，保持原有词语与来源编号。
     import re
     content=[];used=set();pos=0
