@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-17T06:23:58.520169+08:00",
+  "as_of": "2026-09-17T06:34:30.825708+08:00",
   "goal_status": "active",
   "phase": "独立ImageCoDe验证与强逐图基线对照；审核上下文标签，尚无创新成立",
   "scope": {
@@ -208,22 +208,29 @@
       "analysis": "results/P022_raw_score_validation.json"
     },
     "ImageCoDe_download": {
-      "status": "running",
+      "status": "completed",
       "driver_pid": 509048,
       "manifest": "literature/ImageCoDe_manifest.json",
-      "exitcode_file": "runs/ImageCoDe_download.exitcode"
+      "exitcode_file": "runs/ImageCoDe_download.exitcode",
+      "exitcode": 0,
+      "verification": "data/ImageCoDe/verification.json"
     },
     "P023": {
-      "status": "waiting_for_live_download",
+      "status": "running",
       "config": "configs/P023_imagecode.json",
       "expected_calibration": 40,
       "expected_evaluation": 256,
       "script": "scripts/run_P023.sh",
       "analysis": "results/P023_imagecode.json",
       "protocol_smoke": "results/P023_protocol_smoke.json",
-      "driver_pid": 509553,
+      "driver_pid": 510581,
       "dependency_pid": 509048,
-      "exitcode_file": "runs/P023.exitcode"
+      "exitcode_file": "runs/P023.exitcode",
+      "child_pid": 510618,
+      "attempt": 3,
+      "data_amendment": "results/P023_data_amendment.json",
+      "data_audit": "runs/P023_data/audit.json",
+      "amendment_commit": "477e0d6"
     },
     "P024": {
       "status": "completed",
@@ -234,8 +241,8 @@
     },
     "P025": {
       "status": "waiting_for_live_P023",
-      "driver_pid": 509875,
-      "dependency_pid": 509553,
+      "driver_pid": 510582,
+      "dependency_pid": 510581,
       "config": "configs/P025_pointwise_imagecode.json",
       "expected_images": 2960,
       "exitcode_file": "runs/P025.exitcode",
@@ -244,13 +251,41 @@
     },
     "P026": {
       "status": "waiting_for_live_P025",
-      "driver_pid": 510279,
-      "dependency_pid": 509875,
+      "driver_pid": 510583,
+      "dependency_pid": 510582,
       "config": "configs/P026_annotation_slices.json",
       "exitcode_file": "runs/P026.exitcode",
       "analysis": "results/P026_annotation_slices.json",
       "preregister_commit": "941413e",
-      "uses_gpu": false
+      "uses_gpu": false,
+      "amended_config_commit": "477e0d6"
+    },
+    "Qwen3_Reranker_download": {
+      "status": "completed",
+      "driver_pid": 510444,
+      "exitcode": 0,
+      "revision": "4bd860ac4f15ad1897a214615cccc700f8f71818",
+      "verification": "models/Qwen3-VL-Reranker-2B/verification.json"
+    },
+    "qwen3_env_setup": {
+      "status": "completed",
+      "driver_pid": 510445,
+      "exitcode": 0,
+      "environment": "envs/qwen3",
+      "freeze": "runs/qwen3_environment_freeze.txt",
+      "torch": "2.8.0+cu126",
+      "transformers": "4.57.1",
+      "validation": "pip check and CPU import succeeded; GPU compatibility to be exercised by P027"
+    },
+    "P027": {
+      "status": "waiting_for_live_P025",
+      "driver_pid": 510712,
+      "dependency_pid": 510582,
+      "config": "configs/P027_qwen3_imagecode.json",
+      "preregister_commit": "8a28018",
+      "exitcode_file": "runs/P027.exitcode",
+      "analysis": "results/P027_qwen3_imagecode.json",
+      "expected_records": 512
     }
   },
   "monitor": {
@@ -259,7 +294,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "Local automation gpu3 TOML inspected; active heartbeat every 20 minutes, silent on unchanged state"
   },
-  "next": "核验下载完成后的P023与P025串行GPU3实验；P026自动按作者正标注切片。先检验独立256题是否存在超出逐图评分的稳定优势，再决定是否保留patch方向或转向上下文证据问题。现代Qwen3-VL-Reranker仅已调研，尚未下载或运行。",
+  "next": "完成P023/P025独立ImageCoDe对照，P026正标注切片自动分析，P027官方Qwen3-VL-Reranker-2B在默认与同像素上限设置下串行补强。根据独立数据和强逐图基线作方向取舍；剩余392个验证源簇继续保留。",
   "results": {
     "P001": {
       "n": 4,
@@ -846,6 +881,14 @@
       "missing": 5,
       "explicit_context_positive": 49,
       "interpretation": "只按作者明确正标签切片，缺失、空白或无某代码不等于现象阴性；context也混合程度比较与跨帧指代，不能当不可逐图求解的真值。"
+    },
+    "P023_data_integrity": {
+      "audit": "runs/P023_data/audit.json",
+      "amendment": "results/P023_data_amendment.json",
+      "n_records": 296,
+      "n_images": 2960,
+      "n_calibration_eval_pixel_overlaps": 0,
+      "interpretation": "视频文件名是非连续源帧号，gold是数值排序后的0-9索引，已与官方代码核对。仅替换一个与验证图像重叠的同目标/同类别校准题，验证256题与人工标签切片完全不变，发生于任何P023推理前。"
     }
   },
   "novelty_status": "仍无满足目标的新颖方法或SOTA；注意力校准、证据头与候选间判别性均有直接近邻。"

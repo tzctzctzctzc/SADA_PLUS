@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-17T06:23:58.520169+08:00",
+  "as_of": "2026-09-17T06:34:30.825708+08:00",
   "status": "Novelty not established; generic ordinal binding amplification and syntax/content source separation are already covered by close neighbors",
   "records": [
     {
@@ -218,13 +218,15 @@
       "code": "https://github.com/QwenLM/Qwen3-VL-Embedding",
       "model_card": "https://huggingface.co/Qwen/Qwen3-VL-Reranker-2B",
       "evidence": "已读模型卡和报告架构、数据及§5.2：逐query-document二分类，sigmoid(logit_yes-logit_no)，检索专用训练。现代强基线候选。",
-      "implementation_status": "尚未下载模型或建立新环境；模型卡依赖torch2.8和transformers>=4.57，不得升级正在使用的main环境。"
+      "implementation_status": "固定模型rev 4bd860ac4f15ad1897a214615cccc700f8f71818已下载并校验；官方reranker源码rev393e2978d27852b0d0230d6994f37f9c15bed73c已审。独立envs/qwen3完成，P027已预注册并等待P025后仅GPU3执行。",
+      "source_audit": "保留官方yes-no权重差线性头及BF16 sigmoid；同时存储sigmoid前margin审计饱和并列。对官方图像加载异常转NULL的回退加入图token数断言，拒绝伪成功。"
     },
     {
       "id": "LLM_Preferential_Consistency_2024",
-      "url": "https://arxiv.org/abs/2410.08851",
-      "evidence": "搜索摘要已确认包含transitivity/asymmetry/reversibility/IIA形式化，正文未读。",
-      "overlap": "仅诊断添加候选导致排序变化不是新贡献；不能直接把视觉上下文依赖都判为错误。"
+      "url": "https://arxiv.org/html/2410.08851v1",
+      "evidence": "已读§2.1形式化、§2实验设置、§3.2–3.4与限制：MMLU四选项排序、删去选项的MED相似度、双序成对比较、传递性与反序一致性。",
+      "overlap": "仅诊断添加候选导致排序变化不是新贡献；不能直接把视觉上下文依赖都判为错误。",
+      "limitations": "偏好或MCQA候选删减不等于视觉证据删减；不能未经语义检查要求所有视觉context满足IIA。"
     }
   ]
 }
