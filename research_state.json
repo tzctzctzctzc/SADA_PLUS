@@ -1,7 +1,7 @@
 {
   "as_of": "2026-09-17",
   "goal_status": "active",
-  "phase": "已否定单纯 canonical-start 涨点方案；3B基线正在运行，Muir开发集和图像/选项双因素诊断排队",
+  "phase": "P004/P005均未见固定DTS收益；P006因素实验运行中；P007 LAD基线排队",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -24,7 +24,7 @@
     {
       "id": "H0",
       "statement": "基线原模型与公开 Delimiter Scaling 能在统一协议下得到可复核结果",
-      "status": "未运行"
+      "status": "原模型基线已复现到相近精度；固定DTS在3B/7B未见增益，完整调参方案尚未审计"
     },
     {
       "id": "H1",
@@ -71,26 +71,34 @@
     },
     "P004": {
       "pid": 502175,
-      "status": "running; 7B canonical condition complete; 3B baseline last verified live",
+      "status": "completed",
       "log": "logs/P004_driver.log",
-      "exitcode": "runs/P004.exitcode"
+      "exitcode": 0
     },
     "P005": {
       "pid": 502389,
-      "status": "queued on runs/gpu3.lock; inspect actual PID and child before action",
+      "status": "completed",
       "log": "logs/P005_driver.log",
-      "exitcode": "runs/P005.exitcode"
+      "exitcode": 0
     },
     "P006": {
       "pid": 502704,
-      "status": "queued on runs/gpu3.lock; inspect actual PID and child before action",
+      "status": "running, baseline complete; scale child verified through growing predictions",
       "log": "logs/P006_driver.log",
       "exitcode": "runs/P006.exitcode"
     },
     "LAD_source": {
-      "pid": 502784,
-      "status": "downloading; inspect process/log",
-      "log": "logs/fetch_lad_source.log"
+      "status": "completed",
+      "commit": "c704b9d93eb207652c0b60a5e2e83bcdcae01508",
+      "verified_files": 21
+    },
+    "P007": {
+      "pid": 503615,
+      "status": "queued; flock child 503616 verified",
+      "config": "configs/P007_lad_bridge.json",
+      "log": "logs/P007_driver.log",
+      "exitcode": "runs/P007.exitcode",
+      "preregister_commit": "1fa8019"
     }
   },
   "monitor": {
@@ -98,7 +106,7 @@
     "interval_minutes": 20,
     "gpu_queue": "All P002-P006 drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock"
   },
-  "next": "先核验P004/P005/P006真实PID和退出码，完成后分析结果，不重复启动活任务。P006先分清图像位置、选项字母和答案格式；只有明确机制才研究保留结构序号、去除语义干扰的干预。复现LAD作为新增近邻强基线；若证据不支持，应及时换思路。Muir保留集继续不用于调参。",
+  "next": "先分析P006位置/字母效应，再完成P007官方LAD代码迁移，区分边界和patch注意力；没有创新成立前不扩展到保留测试集",
   "results": {
     "P001": {
       "n": 4,
@@ -242,6 +250,17 @@
         "Repeated/shared images and post-hoc subset definition; exploratory p value is not confirmatory",
         "Need factorial image permutation and option permutation to distinguish source-index bias from answer-letter bias"
       ]
+    },
+    "P004_3b": {
+      "baseline_correct": 129,
+      "scale_correct": 128,
+      "n": 217
+    },
+    "P005_dev": {
+      "baseline_correct": 85,
+      "scale_correct": 84,
+      "n": 168,
+      "heldout_used": false
     }
   }
 }

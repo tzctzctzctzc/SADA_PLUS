@@ -1,0 +1,26 @@
+{
+  "scope": "CPU fp32 tiny decoder, grouped-query attention, multimodal rotary positions and masked keys",
+  "records": [
+    {
+      "masked": false,
+      "row_max_errors": [
+        3.725290298461914e-09,
+        3.725290298461914e-09,
+        3.725290298461914e-09,
+        3.725290298461914e-09
+      ],
+      "model_output_error": 0.0
+    },
+    {
+      "masked": true,
+      "row_max_errors": [
+        3.725290298461914e-09,
+        0.0,
+        3.725290298461914e-09,
+        3.725290298461914e-09
+      ],
+      "model_output_error": 0.0
+    }
+  ],
+  "passed": true
+}
