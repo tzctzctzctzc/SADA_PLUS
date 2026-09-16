@@ -1,0 +1,9 @@
+{
+  "id": "P018",
+  "scope": "Predeclared CPU controls after P015 signal and before inspecting P017 results; reused evaluation data, not confirmatory.",
+  "n_resamples": 1000,
+  "seed": 17018,
+  "unit": "calibration question, retaining four cyclic permutations",
+  "density": "Divide each image patch attention sum by its visual token count (product of Qwen grid_thw / spatial_merge_size^2), both in calibration and evaluation, before the unchanged top2 layer selection and prior adjustment.",
+  "motivation": "Under a uniform token-attention null, image mass is proportional to token count; this control checks sensitivity to changing native image token counts."
+}
