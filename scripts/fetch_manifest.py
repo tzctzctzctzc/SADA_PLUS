@@ -7,7 +7,7 @@ p=argparse.ArgumentParser();p.add_argument('--manifest',required=True);p.add_arg
 args=p.parse_args();dest=Path(args.destination).resolve();assert dest.is_relative_to(root)
 m=json.loads(Path(args.manifest).read_text());dest.mkdir(parents=True,exist_ok=True)
 (dest/'source_manifest.json').write_text(json.dumps(m,indent=2)+'\n')
-patterns=['*.json','*.jsonl','*.safetensors','*.txt','*.model','*.parquet','*.zip']
+patterns=['*.json','*.jsonl','*.safetensors','*.txt','*.model','*.parquet','*.zip','*.jinja']
 print('START',m['repository'],m['revision'],flush=True)
 snapshot_download(repo_id=m['repository'],repo_type=m['type'],revision=m['revision'],local_dir=dest,
  allow_patterns=patterns,max_workers=4,token=False)
