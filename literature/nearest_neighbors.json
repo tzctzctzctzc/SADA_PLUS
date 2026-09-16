@@ -55,6 +55,22 @@
       "url": "https://arxiv.org/html/2508.13744v1",
       "code": "https://github.com/yejipark-m/FOCUS",
       "overlap": "Cross-image leakage via per-image noise-controlled logit aggregation. Simple per-image ensembling not novel."
+    },
+    {
+      "id": "LAD_2026",
+      "url": "https://arxiv.org/html/2605.11591v1",
+      "code": "https://github.com/brightXian/LAD",
+      "overlap": "Very close: conditional source-position priors, cyclic image calibration, attention-aligned evidence versus biased logits. Must reproduce and distinguish any new binding/ordinal proposal. Author repository claims ICML2026; proceedings not verified here."
+    },
+    {
+      "id": "MIBench_EMNLP2024",
+      "url": "https://aclanthology.org/2024.emnlp-main.1250/",
+      "overlap": "Circular evaluation rotates correct option over A-D; option-order control is an established evaluation practice, not innovation."
+    },
+    {
+      "id": "CountingManifolds_2025",
+      "url": "https://transformer-circuits.pub/2025/linebreaks/index.html",
+      "overlap": "Potential cross-domain inspiration: separator-token row and column counting features. Search excerpt checked; full 30MB page not yet read. Not evidence of VLM ordinal encoding."
     }
   ]
 }

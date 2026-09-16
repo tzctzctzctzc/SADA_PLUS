@@ -1,0 +1,1 @@
+{"passed": true, "rows": 128, "base_questions": 8, "check": "every transformed gold option maps to the original target PIL image object; letters and target positions balanced per question"}

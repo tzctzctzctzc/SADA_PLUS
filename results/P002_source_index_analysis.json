@@ -1,0 +1,408 @@
+{
+  "n": 37,
+  "n_valid": 37,
+  "shift_to_lower_index": 17,
+  "shift_to_higher_index": 0,
+  "exploratory_binomial_p": 1.52587890625e-05,
+  "accuracy": {
+    "baseline": 0.6216216216216216,
+    "scale": 0.5675675675675675
+  },
+  "prediction_counts": {
+    "baseline": {
+      "3": 10,
+      "2": 12,
+      "1": 9,
+      "4": 6
+    },
+    "scale": {
+      "3": 5,
+      "2": 14,
+      "1": 17,
+      "4": 1
+    }
+  },
+  "gold_counts": {
+    "3": 11,
+    "2": 11,
+    "1": 10,
+    "4": 5
+  },
+  "limitations": [
+    "Source image order is confounded with option letter/order in these questions",
+    "Repeated/shared images and post-hoc subset definition; exploratory p value is not confirmatory",
+    "Need factorial image permutation and option permutation to distinguish source-index bias from answer-letter bias"
+  ],
+  "rows": [
+    {
+      "id": "xh_8",
+      "question": "Among <image>, <image> and <image>, which image shows the youngest person?",
+      "n_images": 3,
+      "baseline_index": 3,
+      "baseline_correct": true,
+      "scale_index": 3,
+      "scale_correct": true,
+      "gold_index": 3
+    },
+    {
+      "id": "xh_9",
+      "question": "Among <image>, <image> and <image>, which image shows the most natural scene or object?",
+      "n_images": 3,
+      "baseline_index": 3,
+      "baseline_correct": true,
+      "scale_index": 3,
+      "scale_correct": true,
+      "gold_index": 3
+    },
+    {
+      "id": "xh_10",
+      "question": "Among <image>, <image> and <image>, which image has the most light in it?",
+      "n_images": 3,
+      "baseline_index": 3,
+      "baseline_correct": true,
+      "scale_index": 3,
+      "scale_correct": true,
+      "gold_index": 3
+    },
+    {
+      "id": "xh_13",
+      "question": "Among <image>, <image> and <image>, which image shows a different mood of character from the others?",
+      "n_images": 3,
+      "baseline_index": 2,
+      "baseline_correct": true,
+      "scale_index": 2,
+      "scale_correct": true,
+      "gold_index": 2
+    },
+    {
+      "id": "xh_20",
+      "question": "Among <image>, <image> and <image>, which image shows a entrance of supermarket?",
+      "n_images": 3,
+      "baseline_index": 1,
+      "baseline_correct": true,
+      "scale_index": 1,
+      "scale_correct": true,
+      "gold_index": 1
+    },
+    {
+      "id": "xh_40",
+      "question": "For the objects depicted in <image>, <image> and <image>, if there is wind or some external force implemented on the object, which one is most likely to collapse?",
+      "n_images": 3,
+      "baseline_index": 1,
+      "baseline_correct": true,
+      "scale_index": 1,
+      "scale_correct": true,
+      "gold_index": 1
+    },
+    {
+      "id": "xh_42",
+      "question": "In <image>, <image> and <image>, which image shows solar eclipse?",
+      "n_images": 3,
+      "baseline_index": 1,
+      "baseline_correct": true,
+      "scale_index": 1,
+      "scale_correct": true,
+      "gold_index": 1
+    },
+    {
+      "id": "xh_44",
+      "question": "Among <image>, <image> and <image>, which image looks most natural and not synthesized?",
+      "n_images": 3,
+      "baseline_index": 3,
+      "baseline_correct": true,
+      "scale_index": 3,
+      "scale_correct": true,
+      "gold_index": 3
+    },
+    {
+      "id": "xh_45",
+      "question": "For animals depicted in <image>, <image> and <image>, which animal is different from others?",
+      "n_images": 3,
+      "baseline_index": 2,
+      "baseline_correct": true,
+      "scale_index": 2,
+      "scale_correct": true,
+      "gold_index": 2
+    },
+    {
+      "id": "m_13",
+      "question": "<image> <image> Which person in the image is more likely to bring more cultural influence to the internet?",
+      "n_images": 2,
+      "baseline_index": 1,
+      "baseline_correct": true,
+      "scale_index": 1,
+      "scale_correct": true,
+      "gold_index": 1
+    },
+    {
+      "id": "wc_43",
+      "question": "Which Zebra has only a single leg?",
+      "n_images": 4,
+      "baseline_index": 3,
+      "baseline_correct": false,
+      "scale_index": 1,
+      "scale_correct": false,
+      "gold_index": 2
+    },
+    {
+      "id": "wc_44",
+      "question": "Which image contains a stuffed action figure toy on the grass?",
+      "n_images": 4,
+      "baseline_index": 2,
+      "baseline_correct": true,
+      "scale_index": 1,
+      "scale_correct": false,
+      "gold_index": 2
+    },
+    {
+      "id": "wc_45",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A stop sign directs pedestrians as a train travels by with a dear on the grass'?",
+      "n_images": 4,
+      "baseline_index": 4,
+      "baseline_correct": true,
+      "scale_index": 4,
+      "scale_correct": true,
+      "gold_index": 4
+    },
+    {
+      "id": "wc_46",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A stuffed action figure toy laying down in the grass'?",
+      "n_images": 4,
+      "baseline_index": 1,
+      "baseline_correct": true,
+      "scale_index": 1,
+      "scale_correct": true,
+      "gold_index": 1
+    },
+    {
+      "id": "wc_47",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A child playing with a stuffed action figure toy in the grass'?",
+      "n_images": 4,
+      "baseline_index": 3,
+      "baseline_correct": true,
+      "scale_index": 2,
+      "scale_correct": false,
+      "gold_index": 3
+    },
+    {
+      "id": "wc_48",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A woman kissing in front of a kitchen counter'?",
+      "n_images": 4,
+      "baseline_index": 4,
+      "baseline_correct": true,
+      "scale_index": 2,
+      "scale_correct": false,
+      "gold_index": 4
+    },
+    {
+      "id": "wc_49",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'Woman making a heart sign in front of a kitchen counter'?",
+      "n_images": 4,
+      "baseline_index": 4,
+      "baseline_correct": true,
+      "scale_index": 2,
+      "scale_correct": false,
+      "gold_index": 4
+    },
+    {
+      "id": "wc_51",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A person typing on his laptop while laying in bed'?",
+      "n_images": 4,
+      "baseline_index": 1,
+      "baseline_correct": true,
+      "scale_index": 1,
+      "scale_correct": true,
+      "gold_index": 1
+    },
+    {
+      "id": "wc_55",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A small black dog playing with a soccer ball'?",
+      "n_images": 4,
+      "baseline_index": 2,
+      "baseline_correct": true,
+      "scale_index": 2,
+      "scale_correct": true,
+      "gold_index": 2
+    },
+    {
+      "id": "wc_56",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A small black dog with a newspaper in its mouth'?",
+      "n_images": 4,
+      "baseline_index": 3,
+      "baseline_correct": false,
+      "scale_index": 2,
+      "scale_correct": false,
+      "gold_index": 1
+    },
+    {
+      "id": "wc_57",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A small black dog with a newspaper in its mouth next to a potted plant'?",
+      "n_images": 4,
+      "baseline_index": 2,
+      "baseline_correct": false,
+      "scale_index": 1,
+      "scale_correct": false,
+      "gold_index": 4
+    },
+    {
+      "id": "wc_58",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A red bed suspended over a pile of luggage'?",
+      "n_images": 4,
+      "baseline_index": 2,
+      "baseline_correct": false,
+      "scale_index": 1,
+      "scale_correct": false,
+      "gold_index": 3
+    },
+    {
+      "id": "wc_60",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A demonic looking chucky like doll wearing a hat standing next to a white clock'?",
+      "n_images": 4,
+      "baseline_index": 2,
+      "baseline_correct": false,
+      "scale_index": 1,
+      "scale_correct": true,
+      "gold_index": 1
+    },
+    {
+      "id": "wc_61",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'Two people in an ocean playing with a yellow ball'?",
+      "n_images": 4,
+      "baseline_index": 2,
+      "baseline_correct": false,
+      "scale_index": 2,
+      "scale_correct": false,
+      "gold_index": 3
+    },
+    {
+      "id": "wc_62",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'Two people, a whale, and a dog playing with a yellow ball in the ocean'?",
+      "n_images": 4,
+      "baseline_index": 4,
+      "baseline_correct": false,
+      "scale_index": 2,
+      "scale_correct": true,
+      "gold_index": 2
+    },
+    {
+      "id": "wc_63",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A kitchen filled with wooden floors and a stove top oven, minus the vase on top of the table'?",
+      "n_images": 4,
+      "baseline_index": 1,
+      "baseline_correct": false,
+      "scale_index": 1,
+      "scale_correct": false,
+      "gold_index": 3
+    },
+    {
+      "id": "wc_64",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A desk with a black computer monitor on it'?",
+      "n_images": 4,
+      "baseline_index": 1,
+      "baseline_correct": true,
+      "scale_index": 1,
+      "scale_correct": true,
+      "gold_index": 1
+    },
+    {
+      "id": "wc_65",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'An empty kitchen filled with dishes and appliances, with a game show on TV'?",
+      "n_images": 4,
+      "baseline_index": 4,
+      "baseline_correct": false,
+      "scale_index": 3,
+      "scale_correct": true,
+      "gold_index": 3
+    },
+    {
+      "id": "wc_67",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A cat sits on a table surrounded by bowls of fruit'?",
+      "n_images": 4,
+      "baseline_index": 3,
+      "baseline_correct": false,
+      "scale_index": 2,
+      "scale_correct": false,
+      "gold_index": 1
+    },
+    {
+      "id": "wc_69",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A blonde woman crying while getting her hair styled in front of the mirror'?",
+      "n_images": 4,
+      "baseline_index": 1,
+      "baseline_correct": false,
+      "scale_index": 1,
+      "scale_correct": false,
+      "gold_index": 4
+    },
+    {
+      "id": "wc_71",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A police officer directing traffic in front of a yellow truck'?",
+      "n_images": 4,
+      "baseline_index": 3,
+      "baseline_correct": true,
+      "scale_index": 1,
+      "scale_correct": false,
+      "gold_index": 3
+    },
+    {
+      "id": "wc_73",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A small child cooking macaroni and cheese while holding a bottle of pepper'?",
+      "n_images": 4,
+      "baseline_index": 2,
+      "baseline_correct": true,
+      "scale_index": 1,
+      "scale_correct": false,
+      "gold_index": 2
+    },
+    {
+      "id": "wc_74",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A small child with a bird drawing on his shirt cooking macaroni and cheese while holding a bottle of pepper'?",
+      "n_images": 4,
+      "baseline_index": 2,
+      "baseline_correct": true,
+      "scale_index": 1,
+      "scale_correct": false,
+      "gold_index": 2
+    },
+    {
+      "id": "wc_76",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A zebra and lion standing by a plastic pool'?",
+      "n_images": 4,
+      "baseline_index": 3,
+      "baseline_correct": false,
+      "scale_index": 2,
+      "scale_correct": true,
+      "gold_index": 2
+    },
+    {
+      "id": "wc_78",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A stylish cow wearing a hat walks around a pen on a farm'?",
+      "n_images": 4,
+      "baseline_index": 2,
+      "baseline_correct": true,
+      "scale_index": 2,
+      "scale_correct": true,
+      "gold_index": 2
+    },
+    {
+      "id": "wc_81",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A man tries to stand on his surf board as a dolphin jumps out of the water'?",
+      "n_images": 4,
+      "baseline_index": 2,
+      "baseline_correct": false,
+      "scale_index": 2,
+      "scale_correct": false,
+      "gold_index": 3
+    },
+    {
+      "id": "wc_82",
+      "question": "<image> <image> <image> <image> Which image best depicts the caption 'A kitchen counter topped with ripe bananas and berries'?",
+      "n_images": 4,
+      "baseline_index": 4,
+      "baseline_correct": false,
+      "scale_index": 2,
+      "scale_correct": true,
+      "gold_index": 2
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "n": 217,
+  "baseline_correct": 149,
+  "canonical_start_correct": 143,
+  "gains": 9,
+  "losses": 15,
+  "mcnemar_exact_p": 0.30745625495910645,
+  "decision": "Reject first-boundary canonicalization as a standalone improving method under this protocol; retain as mechanistic negative control in P006."
+}
