@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/QwenLM/Qwen3-VL-Embedding",
+  "revision": "393e2978d27852b0d0230d6994f37f9c15bed73c",
+  "file": "src/models/qwen3_vl_reranker.py",
+  "source_url": "https://raw.githubusercontent.com/QwenLM/Qwen3-VL-Embedding/393e2978d27852b0d0230d6994f37f9c15bed73c/src/models/qwen3_vl_reranker.py",
+  "sha256": "7f55d5598d0e93585dcd9de7cad522756bb9eed7b1e783a66f8d53a1f7f47e6c"
+}

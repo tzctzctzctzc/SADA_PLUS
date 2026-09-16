@@ -1,0 +1,115 @@
+{
+  "repository": "Qwen/Qwen3-VL-Reranker-2B",
+  "revision": "4bd860ac4f15ad1897a214615cccc700f8f71818",
+  "type": "model",
+  "files": [
+    {
+      "path": ".gitattributes",
+      "size": 1570,
+      "lfs": null
+    },
+    {
+      "path": "1_LogitScore/config.json",
+      "size": 57,
+      "lfs": null
+    },
+    {
+      "path": "README.md",
+      "size": 13265,
+      "lfs": null
+    },
+    {
+      "path": "added_tokens.json",
+      "size": 707,
+      "lfs": null
+    },
+    {
+      "path": "additional_chat_templates/reranker.jinja",
+      "size": 2443,
+      "lfs": null
+    },
+    {
+      "path": "chat_template.jinja",
+      "size": 5292,
+      "lfs": null
+    },
+    {
+      "path": "config.json",
+      "size": 1652,
+      "lfs": null
+    },
+    {
+      "path": "config_sentence_transformers.json",
+      "size": 294,
+      "lfs": null
+    },
+    {
+      "path": "generation_config.json",
+      "size": 213,
+      "lfs": null
+    },
+    {
+      "path": "merges.txt",
+      "size": 1671853,
+      "lfs": null
+    },
+    {
+      "path": "model.safetensors",
+      "size": 4255140312,
+      "lfs": {
+        "sha256": "466ec01961061e9d7f804b4fb1625fb6f406106cd1567e026096d4736fa9d5b9",
+        "size": 4255140312,
+        "pointerSize": 135
+      }
+    },
+    {
+      "path": "modules.json",
+      "size": 280,
+      "lfs": null
+    },
+    {
+      "path": "preprocessor_config.json",
+      "size": 628,
+      "lfs": null
+    },
+    {
+      "path": "scripts/qwen3_vl_reranker.py",
+      "size": 10873,
+      "lfs": null
+    },
+    {
+      "path": "sentence_bert_config.json",
+      "size": 756,
+      "lfs": null
+    },
+    {
+      "path": "special_tokens_map.json",
+      "size": 613,
+      "lfs": null
+    },
+    {
+      "path": "tokenizer.json",
+      "size": 11422654,
+      "lfs": {
+        "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+        "size": 11422654,
+        "pointerSize": 133
+      }
+    },
+    {
+      "path": "tokenizer_config.json",
+      "size": 5445,
+      "lfs": null
+    },
+    {
+      "path": "video_preprocessor_config.json",
+      "size": 817,
+      "lfs": null
+    },
+    {
+      "path": "vocab.json",
+      "size": 2776833,
+      "lfs": null
+    }
+  ]
+}
