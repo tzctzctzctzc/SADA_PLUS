@@ -1,0 +1,9 @@
+{
+  "scope": "CPU fp32 tiny decoder, mixed rotary axes; restore both normalized boundaries should recover every non-boundary state",
+  "clean_both_nonboundary_max_error": 0.0,
+  "scale_nonboundary_max_change": 0.3821502923965454,
+  "rotated_state_effect": 0.10191702842712402,
+  "after_context_max_error": 0.0,
+  "hooks_remaining": 0,
+  "passed": true
+}
