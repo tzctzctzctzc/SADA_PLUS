@@ -1,4 +1,4 @@
-"""P007: official-code LAD calibration transferred to disjoint Mantis groups."""
+"""Official-code LAD calibration transferred to disjoint Mantis groups."""
 import argparse, hashlib, json, os, re, time
 from pathlib import Path
 from contextlib import nullcontext
@@ -17,13 +17,14 @@ assert torch.cuda.device_count()==1
 p=argparse.ArgumentParser()
 p.add_argument('--mode',choices=['baseline','scale'],required=True)
 p.add_argument('--output',required=True)
+p.add_argument('--config',default='configs/P007_lad_bridge.json')
 args=p.parse_args()
 out=Path(args.output).resolve(); assert out.is_relative_to(ROOT)
 out.mkdir(parents=True,exist_ok=True)
-cfg=json.loads((ROOT/'configs/P007_lad_bridge.json').read_text())
+cfg=json.loads((ROOT/args.config).read_text())
 layers=list(range(cfg['layer_range'][0],cfg['layer_range'][1]+1))
 model_path=ROOT/'models'/cfg['model']
-ds=load_dataset('parquet',data_files={'test':[str(p) for p in (ROOT/'data/Mantis-Eval').rglob('*.parquet')]},split='test')
+ds=load_dataset('parquet',data_files={'test':sorted(str(p) for p in (ROOT/'data/Mantis-Eval').rglob('*.parquet'))},split='test')
 processor=AutoProcessor.from_pretrained(model_path,local_files_only=True,padding_side='left')
 model=Qwen2_5_VLForConditionalGeneration.from_pretrained(model_path,local_files_only=True,
     torch_dtype='auto',device_map={'':0},attn_implementation='eager').eval()
@@ -81,7 +82,7 @@ with torch.inference_mode(),rp.open('a',buffering=1) as f:
                 'mass_max_error':float(np.max(np.abs(np.array(masses[-1])-probe.scores[layer].numpy())))})
     if first:
         audit={'mode':args.mode,'id':idx,'dtype':str(model.dtype),'input_tokens':len(ids),'errors':errs,
-            'scope':'Actual Qwen3B BF16 eager last-query attention; experiment uses full eager values regardless of reconstruction error.'}
+            'scope':cfg['model']+' BF16 eager last-query attention; experiment uses full eager values regardless of reconstruction error.'}
         (out/'attention_audit.json').write_text(json.dumps(audit,indent=2));first=False
     scores=gen.scores[0][0,candidate_ids].float().cpu().tolist()
     raw=processor.tokenizer.decode(gen.sequences[0,len(ids):],skip_special_tokens=True)

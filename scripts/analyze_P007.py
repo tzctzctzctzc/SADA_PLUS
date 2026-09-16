@@ -1,13 +1,15 @@
-import sys,json
+import sys,json,argparse
 from pathlib import Path
 from collections import Counter
 import numpy as np
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src'))
 from lad_bridge import official_lad_functions
-F=official_lad_functions();cfg=json.loads(Path('configs/P007_lad_bridge.json').read_text())
+parser=argparse.ArgumentParser();parser.add_argument('--config',default='configs/P007_lad_bridge.json')
+args=parser.parse_args()
+F=official_lad_functions();cfg=json.loads(Path(args.config).read_text());tag=cfg['id']
 data={}
 for mode in cfg['modes']:
-    root=Path('runs/P007_lad_'+mode)
+    root=Path('runs/'+tag+'_lad_'+mode)
     assert json.loads((root/'summary.json').read_text())['complete']
     data[mode]=[json.loads(l) for l in (root/'predictions.jsonl').read_text().splitlines()]
 cal={}
@@ -71,6 +73,6 @@ for mode in cfg['modes']:
     report['attention_correct_logits_wrong']=sum(r['predictions']['attention_calibrated']==r['gold'] and r['predictions']['logits']!=r['gold'] for r in rr)
     report['logits_correct_attention_wrong']=sum(r['predictions']['attention_calibrated']!=r['gold'] and r['predictions']['logits']==r['gold'] for r in rr)
     summary['models'][mode]=report
-Path('results/P007_lad_bridge.json').write_text(json.dumps(summary,indent=2))
-Path('runs/P007_lad_predictions.json').write_text(json.dumps(records,indent=2))
+Path('results/'+tag+'_lad_bridge.json').write_text(json.dumps(summary,indent=2))
+Path('runs/'+tag+'_lad_predictions.json').write_text(json.dumps(records,indent=2))
 print(json.dumps(summary,indent=2))

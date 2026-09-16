@@ -1,0 +1,332 @@
+{
+  "id": "P015",
+  "purpose": "Transfer the frozen P007 official-code LAD/AGD protocol to 7B and test whether attribution readout is a useful strong baseline after P014 content-isolation failure; not a novel method.",
+  "model": "Qwen2.5-VL-7B-Instruct",
+  "modes": [
+    "baseline",
+    "scale"
+  ],
+  "image_size": [
+    336,
+    336
+  ],
+  "layer_range": [
+    13,
+    27
+  ],
+  "topk": 2,
+  "sharpen_power": 5,
+  "calibration": [
+    {
+      "id": "wc_82",
+      "index": 196,
+      "caption": "A kitchen counter topped with ripe bananas and berries",
+      "image_hashes": [
+        "acafc1a3c889aac1b6db141b0fe09bc8abd19ff032c7c7ec1ad7e69791b810db",
+        "ae7f17e9cbc81a4da35cc670e82a5062072ce8a6977ca83dd1d8846cebfd6915",
+        "4c72511eb98989198f1ef2081a4f9c22b48787aea7ac632b313e44238ece5ca8",
+        "040e20edbbd9af042e949d9d6f0ca1a66eaafb02f976e5353d4b932aa9f39d52"
+      ]
+    },
+    {
+      "id": "wc_58",
+      "index": 181,
+      "caption": "A red bed suspended over a pile of luggage",
+      "image_hashes": [
+        "e1cc9bff060f66defdf50849e55d071b048d0a09a77d08c4394274ee3c829d77",
+        "b0561debeea2236a9497694954ce54c5c63dcbe7f387ee5c18beee0923f518f9",
+        "59bc74fd7f8f5f3d126e0504d0ebc09812b88b91e39bf092802b68ff73909e54",
+        "f1a8983a0621770a0ed3b02d11d3e73601a186151c50c9ac6ef9d2f2eab6d568"
+      ]
+    },
+    {
+      "id": "wc_74",
+      "index": 192,
+      "caption": "A small child with a bird drawing on his shirt cooking macaroni and cheese while holding a bottle of pepper",
+      "image_hashes": [
+        "caac354cd960227d8bd221846c203508a03491813195977692db4e5988e1b93a",
+        "63950093419051afc717d8287dc6cc27e44ccd64ee199db09a80acd1ddbffda3",
+        "b925799cb779d7d7c36d3219911f71db48eaa48e535a998ecc30ebe52e1b6538",
+        "a269a43fc7e33cb653a392d11c91dd9e672486456f72f95f76ced274398f1a29"
+      ]
+    },
+    {
+      "id": "wc_60",
+      "index": 182,
+      "caption": "A demonic looking chucky like doll wearing a hat standing next to a white clock",
+      "image_hashes": [
+        "39e55813d434a5b03be89bfc7353b891ee8d5acfb497f14c3cf4543937b1be00",
+        "31faf669252c75bb29fb0e56b19ce7eb1af830355a75e98b29755e4acf62d8dc",
+        "21402fa00b8fc6d9913ee360db349eccfa6ede18b92beab5254ba41395be9f06",
+        "d83152cff0c329e4130e89ed2490dd8fbf795cc8dafed69142ad804b34652168"
+      ]
+    },
+    {
+      "id": "wc_51",
+      "index": 176,
+      "caption": "A person typing on his laptop while laying in bed",
+      "image_hashes": [
+        "e5ebd137c454ef8b78ee9f1bae657af974178e952d96e59e9bcaf82e032c221e",
+        "e11bcee585b04a9d405272633f7eb4d0e8847c1a2698a4a7f22fea67870c0f79",
+        "9e66a4148e63e3cbea2645371cd278178ff64d2f71aab4921eb3aef4dcbf6a24",
+        "83af970079ad45ab5fbdb65d1134db10600bcb990446a44f0029ee56b8f07cf8"
+      ]
+    }
+  ],
+  "evaluation": [
+    {
+      "id": "wc_45",
+      "index": 171,
+      "caption": "A stop sign directs pedestrians as a train travels by with a dear on the grass",
+      "image_hashes": [
+        "646e7b85a2096f97b489faed2b9df06b14cf3e12a8e4c7c3d834ce6342a7eb5b",
+        "6d6996c801ff2af52cefd081a06de968e8fd8bc3851be0db43ec2a2c23bbf0be",
+        "6682dd1b6ea6b667a1deaf2b2e6b97c92f4f707d0117c2d315ca4243f59eedd0",
+        "6a065a3c2c56e1612698b9147bcc0dba5c02b1b71b4d312ca44296a477d4efa0"
+      ]
+    },
+    {
+      "id": "wc_46",
+      "index": 172,
+      "caption": "A stuffed action figure toy laying down in the grass",
+      "image_hashes": [
+        "68cbf9b4ed400153ade565d95215b2840c89b0fb669133b9f5d54b2b18a132df",
+        "5ebd74088e6f4f7b1b2581e4832c3ed5a0649b1255d1f16c4a9090bf02eb44e1",
+        "d4a2fbb6a370fc2247af710a34fabe41c8715a4f86c5d64039bafccb9e457665",
+        "50504d9b2577ff2e39c12c1e46cc6cfae2ab233be769783dafe34f8ca1c11db1"
+      ]
+    },
+    {
+      "id": "wc_47",
+      "index": 173,
+      "caption": "A child playing with a stuffed action figure toy in the grass",
+      "image_hashes": [
+        "68cbf9b4ed400153ade565d95215b2840c89b0fb669133b9f5d54b2b18a132df",
+        "39a6ef8e0b37fc7b2d783b06d11463c3c521c10f2f0fc3dafe6f1c7285a7e85a",
+        "b39e68a81f2c6f6dd4d28d3c3ffb8e40f54211ca09de15286d59e592fce0ccb1",
+        "5b685d232384c770d83a9482998fe8ca7446d47988fb4051167d10118e3cc625"
+      ]
+    },
+    {
+      "id": "wc_48",
+      "index": 174,
+      "caption": "A woman kissing in front of a kitchen counter",
+      "image_hashes": [
+        "7b091886d1db60692875b80ce9d5d116728e4f96f9cedadf2eff518a8c373c55",
+        "1b0927a19538f0204b8526e6eda3970c599d25754a2c6b7a89921e0aac9f6d28",
+        "b04a32c901f32a22334735a061ac4301de384867211986f924d14be397ad8ea3",
+        "a66e891769d6751e6aaaea76b1b6cc5d434e70b40baf07afba0898449117d357"
+      ]
+    },
+    {
+      "id": "wc_49",
+      "index": 175,
+      "caption": "Woman making a heart sign in front of a kitchen counter",
+      "image_hashes": [
+        "05268dfb1ff021209d621ed6d0a7b09983d7b7f922f51665629310fef27d99b6",
+        "f9db945a97aef443328f68bdfc3125de7e3411d6b806ae8aa822147455de966c",
+        "a66e891769d6751e6aaaea76b1b6cc5d434e70b40baf07afba0898449117d357",
+        "d93252110ca7456bc44024c947a32906086cb6d4c643261381cad48fc3c933fe"
+      ]
+    },
+    {
+      "id": "wc_55",
+      "index": 178,
+      "caption": "A small black dog playing with a soccer ball",
+      "image_hashes": [
+        "bf0bbbe03b234770cf5e50d343648cf955e6e663a4a7975b91b31191971d1d00",
+        "aa47c7fefde4e0d7f2513fd298a6d3994905751c058fd5ad3d56a7deafe364ae",
+        "7bb2875fcd3b0fbf31d176bc56b46259398126306c9b34a161d6b60bfe333ef0",
+        "aa655a8c0e4165349ffdc3541b4890aa9879b489a1734a3e54ae912b98434d34"
+      ]
+    },
+    {
+      "id": "wc_56",
+      "index": 179,
+      "caption": "A small black dog with a newspaper in its mouth",
+      "image_hashes": [
+        "6cd0556177defc4d12188a077d5d47e1be9bc7fd7ac19486de7da154f0be28e8",
+        "30b4f621c5ad802e7b74395dbf77905576b86d5191bd125d7f0a63b536ece327",
+        "2d9beeeaa5c13aab5bf05f4e3ff5e8d4817d84fa62e53ebc932f13ad817595b5",
+        "aa47c7fefde4e0d7f2513fd298a6d3994905751c058fd5ad3d56a7deafe364ae"
+      ]
+    },
+    {
+      "id": "wc_57",
+      "index": 180,
+      "caption": "A small black dog with a newspaper in its mouth next to a potted plant",
+      "image_hashes": [
+        "6cd0556177defc4d12188a077d5d47e1be9bc7fd7ac19486de7da154f0be28e8",
+        "3c78e9587d206f374cc2a0f29ceccc07851ad9f0a7ec668163ca913f8e00312d",
+        "24abe020e377533894f081ceb4aed6d1f495a4f3037efd5ccc16aa42a0978787",
+        "fffde8af013926da5da0b6f33a390346b2c96ac9fe6c13212f183f2123ce2bad"
+      ]
+    },
+    {
+      "id": "wc_61",
+      "index": 183,
+      "caption": "Two people in an ocean playing with a yellow ball",
+      "image_hashes": [
+        "b93a7b8690f782969fe20e4013a61c5623b799f33c709e68364b912ff24be77a",
+        "5038cd26c5b278af8a3c44a2d2c7b87cecfafb04766b6697696614b377900a06",
+        "bc47066dd556fd62a947d3579fa28e51a295c116bb882fdbee5ef6d402d404ea",
+        "e7d518d815b33524f525e06d034d6eb16c3fbc1727268407abe1f74f71a834f1"
+      ]
+    },
+    {
+      "id": "wc_62",
+      "index": 184,
+      "caption": "Two people, a whale, and a dog playing with a yellow ball in the ocean",
+      "image_hashes": [
+        "98ac120692659ff98fb9321716b7984bd2a0f011bfc3212aa8a4b5e9dda2c050",
+        "a41e7e294e467351abd1da411cd6a0bae8fdffdc0094333175013d693290f121",
+        "965eab9372856f71ea93fe1da4dca7418d15298367a0412750467a6fe5508a84",
+        "bd9444674beb832e961867eaa2cd6a150dd9adc0c05aa37bef7f05b127e6eab1"
+      ]
+    },
+    {
+      "id": "wc_63",
+      "index": 185,
+      "caption": "A kitchen filled with wooden floors and a stove top oven, minus the vase on top of the table",
+      "image_hashes": [
+        "020305047e217c9d744e51daa6fec51a46cf9c79cde190bb4aaa94b1180f4581",
+        "faa1c77e4f4d5d9a08d1dc0d85a00d4c193d650f5a6d23b51a7670c8042050ff",
+        "750bbfbfc2b1610c0fe701fdd3711b8c46994f3a768bf7d1199c8a4875cae487",
+        "274627602592c88ecf93a1471ea5c8a2a72f7516efe3e51274a6e49e9eb9239c"
+      ]
+    },
+    {
+      "id": "wc_64",
+      "index": 186,
+      "caption": "A desk with a black computer monitor on it",
+      "image_hashes": [
+        "c724fef005a777b793fe2195f4bd12e9ff3efdf728e21eb538431747511cadd7",
+        "b402e0968925302c4b1455c6e6ee379542af0fc7019c7218bf296f3075ec880b",
+        "63cd4d4ef0c889147700cacee2f3ae550193c3a2aff94c76516f2d3071e4b625",
+        "8723be42cccfa5b2c2308d16e3f68e10a82934b410684cd2be6a5c1b5a17cbe8"
+      ]
+    },
+    {
+      "id": "wc_65",
+      "index": 187,
+      "caption": "An empty kitchen filled with dishes and appliances, with a game show on TV",
+      "image_hashes": [
+        "a69cf9efbc3ae6b1e56f812e58b0397901213aebc219a203c9ca65408b3b379f",
+        "100a55b0ba7157b782b113b9e64e87ee094491719478a22f8510713d04d80c6b",
+        "b4613feaf0a9f011c3a72900109104ebf7e763a3181a9d8c6b1109fbc4c46108",
+        "dbc886ab32231389825c860c4ff9133026144ef52e7fde63d46d2380f5c494f0"
+      ]
+    },
+    {
+      "id": "wc_67",
+      "index": 188,
+      "caption": "A cat sits on a table surrounded by bowls of fruit",
+      "image_hashes": [
+        "7fd79e046a129b5f9a659aabcae49e87fecb5bd13c0afa208631a440f7b84458",
+        "0aed908fd15503d7814c9cba93d1e4dc4aed072679a854a43fd47ee4758b3574",
+        "f995bcb4adfff6785f5c4c89e507bb84c96213254b1d1e640145fc03acf897ba",
+        "354554224e0b8c6d2e713c5105e925cfc35aab79148095cc072ca8b4101ece94"
+      ]
+    },
+    {
+      "id": "wc_69",
+      "index": 189,
+      "caption": "A blonde woman crying while getting her hair styled in front of the mirror",
+      "image_hashes": [
+        "ad51a0b81653af64316dde4554f0a51b4251d605cc7867c5cee137a9e156b5a4",
+        "9f8ea32d202ae3fa87272dd2d3f72407749da2e0b9ec7cf9cfdbe2595ad7a664",
+        "60d350e7389f3b2e76705fcfd5eab31032e769df3a7b1aea4113e9146ab6af34",
+        "386812f8ad36819c4b742cf6b0597d6174b453ffc7083423be93bd7cba681930"
+      ]
+    },
+    {
+      "id": "wc_71",
+      "index": 190,
+      "caption": "A police officer directing traffic in front of a yellow truck",
+      "image_hashes": [
+        "82638ecada3b6b956044634fa08e0d2ac63986db4968f2e0ff4ea40994825aa3",
+        "65b8a948f2c68f9cadfd34b5bf7b8d2d3ae7b1d9d0c0461c3f4a3ce5667b988f",
+        "dd7c442b813128b5d9eeecec2094c760948d4fe3a451bde5af714bea6ae964b1",
+        "6519188a70810d20e70c2fbfbe021b50505ec0c7c349514177d398d27019abc8"
+      ]
+    },
+    {
+      "id": "wc_76",
+      "index": 193,
+      "caption": "A zebra and lion standing by a plastic pool",
+      "image_hashes": [
+        "fd5f57bf58b2703095748f4f8009866f52c3d553d90db34a71af9a1ea87bd9cb",
+        "c672b13625e6d05b6c99ea8e1a94f5b821c7043283564f7207271dddc6e1210a",
+        "c21248c477212c05fe74aaba6811350de49988aaf2b14153520a02c3a0cf60ea",
+        "d50b0006beb299cea6d8dc74de9c5c597923a1304661a4445429da96c7c8dcbf"
+      ]
+    },
+    {
+      "id": "wc_78",
+      "index": 194,
+      "caption": "A stylish cow wearing a hat walks around a pen on a farm",
+      "image_hashes": [
+        "ce3c2921ccf09c117cb6ce1d61ee390f19fd4cfc6c6a437a71665487abe9c00e",
+        "8fa8879daade2b31a75a468a93cd60524e859276751a5b9e5fc7b9b065e50520",
+        "6384ec6798b604978775bd443874381f24288614c5a3886cca1202aa2bbcc73e",
+        "5e4c4d1e8246200aaf63d6959c297fe81807e80e390f6e7a45011c1ff3520762"
+      ]
+    },
+    {
+      "id": "wc_81",
+      "index": 195,
+      "caption": "A man tries to stand on his surf board as a dolphin jumps out of the water",
+      "image_hashes": [
+        "77ee7d088d21428b3659ab2cc85878884b9d9915f1f6c7cb2229cc0b546360cc",
+        "0c209c6410499c207af2215f6be298739069813bd95738b39519fde05f90283f",
+        "b7a6f12d58ae6eeba34648422985b563dc465daff185641ae95d87095d0e9e12",
+        "89ec92fe8a4881f9fb65d17bf14bf20ba3e40a7f9d27c8488118b226cddd03e9"
+      ]
+    }
+  ],
+  "permutations": [
+    [
+      0,
+      1,
+      2,
+      3
+    ],
+    [
+      1,
+      2,
+      3,
+      0
+    ],
+    [
+      2,
+      3,
+      0,
+      1
+    ],
+    [
+      3,
+      0,
+      1,
+      2
+    ]
+  ],
+  "calibration_selection": "Five hash-ranked image-disjoint groups outside P006; calibration and evaluation share no exact encoded image SHA256",
+  "official_commit": "c704b9d93eb207652c0b60a5e2e83bcdcae01508",
+  "generation": "greedy, first processed generation score including model default repetition penalty",
+  "attentions": "last-query rows, vision_start+patches+vision_end; per-part attribution also saved",
+  "comparisons": [
+    "candidate-logit argmax",
+    "raw attention",
+    "prior-corrected attention",
+    "official AGD code",
+    "patch-only attention diagnostic",
+    "cross-mode calibration diagnostic"
+  ],
+  "statistics": "Base questions and shared-image components are units; permutations are dependent. Small post-hoc Mantis subset; exploratory.",
+  "real_model_validation": "First calibration forward per mode checks recomputed last row against full eager attention; retain errors and official scores.",
+  "layer_policy": "Last 15 decoder layers, exactly the same layer-count rule as P007; top2 and sharpen_power5 unchanged. No evaluation-set selection.",
+  "previous_config_sha256": "43f214bb7d53f074f4a2f0b4eaa36be8213a8a04e552fdba23bbcc708e001eba",
+  "heldout_muir_used": false,
+  "decision": "Use as a strong baseline and diagnose attention-correct/logit-wrong cases. No innovation or SOTA claim from reproducing AGD.",
+  "n_records_per_mode": 96
+}

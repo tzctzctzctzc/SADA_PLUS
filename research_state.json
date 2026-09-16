@@ -159,6 +159,12 @@
       "log": "logs/P014_image_isolation.log",
       "driver_log": "logs/P014_driver.log",
       "exitcode": 0
+    },
+    "P015": {
+      "status": "preregistered",
+      "config": "configs/P015_lad_bridge.json",
+      "n_records": 192,
+      "analysis": "results/P015_lad_bridge.json"
     }
   },
   "monitor": {
