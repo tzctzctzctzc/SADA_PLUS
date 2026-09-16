@@ -6,7 +6,9 @@ import numpy as np
 from scipy.stats import rankdata
 ROOT=Path("/vepfs/vlms/1");assert Path.cwd().resolve()==ROOT
 cfg=json.loads(Path("configs/P032_reference_contrast.json").read_text())
-source_config=Path(cfg["source_config"])\nassert hashlib.sha256(source_config.read_bytes()).hexdigest()==cfg["source_config_sha256"]\np030=json.loads(source_config.read_text())
+source_config=Path(cfg["source_config"])
+assert hashlib.sha256(source_config.read_bytes()).hexdigest()==cfg["source_config_sha256"]
+p030=json.loads(source_config.read_text())
 raw=Path("runs/P030_pinpoint_references/predictions.jsonl")
 preds=[json.loads(x) for x in raw.read_text().splitlines()]
 assert len(preds)==len({x["key"] for x in preds})==p030["expected_records"]
