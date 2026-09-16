@@ -1,0 +1,20 @@
+{
+  "id": "P024",
+  "model": "Qwen2.5-VL-7B-Instruct",
+  "data_config": "configs/P017_lad_resolution.json",
+  "data_config_sha256": "92dfa06953a734af5afa5831400f0fde8f22635fc8a41a749f381b69d7fa8308",
+  "min_pixels": 200704,
+  "max_pixels": 1605632,
+  "matching_prompt": "Does the image match the following description? Answer True or False only.\nDescription: {caption}\nAnswer:",
+  "caption_prompt": "Describe this image.",
+  "metrics": [
+    "19-question accuracy",
+    "paired image-cluster CI versus P017/P021 and SigLIP2"
+  ],
+  "scope": "Two established pointwise scoring paradigms on the same frozen backbone and Mantis questions. New prompts are explicit adaptations, not PinPoint reproduction. No prompt sweep or calibration.",
+  "limits": [
+    "Repeatedly used exploration questions, not independent data.",
+    "One-image scores cannot use cross-image context.",
+    "Different scoring prompts from the listwise baseline; any gain is a baseline result, not a mechanism proof."
+  ]
+}
