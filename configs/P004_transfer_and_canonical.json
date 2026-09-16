@@ -1,0 +1,40 @@
+{
+  "id": "P004",
+  "date": "2026-09-17",
+  "purpose": "Reproduce the published Qwen2.5-VL-3B example and assess the untuned canonical-start intervention on the exploratory Mantis benchmark",
+  "matrix": [
+    {
+      "model": "Qwen2.5-VL-7B-Instruct",
+      "mode": "canonical_start"
+    },
+    {
+      "model": "Qwen2.5-VL-3B-Instruct",
+      "mode": "baseline"
+    },
+    {
+      "model": "Qwen2.5-VL-3B-Instruct",
+      "mode": "scale"
+    }
+  ],
+  "dataset": "Mantis-Eval official 217",
+  "seed": 17,
+  "max_pixels": 1605632,
+  "dtype": "bfloat16",
+  "scaling": {
+    "scale": 8,
+    "layers": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "canonical_start": "Copy first vision-start attention-normalized representation into later vision-start positions at every layer; preserve rotary positions; leave vision-end and ordinary tokens intact.",
+  "metrics": [
+    "accuracy",
+    "paired gains/losses",
+    "generation truncation",
+    "runtime and memory"
+  ],
+  "interpretation": "This is exploratory mechanism evaluation, not proof of novelty or held-out confirmation. Canonicalization is not advanced if correctness collapses. Full multi-benchmark confirmation still required."
+}

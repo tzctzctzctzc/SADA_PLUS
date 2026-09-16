@@ -7,6 +7,10 @@ def boundary_intervention(model, input_ids, mode):
         with delimiter_intervention(model, input_ids, mode):
             yield
         return
+    if mode in ("scale_start","scale_end"):
+        with delimiter_intervention(model, input_ids, "scale", token_kind=mode.removeprefix("scale_")):
+            yield
+        return
     kind = mode.removeprefix("canonical_")
     assert kind in ("start", "end")
     token_id = getattr(model.config, "vision_" + kind + "_token_id")
