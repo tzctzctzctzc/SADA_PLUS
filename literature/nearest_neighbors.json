@@ -297,6 +297,28 @@
       "evidence": "已读§3–4.1：属性schema发现、伪目标属性编辑、exact-match属性分数与caption余弦线性融合，再由文本LLM逐项0–10打分；融合权重用训练子集网格搜索。",
       "overlap": "属性显式化后与全局得分融合、caption空间重排已有直接近邻。",
       "limits": "GPT-4.1和text-embedding-3-large；未复现；无需据其报告结果认定本地SOTA。"
+    },
+    {
+      "id": "VCD_2311_16922",
+      "url": "https://arxiv.org/html/2311.16922",
+      "code": "https://github.com/DAMO-NLP-SG/VCD",
+      "evidence": "已读§3：生成时使用(1+alpha)乘真实图条件logit减alpha乘视觉扰动条件logit，并用真实条件概率设置plausibility约束。",
+      "overlap": "P032的二分类log-odds公式直接继承其alpha=1形式；潜在新意只可能来自多参考检索的错配来源负控制及其验证。",
+      "limits": "VCD是生成解码且扰动同一图；P032替换第二参考图，会同时改变语义与输入分布，不能直接作因果解释。"
+    },
+    {
+      "id": "ContextualCalibration_ICML2021",
+      "url": "https://proceedings.mlr.press/v139/zhao21c.html",
+      "evidence": "用content-free输入估计提示对答案的先验偏置，再学习校准参数使该输入上的答案分布均匀。",
+      "overlap": "从真实输入分数中消除无信息控制条件响应已有成熟先例。",
+      "limits": "文本少样本分类，不涉及多参考图来源绑定或候选排序。"
+    },
+    {
+      "id": "PMIDC_EMNLP2021",
+      "url": "https://aclanthology.org/2021.emnlp-main.564/",
+      "evidence": "Domain Conditional PMI按任务域中的答案先验重加权候选答案，缓解surface-form competition。",
+      "overlap": "条件分数减去域先验log分数与P032负控制差分存在数学近邻。",
+      "limits": "答案字符串概率的文本任务；错配视觉参考不是域先验的无偏估计。"
     }
   ]
 }

@@ -1,0 +1,32 @@
+{
+  "id": "P032",
+  "purpose": "探索错配第二参考图能否作为负控制，校准多参考二分类重排分数",
+  "source_experiment": "P030",
+  "evidence_status": "exploratory_on_development_cohort",
+  "alpha": 1,
+  "primary_score": "rcr_alpha1 = 2 * margin(labelled_dual) - margin(labelled_sham)",
+  "secondary_score": "additive_residual = margin(labelled_single) + margin(labelled_dual) - margin(labelled_sham)",
+  "primary_comparison": "rcr_alpha1 minus labelled_dual on canonical-set AP@10",
+  "mechanism_prediction": "dual-minus-sham margin should be larger for labelled positives than explicit negatives",
+  "derivation": "For binary True/False logits, VCD with alpha=1 induces adjusted log-odds 2*m_true_view-m_negative_control_view.",
+  "ranking": "stable rerank of the same frozen top20; ranks 21-50 unchanged",
+  "bootstrap": {
+    "unit": "exact-RGB-connected reference component",
+    "replicates": 5000,
+    "seed": 17032
+  },
+  "confirmatory_gate": "Only if the fixed primary score improves pilot AP@10 and mechanism direction agrees; then preregister untouched reserved reference components before any new scores.",
+  "novelty_boundary": [
+    "Visual Contrastive Decoding already uses (1+alpha) logits from an original image minus alpha logits from a distorted image for generation.",
+    "Contextual calibration and PMI-style scoring already subtract content-free/domain-conditioned priors.",
+    "P032 tests a task-specific negative-control construction for multi-reference retrieval; it is not yet a contribution."
+  ],
+  "limits": [
+    "One sham reference per query gives a noisy estimate of nuisance response.",
+    "The sham assignment couples reference groups, so intervals are descriptive.",
+    "Candidates can recur across queries; reference-component bootstrap does not remove every candidate-level dependence.",
+    "The PinPoint pilot contains 48 selected reference components and is not a full benchmark evaluation."
+  ],
+  "source_config": "configs/P030_pinpoint_references.json",
+  "source_config_sha256": "ea6c0191464a12dcbb5c6b634554f55cb4d0a1633f9ad0027b373be8312eab44"
+}
