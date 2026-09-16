@@ -1,0 +1,6 @@
+{
+  "passed": true,
+  "fp32_split_prefill_max_error": 0.0,
+  "hybrid_slots_exact": true,
+  "source_snapshots_unchanged": true
+}

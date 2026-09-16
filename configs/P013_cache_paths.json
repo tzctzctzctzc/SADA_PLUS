@@ -1,0 +1,209 @@
+{
+  "date": "2026-09-17",
+  "model": "Qwen2.5-VL-7B-Instruct",
+  "max_pixels": 1605632,
+  "max_new_tokens": 16,
+  "factorial": {
+    "ids": [
+      "wc_45",
+      "wc_46",
+      "wc_47",
+      "wc_49",
+      "wc_55",
+      "wc_56",
+      "wc_61",
+      "wc_62",
+      "wc_63",
+      "wc_78",
+      "wc_81"
+    ],
+    "image_permutations": [
+      [
+        0,
+        1,
+        2,
+        3
+      ],
+      [
+        1,
+        2,
+        3,
+        0
+      ],
+      [
+        2,
+        3,
+        0,
+        1
+      ],
+      [
+        3,
+        0,
+        1,
+        2
+      ]
+    ],
+    "option_permutations": [
+      [
+        0,
+        1,
+        2,
+        3
+      ],
+      [
+        1,
+        2,
+        3,
+        0
+      ]
+    ]
+  },
+  "n_base_questions": 11,
+  "n_samples": 88,
+  "image_clusters": {
+    "wc_45": "wc_45",
+    "wc_46": "wc_47",
+    "wc_47": "wc_47",
+    "wc_49": "wc_49",
+    "wc_55": "wc_56",
+    "wc_56": "wc_56",
+    "wc_61": "wc_61",
+    "wc_62": "wc_62",
+    "wc_63": "wc_63",
+    "wc_78": "wc_78",
+    "wc_81": "wc_81"
+  },
+  "n_image_clusters": 9,
+  "id": "P013",
+  "purpose": "Separate start-KV readout from effects propagated into the rest of the image prefix; a causal diagnostic, not a cache reuse method",
+  "shifts": [
+    0,
+    1,
+    3
+  ],
+  "conditions": [
+    {
+      "id": "baseline_cached",
+      "part": "baseline",
+      "shift": null
+    },
+    {
+      "id": "full:0",
+      "part": "full",
+      "shift": 0
+    },
+    {
+      "id": "start_only:0",
+      "part": "start_only",
+      "shift": 0
+    },
+    {
+      "id": "other_prefix:0",
+      "part": "other_prefix",
+      "shift": 0
+    },
+    {
+      "id": "full:1",
+      "part": "full",
+      "shift": 1
+    },
+    {
+      "id": "start_only:1",
+      "part": "start_only",
+      "shift": 1
+    },
+    {
+      "id": "other_prefix:1",
+      "part": "other_prefix",
+      "shift": 1
+    },
+    {
+      "id": "full:3",
+      "part": "full",
+      "shift": 3
+    },
+    {
+      "id": "start_only:3",
+      "part": "start_only",
+      "shift": 3
+    },
+    {
+      "id": "other_prefix:3",
+      "part": "other_prefix",
+      "shift": 3
+    }
+  ],
+  "source_states": {
+    "wc_45": {
+      "donor_id": "wc_82",
+      "path": "runs/P011_geometry_transport/caches/f6cdcd29cc6996952e50110c2d8e1926e10c7a5a91888be18ce4e687da4e62e4.pt",
+      "sha256": "1d33f0499f04acabbf32a458fce1b377fc46d866d5fd9f60d74f52e18901b43b"
+    },
+    "wc_46": {
+      "donor_id": "wc_58",
+      "path": "runs/P011_geometry_transport/caches/68ba7ea397345010edd2d646ee29d0b5e9058fc4c30098edb3d9fa3ee6c4b4c0.pt",
+      "sha256": "90a59a0b2698fdaab24348ec31bff641415a2a540f4c448b1d55eb03c382faa4"
+    },
+    "wc_47": {
+      "donor_id": "wc_74",
+      "path": "runs/P011_geometry_transport/caches/ffe315b83a448e66b5315e875bb9fad330fb3e57adece1b8c2b7edfe8e8b9638.pt",
+      "sha256": "21158130a720b3805944b13a1d3b94169399ac17afe661cf94122a2e21ec7d4c"
+    },
+    "wc_49": {
+      "donor_id": "wc_60",
+      "path": "runs/P011_geometry_transport/caches/4a23fcf769fa2937284f1eb62fb38d6fd16554f92bab6019dd90496ed7895649.pt",
+      "sha256": "2510a4013f122db3bb32c16170d7894c553b59d79bd6e452f5ed8943c6b17a41"
+    },
+    "wc_55": {
+      "donor_id": "wc_51",
+      "path": "runs/P011_geometry_transport/caches/1e0d26f2f4075f093dbf8d0a167eef66a833622228bec84fd855614188a71809.pt",
+      "sha256": "81943b96e1adb8b215467cecec144a72bf9bf0fbc8f8f71093f75dbb645fd0e1"
+    },
+    "wc_56": {
+      "donor_id": "wc_82",
+      "path": "runs/P011_geometry_transport/caches/f6cdcd29cc6996952e50110c2d8e1926e10c7a5a91888be18ce4e687da4e62e4.pt",
+      "sha256": "1d33f0499f04acabbf32a458fce1b377fc46d866d5fd9f60d74f52e18901b43b"
+    },
+    "wc_61": {
+      "donor_id": "wc_58",
+      "path": "runs/P011_geometry_transport/caches/68ba7ea397345010edd2d646ee29d0b5e9058fc4c30098edb3d9fa3ee6c4b4c0.pt",
+      "sha256": "90a59a0b2698fdaab24348ec31bff641415a2a540f4c448b1d55eb03c382faa4"
+    },
+    "wc_62": {
+      "donor_id": "wc_74",
+      "path": "runs/P011_geometry_transport/caches/ffe315b83a448e66b5315e875bb9fad330fb3e57adece1b8c2b7edfe8e8b9638.pt",
+      "sha256": "21158130a720b3805944b13a1d3b94169399ac17afe661cf94122a2e21ec7d4c"
+    },
+    "wc_63": {
+      "donor_id": "wc_60",
+      "path": "runs/P011_geometry_transport/caches/4a23fcf769fa2937284f1eb62fb38d6fd16554f92bab6019dd90496ed7895649.pt",
+      "sha256": "2510a4013f122db3bb32c16170d7894c553b59d79bd6e452f5ed8943c6b17a41"
+    },
+    "wc_78": {
+      "donor_id": "wc_51",
+      "path": "runs/P011_geometry_transport/caches/1e0d26f2f4075f093dbf8d0a167eef66a833622228bec84fd855614188a71809.pt",
+      "sha256": "81943b96e1adb8b215467cecec144a72bf9bf0fbc8f8f71093f75dbb645fd0e1"
+    },
+    "wc_81": {
+      "donor_id": "wc_82",
+      "path": "runs/P011_geometry_transport/caches/f6cdcd29cc6996952e50110c2d8e1926e10c7a5a91888be18ce4e687da4e62e4.pt",
+      "sha256": "1d33f0499f04acabbf32a458fce1b377fc46d866d5fd9f60d74f52e18901b43b"
+    }
+  },
+  "n_records": 880,
+  "predictions": {
+    "start_only": "If source identity acts mainly through direct boundary lookup, editing only start K/V should reproduce directional shifts.",
+    "other_prefix": "If identity is propagated into non-start cached states during prefill, restoring natural start K/V afterward should preserve directional shifts."
+  },
+  "controls": [
+    "CPU fp32 full versus split-prefill equivalence and exact hybrid slot checks",
+    "Cached baseline and full interventions compared with every corresponding P011 raw generation and candidate score",
+    "No uniform-geometry versus matched-geometry extension: fixed square448 source states only"
+  ],
+  "limitations": [
+    "Same eleven questions as P011; a new intervention, not new data.",
+    "Non-start prefix includes image patches AND end delimiters; it cannot alone localize propagation to patches.",
+    "Hybrid caches are artificial; causal effects do not establish a naturally exclusive path.",
+    "Kamera already studies readout versus conditioning for cross-chunk cache reuse; this experiment concerns source-index interpretation, not a novelty claim."
+  ]
+}
