@@ -1,0 +1,824 @@
+{
+  "id": "P012",
+  "scope": "Post-hoc diagnostic on frozen P006; exact finite 4x4 protocol distribution, not neural PID estimator reproduction",
+  "theorem": {
+    "code": "Y=(Z-R-C) mod K, independent uniform R,C and fixed Z",
+    "encoded_target": {
+      "H_Y_bits": 2.0,
+      "I_Y_image_order_bits": 0.0,
+      "I_Y_option_order_bits": 0.0,
+      "I_Y_joint_order_bits": 2.0,
+      "net_synergy_bits": 2.0,
+      "nonnegative_PID_synergy_bounds_bits": [
+        2.0,
+        2.0
+      ]
+    },
+    "canonical_target": {
+      "H_Y_bits": -0.0,
+      "I_Y_image_order_bits": 0.0,
+      "I_Y_option_order_bits": 0.0,
+      "I_Y_joint_order_bits": 0.0,
+      "net_synergy_bits": 0.0,
+      "nonnegative_PID_synergy_bounds_bits": [
+        0.0,
+        0.0
+      ]
+    },
+    "meaning": "Purely representational cooperation reaches log2(K) although image set and requested semantic entity are fixed; the same is true for a consistently wrong entity."
+  },
+  "modes": {
+    "baseline": {
+      "wc_48": {
+        "n": 16,
+        "correct": 16,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 2.0,
+          "I_Y_image_order_bits": 0.0,
+          "I_Y_option_order_bits": 0.0,
+          "I_Y_joint_order_bits": 2.0,
+          "net_synergy_bits": 2.0,
+          "nonnegative_PID_synergy_bounds_bits": [
+            2.0,
+            2.0
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": -0.0,
+          "I_Y_image_order_bits": 0.0,
+          "I_Y_option_order_bits": 0.0,
+          "I_Y_joint_order_bits": 0.0,
+          "net_synergy_bits": 0.0,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.0,
+            0.0
+          ]
+        },
+        "canonical_predictions": {
+          "3": 16
+        }
+      },
+      "wc_57": {
+        "n": 16,
+        "correct": 4,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.9772170014624826,
+          "I_Y_image_order_bits": 0.10221700146248258,
+          "I_Y_option_order_bits": 0.6493974703476995,
+          "I_Y_joint_order_bits": 1.977217001462483,
+          "net_synergy_bits": 1.225602529652301,
+          "nonnegative_PID_synergy_bounds_bits": [
+            1.225602529652301,
+            1.3278195311147836
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 1.1216407621868583,
+          "I_Y_image_order_bits": 0.9188212310720751,
+          "I_Y_option_order_bits": 0.13818216884250845,
+          "I_Y_joint_order_bits": 1.1216407621868587,
+          "net_synergy_bits": 0.06463736227227512,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.06463736227227512,
+            0.20281953111478357
+          ]
+        },
+        "canonical_predictions": {
+          "1": 11,
+          "3": 4,
+          "0": 1
+        }
+      },
+      "wc_64": {
+        "n": 16,
+        "correct": 11,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.7961796919474975,
+          "I_Y_image_order_bits": 0.34336016083271437,
+          "I_Y_option_order_bits": 0.46836016083271437,
+          "I_Y_joint_order_bits": 1.796179691947497,
+          "net_synergy_bits": 0.9844593702820683,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.9844593702820683,
+            1.3278195311147827
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 1.3716407621868583,
+          "I_Y_image_order_bits": 0.7466407621868583,
+          "I_Y_option_order_bits": 0.38818216884250845,
+          "I_Y_joint_order_bits": 1.3716407621868587,
+          "net_synergy_bits": 0.236817831157492,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.236817831157492,
+            0.6250000000000004
+          ]
+        },
+        "canonical_predictions": {
+          "1": 2,
+          "3": 1,
+          "0": 11,
+          "2": 2
+        }
+      },
+      "wc_65": {
+        "n": 16,
+        "correct": 8,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.6697367178034825,
+          "I_Y_image_order_bits": 0.41973671780348276,
+          "I_Y_option_order_bits": 0.7169171866886996,
+          "I_Y_joint_order_bits": 1.6697367178034828,
+          "net_synergy_bits": 0.5330828133113004,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.5330828133113004,
+            0.9528195311147831
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 1.7028195311147831,
+          "I_Y_image_order_bits": 0.5778195311147831,
+          "I_Y_option_order_bits": 0.4221804688852169,
+          "I_Y_joint_order_bits": 1.7028195311147831,
+          "net_synergy_bits": 0.7028195311147831,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.7028195311147831,
+            1.125
+          ]
+        },
+        "canonical_predictions": {
+          "2": 8,
+          "3": 4,
+          "0": 1,
+          "1": 3
+        }
+      },
+      "wc_67": {
+        "n": 16,
+        "correct": 2,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.954434002924965,
+          "I_Y_image_order_bits": 0.20443400292496516,
+          "I_Y_option_order_bits": 0.20443400292496516,
+          "I_Y_joint_order_bits": 1.9544340029249652,
+          "net_synergy_bits": 1.5455659970750348,
+          "nonnegative_PID_synergy_bounds_bits": [
+            1.5455659970750348,
+            1.75
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 0.5435644431995964,
+          "I_Y_image_order_bits": 0.2935644431995965,
+          "I_Y_option_order_bits": 0.13792538097003026,
+          "I_Y_joint_order_bits": 0.5435644431995961,
+          "net_synergy_bits": 0.11207461902996929,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.11207461902996929,
+            0.24999999999999956
+          ]
+        },
+        "canonical_predictions": {
+          "2": 14,
+          "0": 2
+        }
+      },
+      "wc_69": {
+        "n": 16,
+        "correct": 0,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 2.0,
+          "I_Y_image_order_bits": 0.0,
+          "I_Y_option_order_bits": 0.0,
+          "I_Y_joint_order_bits": 2.0,
+          "net_synergy_bits": 2.0,
+          "nonnegative_PID_synergy_bounds_bits": [
+            2.0,
+            2.0
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": -0.0,
+          "I_Y_image_order_bits": 0.0,
+          "I_Y_option_order_bits": 0.0,
+          "I_Y_joint_order_bits": 0.0,
+          "net_synergy_bits": 0.0,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.0,
+            0.0
+          ]
+        },
+        "canonical_predictions": {
+          "0": 16
+        }
+      },
+      "wc_71": {
+        "n": 16,
+        "correct": 14,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.954434002924965,
+          "I_Y_image_order_bits": 0.20443400292496516,
+          "I_Y_option_order_bits": 0.20443400292496516,
+          "I_Y_joint_order_bits": 1.9544340029249652,
+          "net_synergy_bits": 1.5455659970750348,
+          "nonnegative_PID_synergy_bounds_bits": [
+            1.5455659970750348,
+            1.75
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 0.5435644431995964,
+          "I_Y_image_order_bits": 0.2935644431995965,
+          "I_Y_option_order_bits": 0.13792538097003026,
+          "I_Y_joint_order_bits": 0.5435644431995961,
+          "net_synergy_bits": 0.11207461902996929,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.11207461902996929,
+            0.24999999999999956
+          ]
+        },
+        "canonical_predictions": {
+          "2": 14,
+          "0": 2
+        }
+      },
+      "wc_76": {
+        "n": 16,
+        "correct": 0,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 2.0,
+          "I_Y_image_order_bits": 0.0,
+          "I_Y_option_order_bits": 0.0,
+          "I_Y_joint_order_bits": 2.0,
+          "net_synergy_bits": 2.0,
+          "nonnegative_PID_synergy_bounds_bits": [
+            2.0,
+            2.0
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": -0.0,
+          "I_Y_image_order_bits": 0.0,
+          "I_Y_option_order_bits": 0.0,
+          "I_Y_joint_order_bits": 0.0,
+          "net_synergy_bits": 0.0,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.0,
+            0.0
+          ]
+        },
+        "canonical_predictions": {
+          "2": 16
+        }
+      }
+    },
+    "scale": {
+      "wc_48": {
+        "n": 16,
+        "correct": 6,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.8496017527145814,
+          "I_Y_image_order_bits": 0.27178222159979804,
+          "I_Y_option_order_bits": 0.896782221599798,
+          "I_Y_joint_order_bits": 1.8496017527145812,
+          "net_synergy_bits": 0.6810373095149851,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.6810373095149851,
+            0.9528195311147831
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 1.6774212838293647,
+          "I_Y_image_order_bits": 0.8024212838293647,
+          "I_Y_option_order_bits": 0.30242128382936473,
+          "I_Y_joint_order_bits": 1.6774212838293643,
+          "net_synergy_bits": 0.5725787161706348,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.5725787161706348,
+            0.8749999999999996
+          ]
+        },
+        "canonical_predictions": {
+          "1": 1,
+          "0": 2,
+          "2": 7,
+          "3": 6
+        }
+      },
+      "wc_57": {
+        "n": 16,
+        "correct": 5,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.8496017527145814,
+          "I_Y_image_order_bits": 0.39678222159979804,
+          "I_Y_option_order_bits": 0.8189626904850149,
+          "I_Y_joint_order_bits": 1.8496017527145812,
+          "net_synergy_bits": 0.6338568406297682,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.6338568406297682,
+            1.0306390622295662
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 1.579434002924965,
+          "I_Y_image_order_bits": 0.7987949406953989,
+          "I_Y_option_order_bits": 0.37661447181018204,
+          "I_Y_joint_order_bits": 1.5794340029249652,
+          "net_synergy_bits": 0.4040245904193842,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.4040245904193842,
+            0.7806390622295662
+          ]
+        },
+        "canonical_predictions": {
+          "0": 6,
+          "3": 5,
+          "1": 5
+        }
+      },
+      "wc_64": {
+        "n": 16,
+        "correct": 8,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.7028195311147831,
+          "I_Y_image_order_bits": 0.5471804688852169,
+          "I_Y_option_order_bits": 0.5778195311147831,
+          "I_Y_joint_order_bits": 1.7028195311147831,
+          "net_synergy_bits": 0.5778195311147831,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.5778195311147831,
+            1.125
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 1.75,
+          "I_Y_image_order_bits": 0.5471804688852169,
+          "I_Y_option_order_bits": 0.5,
+          "I_Y_joint_order_bits": 1.75,
+          "net_synergy_bits": 0.7028195311147831,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.7028195311147831,
+            1.2028195311147831
+          ]
+        },
+        "canonical_predictions": {
+          "0": 8,
+          "3": 2,
+          "1": 4,
+          "2": 2
+        }
+      },
+      "wc_65": {
+        "n": 16,
+        "correct": 5,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.7489992230622806,
+          "I_Y_image_order_bits": 0.6711796919474975,
+          "I_Y_option_order_bits": 0.7655406297179308,
+          "I_Y_joint_order_bits": 1.748999223062281,
+          "net_synergy_bits": 0.31227890139685277,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.31227890139685277,
+            0.9834585933443503
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 1.954434002924965,
+          "I_Y_image_order_bits": 0.501614471810182,
+          "I_Y_option_order_bits": 0.45443400292496516,
+          "I_Y_joint_order_bits": 1.9544340029249652,
+          "net_synergy_bits": 0.998385528189818,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.998385528189818,
+            1.4528195311147831
+          ]
+        },
+        "canonical_predictions": {
+          "2": 5,
+          "0": 3,
+          "3": 3,
+          "1": 5
+        }
+      },
+      "wc_67": {
+        "n": 16,
+        "correct": 3,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.5435644431995963,
+          "I_Y_image_order_bits": 0.29356444319959607,
+          "I_Y_option_order_bits": 0.3879253809700298,
+          "I_Y_joint_order_bits": 1.543564443199596,
+          "net_synergy_bits": 0.8620746190299702,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.8620746190299702,
+            1.1556390622295662
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 1.8496017527145814,
+          "I_Y_image_order_bits": 0.9746017527145812,
+          "I_Y_option_order_bits": 0.34960175271458116,
+          "I_Y_joint_order_bits": 1.8496017527145812,
+          "net_synergy_bits": 0.5253982472854188,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.5253982472854188,
+            0.875
+          ]
+        },
+        "canonical_predictions": {
+          "1": 4,
+          "3": 2,
+          "2": 7,
+          "0": 3
+        }
+      },
+      "wc_69": {
+        "n": 16,
+        "correct": 3,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.6774212838293647,
+          "I_Y_image_order_bits": 0.3967822215997985,
+          "I_Y_option_order_bits": 0.3967822215997985,
+          "I_Y_joint_order_bits": 1.6774212838293643,
+          "net_synergy_bits": 0.8838568406297673,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.8838568406297673,
+            1.2806390622295658
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 1.5016144718101818,
+          "I_Y_image_order_bits": 0.5487949406953989,
+          "I_Y_option_order_bits": 0.501614471810182,
+          "I_Y_joint_order_bits": 1.501614471810182,
+          "net_synergy_bits": 0.4512050593046011,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.4512050593046011,
+            0.9528195311147831
+          ]
+        },
+        "canonical_predictions": {
+          "0": 10,
+          "2": 2,
+          "3": 3,
+          "1": 1
+        }
+      },
+      "wc_71": {
+        "n": 16,
+        "correct": 6,
+        "invalid": 1,
+        "encoded_target": {
+          "H_Y_bits": 1.875,
+          "I_Y_image_order_bits": 0.4221804688852169,
+          "I_Y_option_order_bits": 0.7665414066556502,
+          "I_Y_joint_order_bits": 1.875,
+          "net_synergy_bits": 0.6862781244591329,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.6862781244591329,
+            1.1084585933443498
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 2.007856063692049,
+          "I_Y_image_order_bits": 1.0243974703476995,
+          "I_Y_option_order_bits": 0.5078560636920493,
+          "I_Y_joint_order_bits": 2.0078560636920493,
+          "net_synergy_bits": 0.47560252965230054,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.47560252965230054,
+            0.9834585933443498
+          ]
+        },
+        "canonical_predictions": {
+          "1": 5,
+          "0": 3,
+          "3": 1,
+          "-1": 1,
+          "2": 6
+        }
+      },
+      "wc_76": {
+        "n": 16,
+        "correct": 6,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.9772170014624826,
+          "I_Y_image_order_bits": 0.10221700146248258,
+          "I_Y_option_order_bits": 0.4772170014624826,
+          "I_Y_joint_order_bits": 1.977217001462483,
+          "net_synergy_bits": 1.3977829985375179,
+          "nonnegative_PID_synergy_bounds_bits": [
+            1.3977829985375179,
+            1.5000000000000004
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 0.954434002924965,
+          "I_Y_image_order_bits": 0.7044340029249652,
+          "I_Y_option_order_bits": 0.048794940695398914,
+          "I_Y_joint_order_bits": 0.9544340029249652,
+          "net_synergy_bits": 0.20120505930460109,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.20120505930460109,
+            0.25
+          ]
+        },
+        "canonical_predictions": {
+          "1": 6,
+          "2": 10
+        }
+      }
+    },
+    "canonical_start": {
+      "wc_48": {
+        "n": 16,
+        "correct": 7,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.7028195311147831,
+          "I_Y_image_order_bits": 0.25,
+          "I_Y_option_order_bits": 0.4528195311147831,
+          "I_Y_joint_order_bits": 1.7028195311147831,
+          "net_synergy_bits": 1.0,
+          "nonnegative_PID_synergy_bounds_bits": [
+            1.0,
+            1.25
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 1.271782221599798,
+          "I_Y_image_order_bits": 0.4911431593702318,
+          "I_Y_option_order_bits": 0.1939626904850149,
+          "I_Y_joint_order_bits": 1.271782221599798,
+          "net_synergy_bits": 0.5866763717445513,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.5866763717445513,
+            0.7806390622295662
+          ]
+        },
+        "canonical_predictions": {
+          "2": 8,
+          "3": 7,
+          "0": 1
+        }
+      },
+      "wc_57": {
+        "n": 16,
+        "correct": 7,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.8496017527145814,
+          "I_Y_image_order_bits": 0.39678222159979804,
+          "I_Y_option_order_bits": 0.771782221599798,
+          "I_Y_joint_order_bits": 1.8496017527145812,
+          "net_synergy_bits": 0.6810373095149851,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.6810373095149851,
+            1.0778195311147831
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 1.7489992230622806,
+          "I_Y_image_order_bits": 0.9989992230622806,
+          "I_Y_option_order_bits": 0.24899922306228062,
+          "I_Y_joint_order_bits": 1.748999223062281,
+          "net_synergy_bits": 0.5010007769377198,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.5010007769377198,
+            0.7500000000000004
+          ]
+        },
+        "canonical_predictions": {
+          "0": 3,
+          "2": 1,
+          "3": 7,
+          "1": 5
+        }
+      },
+      "wc_64": {
+        "n": 16,
+        "correct": 6,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.3244602933016414,
+          "I_Y_image_order_bits": 0.34100169995729157,
+          "I_Y_option_order_bits": 0.5744602933016414,
+          "I_Y_joint_order_bits": 1.324460293301641,
+          "net_synergy_bits": 0.408998300042708,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.408998300042708,
+            0.7499999999999996
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 1.936278124459133,
+          "I_Y_image_order_bits": 0.5612781244591329,
+          "I_Y_option_order_bits": 0.23345859334434982,
+          "I_Y_joint_order_bits": 1.9362781244591325,
+          "net_synergy_bits": 1.1415414066556497,
+          "nonnegative_PID_synergy_bounds_bits": [
+            1.1415414066556497,
+            1.3749999999999996
+          ]
+        },
+        "canonical_predictions": {
+          "0": 6,
+          "2": 4,
+          "3": 3,
+          "1": 3
+        }
+      },
+      "wc_65": {
+        "n": 16,
+        "correct": 7,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.75,
+          "I_Y_image_order_bits": 0.375,
+          "I_Y_option_order_bits": 0.75,
+          "I_Y_joint_order_bits": 1.75,
+          "net_synergy_bits": 0.625,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.625,
+            1.0
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 1.5435644431995963,
+          "I_Y_image_order_bits": 0.6379253809700298,
+          "I_Y_option_order_bits": 0.3879253809700298,
+          "I_Y_joint_order_bits": 1.543564443199596,
+          "net_synergy_bits": 0.5177136812595364,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.5177136812595364,
+            0.9056390622295662
+          ]
+        },
+        "canonical_predictions": {
+          "2": 7,
+          "3": 1,
+          "1": 7,
+          "0": 1
+        }
+      },
+      "wc_67": {
+        "n": 16,
+        "correct": 2,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.7961796919474975,
+          "I_Y_image_order_bits": 0.34336016083271437,
+          "I_Y_option_order_bits": 0.34336016083271437,
+          "I_Y_joint_order_bits": 1.796179691947497,
+          "net_synergy_bits": 1.1094593702820683,
+          "nonnegative_PID_synergy_bounds_bits": [
+            1.1094593702820683,
+            1.4528195311147827
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 1.5919171866886992,
+          "I_Y_image_order_bits": 0.8419171866886992,
+          "I_Y_option_order_bits": 0.38909765557391607,
+          "I_Y_joint_order_bits": 1.5919171866886987,
+          "net_synergy_bits": 0.3609023444260835,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.3609023444260835,
+            0.7499999999999996
+          ]
+        },
+        "canonical_predictions": {
+          "1": 4,
+          "3": 1,
+          "0": 2,
+          "2": 9
+        }
+      },
+      "wc_69": {
+        "n": 16,
+        "correct": 5,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.5306390622295665,
+          "I_Y_image_order_bits": 0.3278195311147831,
+          "I_Y_option_order_bits": 0.3278195311147831,
+          "I_Y_joint_order_bits": 1.5306390622295662,
+          "net_synergy_bits": 0.875,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.875,
+            1.2028195311147831
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 1.7961796919474975,
+          "I_Y_image_order_bits": 0.7961796919474975,
+          "I_Y_option_order_bits": 0.2961796919474975,
+          "I_Y_joint_order_bits": 1.796179691947497,
+          "net_synergy_bits": 0.7038203080525021,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.7038203080525021,
+            0.9999999999999996
+          ]
+        },
+        "canonical_predictions": {
+          "0": 7,
+          "2": 2,
+          "3": 5,
+          "1": 2
+        }
+      },
+      "wc_71": {
+        "n": 16,
+        "correct": 4,
+        "invalid": 1,
+        "encoded_target": {
+          "H_Y_bits": 2.10845859334435,
+          "I_Y_image_order_bits": 0.48345859334435026,
+          "I_Y_option_order_bits": 0.952819531114784,
+          "I_Y_joint_order_bits": 2.1084585933443503,
+          "net_synergy_bits": 0.672180468885216,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.672180468885216,
+            1.1556390622295662
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 2.0306390622295662,
+          "I_Y_image_order_bits": 1.2193609377704333,
+          "I_Y_option_order_bits": 0.40563906222956625,
+          "I_Y_joint_order_bits": 2.0306390622295662,
+          "net_synergy_bits": 0.4056390622295667,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.4056390622295667,
+            0.8112781244591329
+          ]
+        },
+        "canonical_predictions": {
+          "0": 4,
+          "3": 1,
+          "1": 6,
+          "-1": 1,
+          "2": 4
+        }
+      },
+      "wc_76": {
+        "n": 16,
+        "correct": 6,
+        "invalid": 0,
+        "encoded_target": {
+          "H_Y_bits": 1.9772170014624826,
+          "I_Y_image_order_bits": 0.10221700146248258,
+          "I_Y_option_order_bits": 0.4772170014624826,
+          "I_Y_joint_order_bits": 1.977217001462483,
+          "net_synergy_bits": 1.3977829985375179,
+          "nonnegative_PID_synergy_bounds_bits": [
+            1.3977829985375179,
+            1.5000000000000004
+          ]
+        },
+        "canonical_target": {
+          "H_Y_bits": 0.954434002924965,
+          "I_Y_image_order_bits": 0.7044340029249652,
+          "I_Y_option_order_bits": 0.048794940695398914,
+          "I_Y_joint_order_bits": 0.9544340029249652,
+          "net_synergy_bits": 0.20120505930460109,
+          "nonnegative_PID_synergy_bounds_bits": [
+            0.20120505930460109,
+            0.25
+          ]
+        },
+        "canonical_predictions": {
+          "1": 6,
+          "2": 10
+        }
+      }
+    }
+  },
+  "source_sha256": {
+    "runs/P006_permutation_baseline/predictions.jsonl": "8e74839e80445b9588cb8b8e1f3cb8077669fb8537660fac5c14031dddf278a1",
+    "runs/P006_permutation_scale/predictions.jsonl": "9c89f0c30c07b2558abc177f5c51ee1634dbad8ef48a4af81c864c8e7ca45e60",
+    "runs/P006_permutation_canonical_start/predictions.jsonl": "52fef40532aaa671efcb27ccad71a33207a10109df1ae772239fe22b4d6ea95c"
+  },
+  "limitations": [
+    "Protocol variables are image/choice permutations, not arbitrary visual/textual content.",
+    "Only eight already-examined questions; no population statistical claim.",
+    "For real responses, report bounds valid for nonnegative PID atoms, not a chosen redundancy functional.",
+    "Canonicalizing the response is a diagnostic inverse of known permutations; it is not a deployable answer correction and uses no gold answer.",
+    "No evidence yet that existing neural PID benchmark conclusions reverse under this control."
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "as_of": "2026-09-17",
   "goal_status": "active",
-  "phase": "P011跨几何序号迁移实验运行中",
+  "phase": "P011完成；准备P013缓存路径分解，P012为信息指标的编码对照",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -132,13 +132,13 @@
     "P011": {
       "pid": 505796,
       "child_pid": 505798,
-      "status": "running; parent and Python child verified live, 22/704 observed",
+      "status": "completed",
       "preregister_commit": "5c72c27",
       "config": "configs/P011_geometry_transport.json",
       "log": "logs/P011_geometry_transport.log",
       "driver_log": "logs/P011_driver.log",
-      "exitcode": "runs/P011.exitcode",
-      "analysis": "scripts/analyze_P011.py"
+      "exitcode": 0,
+      "analysis": "results/P011_geometry_transport.json"
     }
   },
   "monitor": {
@@ -467,6 +467,28 @@
         "original:scale": 47
       },
       "decision": "保留明确图像指代是必要强基线；原始格式与编号/交错结果不可混作算法收益。"
+    },
+    "P011": {
+      "analysis": "results/P011_geometry_transport.json",
+      "n_records": 704,
+      "n_base_questions": 11,
+      "n_image_clusters": 9,
+      "correct": {
+        "baseline": 58,
+        "baseline_labeled": 59,
+        "matched:0": 58,
+        "matched:1": 19,
+        "matched:3": 18,
+        "square448:0": 58,
+        "square448:1": 19,
+        "square448:3": 22
+      },
+      "interpretation": "同序号统一尺寸donor保持58/88；双向错位答案按预期移动51与53/88，反向仅10与6。支持跨几何的来源序号信号；尚无涨点方法。标准Picture标签59/88，区间宽。"
+    },
+    "P012": {
+      "analysis": "results/P012_protocol_information.json",
+      "scope": "post-hoc finite protocol design",
+      "interpretation": "全对wc48与全错wc69/wc76均可产生2bit排列协同，解码到图片身份后0；说明编码协作不能直接当内容推理，未复现或推翻BATCH论文结论。"
     }
   }
 }

@@ -104,8 +104,8 @@
     {
       "id": "Kamera_2026",
       "url": "https://arxiv.org/abs/2606.23581",
-      "overlap": "Prospective adjacent cache direction already covered: position-free multimodal KV reuse, cross-chunk binding residue, low-rank conditioning patch, reordering and sliding-window reuse. Do not propose generic source-equivariant KV reuse as new.",
-      "evidence": "Primary abstract only; exactness and full experimental/code claims not audited."
+      "overlap": "Position-free KV reuse, exact RoPE relocation, low-rank conditioning patches and orbit reuse. Sparse-token correction is argued insufficient for their multi-hop task. P013 source-index lookup is a separate diagnostic, not yet a distinct method.",
+      "evidence": "Primary abstract and introduction now read: cross-chunk conditioning deficit versus query readout; conditioned compile-time forward and low-rank SVD patch; full method and implementation still require audit."
     },
     {
       "id": "VLCache_2025",
@@ -119,6 +119,27 @@
       "evidence": "Official ACL abstract read",
       "overlap": "Parallel context encoding performance loss explained by high attention entropy; attention sinks and selection mitigate. Simply isolating images plus entropy/sink adjustment is not enough novelty.",
       "limitation": "Specific visual ordinal state transport is not evaluated in the inspected abstract; full implementation not audited."
+    },
+    {
+      "id": "PIDLVLM_2026",
+      "url": "https://arxiv.org/html/2603.29676v1",
+      "code": "https://github.com/RiiShin/pid-lvlm-analysis",
+      "commit": "950ddb7fdf2f88da5d48866f1fc7a12dffd91ab6",
+      "evidence": "Main methodology incl finite answer-letter target, embedding-noise unimodal approximations and limitations read; Qwen feature extraction and core estimator inspected in pinned source.",
+      "overlap": "BATCH PID analysis across models/tasks/layers; using PID alone is not new.",
+      "caveat": "Authors call it process-level descriptor complementary to accuracy. P012 is a different finite protocol-variable design and cannot establish their benchmark conclusions are wrong."
+    },
+    {
+      "id": "SensoryPID_2026",
+      "url": "https://arxiv.org/html/2606.00959v1",
+      "evidence": "Abstract/introduction and conditional-PID framing inspected; estimator/experiments not fully audited.",
+      "overlap": "Treats language as conditioning/control for video-audio decomposition and uses PID-guided sample reweighting."
+    },
+    {
+      "id": "SynergisticFaithfulness_2026",
+      "url": "https://arxiv.org/html/2605.22168v1",
+      "evidence": "Intro and methods through definitions and redundancy counterexample read; full metric derivation and experiments not yet audited.",
+      "overlap": "Crossmodal Harsanyi/Shapley interactions for explanation faithfulness; naive multimodal synergy metric is not new."
     }
   ]
 }
