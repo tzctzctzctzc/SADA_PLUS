@@ -41,7 +41,7 @@ eval_manifest=$base_artifact/rq1_val_gt_segments.jsonl
 "$sada_python" tools/prepare_rq1_frames.py \
     --manifest "$manifest" --video-root "$video_root" \
     --frame-cache "$frame_cache" --cache-namespace rq1_8f \
-    --frame-count 8 --workers 12 \
+    --frame-count 8 --workers 48 \
     >"$artifact/logs/prepare_frames.log" 2>&1
 
 (
