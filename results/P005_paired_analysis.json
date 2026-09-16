@@ -1,0 +1,99 @@
+{
+  "n": 168,
+  "baseline_correct": 85,
+  "scale_correct": 84,
+  "gains": 11,
+  "losses": 12,
+  "descriptive_question_level_mcnemar_p": 1.0,
+  "limitations": [
+    "One sampling seed; descriptive question-level test ignores shared-image dependence",
+    "Fixed public 3B example parameters; not a tuned 7B replication"
+  ],
+  "groups": {
+    "Geographic Understanding": {
+      "n": 6,
+      "baseline_correct": 1,
+      "scale_correct": 3
+    },
+    "Counting": {
+      "n": 12,
+      "baseline_correct": 3,
+      "scale_correct": 4
+    },
+    "Visual Grounding": {
+      "n": 18,
+      "baseline_correct": 11,
+      "scale_correct": 8
+    },
+    "Image-Text Matching": {
+      "n": 22,
+      "baseline_correct": 12,
+      "scale_correct": 13
+    },
+    "Scene Understanding": {
+      "n": 14,
+      "baseline_correct": 10,
+      "scale_correct": 9
+    },
+    "Difference Spotting": {
+      "n": 12,
+      "baseline_correct": 6,
+      "scale_correct": 5
+    },
+    "Cartoon Understanding": {
+      "n": 8,
+      "baseline_correct": 3,
+      "scale_correct": 3
+    },
+    "Action Understanding": {
+      "n": 14,
+      "baseline_correct": 7,
+      "scale_correct": 6
+    },
+    "Diagram Understanding": {
+      "n": 38,
+      "baseline_correct": 21,
+      "scale_correct": 18
+    },
+    "Attribute Similarity": {
+      "n": 8,
+      "baseline_correct": 7,
+      "scale_correct": 7
+    },
+    "Visual Retrieval": {
+      "n": 16,
+      "baseline_correct": 4,
+      "scale_correct": 8
+    }
+  },
+  "changed_ids": [
+    "31",
+    "75",
+    "226",
+    "410",
+    "414",
+    "433",
+    "494",
+    "617",
+    "776",
+    "795",
+    "945",
+    "951",
+    "968",
+    "1032",
+    "1178",
+    "1270",
+    "2012",
+    "2351",
+    "2365",
+    "2420",
+    "2507",
+    "2561",
+    "2575"
+  ],
+  "both_counterpart_questions_correct": {
+    "baseline": 19,
+    "scale": 18
+  },
+  "n_counterpart_pairs": 84
+}

@@ -1,6 +1,6 @@
 {
   "as_of": "2026-09-17",
-  "status": "Novelty not established; canonical boundary is only a pilot hypothesis",
+  "status": "Novelty not established; generic ordinal binding amplification and syntax/content source separation are already covered by close neighbors",
   "records": [
     {
       "id": "DTS_ICLR2026",
@@ -71,6 +71,35 @@
       "id": "CountingManifolds_2025",
       "url": "https://transformer-circuits.pub/2025/linebreaks/index.html",
       "overlap": "Potential cross-domain inspiration: separator-token row and column counting features. Search excerpt checked; full 30MB page not yet read. Not evidence of VLM ordinal encoding."
+    },
+    {
+      "id": "BindingIDs_CVPRW2025",
+      "url": "https://www.cs.toronto.edu/~makarand/papers/CVPRW2025-MIV_BindingID.pdf",
+      "overlap": "Factorization of content and binding IDs, RoPE position-independence, mean activation interventions established in VLM object-text binding. Plain content/ordinal subspace separation is not a novelty.",
+      "evidence": "Full five-page primary PDF inspected",
+      "limitation": "Small synthetic within-image object/color/item task, distinct from multi-image source indexing."
+    },
+    {
+      "id": "DualSpatialBinding_2026",
+      "url": "https://arxiv.org/abs/2603.22278",
+      "project": "https://spatial.baulab.info/",
+      "overlap": "Vision-derived distributed ordering and LM backup ordering; global probe direction amplification improves spatial reasoning. A generic ordinal probe plus amplification is already studied.",
+      "evidence": "Primary project detailed setup, interventions and results inspected; full paper not yet read.",
+      "limitation": "Within-image spatial order is available to vision encoder; image-list ordinal identity is not. This distinction is a candidate question, not demonstrated novelty."
+    },
+    {
+      "id": "SourceModalityMonitoring_2026",
+      "url": "https://arxiv.org/abs/2604.22038",
+      "code": "https://github.com/ethahtz/source-modality-monitoring",
+      "overlap": "Semantic versus syntactic source binding, arbitrary labels, marker swapping/removal, freeze-remove interventions, learned transformation vectors across 11 VLMs. Generic source syntax/content disentanglement and marker perturbation are not new.",
+      "evidence": "Read primary manuscript main body including symbolic vs distributional probes, marker perturbation, freeze-remove content restoration, and learned-vector interventions; appendix implementation details not fully audited.",
+      "limitation": "Primarily image/text modality identity, not sources within a single modality; venue claim from authors' repository not independently audited."
+    },
+    {
+      "id": "LinearSpatiotemporal_2026",
+      "url": "https://arxiv.org/abs/2601.12626",
+      "overlap": "Spatial IDs linked to text and video temporal binding; must read before claiming new ordinal-binding mechanism.",
+      "evidence": "Primary abstract and related-work description only; detailed methods pending."
     }
   ]
 }

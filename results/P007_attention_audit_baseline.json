@@ -1,0 +1,84 @@
+{
+  "mode": "baseline",
+  "id": "wc_82:p0",
+  "dtype": "torch.bfloat16",
+  "input_tokens": 650,
+  "errors": [
+    {
+      "layer": 21,
+      "row_max_error": 0.0,
+      "mass_max_error": 0.0
+    },
+    {
+      "layer": 22,
+      "row_max_error": 0.0,
+      "mass_max_error": 0.0
+    },
+    {
+      "layer": 23,
+      "row_max_error": 0.0,
+      "mass_max_error": 0.0
+    },
+    {
+      "layer": 24,
+      "row_max_error": 2.384185791015625e-07,
+      "mass_max_error": 0.0
+    },
+    {
+      "layer": 25,
+      "row_max_error": 0.0,
+      "mass_max_error": 0.0
+    },
+    {
+      "layer": 26,
+      "row_max_error": 0.0,
+      "mass_max_error": 0.0
+    },
+    {
+      "layer": 27,
+      "row_max_error": 0.0,
+      "mass_max_error": 0.0
+    },
+    {
+      "layer": 28,
+      "row_max_error": 0.0,
+      "mass_max_error": 0.0
+    },
+    {
+      "layer": 29,
+      "row_max_error": 0.0001220703125,
+      "mass_max_error": 0.0
+    },
+    {
+      "layer": 30,
+      "row_max_error": 1.52587890625e-05,
+      "mass_max_error": 0.0
+    },
+    {
+      "layer": 31,
+      "row_max_error": 0.0,
+      "mass_max_error": 0.0
+    },
+    {
+      "layer": 32,
+      "row_max_error": 3.814697265625e-05,
+      "mass_max_error": 0.0
+    },
+    {
+      "layer": 33,
+      "row_max_error": 0.0,
+      "mass_max_error": 0.0
+    },
+    {
+      "layer": 34,
+      "row_max_error": 3.0517578125e-05,
+      "mass_max_error": 0.0
+    },
+    {
+      "layer": 35,
+      "row_max_error": 8.344650268554688e-07,
+      "mass_max_error": 0.0
+    }
+  ],
+  "scope": "Actual Qwen3B BF16 eager last-query attention; experiment uses full eager values regardless of reconstruction error."
+}

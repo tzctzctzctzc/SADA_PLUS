@@ -1,7 +1,7 @@
 {
   "as_of": "2026-09-17",
   "goal_status": "active",
-  "phase": "P004/P005均未见固定DTS收益；P006因素实验运行中；P007 LAD基线排队",
+  "phase": "已完成P006双因素与P007官方LAD迁移；P008交叉控制模型/预处理/提示协议正在GPU3运行",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -40,7 +40,7 @@
     {
       "id": "H3",
       "statement": "缩放可能抑制图片序号绑定所需的结构信息，而不只是先前图像内容的干扰；也可能仅改变选项字母/格式先验",
-      "status": "探索性线索：37道编号选择题中17个预测移向更早编号，0个向后；图片顺序与选项顺序混淆，P006待检验",
+      "status": "P006控制图片/选项排列后仍偏向前图，且选项重排一致性下降；但P007另一协议下缩放略有收益，普遍序号坍塌解释未成立。P008解开模型、分辨率和模板混淆。",
       "novelty": "普通位置偏差、循环排列和注意力引导校准已有 SoFA、MIBench、LAD；不能当作新贡献。"
     }
   ],
@@ -83,9 +83,9 @@
     },
     "P006": {
       "pid": 502704,
-      "status": "running, baseline complete; scale child verified through growing predictions",
+      "status": "completed",
       "log": "logs/P006_driver.log",
-      "exitcode": "runs/P006.exitcode"
+      "exitcode": 0
     },
     "LAD_source": {
       "status": "completed",
@@ -94,19 +94,27 @@
     },
     "P007": {
       "pid": 503615,
-      "status": "queued; flock child 503616 verified",
+      "status": "completed",
       "config": "configs/P007_lad_bridge.json",
       "log": "logs/P007_driver.log",
-      "exitcode": "runs/P007.exitcode",
+      "exitcode": 0,
       "preregister_commit": "1fa8019"
+    },
+    "P008": {
+      "pid": 504109,
+      "child_pid": 504111,
+      "status": "running; 3B child verified live and 21/256 predictions observed",
+      "log": "logs/P008_driver.log",
+      "exitcode": "runs/P008.exitcode",
+      "preregister_commit": "21659e2"
     }
   },
   "monitor": {
     "automation_id": "gpu3",
     "interval_minutes": 20,
-    "gpu_queue": "All P002-P006 drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock"
+    "gpu_queue": "P002-P008 drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock"
   },
-  "next": "先分析P006位置/字母效应，再完成P007官方LAD代码迁移，区分边界和patch注意力；没有创新成立前不扩展到保留测试集",
+  "next": "核验P008进程及逐样本输出，结束后运行scripts/analyze_P008.py；先依据交叉结果判断何种协议触发失效，再预注册机制干预。不得仅把位置偏差、序号线性探针或LAD注意力校准包装成创新。",
   "results": {
     "P001": {
       "n": 4,
@@ -261,6 +269,33 @@
       "scale_correct": 84,
       "n": 168,
       "heldout_used": false
+    },
+    "P006": {
+      "baseline_correct": 55,
+      "scale_correct": 42,
+      "canonical_start_correct": 44,
+      "n_per_mode": 128,
+      "n_base_questions": 8,
+      "option_reordering_consistent_groups": {
+        "baseline": 24,
+        "scale": 8,
+        "canonical_start": 9
+      },
+      "n_groups": 32,
+      "analysis": "results/P006_factorial_analysis.json"
+    },
+    "P007": {
+      "analysis": "results/P007_lad_bridge.json",
+      "n_eval_base_questions": 19,
+      "n_image_clusters": 15,
+      "n_eval_permutations": 76,
+      "baseline_correct": 18,
+      "agd_correct": 27,
+      "scale_correct": 22,
+      "scale_agd_correct": 32,
+      "boundary_fraction_baseline": 0.028571218676291654,
+      "boundary_fraction_scale": 0.6435109707645384,
+      "limitations": "探索性迁移，AGD收益区间较宽；与P006模型大小、图像预处理、提示模板均不同，不能归因于单一因素"
     }
   }
 }

@@ -1,0 +1,394 @@
+{
+  "n": 217,
+  "baseline_correct": 129,
+  "scale_correct": 128,
+  "gains": 16,
+  "losses": 17,
+  "descriptive_question_level_mcnemar_p": 1.0,
+  "limitations": [
+    "One sampling seed; descriptive question-level test ignores shared-image dependence",
+    "Official public 3B example parameters; paper scaled score not reproduced"
+  ],
+  "groups": {
+    "number of objects": {
+      "n": 7,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "num of objects": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "weather conditions in image": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "color of objects": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 1
+    },
+    "time of day in images": {
+      "n": 2,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "age estimation of objects or subjects": {
+      "n": 2,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "natural versus artificial elements in images": {
+      "n": 2,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "lighting and shadow effects in images": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 1
+    },
+    "geographical location implications in images": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "economic or social status indicators in images": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "emotional tone or mood in images": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "recreational and leisure activities in various environments": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "common sense": {
+      "n": 3,
+      "baseline_correct": 3,
+      "scale_correct": 3
+    },
+    "seasonal attributes in images": {
+      "n": 3,
+      "baseline_correct": 2,
+      "scale_correct": 1
+    },
+    "Technological Advancements": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "language understanding": {
+      "n": 3,
+      "baseline_correct": 3,
+      "scale_correct": 3
+    },
+    "motion or static state of objects": {
+      "n": 3,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "cultural_symbols": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "environmental_concerns": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "weather_conditions": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "wildlife_habitat": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "material of objects": {
+      "n": 2,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "difference description": {
+      "n": 3,
+      "baseline_correct": 1,
+      "scale_correct": 0
+    },
+    "Human-Animal Interaction": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 1
+    },
+    "STEM reasoning": {
+      "n": 4,
+      "baseline_correct": 2,
+      "scale_correct": 3
+    },
+    "pattern recognition": {
+      "n": 3,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "safety considerations in changing object placements": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 1
+    },
+    "cost and economic value of objects in diverse contexts": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "maintenance and care requirements of objects": {
+      "n": 2,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "seasonal activities and their appropriate gear or settings": {
+      "n": 2,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "astronomical phenomena visible or inferred in images": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "climate change": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "architectural_styles": {
+      "n": 2,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "Emotional Impact": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "animal_behavior": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "historical context": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "artistic_styles": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "geographical_features": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "geographical location": {
+      "n": 2,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "texture of objects": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "technological aspects in images": {
+      "n": 2,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "weather conditions in images": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "artistic style or genre of images": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "historical_context": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "cultural_influence": {
+      "n": 2,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "Clothing style and period": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "human_activity": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "weight of objects": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "symmetry and asymmetry in objects": {
+      "n": 2,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "adaptability of subjects or objects in new environments": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "sequence understanding": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "counting": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "recognizing similarity": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "cause and effect": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "weight comparison": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "price comparison": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "Logical Reasoning": {
+      "n": 12,
+      "baseline_correct": 5,
+      "scale_correct": 6
+    },
+    "Difference Description": {
+      "n": 23,
+      "baseline_correct": 13,
+      "scale_correct": 12
+    },
+    "Complex Reasoning": {
+      "n": 15,
+      "baseline_correct": 9,
+      "scale_correct": 10
+    },
+    "Common Sense": {
+      "n": 42,
+      "baseline_correct": 27,
+      "scale_correct": 28
+    },
+    "Image Reasoning": {
+      "n": 28,
+      "baseline_correct": 12,
+      "scale_correct": 6
+    },
+    "animal_species": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "emotional_tone": {
+      "n": 2,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "Flora and fauna": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "Climate and geography": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "natural_elements": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "orientation of objects": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "environmental context of objects": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "historical or temporal context of images": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    }
+  },
+  "changed_ids": [
+    "xh_4",
+    "xh_5",
+    "xh_10",
+    "xh_30",
+    "xh_31",
+    "xh_37",
+    "xh_45",
+    "m_9",
+    "w_3",
+    "w_7",
+    "w_17",
+    "w_18",
+    "w_30",
+    "w_35",
+    "w_43",
+    "w_45",
+    "w_47",
+    "wc_5",
+    "wc_6",
+    "wc_14",
+    "wc_25",
+    "wc_33",
+    "wc_40",
+    "wc_42",
+    "wc_43",
+    "wc_44",
+    "wc_45",
+    "wc_46",
+    "wc_63",
+    "wc_76",
+    "wc_78",
+    "wc_82",
+    "cw_8"
+  ]
+}
