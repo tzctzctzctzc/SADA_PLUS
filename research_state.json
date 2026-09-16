@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T06:34:30.825708+08:00",
+  "as_of": "2026-09-17T06:39:52.395495+08:00",
   "goal_status": "active",
-  "phase": "独立ImageCoDe验证与强逐图基线对照；审核上下文标签，尚无创新成立",
+  "phase": "独立验证未复现patch优势，停止该候选方法；继续逐图与专用检索强基线",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -43,6 +43,16 @@
       "statement": "缩放可能抑制图片序号绑定所需的结构信息，而不只是先前图像内容的干扰；也可能仅改变选项字母/格式先验",
       "status": "P006/P008支持7B固定DTS导致跨排列不稳与前图偏差；7B退化在两种预处理和两种模板均存在。3B变化仅正负1题，不能泛化为所有模型序号坍塌；是否结构绑定损伤仍需因果干预。",
       "novelty": "普通位置偏差、循环排列和注意力引导校准已有 SoFA、MIBench、LAD；不能当作新贡献。"
+    },
+    {
+      "id": "H4",
+      "statement": "patch-only注意力读出可稳定超过纠正解码规则后的原始7B及简单逐图基线",
+      "status": "未获支持，停止候选方法线",
+      "evidence": [
+        "P024：同模型逐图描述似然与native patch同为52/76。",
+        "P023：独立256题patch92、原始100；差值区间跨0，未复现优势。"
+      ],
+      "scope": "该否定针对本次固定方法与协议，不声称所有视觉注意力方法无效。"
     }
   ],
   "evaluation_policy": {
@@ -216,7 +226,7 @@
       "verification": "data/ImageCoDe/verification.json"
     },
     "P023": {
-      "status": "running",
+      "status": "completed",
       "config": "configs/P023_imagecode.json",
       "expected_calibration": 40,
       "expected_evaluation": 256,
@@ -230,7 +240,8 @@
       "attempt": 3,
       "data_amendment": "results/P023_data_amendment.json",
       "data_audit": "runs/P023_data/audit.json",
-      "amendment_commit": "477e0d6"
+      "amendment_commit": "477e0d6",
+      "exitcode": 0
     },
     "P024": {
       "status": "completed",
@@ -240,19 +251,21 @@
       "n_image_records": 96
     },
     "P025": {
-      "status": "waiting_for_live_P023",
-      "driver_pid": 510582,
+      "status": "running",
+      "driver_pid": 511022,
       "dependency_pid": 510581,
       "config": "configs/P025_pointwise_imagecode.json",
       "expected_images": 2960,
       "exitcode_file": "runs/P025.exitcode",
       "analysis": "results/P025_pointwise_imagecode.json",
-      "preregister_commit": "50c59c1"
+      "preregister_commit": "50c59c1",
+      "child_pid": 511028,
+      "data_amendment_sync_commit": "399a4ae"
     },
     "P026": {
       "status": "waiting_for_live_P025",
-      "driver_pid": 510583,
-      "dependency_pid": 510582,
+      "driver_pid": 511023,
+      "dependency_pid": 511022,
       "config": "configs/P026_annotation_slices.json",
       "exitcode_file": "runs/P026.exitcode",
       "analysis": "results/P026_annotation_slices.json",
@@ -262,10 +275,12 @@
     },
     "Qwen3_Reranker_download": {
       "status": "completed",
-      "driver_pid": 510444,
+      "driver_pid": 510893,
       "exitcode": 0,
       "revision": "4bd860ac4f15ad1897a214615cccc700f8f71818",
-      "verification": "models/Qwen3-VL-Reranker-2B/verification.json"
+      "verification": "models/Qwen3-VL-Reranker-2B/verification.json",
+      "template_fix_commit": "abfbdf7",
+      "templates_included": true
     },
     "qwen3_env_setup": {
       "status": "completed",
@@ -279,13 +294,14 @@
     },
     "P027": {
       "status": "waiting_for_live_P025",
-      "driver_pid": 510712,
-      "dependency_pid": 510582,
+      "driver_pid": 511024,
+      "dependency_pid": 511022,
       "config": "configs/P027_qwen3_imagecode.json",
       "preregister_commit": "8a28018",
       "exitcode_file": "runs/P027.exitcode",
       "analysis": "results/P027_qwen3_imagecode.json",
-      "expected_records": 512
+      "expected_records": 512,
+      "protocol_preflight": "results/P027_protocol_cpu.json"
     }
   },
   "monitor": {
@@ -294,7 +310,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "Local automation gpu3 TOML inspected; active heartbeat every 20 minutes, silent on unchanged state"
   },
-  "next": "完成P023/P025独立ImageCoDe对照，P026正标注切片自动分析，P027官方Qwen3-VL-Reranker-2B在默认与同像素上限设置下串行补强。根据独立数据和强逐图基线作方向取舍；剩余392个验证源簇继续保留。",
+  "next": "等待真实运行的P025逐图评分；P026按明确作者正标签切片，P027运行官方专用Qwen3检索模型。依据强基线错误确定是否存在可证伪的上下文证据问题；不继续patch读出参数扫描。保留尚未使用的392个验证源簇用于后续独立确认。",
   "results": {
     "P001": {
       "n": 4,
@@ -889,6 +905,38 @@
       "n_images": 2960,
       "n_calibration_eval_pixel_overlaps": 0,
       "interpretation": "视频文件名是非连续源帧号，gold是数值排序后的0-9索引，已与官方代码核对。仅替换一个与验证图像重叠的同目标/同类别校准题，验证256题与人工标签切片完全不变，发生于任何P023推理前。"
+    },
+    "P023": {
+      "analysis": "results/P023_imagecode.json",
+      "n_evaluation": 256,
+      "n_independent_clusters": 256,
+      "correct": {
+        "raw_logits": 100,
+        "all_span_attention_calibrated": 102,
+        "patch_attention_calibrated": 92,
+        "patch_density_calibrated": 91,
+        "patch_on_total_layers": 91,
+        "code_AGD_raw": 99,
+        "SigLIP2": 84,
+        "all_span_attention_raw": 103,
+        "patch_attention_raw": 90
+      },
+      "patch_minus_raw": {
+        "difference_pp": -3.125,
+        "cluster_95ci_pp": [
+          -8.203125,
+          1.953125
+        ],
+        "gains": 19,
+        "losses": 27
+      },
+      "image_length_audit": {
+        "min_tokens": 99,
+        "max_tokens": 256,
+        "rows_with_unequal_image_tokens": 65
+      },
+      "interpretation": "原始logits100/256，patch92，密度91，SigLIP2为84。patch相对原始-3.125个百分点，簇95CI[-8.203,1.953]；旧Mantis小样本收益没有在独立ImageCoDe复现。停止将patch-only读出作为候选新方法，不把普通all-span的102/103题当新贡献。",
+      "decision": "停止patch-only分数调参和扩展；P025/P027用于定位强基线下仍存在的问题，不作为继续追逐旧收益的理由。"
     }
   },
   "novelty_status": "仍无满足目标的新颖方法或SOTA；注意力校准、证据头与候选间判别性均有直接近邻。"
