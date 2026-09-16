@@ -1,0 +1,301 @@
+{
+  "sha": "059d6e4ae191d3f0775cbe2e9cf77baa0e714126",
+  "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/trees/059d6e4ae191d3f0775cbe2e9cf77baa0e714126",
+  "tree": [
+    {
+      "path": "CODE_LICENSE.TXT",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64",
+      "size": 11357,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64"
+    },
+    {
+      "path": "DATA_LICENSE.TXT",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "da6ab6cc8f333d7e89a99812866df8f24374d47c",
+      "size": 18657,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/da6ab6cc8f333d7e89a99812866df8f24374d47c"
+    },
+    {
+      "path": "README.md",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "ec88f7d64e4389dc6b22acf270105b3b500a6bb6",
+      "size": 12805,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/ec88f7d64e4389dc6b22acf270105b3b500a6bb6"
+    },
+    {
+      "path": "build_faiss_index.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "96f85fbd50554239b09ae8d9b0cbfba275b5ced0",
+      "size": 7915,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/96f85fbd50554239b09ae8d9b0cbfba275b5ced0"
+    },
+    {
+      "path": "evaluate.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "d682965465f536ad18f9d0dbbaa854d6fc6f981e",
+      "size": 9590,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/d682965465f536ad18f9d0dbbaa854d6fc6f981e"
+    },
+    {
+      "path": "image.png",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "f0df82d6e4fcb92829bb325c92b491111fbd660a",
+      "size": 2670222,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/f0df82d6e4fcb92829bb325c92b491111fbd660a"
+    },
+    {
+      "path": "image_attribution.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "ff61e074e17b39dcf292c47726e7da26330ae8d4",
+      "size": 17751148,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/ff61e074e17b39dcf292c47726e7da26330ae8d4"
+    },
+    {
+      "path": "index_signatures.txt",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7150b4ea9a990aa5f5579f27dd97aedeb0ff6230",
+      "size": 3616799,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/7150b4ea9a990aa5f5579f27dd97aedeb0ff6230"
+    },
+    {
+      "path": "metrics.csv",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "547f7d2d864103da72649cc9d67ffe5dd1025ba9",
+      "size": 2655,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/547f7d2d864103da72649cc9d67ffe5dd1025ba9"
+    },
+    {
+      "path": "pinpoint_licensed.parquet",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "54e2b3c3d572fe342e84e50a0374cecf43f65aaf",
+      "size": 2072753,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/54e2b3c3d572fe342e84e50a0374cecf43f65aaf"
+    },
+    {
+      "path": "requirements-eval.txt",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "247ed1e8dd8057aa8f4ee9cd6cd3faa1b9f5d754",
+      "size": 149,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/247ed1e8dd8057aa8f4ee9cd6cd3faa1b9f5d754"
+    },
+    {
+      "path": "requirements.txt",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "eff74a37c6d8f558446eb43f1bfb5d4050d763f4",
+      "size": 725,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/eff74a37c6d8f558446eb43f1bfb5d4050d763f4"
+    },
+    {
+      "path": "rerank.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "f5ed1d0e8cea882ad2d83752084a790c949d25fd",
+      "size": 15055,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/f5ed1d0e8cea882ad2d83752084a790c949d25fd"
+    },
+    {
+      "path": "run_retrieval.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "30ab3f09365f3cd0b4ed9f217df18f3a7d143274",
+      "size": 9971,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/30ab3f09365f3cd0b4ed9f217df18f3a7d143274"
+    },
+    {
+      "path": "setup.sh",
+      "mode": "100755",
+      "type": "blob",
+      "sha": "8d65ab4928d659497f2657716bbe244b3043550a",
+      "size": 6459,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/8d65ab4928d659497f2657716bbe244b3043550a"
+    },
+    {
+      "path": "standardized_results",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "9a1efd8d823b6a8590b4fc7fdc435ab039db564d",
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/trees/9a1efd8d823b6a8590b4fc7fdc435ab039db564d"
+    },
+    {
+      "path": "standardized_results/bge_vl_clip_large_retrieval_results_licensed.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "2223399be57525bda731da7b47eb1395ff272d4e",
+      "size": 13986816,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/2223399be57525bda731da7b47eb1395ff272d4e"
+    },
+    {
+      "path": "standardized_results/bge_vl_mllm_s1_retrieval_results_licensed.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "1f336c26214d2f0997b30fba0b7bde5c8179d7fc",
+      "size": 13987320,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/1f336c26214d2f0997b30fba0b7bde5c8179d7fc"
+    },
+    {
+      "path": "standardized_results/bge_vl_mllm_s1_retrieval_results_licensed_reranked.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "eb5c90153cecb131cacb3fdd406ac893e9ccd1c8",
+      "size": 13987320,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/eb5c90153cecb131cacb3fdd406ac893e9ccd1c8"
+    },
+    {
+      "path": "standardized_results/bge_vl_mllm_s2_retrieval_results_licensed.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "324f32911d738debfacca3b8752324c4bb7226dd",
+      "size": 13987320,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/324f32911d738debfacca3b8752324c4bb7226dd"
+    },
+    {
+      "path": "standardized_results/gpt5_text_postmerge_standardized.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "bafe856cc4ec3c4e57620b9634a5fd5ae6fbcd26",
+      "size": 16855358,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/bafe856cc4ec3c4e57620b9634a5fd5ae6fbcd26"
+    },
+    {
+      "path": "standardized_results/gpt5_text_premerge_reranked_standardized.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "576a149c3b886f20fdc59faa22954bbb2b73788c",
+      "size": 14360011,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/576a149c3b886f20fdc59faa22954bbb2b73788c"
+    },
+    {
+      "path": "standardized_results/gpt5_text_premerge_standardized.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "38e961c9577d48bb23a183a1d87fe02231a4ad5a",
+      "size": 16855358,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/38e961c9577d48bb23a183a1d87fe02231a4ad5a"
+    },
+    {
+      "path": "standardized_results/metaclip2_retrieval_results_combined.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "b71f0749a6f5666df1a837114d7a85e8f1181d9b",
+      "size": 13987320,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/b71f0749a6f5666df1a837114d7a85e8f1181d9b"
+    },
+    {
+      "path": "standardized_results/metaclip2_retrieval_results_image_only.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "6bcbc88cc2fa71e97e055a4b2e46e4d5c7b8156b",
+      "size": 13987320,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/6bcbc88cc2fa71e97e055a4b2e46e4d5c7b8156b"
+    },
+    {
+      "path": "standardized_results/metaclip2_retrieval_results_text_only.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "f7004854c2c6be45073dcc755939f074eec19ab4",
+      "size": 13987320,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/f7004854c2c6be45073dcc755939f074eec19ab4"
+    },
+    {
+      "path": "standardized_results/metaclip2_slerp_retrieval_results_licensed.json",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "bb9bd17f3074016d5289675b1fbeb6827baefb0e",
+      "size": 13987320,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/bb9bd17f3074016d5289675b1fbeb6827baefb0e"
+    },
+    {
+      "path": "utils",
+      "mode": "040000",
+      "type": "tree",
+      "sha": "d73f05d3ee5f26d92c94d6a7273f29f032cfb8b9",
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/trees/d73f05d3ee5f26d92c94d6a7273f29f032cfb8b9"
+    },
+    {
+      "path": "utils/__init__.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "4269e589201ff44858f4ff77ac5736737bfd8fd5",
+      "size": 58,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/4269e589201ff44858f4ff77ac5736737bfd8fd5"
+    },
+    {
+      "path": "utils/data_utils.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "3bfca3b6fea6991d6aa75e761914666f38aafe4d",
+      "size": 1023,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/3bfca3b6fea6991d6aa75e761914666f38aafe4d"
+    },
+    {
+      "path": "utils/dataset.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "80884128c786c185764ccb52c93815bd2d77477c",
+      "size": 1560,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/80884128c786c185764ccb52c93815bd2d77477c"
+    },
+    {
+      "path": "utils/embeddings.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "f9491827e8709694ea3f60e13aa89d272605be82",
+      "size": 4075,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/f9491827e8709694ea3f60e13aa89d272605be82"
+    },
+    {
+      "path": "utils/faiss_utils.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "78e6e076a847d478e532f44e6b1a2e232a940668",
+      "size": 2240,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/78e6e076a847d478e532f44e6b1a2e232a940668"
+    },
+    {
+      "path": "utils/image_loader.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "e96b8f583f24c7dca813a83cc707fcd4ad48dd25",
+      "size": 2388,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/e96b8f583f24c7dca813a83cc707fcd4ad48dd25"
+    },
+    {
+      "path": "utils/metrics.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "f68e4a6627d00b09c427aef5e79faa2b33915dbc",
+      "size": 1893,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/f68e4a6627d00b09c427aef5e79faa2b33915dbc"
+    },
+    {
+      "path": "utils/model_loader.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "3631d0ce6097ee42e44c1abea8970e26841e03f7",
+      "size": 1391,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/3631d0ce6097ee42e44c1abea8970e26841e03f7"
+    },
+    {
+      "path": "visualize_results.py",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "ea481a0bda7d8428594d1c93c596a1f1e9f2f989",
+      "size": 17896,
+      "url": "https://api.github.com/repos/pinterest/pinpoint-dataset/git/blobs/ea481a0bda7d8428594d1c93c596a1f1e9f2f989"
+    }
+  ],
+  "truncated": false
+}

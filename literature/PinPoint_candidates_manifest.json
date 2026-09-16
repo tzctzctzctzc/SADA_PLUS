@@ -1,0 +1,21 @@
+{
+  "revision": "059d6e4ae191d3f0775cbe2e9cf77baa0e714126",
+  "files": [
+    {
+      "upstream_path": "standardized_results/bge_vl_mllm_s1_retrieval_results_licensed.json",
+      "local_path": "data/PinPoint/bge_vl_mllm_s1_retrieval_results_licensed.json",
+      "bytes": 13987320,
+      "sha256": "dcf23ff0789f6c68cc5e9abc126958e590942c6de9bdf76d1d1f149090cb89c9",
+      "blob_sha1": "1f336c26214d2f0997b30fba0b7bde5c8179d7fc",
+      "url": "https://raw.githubusercontent.com/pinterest/pinpoint-dataset/059d6e4ae191d3f0775cbe2e9cf77baa0e714126/standardized_results/bge_vl_mllm_s1_retrieval_results_licensed.json"
+    },
+    {
+      "upstream_path": "standardized_results/bge_vl_mllm_s1_retrieval_results_licensed_reranked.json",
+      "local_path": "data/PinPoint/bge_vl_mllm_s1_retrieval_results_licensed_reranked.json",
+      "bytes": 13987320,
+      "sha256": "d47b422b0b3403e8fee9a04a1c56f29234e13d8fb1fef8e462b0a2322075a193",
+      "blob_sha1": "eb5c90153cecb131cacb3fdd406ac893e9ccd1c8",
+      "url": "https://raw.githubusercontent.com/pinterest/pinpoint-dataset/059d6e4ae191d3f0775cbe2e9cf77baa0e714126/standardized_results/bge_vl_mllm_s1_retrieval_results_licensed_reranked.json"
+    }
+  ]
+}

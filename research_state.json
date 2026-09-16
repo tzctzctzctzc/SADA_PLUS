@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-16T23:05:59.904143+00:00",
+  "as_of": "2026-09-16T23:26:23.737636+00:00",
   "goal_status": "active",
-  "phase": "排除简单分辨率和四题条款聚合修补；核验多参考图检索的完整输入基线",
+  "phase": "P030固定48参考图组件的完整输入对照：数据就绪，准备GPU3运行",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -331,6 +331,35 @@
       "uses_gpu": false,
       "analysis": "results/PinPoint_reference_audit.json",
       "source_manifest": "literature/PinPoint_source_manifest.json"
+    },
+    "P030_sources": {
+      "status": "completed",
+      "exitcode": 0,
+      "driver_pid": 512133,
+      "manifest": "literature/PinPoint_candidates_manifest.json"
+    },
+    "P030_images": {
+      "status": "completed",
+      "exitcode": 0,
+      "driver_pid": 512621,
+      "prior_driver_pid": 512357,
+      "prior_child_pid": 512358,
+      "prior_exitcode": 143,
+      "manifest": "data/PinPoint/P030_image_manifest.json",
+      "n_success": 996,
+      "n_failed": 0,
+      "transport": "Existing system proxy over temporary SSH reverse forwarding; only downloader process used proxy, tunnel closed after completion"
+    },
+    "P030": {
+      "status": "ready_to_run",
+      "config": "configs/P030_pinpoint_references.json",
+      "script": "scripts/run_P030.sh",
+      "exitcode_file": "runs/P030.exitcode",
+      "analysis": "results/P030_pinpoint_references.json",
+      "expected_records": 3840,
+      "n_queries": 48,
+      "n_reference_components": 48,
+      "reserved_reference_components": 60
     }
   },
   "monitor": {
@@ -339,7 +368,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "本轮再次读取本地gpu3自动化：ACTIVE heartbeat；已有20分钟安排保留。"
   },
-  "next": "下一步核验PinPoint已发布检索候选及评测口径，建立完整提供两张参考图的7B逐图重排序对照。按参考图共享/指令变体分组，预先保留确认数据。补齐输入属于协议修复，不能作为创新；之后才定位真实多来源约束失配并形成方法。",
+  "next": "运行P030四条件固定对照，主比较labelled_dual对labelled_single，辅助检查labelled_sham与released_single；同时复算发布候选列表评测。补齐输入、格式标记和标签去重均属协议修复，不能作为创新。",
   "results": {
     "P001": {
       "n": 4,
@@ -1031,17 +1060,31 @@
       "n_second_reference_in_payload": 0,
       "n_payloads_unchanged_after_column_drop": 1006,
       "scope": "只证明当前公开代码的信息通路遗漏，尚未验证论文表格使用的历史实现或性能影响。"
+    },
+    "P030_metadata": {
+      "analysis": "results/P030_metadata_audit.json",
+      "all_conflicting_rows": 310,
+      "multi_conflicting_rows": 97,
+      "n_multi_rows": 1006,
+      "n_reference_components": 108,
+      "eligible_components_without_conflicting_rows": 102,
+      "selected_components": 48,
+      "reserved_components": 60,
+      "primary_labels": "deduplicated positive/negative sets; selected rows have no positive-negative overlap",
+      "official_metrics_retained": true
     }
   },
   "novelty_status": "仍未满足创新与充分验证目标。已停止patch候选、分辨率扫描；拆谓词/逻辑聚合有OrLog和NDCR等近邻且四题分量分数仍错。PinPoint公开脚本漏第二参考图是基线协议问题，不是新方法。",
   "last_progress_audit": {
-    "previous_goal_turn": "verified_wait (summary-reported live P025); intervening directory-status reply was not research progress",
-    "this_turn": "progress",
+    "previous_goal_turn": "progress",
     "evidence": [
-      "P025/P026/P027/P028/P029 all exit 0 and analyzed",
-      "PinPoint pinned source trace over 1006 real multi-reference queries",
-      "No new method or SOTA established; goal remains active"
+      "P027-P029 completed and audited; PinPoint released source omission traced on 1006 queries"
     ],
-    "running_gpu_jobs_at_end": []
+    "this_turn": "progress",
+    "new_evidence": [
+      "Pinned published candidate files cover all 7635 queries with 50 unique candidates each",
+      "P030 clean cohort frozen before GPU scores",
+      "996 required images downloaded and hashed using a temporary tunnel to the existing system proxy; tunnel closed"
+    ]
   }
 }
