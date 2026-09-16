@@ -1,0 +1,27 @@
+{
+  "id": "P027",
+  "purpose": "Specialized modern retrieval baseline; not a novel method",
+  "model_revision": "4bd860ac4f15ad1897a214615cccc700f8f71818",
+  "gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
+  "instruction": "Retrieve images or text relevant to the user's query.",
+  "settings": [
+    {
+      "name": "official_default",
+      "min_pixels": 4096,
+      "max_pixels": 1843200
+    },
+    {
+      "name": "bounded_pixels",
+      "min_pixels": 4096,
+      "max_pixels": 200704
+    }
+  ],
+  "primary_score": "official BF16 sigmoid score; also report pre-sigmoid margins to expose saturation ties",
+  "limits": [
+    "This is a retrieval-trained 2B model, not a same-backbone intervention comparison.",
+    "Official-default visual budget differs from P023/P025; bounded_pixels uses the same maximum pixel budget but a different patch size.",
+    "One fixed instruction; no tuning on pilot labels.",
+    "256-question exploratory validation pilot, not full benchmark or SOTA.",
+    "Official binary weight-difference head retained; BF16 probability ties separately audited."
+  ]
+}
