@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-16T23:28:39.267629+00:00",
+  "as_of": "2026-09-16T23:49:16.272334+00:00",
   "goal_status": "active",
-  "phase": "P030四条件在GPU3运行；发布排名复算完成，准备Coral同候选迁移基线",
+  "phase": "P030四条件在GPU3运行；P031 Coral与同底座3B的迁移对照已排队",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -19,7 +19,8 @@
     "SoFA 使用跨图双向 attention 插值；Delimiter Scaling 加强图像边界，两者报告收益，但实验设置不同，不能直接声称矛盾。",
     "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
     "Pathways 2026 发现干预可触发备用信息路径，因此仅看 attention 或遮挡消融不足以证明自然推理机制。",
-    "P008所有7B固定DTS条件各退化3至5/32；3B各变化正负1/32。相同P006协议生成全文64/64一致；P007 eager与P008 SDPA BF16的32个baseline候选argmax有3个差异，不能跨后端解读微小增益。"
+    "P008所有7B固定DTS条件各退化3至5/32；3B各变化正负1/32。相同P006协议生成全文64/64一致；P007 eager与P008 SDPA BF16的32个baseline候选argmax有3个差异，不能跨后端解读微小增益。",
+    "PinPoint全部发布排名指标复算完成：官方mAP10为13.1418%/16.9785%，仅去重后13.2530%/17.1452%，影响有限。results/PinPoint_metric_replay.json。"
   ],
   "hypotheses": [
     {
@@ -372,13 +373,35 @@
       "exitcode_file": "runs/PinPoint_metric_replay.exitcode",
       "analysis": "results/PinPoint_metric_replay.json",
       "exitcode": 0
+    },
+    "Coral_download": {
+      "status": "completed",
+      "driver_pid": 513275,
+      "exitcode": 0,
+      "revision": "2442266b8e160c29192551ec0dba289774af6932",
+      "verification": "models/Coral/verification.json",
+      "uses_gpu": false
+    },
+    "P031": {
+      "status": "queued_waiting_for_P030",
+      "driver_pid": 513690,
+      "preregister_commit": "c741d79",
+      "config": "configs/P031_coral_transfer.json",
+      "script": "scripts/run_P031.sh",
+      "expected_embeddings": 2208,
+      "dependency_pid": 512794,
+      "download_dependency_pid": 513275,
+      "exitcode_file": "runs/P031.exitcode",
+      "analysis": "results/P031_coral_transfer.json",
+      "cpu_preflight": "runs/P031_coral_transfer/cpu_preflight.json",
+      "cpu_preflight_exitcode": 0
     }
   },
   "monitor": {
     "automation_id": "gpu3",
     "interval_minutes": 20,
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
-    "verified_active": "本轮再次读取本地gpu3自动化：ACTIVE heartbeat；已有20分钟安排保留。"
+    "verified_active": "本轮读取本地gpu3 heartbeat：ACTIVE，每20分钟；读取research_state并核验真实PID，保持原有监控。"
   },
   "next": "完成P030完整输入诊断，并在固定48组、同一top20候选上比较Coral与同底座3B的末token归一化表征；不扩展保留组，不据部分结果调参。",
   "results": {
@@ -1086,7 +1109,7 @@
       "official_metrics_retained": true
     }
   },
-  "novelty_status": "仍未满足创新与充分验证目标。已停止patch候选、分辨率扫描；拆谓词/逻辑聚合有OrLog和NDCR等近邻且四题分量分数仍错。PinPoint公开脚本漏第二参考图是基线协议问题，不是新方法。",
+  "novelty_status": "未满足创新和充分验证目标。P030是输入路径诊断，P031是已有Coral方法迁移；属性分解、显式匹配融合、重构训练和诊断树已有近邻，不能独立作为创新。下一步由完整双图对照和专门训练基线的残余错误决定。",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
@@ -1095,7 +1118,9 @@
     "this_turn": "progress",
     "new_evidence": [
       "PinPoint full published-ranking replay completed with exit 0",
-      "MERIT/Coral method and pinned inference/training source read; checkpoint identified"
+      "MERIT/Coral method and pinned inference/training source read; checkpoint identified",
+      "Coral weights verified on 12 files",
+      "P031 frozen at c741d79, both CPU preflights passed; live driver 513690 waits for P030 512794"
     ]
   }
 }
