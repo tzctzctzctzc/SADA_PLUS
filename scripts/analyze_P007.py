@@ -39,11 +39,20 @@ for mode,rows in data.items():
         adj=F['select_attention_scores'](a,c['prior'],cfg['topk'])
         pa=F['sharpen_distribution'](adj,cfg['sharpen_power'])
         patch=F['select_attention_scores'](np.array(r['parts']['patch']),c['patch_prior'],cfg['topk'])
-        other=cal['baseline']
+        other=cal[cfg.get('baseline_mode','baseline')]
         pa_base=F['sharpen_distribution'](F['select_attention_scores'](a,other['prior'],cfg['topk']),cfg['sharpen_power'])
         pred={'logits':int(z.argmax()),'attention_raw':int(raw.argmax()),'attention_calibrated':int(adj.argmax()),
             'agd_official':int((z-pa@c['B']).argmax()),'patch_attention_calibrated':int(patch.argmax()),
             'agd_baseline_calibration':int((z-pa_base@other['B']).argmax())}
+        patch_scores=np.array(r['parts']['patch'])
+        total_ix=np.argsort(a.mean(1))[-cfg['topk']:]
+        patch_ix=np.argsort(patch_scores.mean(1))[-cfg['topk']:]
+        same_total=F['select_attention_scores'](patch_scores[total_ix],c['patch_prior'][total_ix],cfg['topk'])
+        same_patch=F['select_attention_scores'](a[patch_ix],c['prior'][patch_ix],cfg['topk'])
+        pred.update({'patch_attention_raw':int(F['select_attention_scores'](patch_scores,None,cfg['topk']).argmax()),
+            'patch_on_total_layers_calibrated':int(same_total.argmax()),
+            'total_on_patch_layers_calibrated':int(same_patch.argmax()),
+            'agd_patch':int((z-F['sharpen_distribution'](patch,cfg['sharpen_power'])@c['B']).argmax())})
         top=np.argsort(a.mean(1))[-cfg['topk']:]
         boundary=(np.array(r['parts']['start'])+np.array(r['parts']['end']))[top].sum()
         total=a[top].sum()
@@ -53,7 +62,7 @@ for mode,rows in data.items():
 summary={'purpose':cfg['purpose'],'n_base_questions':len(ev),'n_image_clusters':len(set(clusters.values())),
  'calibration_base_questions':len(cfg['calibration']),'calibration_eval_exact_image_overlap':False,
  'models':{},'limitations':['Exploratory reused Mantis questions; no independent confirmation','Calibration and evaluation byte-disjoint, not perceptual near-duplicate checked',
- 'LAD transfer uses original code aggregation and 336px preprocessing, not original paper benchmark',
+ 'LAD transfer uses original code aggregation; preprocessing: '+cfg.get('preprocessing_description','336px')+'; not original paper benchmark',
  'Do not treat 4 permutations of a question as 4 independent examples'],
  'calibrations':{m:{k:v.tolist() for k,v in c.items()} for m,c in cal.items()}}
 for mode in cfg['modes']:
@@ -72,6 +81,13 @@ for mode in cfg['modes']:
     report['agd_minus_logits_cluster_bootstrap_95ci_pp']=(100*np.quantile(boot[:,0]/boot[:,1],[.025,.975])).tolist()
     report['attention_correct_logits_wrong']=sum(r['predictions']['attention_calibrated']==r['gold'] and r['predictions']['logits']!=r['gold'] for r in rr)
     report['logits_correct_attention_wrong']=sum(r['predictions']['attention_calibrated']!=r['gold'] and r['predictions']['logits']==r['gold'] for r in rr)
+    for name,ref in [('patch_attention_calibrated','logits'),('patch_attention_calibrated','attention_calibrated'),
+                     ('patch_attention_calibrated','agd_official'),('patch_on_total_layers_calibrated','attention_calibrated')]:
+        delta=np.array([int(r['predictions'][name]==r['gold'])-int(r['predictions'][ref]==r['gold']) for r in rr])
+        totals=np.array([[sum(delta[i] for i,r in enumerate(rr) if r['cluster']==g),sum(r['cluster']==g for r in rr)] for g in groups])
+        rng=np.random.default_rng(20260917)
+        boot=totals[rng.integers(0,len(groups),size=(10000,len(groups)))].sum(1)
+        report[name+'_minus_'+ref+'_cluster_bootstrap_95ci_pp']=(100*np.quantile(boot[:,0]/boot[:,1],[.025,.975])).tolist()
     summary['models'][mode]=report
 Path('results/'+tag+'_lad_bridge.json').write_text(json.dumps(summary,indent=2))
 Path('runs/'+tag+'_lad_predictions.json').write_text(json.dumps(records,indent=2))

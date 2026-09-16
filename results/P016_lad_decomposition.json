@@ -1,0 +1,132 @@
+{
+  "scope": "Post-hoc baseline diagnosis; no new method or confirmatory selection",
+  "identity": "For row-normalized p, L=E[z|Y] and I=b*11^T+k*Id, z-p*(L-I) equals z-p*L+k*p plus a class-constant b.",
+  "implication": "AGD combines attention-based index evidence with residualized logits. The ideal target is an assumed symmetric mean-logit structure, not directly observed unbiased logits.",
+  "bootstrap": "Resample five calibration questions as blocks, preserving their four cyclic permutations; evaluation fixed. Report sensitivity, not a generalization confidence interval.",
+  "results": {
+    "P007:baseline": {
+      "n": 76,
+      "correct": {
+        "logits": 18,
+        "attention_only": 32,
+        "official_AGD": 27,
+        "attention_injection_only": 32,
+        "conditional_residual_only": 21,
+        "unconditional_centering": 20
+      },
+      "k": 1.883331298828125,
+      "algebra_max_error": 1.0658141036401503e-14,
+      "AGD_vs_injection_same_predictions": 32,
+      "calibration_bootstrap_1000": {
+        "correct_quantiles_025_50_975": [
+          25.0,
+          28.0,
+          32.0
+        ],
+        "k_quantiles_025_50_975": [
+          1.6510097217559836,
+          1.926188659667968,
+          2.510712432861329
+        ],
+        "prediction_change_count_quantiles_025_50_975": [
+          0.0,
+          4.0,
+          11.0
+        ]
+      }
+    },
+    "P007:scale": {
+      "n": 76,
+      "correct": {
+        "logits": 22,
+        "attention_only": 35,
+        "official_AGD": 32,
+        "attention_injection_only": 21,
+        "conditional_residual_only": 19,
+        "unconditional_centering": 19
+      },
+      "k": 2.0619029998779297,
+      "algebra_max_error": 7.105427357601002e-15,
+      "AGD_vs_injection_same_predictions": 18,
+      "calibration_bootstrap_1000": {
+        "correct_quantiles_025_50_975": [
+          26.0,
+          30.0,
+          33.0
+        ],
+        "k_quantiles_025_50_975": [
+          1.7523788452148459,
+          2.0619029998779297,
+          2.5702369689941413
+        ],
+        "prediction_change_count_quantiles_025_50_975": [
+          0.0,
+          7.0,
+          18.0
+        ]
+      }
+    },
+    "P015:baseline": {
+      "n": 76,
+      "correct": {
+        "logits": 39,
+        "attention_only": 46,
+        "official_AGD": 42,
+        "attention_injection_only": 42,
+        "conditional_residual_only": 34,
+        "unconditional_centering": 35
+      },
+      "k": 4.308331298828122,
+      "algebra_max_error": 7.105427357601002e-15,
+      "AGD_vs_injection_same_predictions": 65,
+      "calibration_bootstrap_1000": {
+        "correct_quantiles_025_50_975": [
+          40.0,
+          42.0,
+          44.0
+        ],
+        "k_quantiles_025_50_975": [
+          2.8119026184082045,
+          4.592855072021482,
+          6.894105072021482
+        ],
+        "prediction_change_count_quantiles_025_50_975": [
+          0.0,
+          3.0,
+          9.0
+        ]
+      }
+    },
+    "P015:scale": {
+      "n": 76,
+      "correct": {
+        "logits": 20,
+        "attention_only": 48,
+        "official_AGD": 40,
+        "attention_injection_only": 34,
+        "conditional_residual_only": 26,
+        "unconditional_centering": 25
+      },
+      "k": 2.1321407318115213,
+      "algebra_max_error": 1.4210854715202004e-14,
+      "AGD_vs_injection_same_predictions": 53,
+      "calibration_bootstrap_1000": {
+        "correct_quantiles_025_50_975": [
+          35.0,
+          40.0,
+          46.0
+        ],
+        "k_quantiles_025_50_975": [
+          1.5440456390380852,
+          2.255950164794921,
+          3.9714267730712827
+        ],
+        "prediction_change_count_quantiles_025_50_975": [
+          0.0,
+          6.0,
+          14.0
+        ]
+      }
+    }
+  }
+}

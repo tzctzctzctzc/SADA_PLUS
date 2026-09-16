@@ -1,7 +1,7 @@
 {
   "as_of": "2026-09-17",
   "goal_status": "active",
-  "phase": "P014负结果已完成；补齐7B LAD读出校准强基线",
+  "phase": "P015/P016完成；P017跨分辨率与读出组成对照",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -161,10 +161,19 @@
       "exitcode": 0
     },
     "P015": {
-      "status": "preregistered",
+      "status": "completed",
       "config": "configs/P015_lad_bridge.json",
       "n_records": 192,
-      "analysis": "results/P015_lad_bridge.json"
+      "analysis": "results/P015_lad_bridge.json",
+      "exitcode": 0,
+      "pid": 507308,
+      "preregister_commit": "0508ca2"
+    },
+    "P017": {
+      "status": "preregistered",
+      "config": "configs/P017_lad_resolution.json",
+      "n_records": 192,
+      "analysis": "results/P017_lad_bridge.json"
     }
   },
   "monitor": {
@@ -173,7 +182,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "Local automation gpu3 TOML inspected; active heartbeat every 20 minutes, silent on unchanged state"
   },
-  "next": "P015沿P007冻结协议迁移7B，保持图像内容完整编码，检验内部检索与最终输出的差异；不把已有AGD当创新。",
+  "next": "先确认P017方图SDPA与P015 eager差异，再看原比例高分辨率下patch读出及固定层对照。",
   "results": {
     "P001": {
       "n": 4,
@@ -555,6 +564,23 @@
         "max_candidate_score_error": 0.5
       },
       "limitations": "九个重复使用的图像簇；显式mask与原SDPA有2/88输出差异。内容隔离固定布局下成立，不涵盖改变图片尺寸。"
+    },
+    "P015": {
+      "analysis": "results/P015_lad_bridge.json",
+      "n_eval": 76,
+      "n_image_clusters": 15,
+      "baseline_correct": 39,
+      "agd_correct": 42,
+      "all_span_attention_calibrated_correct": 46,
+      "patch_attention_calibrated_correct": 57,
+      "scale_logits_correct": 20,
+      "scale_agd_correct": 40,
+      "interpretation": "7B的patch-only校准读出优于最终编号输出，但同时改变layer选择，不能仅归因去掉边界；3B未出现同样优势。此为简单强基线信号，不是创新。"
+    },
+    "P016": {
+      "analysis": "results/P016_lad_decomposition.json",
+      "scope": "post-hoc algebra and calibration sensitivity",
+      "interpretation": "AGD可精确分解为条件均值残差加对称的注意力分数注入；7B原模型1000次校准题bootstrap的AGD正确数2.5/50/97.5分位40/42/44。不是泛化置信区间，不是新方法。"
     }
   }
 }
