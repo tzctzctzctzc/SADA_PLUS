@@ -1,7 +1,7 @@
 {
   "as_of": "2026-09-17",
   "goal_status": "active",
-  "phase": "真实模型机制检查已完成；完整固定参数基线运行中",
+  "phase": "7B固定参数基线复现完成；因果边界诊断运行中；3B复现与无调参边界干预已排队",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -41,27 +41,39 @@
   "evaluation_policy": {
     "tuning": "只用预先划定的开发集；测试集只用于冻结配置后的验证",
     "reporting": "保存逐样本预测、数据版本、模型版本、耗时和显存；区分受限复现与官方协议复现",
-    "completion": "需有经过文献核查的创新、强基线、跨数据集与模型验证、机制消融和统计不确定性；当前远未达到"
+    "completion": "需有经过文献核查的创新、强基线、跨数据集与模型验证、机制消融和统计不确定性；当前远未达到",
+    "muir_split": {
+      "path": "configs/muir_split_v1.json",
+      "dev_n": 168,
+      "heldout_n": 2432,
+      "grouping": "counterpart and exact image byte connected components",
+      "heldout_predictions_seen": false
+    }
   },
   "jobs": {
     "P002": {
       "pid": 501501,
-      "driver": "scripts/run_P002.sh",
-      "log": "logs/P002_driver.log",
-      "exitcode": "runs/P002.exitcode",
-      "status": "running; verify PID before acting"
+      "status": "completed",
+      "exitcode": 0,
+      "summary": "results/P002_paired_analysis.json"
+    },
+    "P003": {
+      "pid": 501664,
+      "python_pid": 502116,
+      "status": "running; verify live handle",
+      "log": "logs/P003_boundary_probe.log"
+    },
+    "P004": {
+      "pid": 502175,
+      "status": "queued on runs/gpu3.lock; verify live handle",
+      "log": "logs/P004_driver.log"
     }
   },
   "monitor": {
     "automation_id": "gpu3",
     "interval_minutes": 20
   },
-  "next": [
-    "完成P002并做配对统计，不能把3B示例参数移植7B称为精确论文复现",
-    "核验原作者7B参数和官方类与hook实现的一致性",
-    "检验开头分隔符受先前图像影响的程度；设计开头/结尾分离与反事实干预",
-    "独立开发集与未见确认集分离"
-  ],
+  "next": "检查 P003 是否只减少前缀干扰而保留目标图响应；完成 P004 3B 原配置复现和 7B canonical-start 探索；仅在有支持证据后推进 Muir 开发集，保留集暂不评测。",
   "results": {
     "P001": {
       "n": 4,
@@ -70,6 +82,50 @@
       "same_top1_rate": 1.0,
       "max_abs_error": 8.296966552734375e-05,
       "max_relative_l2_error": 7.883612852310762e-06
+    },
+    "P002": {
+      "n": 217,
+      "baseline_correct": 149,
+      "scale_correct": 145,
+      "baseline_accuracy": 0.6866359447004609,
+      "scale_accuracy": 0.6682027649769585,
+      "delta_percentage_points": -1.8433179723502304,
+      "gains": 11,
+      "losses": 15,
+      "mcnemar_exact_two_sided_p": 0.557197093963623,
+      "paired_question_bootstrap_95ci_percentage_points": [
+        -6.451612903225806,
+        2.7649769585253456
+      ],
+      "limitations": [
+        "Exploratory question-level interval; shared images may create additional dependence",
+        "Fixed 3B example scaling parameters transferred to 7B, not audited 7B optimum",
+        "One sampling seed; Mantis already used for mechanism exploration"
+      ],
+      "question_type": {
+        "multi-choice": {
+          "n": 200,
+          "baseline_correct": 147,
+          "scale_correct": 143
+        },
+        "short-answer": {
+          "n": 17,
+          "baseline_correct": 2,
+          "scale_correct": 2
+        }
+      },
+      "tokens": {
+        "baseline": {
+          "hit_limit": 14,
+          "seconds": 341.87070150347427,
+          "peak_memory_gb": 21.532702208
+        },
+        "scale": {
+          "hit_limit": 15,
+          "seconds": 344.1075740340166,
+          "peak_memory_gb": 21.532727296
+        }
+      }
     }
   }
 }

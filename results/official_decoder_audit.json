@@ -1,0 +1,68 @@
+{
+  "official_source_sha256": "54c33e4ca39e77e8e972e9010c1c82df2014a5b62f80e2a49fd90a049aedf389",
+  "official_repository_commit": "a2880738e3ed7284953f3611e7c06a3c0ede9334",
+  "scope": "Tiny random decoder, CPU fp32, official eager versus port SDPA, 0/1/2 images, prefill and 3 KV-cache decode steps. Vision encoder and FlashAttention not covered.",
+  "records": [
+    {
+      "n_images": 0,
+      "mode": "baseline",
+      "prefill_and_decode_errors": [
+        7.897615432739258e-07,
+        7.152557373046875e-07,
+        3.5762786865234375e-07,
+        4.76837158203125e-07
+      ]
+    },
+    {
+      "n_images": 0,
+      "mode": "scale",
+      "prefill_and_decode_errors": [
+        7.897615432739258e-07,
+        7.152557373046875e-07,
+        3.5762786865234375e-07,
+        4.76837158203125e-07
+      ]
+    },
+    {
+      "n_images": 1,
+      "mode": "baseline",
+      "prefill_and_decode_errors": [
+        1.1920928955078125e-06,
+        4.76837158203125e-07,
+        4.172325134277344e-07,
+        4.76837158203125e-07
+      ]
+    },
+    {
+      "n_images": 1,
+      "mode": "scale",
+      "prefill_and_decode_errors": [
+        1.1920928955078125e-06,
+        4.76837158203125e-07,
+        4.172325134277344e-07,
+        4.76837158203125e-07
+      ]
+    },
+    {
+      "n_images": 2,
+      "mode": "baseline",
+      "prefill_and_decode_errors": [
+        1.1920928955078125e-06,
+        4.76837158203125e-07,
+        5.811452865600586e-07,
+        5.960464477539062e-07
+      ]
+    },
+    {
+      "n_images": 2,
+      "mode": "scale",
+      "prefill_and_decode_errors": [
+        8.344650268554688e-07,
+        4.76837158203125e-07,
+        3.5762786865234375e-07,
+        9.5367431640625e-07
+      ]
+    }
+  ],
+  "passed": true
+}

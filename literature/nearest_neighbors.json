@@ -1,0 +1,60 @@
+{
+  "as_of": "2026-09-17",
+  "status": "Novelty not established; canonical boundary is only a pilot hypothesis",
+  "records": [
+    {
+      "id": "DTS_ICLR2026",
+      "url": "https://openreview.net/forum?id=7QFf05KrOm",
+      "code": "https://github.com/MYMY-young/DelimScaling",
+      "overlap": "Direct nearest method: both boundary hidden states scaled after selected decoder layers.",
+      "evidence": "Paper including appendices read; official decoder audited; 7B baseline accuracy reproduced; 3B example parameters hurt 7B under our seed.",
+      "unknown": "7B optimal layer and scale settings not located; no claim of exact scaled-paper-score replication."
+    },
+    {
+      "id": "RMSNorm_NeurIPS2019",
+      "url": "https://papers.nips.cc/paper_files/paper/2019/hash/1e8a19426224ca89e83cef47f1e7f53b-Abstract.html",
+      "overlap": "Rescaling invariance foundational, not our invention."
+    },
+    {
+      "id": "UnifiedSinks_2026",
+      "url": "https://arxiv.org/html/2601.22966v1",
+      "overlap": "Outlier-driven normalization rescaling and gates already studied. Our scalar token residual-gate equivalence does not establish method novelty."
+    },
+    {
+      "id": "MELayer_WeMask_2026",
+      "url": "https://arxiv.org/html/2605.08504v1",
+      "overlap": "Residual persistence and direction rigidity already established; broad frozen-state explanation is not new."
+    },
+    {
+      "id": "TwoAlgorithms_2026",
+      "url": "https://arxiv.org/html/2606.08105v1",
+      "overlap": "Distinguishes no-op and broadcast sinks with diagnostics. Simply saying sinks have two roles is not novel."
+    },
+    {
+      "id": "CrossmodalHubs_2026",
+      "url": "https://arxiv.org/html/2605.10815v1",
+      "overlap": "Cross-modal versus unimodal sinks, causal patching, adaptive two-pass calibrated decoding already proposed."
+    },
+    {
+      "id": "LSG_2026",
+      "url": "https://arxiv.org/html/2604.03316v1",
+      "overlap": "Query-conditioned layer-wise sink gates trade global and local evidence; a generic adaptive sink gate would be too close."
+    },
+    {
+      "id": "ParallelContext_ACL2025",
+      "url": "https://aclanthology.org/2025.acl-long.485/",
+      "overlap": "Shared sink prefix and selective context attention; canonical boundary reference must be distinguished from these interventions."
+    },
+    {
+      "id": "Pathways_2026",
+      "url": "https://arxiv.org/html/2607.03358v1",
+      "overlap": "Interventions trigger fallback routes. Avoid claiming natural necessity from knockout alone."
+    },
+    {
+      "id": "FOCUS_2025",
+      "url": "https://arxiv.org/html/2508.13744v1",
+      "code": "https://github.com/yejipark-m/FOCUS",
+      "overlap": "Cross-image leakage via per-image noise-controlled logit aggregation. Simple per-image ensembling not novel."
+    }
+  ]
+}

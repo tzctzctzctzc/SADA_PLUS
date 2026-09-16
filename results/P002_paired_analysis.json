@@ -1,0 +1,549 @@
+{
+  "n": 217,
+  "baseline_correct": 149,
+  "scale_correct": 145,
+  "baseline_accuracy": 0.6866359447004609,
+  "scale_accuracy": 0.6682027649769585,
+  "delta_percentage_points": -1.8433179723502304,
+  "gains": 11,
+  "losses": 15,
+  "mcnemar_exact_two_sided_p": 0.557197093963623,
+  "paired_question_bootstrap_95ci_percentage_points": [
+    -6.451612903225806,
+    2.7649769585253456
+  ],
+  "limitations": [
+    "Exploratory question-level interval; shared images may create additional dependence",
+    "Fixed 3B example scaling parameters transferred to 7B, not audited 7B optimum",
+    "One sampling seed; Mantis already used for mechanism exploration"
+  ],
+  "changed_ids": [
+    {
+      "id": "xh_41",
+      "category": "seasonal activities and their appropriate gear or settings",
+      "baseline": true,
+      "scale": false
+    },
+    {
+      "id": "xh_48",
+      "category": "animal_behavior",
+      "baseline": true,
+      "scale": false
+    },
+    {
+      "id": "dj_2",
+      "category": "sequence understanding",
+      "baseline": false,
+      "scale": true
+    },
+    {
+      "id": "w_1",
+      "category": "Logical Reasoning",
+      "baseline": true,
+      "scale": false
+    },
+    {
+      "id": "w_7",
+      "category": "Difference Description",
+      "baseline": false,
+      "scale": true
+    },
+    {
+      "id": "w_16",
+      "category": "Complex Reasoning",
+      "baseline": true,
+      "scale": false
+    },
+    {
+      "id": "w_17",
+      "category": "Logical Reasoning",
+      "baseline": true,
+      "scale": false
+    },
+    {
+      "id": "w_21",
+      "category": "Difference Description",
+      "baseline": false,
+      "scale": true
+    },
+    {
+      "id": "w_25",
+      "category": "Difference Description",
+      "baseline": false,
+      "scale": true
+    },
+    {
+      "id": "w_47",
+      "category": "Difference Description",
+      "baseline": true,
+      "scale": false
+    },
+    {
+      "id": "wc_4",
+      "category": "Common Sense",
+      "baseline": true,
+      "scale": false
+    },
+    {
+      "id": "wc_6",
+      "category": "Common Sense",
+      "baseline": true,
+      "scale": false
+    },
+    {
+      "id": "wc_13",
+      "category": "Common Sense",
+      "baseline": false,
+      "scale": true
+    },
+    {
+      "id": "wc_36",
+      "category": "Common Sense",
+      "baseline": false,
+      "scale": true
+    },
+    {
+      "id": "wc_44",
+      "category": "Image Reasoning",
+      "baseline": true,
+      "scale": false
+    },
+    {
+      "id": "wc_47",
+      "category": "Image Reasoning",
+      "baseline": true,
+      "scale": false
+    },
+    {
+      "id": "wc_48",
+      "category": "Image Reasoning",
+      "baseline": true,
+      "scale": false
+    },
+    {
+      "id": "wc_49",
+      "category": "Image Reasoning",
+      "baseline": true,
+      "scale": false
+    },
+    {
+      "id": "wc_60",
+      "category": "Image Reasoning",
+      "baseline": false,
+      "scale": true
+    },
+    {
+      "id": "wc_62",
+      "category": "Image Reasoning",
+      "baseline": false,
+      "scale": true
+    },
+    {
+      "id": "wc_65",
+      "category": "Image Reasoning",
+      "baseline": false,
+      "scale": true
+    },
+    {
+      "id": "wc_71",
+      "category": "Image Reasoning",
+      "baseline": true,
+      "scale": false
+    },
+    {
+      "id": "wc_73",
+      "category": "Image Reasoning",
+      "baseline": true,
+      "scale": false
+    },
+    {
+      "id": "wc_74",
+      "category": "Image Reasoning",
+      "baseline": true,
+      "scale": false
+    },
+    {
+      "id": "wc_76",
+      "category": "Image Reasoning",
+      "baseline": false,
+      "scale": true
+    },
+    {
+      "id": "wc_82",
+      "category": "Image Reasoning",
+      "baseline": false,
+      "scale": true
+    }
+  ],
+  "question_type": {
+    "multi-choice": {
+      "n": 200,
+      "baseline_correct": 147,
+      "scale_correct": 143
+    },
+    "short-answer": {
+      "n": 17,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    }
+  },
+  "category": {
+    "number of objects": {
+      "n": 7,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "num of objects": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "weather conditions in image": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "color of objects": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "time of day in images": {
+      "n": 2,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "age estimation of objects or subjects": {
+      "n": 2,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "natural versus artificial elements in images": {
+      "n": 2,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "lighting and shadow effects in images": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "geographical location implications in images": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "economic or social status indicators in images": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "emotional tone or mood in images": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "recreational and leisure activities in various environments": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "common sense": {
+      "n": 3,
+      "baseline_correct": 3,
+      "scale_correct": 3
+    },
+    "seasonal attributes in images": {
+      "n": 3,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "Technological Advancements": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "language understanding": {
+      "n": 3,
+      "baseline_correct": 3,
+      "scale_correct": 3
+    },
+    "motion or static state of objects": {
+      "n": 3,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "cultural_symbols": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "environmental_concerns": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "weather_conditions": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "wildlife_habitat": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "material of objects": {
+      "n": 2,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "difference description": {
+      "n": 3,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "Human-Animal Interaction": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "STEM reasoning": {
+      "n": 4,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "pattern recognition": {
+      "n": 3,
+      "baseline_correct": 3,
+      "scale_correct": 3
+    },
+    "safety considerations in changing object placements": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "cost and economic value of objects in diverse contexts": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "maintenance and care requirements of objects": {
+      "n": 2,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "seasonal activities and their appropriate gear or settings": {
+      "n": 2,
+      "baseline_correct": 2,
+      "scale_correct": 1
+    },
+    "astronomical phenomena visible or inferred in images": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "climate change": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "architectural_styles": {
+      "n": 2,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "Emotional Impact": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "animal_behavior": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 0
+    },
+    "historical context": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "artistic_styles": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "geographical_features": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "geographical location": {
+      "n": 2,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "texture of objects": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "technological aspects in images": {
+      "n": 2,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "weather conditions in images": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "artistic style or genre of images": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "historical_context": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "cultural_influence": {
+      "n": 2,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "Clothing style and period": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "human_activity": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "weight of objects": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "symmetry and asymmetry in objects": {
+      "n": 2,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "adaptability of subjects or objects in new environments": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "sequence understanding": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 1
+    },
+    "counting": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "recognizing similarity": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "cause and effect": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "weight comparison": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "price comparison": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "Logical Reasoning": {
+      "n": 12,
+      "baseline_correct": 7,
+      "scale_correct": 5
+    },
+    "Difference Description": {
+      "n": 23,
+      "baseline_correct": 14,
+      "scale_correct": 16
+    },
+    "Complex Reasoning": {
+      "n": 15,
+      "baseline_correct": 8,
+      "scale_correct": 7
+    },
+    "Common Sense": {
+      "n": 42,
+      "baseline_correct": 32,
+      "scale_correct": 32
+    },
+    "Image Reasoning": {
+      "n": 28,
+      "baseline_correct": 14,
+      "scale_correct": 12
+    },
+    "animal_species": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "emotional_tone": {
+      "n": 2,
+      "baseline_correct": 2,
+      "scale_correct": 2
+    },
+    "Flora and fauna": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "Climate and geography": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "natural_elements": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "orientation of objects": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    },
+    "environmental context of objects": {
+      "n": 1,
+      "baseline_correct": 1,
+      "scale_correct": 1
+    },
+    "historical or temporal context of images": {
+      "n": 1,
+      "baseline_correct": 0,
+      "scale_correct": 0
+    }
+  },
+  "tokens": {
+    "baseline": {
+      "hit_limit": 14,
+      "seconds": 341.87070150347427,
+      "peak_memory_gb": 21.532702208
+    },
+    "scale": {
+      "hit_limit": 15,
+      "seconds": 344.1075740340166,
+      "peak_memory_gb": 21.532727296
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "n": 4,
+  "mode": "mechanism",
+  "complete": true,
+  "same_top1_rate": 1.0,
+  "max_abs_error": 8.296966552734375e-05,
+  "max_relative_l2_error": 7.883612852310762e-06
+}
