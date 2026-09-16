@@ -1,7 +1,7 @@
 {
   "as_of": "2026-09-17",
   "goal_status": "active",
-  "phase": "P008交叉协议诊断完成；7B固定DTS退化跨两种预处理和两种模板持续，待因果定位",
+  "phase": "P009边界因果恢复实验运行中；先判定独立内容同序号状态是否保留作用",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -109,14 +109,25 @@
       "exitcode": 0,
       "preregister_commit": "21659e2",
       "analysis": "results/P008_protocol_cross.json"
+    },
+    "P009": {
+      "pid": 504649,
+      "child_pid": 504651,
+      "status": "running; parent and Python child verified, 12/1664 observed",
+      "log": "logs/P009_boundary_restore.log",
+      "driver_log": "logs/P009_driver.log",
+      "exitcode": "runs/P009.exitcode",
+      "preregister_commit": "3ac716e",
+      "config": "configs/P009_boundary_restore.json",
+      "analysis": "scripts/analyze_P009.py"
     }
   },
   "monitor": {
     "automation_id": "gpu3",
     "interval_minutes": 20,
-    "gpu_queue": "P002-P008 drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock"
+    "gpu_queue": "P002-P009 drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock"
   },
-  "next": "预注册边界状态恢复实验：7B上分别恢复基线start/end/both的规范化状态，以both为实现一致性对照；再用图像分离、同序号的无关内容donor与错序号donor作区分。全部只作因果机制探索，不把oracle恢复当方法收益。若不支持结构与语义分离，停止该方案并重新筛选方向。保持Muir2432保留集未评测。",
+  "next": "先核验P009父子进程和退出码。若仍活跃不重复启动。全部完成后读取results/P009_boundary_restore.json，分开分析clean-start/end因果恢复与donor同序号/错序号对照；clean-both按构造恢复基线不算科学收益。若同序号无关内容不能稳定救回或区分不了错序号，应放弃简单结构模板假设。",
   "results": {
     "P001": {
       "n": 4,
