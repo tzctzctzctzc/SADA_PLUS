@@ -1122,7 +1122,7 @@
       "official_metrics_retained": true
     }
   },
-  "novelty_status": "未满足创新和充分验证目标。P030是输入路径诊断，P031是已有Coral方法迁移；属性分解、显式匹配融合、重构训练和诊断树已有近邻，不能独立作为创新。下一步由完整双图对照和专门训练基线的残余错误决定。",
+  "novelty_status": "P032 quick strict audit: current main-track readiness low, development potential medium. VCD formula transfer alone is insufficient; causal language is disallowed unless structured controls and held-out multi-model evidence support it.",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
@@ -1136,5 +1136,25 @@
       "P031 frozen at c741d79, both CPU preflights passed; live driver 513690 waits for P030 512794",
       "P032 negative-control reference contrast protocol locked before viewing P030 metrics; queued CPU driver 513876"
     ]
+  },
+  "idea_audits": {
+    "P032_quick": {
+      "mode": "quick",
+      "target": "CVPR/ICML main track",
+      "current_conference_readiness": "low",
+      "development_potential": "medium",
+      "strongest_point": "Binary log-odds gives an exact, parameter-free transfer of contrastive decoding to reference-conditioned relevance scoring, with a held-out-group path.",
+      "top_rejection_risks": [
+        "The score formula is inherited directly from VCD; applying it to PinPoint alone is not a sufficient novelty delta.",
+        "A single mismatched reference changes both semantics and input distribution, so dual-minus-sham is not an identifiable causal effect.",
+        "A 48-query reranking pilot cannot establish generality or SOTA, and candidate/reference dependencies weaken naive intervals."
+      ],
+      "score_change_conditions": [
+        "The locked P032 primary score must improve over dual input and its lift must discriminate positives from explicit negatives.",
+        "The same fixed construction must survive preregistered untouched components and at least one separately trained retriever/reranker.",
+        "A multi-negative or structured negative-control estimator must be derived and shown to isolate source-specific evidence better than random noise, missing-image, and generic VCD controls."
+      ],
+      "recommendation": "revise; use P032 as a kill gate, not as a claimed method."
+    }
   }
 }
