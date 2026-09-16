@@ -5,6 +5,7 @@ import csv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from tools import run_clip_target_adapter as adapter
 from tools.run_clip_target_adapter import download_video, epic_55_splits, video_path
 from tools.run_clip_then_llava import read_jsonl
 
@@ -48,6 +49,11 @@ def parse_args():
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--connections", type=int, default=8)
     parser.add_argument("--retries", type=int, default=5)
+    parser.add_argument(
+        "--use-http",
+        action="store_true",
+        help="Use the official Bristol HTTP endpoint when HTTPS video GETs stall.",
+    )
     return parser.parse_args()
 
 
@@ -56,6 +62,9 @@ def main():
     if min(args.workers, args.connections, args.retries) <= 0:
         raise ValueError("worker, connection, and retry counts must be positive")
     rows = read_jsonl(args.manifest)
+    if args.use_http:
+        adapter.EPIC_55_BASE_URL = adapter.EPIC_55_BASE_URL.replace("https://", "http://")
+        adapter.EPIC_100_BASE_URL = adapter.EPIC_100_BASE_URL.replace("https://", "http://")
     video_ids = sorted({row["video_id"] for row in rows})
     output_root = Path(args.video_root)
     output_root.mkdir(parents=True, exist_ok=True)
