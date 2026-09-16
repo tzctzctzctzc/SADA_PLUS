@@ -214,13 +214,16 @@
       "exitcode_file": "runs/ImageCoDe_download.exitcode"
     },
     "P023": {
-      "status": "preregistered_smoke_passed",
+      "status": "waiting_for_live_download",
       "config": "configs/P023_imagecode.json",
       "expected_calibration": 40,
       "expected_evaluation": 256,
       "script": "scripts/run_P023.sh",
       "analysis": "results/P023_imagecode.json",
-      "protocol_smoke": "results/P023_protocol_smoke.json"
+      "protocol_smoke": "results/P023_protocol_smoke.json",
+      "driver_pid": 509553,
+      "dependency_pid": 509048,
+      "exitcode_file": "runs/P023.exitcode"
     }
   },
   "monitor": {
