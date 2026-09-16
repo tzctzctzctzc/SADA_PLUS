@@ -1,0 +1,14 @@
+{
+  "full_later_image_change": 1.7983410358428955,
+  "explicit_causal_mask_max_error": 0.0,
+  "isolated": {
+    "later_label_and_image_max_change": 0.0,
+    "question_readout_change": 0.784202516078949
+  },
+  "skeleton": {
+    "later_label_and_image_max_change": 0.0,
+    "question_readout_change": 0.7874372005462646
+  },
+  "hooks_remaining": 0,
+  "passed": true
+}

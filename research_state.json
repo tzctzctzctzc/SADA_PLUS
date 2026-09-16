@@ -147,15 +147,21 @@
       "child_pid": 506439,
       "preregister_commit": "86571ea",
       "analysis": "results/P013_cache_paths.json"
+    },
+    "P014": {
+      "status": "preregistered",
+      "config": "configs/P014_image_isolation.json",
+      "n_records": 440,
+      "analysis": "results/P014_image_isolation.json"
     }
   },
   "monitor": {
     "automation_id": "gpu3",
     "interval_minutes": 20,
-    "gpu_queue": "P002-P011 drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
+    "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "Local automation gpu3 TOML inspected; active heartbeat every 20 minutes, silent on unchanged state"
   },
-  "next": "预注册P014：直接隔离、隔离+标准编号、隔离+donor起始状态、仅起始结构边，对比原完整基线及显式mask数值对照。",
+  "next": "运行P014的440条预注册对照。仅恢复隔离损失不算方法收益；需同时超过完整基线及标准编号基线才扩大。",
   "results": {
     "P001": {
       "n": 4,
