@@ -98,8 +98,20 @@
     {
       "id": "LinearSpatiotemporal_2026",
       "url": "https://arxiv.org/abs/2601.12626",
-      "overlap": "Spatial IDs linked to text and video temporal binding; must read before claiming new ordinal-binding mechanism.",
-      "evidence": "Primary abstract and related-work description only; detailed methods pending."
+      "overlap": "Position/content mean separation, temporal IDs in video, source-of-binding failure diagnosis and ID-guided fine-tuning already studied. Merely moving an ordinal probe from images to videos is not sufficient.",
+      "evidence": "Primary manuscript sections on temporal IDs, vision-vs-integration failure diagnosis, ID-guided fine-tuning and extraction appendix inspected."
+    },
+    {
+      "id": "Kamera_2026",
+      "url": "https://arxiv.org/abs/2606.23581",
+      "overlap": "Prospective adjacent cache direction already covered: position-free multimodal KV reuse, cross-chunk binding residue, low-rank conditioning patch, reordering and sliding-window reuse. Do not propose generic source-equivariant KV reuse as new.",
+      "evidence": "Primary abstract only; exactness and full experimental/code claims not audited."
+    },
+    {
+      "id": "VLCache_2025",
+      "url": "https://arxiv.org/abs/2512.12977",
+      "overlap": "Cumulative multimodal non-prefix cache-reuse error and dynamic layerwise recomputation already studied.",
+      "evidence": "Primary abstract only."
     }
   ]
 }

@@ -1,0 +1,415 @@
+{
+  "primary_mantis_parser": "Frozen P006 score/parse_answer functions applied offline to saved generation text",
+  "parser_corrections": 0,
+  "scope": "Exploratory crossed protocol diagnostic on eight reused Mantis questions; permutations dependent",
+  "n_records": 512,
+  "cells": [
+    {
+      "model": "Qwen2.5-VL-3B-Instruct",
+      "preprocessing": "square336",
+      "prompt": "mantis_letters",
+      "n": 32,
+      "modes": {
+        "baseline": {
+          "correct": 8,
+          "accuracy": 0.25,
+          "prediction_counts": {
+            "-1": 0,
+            "0": 10,
+            "1": 11,
+            "2": 11,
+            "3": 0
+          },
+          "all4_correct_questions": 0,
+          "mean_top2_boundary_fraction": 0.04716831826146811
+        },
+        "scale": {
+          "correct": 7,
+          "accuracy": 0.21875,
+          "prediction_counts": {
+            "-1": 0,
+            "0": 14,
+            "1": 2,
+            "2": 16,
+            "3": 0
+          },
+          "all4_correct_questions": 0,
+          "mean_top2_boundary_fraction": 0.6807800984322272
+        }
+      },
+      "gains": 1,
+      "losses": 2,
+      "delta_pp": -3.125,
+      "question_delta": {
+        "wc_67": 0.0,
+        "wc_48": 0.0,
+        "wc_57": 0.0,
+        "wc_69": 0.0,
+        "wc_71": 0.0,
+        "wc_64": 0.0,
+        "wc_76": -0.25,
+        "wc_65": 0.0
+      }
+    },
+    {
+      "model": "Qwen2.5-VL-3B-Instruct",
+      "preprocessing": "square336",
+      "prompt": "lad_numbers",
+      "n": 32,
+      "modes": {
+        "baseline": {
+          "correct": 9,
+          "accuracy": 0.28125,
+          "prediction_counts": {
+            "-1": 0,
+            "0": 0,
+            "1": 22,
+            "2": 10,
+            "3": 0
+          },
+          "all4_correct_questions": 0,
+          "mean_top2_boundary_fraction": 0.03113789502649548
+        },
+        "scale": {
+          "correct": 10,
+          "accuracy": 0.3125,
+          "prediction_counts": {
+            "-1": 0,
+            "0": 0,
+            "1": 30,
+            "2": 2,
+            "3": 0
+          },
+          "all4_correct_questions": 0,
+          "mean_top2_boundary_fraction": 0.6834016184600799
+        }
+      },
+      "gains": 2,
+      "losses": 1,
+      "delta_pp": 3.125,
+      "question_delta": {
+        "wc_67": 0.25,
+        "wc_48": -0.25,
+        "wc_57": 0.0,
+        "wc_69": 0.25,
+        "wc_71": 0.0,
+        "wc_64": 0.0,
+        "wc_76": 0.0,
+        "wc_65": 0.0
+      }
+    },
+    {
+      "model": "Qwen2.5-VL-3B-Instruct",
+      "preprocessing": "native2048",
+      "prompt": "mantis_letters",
+      "n": 32,
+      "modes": {
+        "baseline": {
+          "correct": 11,
+          "accuracy": 0.34375,
+          "prediction_counts": {
+            "-1": 0,
+            "0": 8,
+            "1": 9,
+            "2": 15,
+            "3": 0
+          },
+          "all4_correct_questions": 0,
+          "mean_top2_boundary_fraction": 0.03597565042095876
+        },
+        "scale": {
+          "correct": 10,
+          "accuracy": 0.3125,
+          "prediction_counts": {
+            "-1": 0,
+            "0": 7,
+            "1": 5,
+            "2": 20,
+            "3": 0
+          },
+          "all4_correct_questions": 0,
+          "mean_top2_boundary_fraction": 0.5837723681484386
+        }
+      },
+      "gains": 1,
+      "losses": 2,
+      "delta_pp": -3.125,
+      "question_delta": {
+        "wc_67": 0.0,
+        "wc_48": 0.0,
+        "wc_57": 0.0,
+        "wc_69": 0.0,
+        "wc_71": 0.0,
+        "wc_64": -0.25,
+        "wc_76": 0.0,
+        "wc_65": 0.0
+      }
+    },
+    {
+      "model": "Qwen2.5-VL-3B-Instruct",
+      "preprocessing": "native2048",
+      "prompt": "lad_numbers",
+      "n": 32,
+      "modes": {
+        "baseline": {
+          "correct": 8,
+          "accuracy": 0.25,
+          "prediction_counts": {
+            "-1": 0,
+            "0": 0,
+            "1": 24,
+            "2": 8,
+            "3": 0
+          },
+          "all4_correct_questions": 0,
+          "mean_top2_boundary_fraction": 0.025297870622515636
+        },
+        "scale": {
+          "correct": 9,
+          "accuracy": 0.28125,
+          "prediction_counts": {
+            "-1": 0,
+            "0": 0,
+            "1": 31,
+            "2": 1,
+            "3": 0
+          },
+          "all4_correct_questions": 0,
+          "mean_top2_boundary_fraction": 0.6688947989866922
+        }
+      },
+      "gains": 2,
+      "losses": 1,
+      "delta_pp": 3.125,
+      "question_delta": {
+        "wc_67": 0.25,
+        "wc_48": 0.0,
+        "wc_57": 0.0,
+        "wc_69": 0.0,
+        "wc_71": 0.0,
+        "wc_64": 0.0,
+        "wc_76": 0.0,
+        "wc_65": 0.0
+      }
+    },
+    {
+      "model": "Qwen2.5-VL-7B-Instruct",
+      "preprocessing": "square336",
+      "prompt": "mantis_letters",
+      "n": 32,
+      "modes": {
+        "baseline": {
+          "correct": 16,
+          "accuracy": 0.5,
+          "prediction_counts": {
+            "-1": 0,
+            "0": 7,
+            "1": 11,
+            "2": 7,
+            "3": 7
+          },
+          "all4_correct_questions": 2,
+          "mean_top2_boundary_fraction": 0.46981966724092916
+        },
+        "scale": {
+          "correct": 11,
+          "accuracy": 0.34375,
+          "prediction_counts": {
+            "-1": 2,
+            "0": 10,
+            "1": 16,
+            "2": 0,
+            "3": 4
+          },
+          "all4_correct_questions": 0,
+          "mean_top2_boundary_fraction": 0.12934606855948363
+        }
+      },
+      "gains": 3,
+      "losses": 8,
+      "delta_pp": -15.625,
+      "question_delta": {
+        "wc_67": 0.0,
+        "wc_48": -0.75,
+        "wc_57": 0.25,
+        "wc_69": 0.25,
+        "wc_71": -0.5,
+        "wc_64": -0.5,
+        "wc_76": 0.25,
+        "wc_65": -0.25
+      }
+    },
+    {
+      "model": "Qwen2.5-VL-7B-Instruct",
+      "preprocessing": "square336",
+      "prompt": "lad_numbers",
+      "n": 32,
+      "modes": {
+        "baseline": {
+          "correct": 12,
+          "accuracy": 0.375,
+          "prediction_counts": {
+            "-1": 0,
+            "0": 2,
+            "1": 12,
+            "2": 12,
+            "3": 6
+          },
+          "all4_correct_questions": 0,
+          "mean_top2_boundary_fraction": 0.5723040766058226
+        },
+        "scale": {
+          "correct": 9,
+          "accuracy": 0.28125,
+          "prediction_counts": {
+            "-1": 0,
+            "0": 2,
+            "1": 23,
+            "2": 6,
+            "3": 1
+          },
+          "all4_correct_questions": 0,
+          "mean_top2_boundary_fraction": 0.13935395970267983
+        }
+      },
+      "gains": 4,
+      "losses": 7,
+      "delta_pp": -9.375,
+      "question_delta": {
+        "wc_67": 0.0,
+        "wc_48": -0.5,
+        "wc_57": 0.0,
+        "wc_69": 0.25,
+        "wc_71": -0.5,
+        "wc_64": -0.5,
+        "wc_76": 0.5,
+        "wc_65": 0.0
+      }
+    },
+    {
+      "model": "Qwen2.5-VL-7B-Instruct",
+      "preprocessing": "native2048",
+      "prompt": "mantis_letters",
+      "n": 32,
+      "modes": {
+        "baseline": {
+          "correct": 16,
+          "accuracy": 0.5,
+          "prediction_counts": {
+            "-1": 0,
+            "0": 6,
+            "1": 13,
+            "2": 7,
+            "3": 6
+          },
+          "all4_correct_questions": 2,
+          "mean_top2_boundary_fraction": 0.4358764534995547
+        },
+        "scale": {
+          "correct": 13,
+          "accuracy": 0.40625,
+          "prediction_counts": {
+            "-1": 1,
+            "0": 10,
+            "1": 14,
+            "2": 3,
+            "3": 4
+          },
+          "all4_correct_questions": 1,
+          "mean_top2_boundary_fraction": 0.10922150375753513
+        }
+      },
+      "gains": 5,
+      "losses": 8,
+      "delta_pp": -9.375,
+      "question_delta": {
+        "wc_67": 0.0,
+        "wc_48": -0.75,
+        "wc_57": 0.25,
+        "wc_69": 0.25,
+        "wc_71": -0.75,
+        "wc_64": 0.25,
+        "wc_76": 0.5,
+        "wc_65": -0.5
+      }
+    },
+    {
+      "model": "Qwen2.5-VL-7B-Instruct",
+      "preprocessing": "native2048",
+      "prompt": "lad_numbers",
+      "n": 32,
+      "modes": {
+        "baseline": {
+          "correct": 14,
+          "accuracy": 0.4375,
+          "prediction_counts": {
+            "-1": 0,
+            "0": 3,
+            "1": 14,
+            "2": 9,
+            "3": 6
+          },
+          "all4_correct_questions": 0,
+          "mean_top2_boundary_fraction": 0.5751530944695213
+        },
+        "scale": {
+          "correct": 9,
+          "accuracy": 0.28125,
+          "prediction_counts": {
+            "-1": 0,
+            "0": 1,
+            "1": 21,
+            "2": 10,
+            "3": 0
+          },
+          "all4_correct_questions": 0,
+          "mean_top2_boundary_fraction": 0.08630645589156036
+        }
+      },
+      "gains": 3,
+      "losses": 8,
+      "delta_pp": -15.625,
+      "question_delta": {
+        "wc_67": 0.0,
+        "wc_48": -0.5,
+        "wc_57": -0.25,
+        "wc_69": 0.25,
+        "wc_71": -0.5,
+        "wc_64": -0.5,
+        "wc_76": 0.5,
+        "wc_65": -0.25
+      }
+    }
+  ],
+  "protocol_audits": {
+    "P006_baseline": {
+      "n": 32,
+      "same_input_token_count": 32,
+      "same_generated_answer": 32
+    },
+    "P006_scale": {
+      "n": 32,
+      "same_input_token_count": 32,
+      "same_generated_answer": 32
+    },
+    "P007_baseline": {
+      "n": 32,
+      "same_candidate_argmax": 29,
+      "same_input_token_count": 32,
+      "max_candidate_score_difference": 0.375,
+      "limitation": "P007 eager vs P008 SDPA BF16; numerical backend difference remains. P008 uses one backend for all paired cells."
+    },
+    "P007_scale": {
+      "n": 32,
+      "same_candidate_argmax": 32,
+      "same_input_token_count": 32,
+      "max_candidate_score_difference": 0.375,
+      "limitation": "P007 eager vs P008 SDPA BF16; numerical backend difference remains. P008 uses one backend for all paired cells."
+    }
+  },
+  "limitations": [
+    "Model, preprocessing, prompt interactions are behavioral evidence, not causal localization",
+    "Square resizing changes aspect ratio and detail, not just token count",
+    "LAD and Mantis prompts differ in instructions as well as answer symbols"
+  ]
+}

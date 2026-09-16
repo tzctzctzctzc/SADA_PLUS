@@ -609,6 +609,9 @@
       "1": 19,
       "0": 63
     },
+    "n_valid_position_pairs": 127,
+    "all_sample_gains": 18,
+    "all_sample_losses": 31,
     "gains": 18,
     "losses": 30,
     "per_question_mean_position_shift": {
@@ -628,6 +631,9 @@
       "1": 18,
       "0": 61
     },
+    "n_valid_position_pairs": 127,
+    "all_sample_gains": 21,
+    "all_sample_losses": 32,
     "gains": 21,
     "losses": 31,
     "per_question_mean_position_shift": {

@@ -1,7 +1,7 @@
 {
   "as_of": "2026-09-17",
   "goal_status": "active",
-  "phase": "已完成P006双因素与P007官方LAD迁移；P008交叉控制模型/预处理/提示协议正在GPU3运行",
+  "phase": "P008交叉协议诊断完成；7B固定DTS退化跨两种预处理和两种模板持续，待因果定位",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -18,7 +18,8 @@
   "known_evidence": [
     "SoFA 使用跨图双向 attention 插值；Delimiter Scaling 加强图像边界，两者报告收益，但实验设置不同，不能直接声称矛盾。",
     "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
-    "Pathways 2026 发现干预可触发备用信息路径，因此仅看 attention 或遮挡消融不足以证明自然推理机制。"
+    "Pathways 2026 发现干预可触发备用信息路径，因此仅看 attention 或遮挡消融不足以证明自然推理机制。",
+    "P008所有7B固定DTS条件各退化3至5/32；3B各变化正负1/32。相同P006协议生成全文64/64一致；P007 eager与P008 SDPA BF16的32个baseline候选argmax有3个差异，不能跨后端解读微小增益。"
   ],
   "hypotheses": [
     {
@@ -40,7 +41,7 @@
     {
       "id": "H3",
       "statement": "缩放可能抑制图片序号绑定所需的结构信息，而不只是先前图像内容的干扰；也可能仅改变选项字母/格式先验",
-      "status": "P006控制图片/选项排列后仍偏向前图，且选项重排一致性下降；但P007另一协议下缩放略有收益，普遍序号坍塌解释未成立。P008解开模型、分辨率和模板混淆。",
+      "status": "P006/P008支持7B固定DTS导致跨排列不稳与前图偏差；7B退化在两种预处理和两种模板均存在。3B变化仅正负1题，不能泛化为所有模型序号坍塌；是否结构绑定损伤仍需因果干预。",
       "novelty": "普通位置偏差、循环排列和注意力引导校准已有 SoFA、MIBench、LAD；不能当作新贡献。"
     }
   ],
@@ -103,10 +104,11 @@
     "P008": {
       "pid": 504109,
       "child_pid": 504111,
-      "status": "running; 3B child verified live and 21/256 predictions observed",
+      "status": "completed",
       "log": "logs/P008_driver.log",
-      "exitcode": "runs/P008.exitcode",
-      "preregister_commit": "21659e2"
+      "exitcode": 0,
+      "preregister_commit": "21659e2",
+      "analysis": "results/P008_protocol_cross.json"
     }
   },
   "monitor": {
@@ -114,7 +116,7 @@
     "interval_minutes": 20,
     "gpu_queue": "P002-P008 drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock"
   },
-  "next": "核验P008进程及逐样本输出，结束后运行scripts/analyze_P008.py；先依据交叉结果判断何种协议触发失效，再预注册机制干预。不得仅把位置偏差、序号线性探针或LAD注意力校准包装成创新。",
+  "next": "预注册边界状态恢复实验：7B上分别恢复基线start/end/both的规范化状态，以both为实现一致性对照；再用图像分离、同序号的无关内容donor与错序号donor作区分。全部只作因果机制探索，不把oracle恢复当方法收益。若不支持结构与语义分离，停止该方案并重新筛选方向。保持Muir2432保留集未评测。",
   "results": {
     "P001": {
       "n": 4,
@@ -296,6 +298,103 @@
       "boundary_fraction_baseline": 0.028571218676291654,
       "boundary_fraction_scale": 0.6435109707645384,
       "limitations": "探索性迁移，AGD收益区间较宽；与P006模型大小、图像预处理、提示模板均不同，不能归因于单一因素"
+    },
+    "P008": {
+      "n_records": 512,
+      "analysis": "results/P008_protocol_cross.json",
+      "cells": [
+        {
+          "model": "Qwen2.5-VL-3B-Instruct",
+          "preprocessing": "square336",
+          "prompt": "mantis_letters",
+          "baseline_correct": 8,
+          "scale_correct": 7,
+          "n": 32
+        },
+        {
+          "model": "Qwen2.5-VL-3B-Instruct",
+          "preprocessing": "square336",
+          "prompt": "lad_numbers",
+          "baseline_correct": 9,
+          "scale_correct": 10,
+          "n": 32
+        },
+        {
+          "model": "Qwen2.5-VL-3B-Instruct",
+          "preprocessing": "native2048",
+          "prompt": "mantis_letters",
+          "baseline_correct": 11,
+          "scale_correct": 10,
+          "n": 32
+        },
+        {
+          "model": "Qwen2.5-VL-3B-Instruct",
+          "preprocessing": "native2048",
+          "prompt": "lad_numbers",
+          "baseline_correct": 8,
+          "scale_correct": 9,
+          "n": 32
+        },
+        {
+          "model": "Qwen2.5-VL-7B-Instruct",
+          "preprocessing": "square336",
+          "prompt": "mantis_letters",
+          "baseline_correct": 16,
+          "scale_correct": 11,
+          "n": 32
+        },
+        {
+          "model": "Qwen2.5-VL-7B-Instruct",
+          "preprocessing": "square336",
+          "prompt": "lad_numbers",
+          "baseline_correct": 12,
+          "scale_correct": 9,
+          "n": 32
+        },
+        {
+          "model": "Qwen2.5-VL-7B-Instruct",
+          "preprocessing": "native2048",
+          "prompt": "mantis_letters",
+          "baseline_correct": 16,
+          "scale_correct": 13,
+          "n": 32
+        },
+        {
+          "model": "Qwen2.5-VL-7B-Instruct",
+          "preprocessing": "native2048",
+          "prompt": "lad_numbers",
+          "baseline_correct": 14,
+          "scale_correct": 9,
+          "n": 32
+        }
+      ],
+      "protocol_audits": {
+        "P006_baseline": {
+          "n": 32,
+          "same_input_token_count": 32,
+          "same_generated_answer": 32
+        },
+        "P006_scale": {
+          "n": 32,
+          "same_input_token_count": 32,
+          "same_generated_answer": 32
+        },
+        "P007_baseline": {
+          "n": 32,
+          "same_candidate_argmax": 29,
+          "same_input_token_count": 32,
+          "max_candidate_score_difference": 0.375,
+          "limitation": "P007 eager vs P008 SDPA BF16; numerical backend difference remains. P008 uses one backend for all paired cells."
+        },
+        "P007_scale": {
+          "n": 32,
+          "same_candidate_argmax": 32,
+          "same_input_token_count": 32,
+          "max_candidate_score_difference": 0.375,
+          "limitation": "P007 eager vs P008 SDPA BF16; numerical backend difference remains. P008 uses one backend for all paired cells."
+        }
+      },
+      "parser_corrections": 0
     }
   }
 }
