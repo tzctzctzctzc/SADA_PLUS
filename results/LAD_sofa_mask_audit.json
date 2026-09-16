@@ -1,0 +1,26 @@
+{
+  "source": "third_party/LAD/src/methods/sofa.py",
+  "sha256": "ad3fa82fe92699813f331fbaf4608909c4403c55f9d166207df5fc978e9e7210",
+  "pinned_repository": "brightXian/LAD",
+  "commit": "c704b9d93eb207652c0b60a5e2e83bcdcae01508",
+  "toy_image_spans": [
+    [
+      2,
+      5
+    ],
+    [
+      7,
+      10
+    ]
+  ],
+  "sigma": 0.5,
+  "opened_future_edges_inside_images": 6,
+  "opened_future_edges_between_images": 9,
+  "changed_text_edges": 0,
+  "future_edge_log_weight": -0.6931471824645996,
+  "interpretation": "The LAD implementation softens future attention within each image span as well as between images. Keep this variant distinct from a strict inter-image-only implementation.",
+  "backend": "Pinned LAD Qwen loader uses eager. Its wrapper requires a non-None attention mask; a transfer to SDPA must materialize the causal mask.",
+  "official_repository": "https://github.com/xytian1008/sofa",
+  "official_repository_observation": "Only Coming soon README visible on 2026-09-17; no official implementation reproduction claimed.",
+  "passed": true
+}
