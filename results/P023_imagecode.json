@@ -1,0 +1,278 @@
+{
+  "complete": true,
+  "n_calibration": 40,
+  "n_evaluation": 256,
+  "n_eval_clusters": 256,
+  "data_audit": {
+    "n_records": 296,
+    "n_unique_pixel_images": 2960,
+    "calibration_eval_pixel_overlaps": 0,
+    "shared_images_across_groups": 0,
+    "archive_sha256": "6abe316c71ecc764d915ff6d92b18953025414ec56a30ac0aff114f144de869c",
+    "image_order": "numeric source frame suffix, as in the official baseline; gold is sorted-list index",
+    "noncontiguous_filename_sets": 229,
+    "official_mapping_source": "https://raw.githubusercontent.com/McGill-NLP/imagecode/609f07611aed2599f946c30d730f40a41af1079b/baselines/clip/contextual.py"
+  },
+  "methods": {
+    "raw_logits": {
+      "correct": 100,
+      "accuracy": 0.390625,
+      "mrr_stable_label_ties": 0.5681764632936508,
+      "by_kind": {
+        "static": {
+          "n": 56,
+          "correct": 47
+        },
+        "video": {
+          "n": 200,
+          "correct": 53
+        }
+      }
+    },
+    "all_span_attention_calibrated": {
+      "correct": 102,
+      "accuracy": 0.3984375,
+      "mrr_stable_label_ties": 0.576176525297619,
+      "by_kind": {
+        "static": {
+          "n": 56,
+          "correct": 45
+        },
+        "video": {
+          "n": 200,
+          "correct": 57
+        }
+      }
+    },
+    "patch_attention_calibrated": {
+      "correct": 92,
+      "accuracy": 0.359375,
+      "mrr_stable_label_ties": 0.5412264384920634,
+      "by_kind": {
+        "static": {
+          "n": 56,
+          "correct": 42
+        },
+        "video": {
+          "n": 200,
+          "correct": 50
+        }
+      }
+    },
+    "patch_density_calibrated": {
+      "correct": 91,
+      "accuracy": 0.35546875,
+      "mrr_stable_label_ties": 0.5395585317460317,
+      "by_kind": {
+        "static": {
+          "n": 56,
+          "correct": 44
+        },
+        "video": {
+          "n": 200,
+          "correct": 47
+        }
+      }
+    },
+    "patch_on_total_layers": {
+      "correct": 91,
+      "accuracy": 0.35546875,
+      "mrr_stable_label_ties": 0.5422076512896825,
+      "by_kind": {
+        "static": {
+          "n": 56,
+          "correct": 43
+        },
+        "video": {
+          "n": 200,
+          "correct": 48
+        }
+      }
+    },
+    "code_AGD_raw": {
+      "correct": 99,
+      "accuracy": 0.38671875,
+      "mrr_stable_label_ties": 0.559312996031746,
+      "by_kind": {
+        "static": {
+          "n": 56,
+          "correct": 45
+        },
+        "video": {
+          "n": 200,
+          "correct": 54
+        }
+      }
+    },
+    "SigLIP2": {
+      "correct": 84,
+      "accuracy": 0.328125,
+      "mrr_stable_label_ties": 0.49406312003968256,
+      "by_kind": {
+        "static": {
+          "n": 56,
+          "correct": 39
+        },
+        "video": {
+          "n": 200,
+          "correct": 45
+        }
+      }
+    },
+    "all_span_attention_raw": {
+      "correct": 103,
+      "accuracy": 0.40234375,
+      "mrr_stable_label_ties": 0.5673332093253969,
+      "by_kind": {
+        "static": {
+          "n": 56,
+          "correct": 45
+        },
+        "video": {
+          "n": 200,
+          "correct": 58
+        }
+      }
+    },
+    "patch_attention_raw": {
+      "correct": 90,
+      "accuracy": 0.3515625,
+      "mrr_stable_label_ties": 0.5278862847222223,
+      "by_kind": {
+        "static": {
+          "n": 56,
+          "correct": 44
+        },
+        "video": {
+          "n": 200,
+          "correct": 46
+        }
+      }
+    }
+  },
+  "paired_comparisons": {
+    "patch_attention_calibrated minus raw_logits": {
+      "difference_pp": -3.125,
+      "cluster_95ci_pp": [
+        -8.203125,
+        1.953125
+      ],
+      "gains": 19,
+      "losses": 27
+    },
+    "patch_attention_calibrated minus all_span_attention_calibrated": {
+      "difference_pp": -3.90625,
+      "cluster_95ci_pp": [
+        -8.203125,
+        0.0
+      ],
+      "gains": 10,
+      "losses": 20
+    },
+    "patch_attention_calibrated minus code_AGD_raw": {
+      "difference_pp": -2.734375,
+      "cluster_95ci_pp": [
+        -7.03125,
+        1.171875
+      ],
+      "gains": 11,
+      "losses": 18
+    },
+    "patch_attention_calibrated minus SigLIP2": {
+      "difference_pp": 3.125,
+      "cluster_95ci_pp": [
+        -3.515625,
+        9.765625
+      ],
+      "gains": 42,
+      "losses": 34
+    },
+    "patch_density_calibrated minus raw_logits": {
+      "difference_pp": -3.515625,
+      "cluster_95ci_pp": [
+        -8.984375,
+        1.953125
+      ],
+      "gains": 20,
+      "losses": 29
+    },
+    "patch_density_calibrated minus all_span_attention_calibrated": {
+      "difference_pp": -4.296875,
+      "cluster_95ci_pp": [
+        -8.59375,
+        -0.390625
+      ],
+      "gains": 10,
+      "losses": 21
+    },
+    "patch_density_calibrated minus code_AGD_raw": {
+      "difference_pp": -3.125,
+      "cluster_95ci_pp": [
+        -7.421875,
+        0.78125
+      ],
+      "gains": 10,
+      "losses": 18
+    },
+    "patch_density_calibrated minus SigLIP2": {
+      "difference_pp": 2.734375,
+      "cluster_95ci_pp": [
+        -3.90625,
+        9.375
+      ],
+      "gains": 41,
+      "losses": 34
+    },
+    "patch_on_total_layers minus raw_logits": {
+      "difference_pp": -3.515625,
+      "cluster_95ci_pp": [
+        -8.984375,
+        1.5625
+      ],
+      "gains": 19,
+      "losses": 28
+    },
+    "patch_on_total_layers minus all_span_attention_calibrated": {
+      "difference_pp": -4.296875,
+      "cluster_95ci_pp": [
+        -8.59375,
+        0.0
+      ],
+      "gains": 11,
+      "losses": 22
+    },
+    "patch_on_total_layers minus code_AGD_raw": {
+      "difference_pp": -3.125,
+      "cluster_95ci_pp": [
+        -7.421875,
+        1.171875
+      ],
+      "gains": 12,
+      "losses": 20
+    },
+    "patch_on_total_layers minus SigLIP2": {
+      "difference_pp": 2.734375,
+      "cluster_95ci_pp": [
+        -3.90625,
+        9.375
+      ],
+      "gains": 41,
+      "losses": 34
+    }
+  },
+  "protocol": "Explicit image labels A-J, repetition_penalty=1, original chronological order, SDPA BF16, native aspect ratio with max_pixels=448^2.",
+  "limits": [
+    "Exploratory pilot subset, not full public benchmark or SOTA.",
+    "Original chronological context retained because descriptions can be relational or temporal.",
+    "Official training split is used for calibration; attention-only priors do not use labels, code AGD does.",
+    "Pointwise SigLIP2 cannot condition on other images; results test this limitation without attributing all differences to reasoning."
+  ],
+  "config_sha256": "bb752add2528275eff9dabcaf4f980e44bf4aa092d146f62ef33beb2d6bc5509",
+  "image_length_audit": {
+    "min_tokens": 99,
+    "max_tokens": 256,
+    "rows_with_unequal_image_tokens": 65
+  },
+  "siglip_truncated_eval_captions": 2,
+  "first_token_outside_label_set": 0
+}

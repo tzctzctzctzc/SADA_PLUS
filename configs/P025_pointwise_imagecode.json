@@ -2,7 +2,7 @@
   "id": "P025",
   "model": "Qwen2.5-VL-7B-Instruct",
   "data_config": "configs/P023_imagecode.json",
-  "data_config_sha256": "66bfa9451f617aa57d04212cb161a4e1bbb7b53ca04f30e8f75c9ad9adfcfbaa",
+  "data_config_sha256": "bb752add2528275eff9dabcaf4f980e44bf4aa092d146f62ef33beb2d6bc5509",
   "min_pixels": 3136,
   "max_pixels": 200704,
   "matching_prompt": "Does the image match the following description? Answer True or False only.\nDescription: {caption}\nAnswer:",
@@ -19,5 +19,6 @@
     "Caption likelihood is an established scoring baseline, not a new method."
   ],
   "data_records": "runs/P023_data/records.json",
-  "expected_images": 2960
+  "expected_images": 2960,
+  "data_integrity_amendment": "results/P023_data_amendment.json"
 }
