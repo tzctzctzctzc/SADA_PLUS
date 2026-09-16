@@ -149,6 +149,29 @@
       "overlap": "Parallel visual encoding with shared initial text/frames and sequential positions already exists; isolation plus visual sinks is not novel.",
       "difference_to_test": "P014 removes actual cross-image pixel conditioning while supplying ordinal structure; a distinct mechanism is only a candidate distinction, not established novelty.",
       "caveat": "Fixed block sizes yield linear attention complexity; our current dense-mask diagnostic does not implement or demonstrate sparse speedup. PEVLM measures long-video tasks, whereas P014 uses reused four-image retrieval questions."
+    },
+    {
+      "id": "RaDiCal_2026",
+      "url": "https://arxiv.org/html/2609.00667v1",
+      "code": "https://github.com/ssui-liu/RaDiCal",
+      "evidence": "已读§1–4.4、附录B与C：候选原型余弦距离×query相似度构成DTI；归一化attention熵控制几何融合和剪枝选层；mask候选造成的排序变化作诊断。",
+      "overlap": "显著性与排序判别性分离、跨候选差异权重、熵选层已有；不能作为本项目新贡献。",
+      "unknown": "源码尚未审计；query嵌入与视觉token的具体共同空间实现待核验。"
+    },
+    {
+      "id": "VERA_2026",
+      "url": "https://arxiv.org/html/2602.10146v1",
+      "evidence": "已读定义和选择部分：gold evidence attention按区域占比归一化，稀疏视觉证据头及mask实验；长上下文文字渲染为图像场景。",
+      "overlap": "寻找证据检索头并把注意力转成训练外干预已有。",
+      "unknown": "尚未完整复现；不可将其文档结果直接当自然图像多图检索基线。"
+    },
+    {
+      "id": "ImageCoDe_ACL2022",
+      "url": "https://arxiv.org/abs/2203.15867",
+      "code": "https://github.com/McGill-NLP/imagecode",
+      "evidence": "官方10图原版与2图simple版说明已读；固定GitHub 609f07611aed2599f946c30d730f40a41af1079b及HF b7b7a73dbc74b681b384048716232b243ad25a99。",
+      "overlap": "上下文相关的细粒度图像检索是已有任务；新评测本身不是创新。",
+      "unknown": "本轮论文只读摘要与官方任务说明，完整正文和ContextBLIP/NDCR基线仍需深入。"
     }
   ]
 }

@@ -12,8 +12,9 @@ assert Path.cwd().resolve()==ROOT
 assert os.environ['CUDA_VISIBLE_DEVICES']=='GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1'
 assert torch.cuda.device_count()==1
 cfg=json.loads(Path('configs/P022_raw_score_validation.json').read_text())
+assert hashlib.sha256(Path(cfg['input']).read_bytes()).hexdigest()==cfg['source_hash']
 data=load_dataset('parquet',data_files={'test':sorted(str(p) for p in Path('data/Mantis-Eval').rglob('*.parquet'))},split='test')
-reconstructed={(r['tag'],r['mode'],r['id']):r for r in json.loads(Path('runs/P021_reconstructed_scores.json').read_text())}
+reconstructed={(r['tag'],r['mode'],r['id']):r for r in json.loads(Path(cfg['input']).read_text())}
 out=Path('runs/P022_raw_score_validation');out.mkdir(exist_ok=True)
 records=[]
 torch.backends.cuda.matmul.allow_tf32=False

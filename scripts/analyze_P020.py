@@ -18,6 +18,7 @@ clusters={q:find(q) for q in docs};groups=sorted(set(clusters.values()))
 report={'complete':True,'n_eval_questions':len(docs),'n_eval_permutations':len(ev),'n_image_clusters':len(groups),
  'siglip_correct':sum(r['correct'] for r in ev.values()),'correct_unique_questions':sum(r['correct'] for r in ev.values())//4,
  'permutation_consistent_questions':sum(len({r['predicted_original_image'] for r in ev.values() if r['base_id']==q})==1 for q in docs),
+ 'reference_note':'Original P017 logits and AGD use processed scores with repetition_penalty=1.05; see P021 for corrected raw comparisons.',
  'comparisons':{},'limitations':['Same repeatedly used Mantis questions; no new-data generalization claim.',
  'Independent image encoding makes permutation invariance intrinsic; its four permutations are not four independent examples.',
  'Encoder uses official 384px preprocessing; VLM resolution protocols reported separately.']}

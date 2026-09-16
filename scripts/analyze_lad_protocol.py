@@ -2,6 +2,7 @@
 import json,sys,hashlib
 from pathlib import Path
 import numpy as np
+import torch
 from scipy.special import softmax,logsumexp
 from transformers import AutoTokenizer
 sys.path.insert(0,'src')
@@ -13,6 +14,8 @@ report={'scope':'Fixed recorded layers, prompts and data; formula-level comparis
   'layer_pooling':'Paper Eq11 averages log attention; released select_attention_scores takes log of mean attention for the numerator.',
   'bias_pooling':'Paper Eq13 is an arithmetic mixture of bias probabilities; released AGDMethod uses a weighted sum of bias scores.',
   'decoding':'Recorded generate scores include Qwen repetition_penalty=1.05. Raw scores reconstructed by inverting only this active processor.'},
+ 'raw_recovery_validation':'results/P022_raw_score_validation.json',
+ 'raw_recovery':'Inverse repetition processor then nearest BF16 value; preserves original logit ties.',
  'cases':{},'limitations':['Paper-style equations use the same recorded last-15-layer range and image spans; no claim of end-to-end paper reproduction.',
  'Eq5 bias weights are used without additional row renormalization, following the displayed equation.',
  'Recorded four single-token candidate scores are normalized over those four candidates for the probability variant.',
@@ -40,7 +43,11 @@ for tag,cn in [('P007','P007_lad_bridge'),('P015','P015_lad_bridge'),('P017','P0
   rows=list(map(json.loads,(root/'predictions.jsonl').read_text().splitlines()))
   assert len(rows)==96
   zz=np.array([r['scores'] for r in rows]);mask=np.stack([seen[r['base_id']] for r in rows])
-  raw=np.where(mask,np.where(zz>=0,zz*penalty,zz/penalty),zz)
+  raw_unrounded=np.where(mask,np.where(zz>=0,zz*penalty,zz/penalty),zz)
+  assert meta['dtype']=='torch.bfloat16'
+  # lm_head logits are BF16 then cast to FP32 by generate; restore the original grid.
+  # P022 validates exact reconstruction against output_logits on all six settings.
+  raw=torch.from_numpy(raw_unrounded).to(torch.bfloat16).float().numpy()
   # Qwen visual placeholder expansion cannot introduce digit candidate tokens.
   ci=np.array([i for i,r in enumerate(rows) if r['split']=='calibration'])
   ei=np.array([i for i,r in enumerate(rows) if r['split']=='evaluation'])
@@ -76,6 +83,30 @@ for tag,cn in [('P007','P007_lad_bridge'),('P015','P015_lad_bridge'),('P017','P0
    raw_records.append({'tag':tag,'mode':mode,'id':r['id'],'split':r['split'],'penalized':mask[i].tolist(),
     'raw_reconstructed':raw[i].tolist(),'processed':zz[i].tolist(),'gold':r['gold'],
     'predictions':{name:int(val[i].argmax()) for name,val in variants.items()}})
+
+# Existing P017 patch predictions versus corrected raw scores, grouped by image reuse.
+cfg17=json.loads(Path('configs/P017_lad_resolution.json').read_text())
+docs={d['id']:d for d in cfg17['evaluation']};parent={q:q for q in docs}
+def root(q):
+ while parent[q]!=q:parent[q]=parent[parent[q]];q=parent[q]
+ return q
+for q,a in docs.items():
+ for k,b in docs.items():
+  if set(a['image_hashes'])&set(b['image_hashes']):parent[root(q)]=root(k)
+groups=sorted({root(q) for q in docs})
+ref=json.loads(Path('runs/P017_lad_predictions.json').read_text())
+report['patch_vs_corrected_raw']={}
+for mode in ['square336','native2048']:
+ rr={r['id']:r for r in ref if r['mode']==mode}
+ raw={r['id']:r for r in raw_records if r['tag']=='P017' and r['mode']==mode and r['split']=='evaluation'}
+ records=[(root(k.split(':p')[0]),int(r['predictions']['patch_attention_calibrated']==r['gold'])-int(raw[k]['predictions']['restored_raw_logits']==r['gold'])) for k,r in rr.items()]
+ a=np.array([[sum(d for g,d in records if g==c),sum(g==c for g,d in records)] for c in groups])
+ rng=np.random.default_rng(17021);b=a[rng.integers(len(a),size=(20000,len(a)))].sum(1)
+ report['patch_vs_corrected_raw'][mode]={'n':len(records),'clusters':len(groups),'patch_correct':sum(r['predictions']['patch_attention_calibrated']==r['gold'] for r in rr.values()),
+  'raw_correct':sum(r['predictions']['restored_raw_logits']==r['gold'] for r in raw.values()),
+  'difference_pp':sum(d for g,d in records)/len(records)*100,
+  'cluster_95ci_pp':(np.quantile(b[:,0]/b[:,1],[.025,.975])*100).tolist()}
+
 Path('runs/P021_reconstructed_scores.json').write_text(json.dumps(raw_records,indent=2)+'\n')
 Path('results/P021_lad_protocol.json').write_text(json.dumps(report,indent=2)+'\n')
 print(json.dumps(report,indent=2))

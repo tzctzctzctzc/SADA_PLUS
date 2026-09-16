@@ -1,4 +1,30 @@
 {
   "repo": "McGill-NLP/imagecode",
-  "revision": "609f07611aed2599f946c30d730f40a41af1079b"
+  "revision": "609f07611aed2599f946c30d730f40a41af1079b",
+  "files": [
+    {
+      "path": "data/train_data.json",
+      "blob": "0679ca5fb1d5af7c9ec81dd31a86b33909a2fbf8",
+      "sha256": "0de229dcffd6e160208a9173b8829fa31e35db040f058170c1f770e08f305b69",
+      "bytes": 2392766
+    },
+    {
+      "path": "data/train_simple.json",
+      "blob": "fbc463afc7df408b5f717b4c5a4dab1eb6b2cdb5",
+      "sha256": "6eb30d48143b537740c44e84af67513b7c8df802aa8ad1c3e8d668b21a39ceb9",
+      "bytes": 4229183
+    },
+    {
+      "path": "data/valid_data.json",
+      "blob": "bbb8f73fe817f22f717122fcb162a74db6aa6fda",
+      "sha256": "cb4b8482354ba9bac62b6e101f145f9e59722dcf3b3fd42583f5b6de12bc698a",
+      "bytes": 321098
+    },
+    {
+      "path": "data/valid_simple.json",
+      "blob": "85b9f6f41d8736c71d89a1bbaee95549ed0a95ae",
+      "sha256": "8dc706273810a3518ec25d4f15c0d3f22b2b431ac4ad439f4312269449fd2800",
+      "bytes": 568800
+    }
+  ]
 }

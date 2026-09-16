@@ -1,0 +1,20 @@
+{
+  "smoke_exitcode": 0,
+  "input_tokens": 2532,
+  "image_tokens": [
+    247,
+    234,
+    234,
+    247,
+    247,
+    228,
+    247,
+    247,
+    247,
+    240
+  ],
+  "first_token": "A",
+  "raw_equals_processed_assertion_passed": true,
+  "attention_analysis_vs_official_max_error": 1.1102230246251565e-16,
+  "scope": "Ten-image native-aspect input smoke plus CPU formula equivalence; not benchmark accuracy."
+}

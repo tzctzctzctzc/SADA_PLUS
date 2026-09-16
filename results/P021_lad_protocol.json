@@ -1,0 +1,259 @@
+{
+  "scope": "Fixed recorded layers, prompts and data; formula-level comparison, not original benchmark reproduction.",
+  "source_differences": {
+    "conditional_statistics": "Paper Eq1 averages candidate probabilities; released compute_bias_matrix averages scores.",
+    "layer_pooling": "Paper Eq11 averages log attention; released select_attention_scores takes log of mean attention for the numerator.",
+    "bias_pooling": "Paper Eq13 is an arithmetic mixture of bias probabilities; released AGDMethod uses a weighted sum of bias scores.",
+    "decoding": "Recorded generate scores include Qwen repetition_penalty=1.05. Raw scores reconstructed by inverting only this active processor."
+  },
+  "raw_recovery_validation": "results/P022_raw_score_validation.json",
+  "raw_recovery": "Inverse repetition processor then nearest BF16 value; preserves original logit ties.",
+  "cases": {
+    "P007:baseline": {
+      "n": 76,
+      "correct": {
+        "processed_logits": 18,
+        "restored_raw_logits": 25,
+        "code_attention_only": 32,
+        "paper_attention_only": 34,
+        "code_AGD_processed": 27,
+        "paper_equations_processed": 32,
+        "code_only_pooling_replaced_processed": 28,
+        "code_AGD_raw": 22,
+        "paper_equations_raw": 23,
+        "code_only_pooling_replaced_raw": 22
+      },
+      "penalty_changed_predictions": 57,
+      "penalized_candidate_patterns": [
+        [
+          1,
+          0,
+          0,
+          1
+        ]
+      ],
+      "details": {
+        "processed": {
+          "paper_loggamma": 1.8903421355127508,
+          "code_k": 1.883331298828125,
+          "pooling_Jensen_gap_max": 0.44748592449656943
+        },
+        "raw": {
+          "paper_loggamma": 0.5403975248336792,
+          "code_k": 0.5,
+          "pooling_Jensen_gap_max": 0.04302913024123106
+        }
+      }
+    },
+    "P007:scale": {
+      "n": 76,
+      "correct": {
+        "processed_logits": 22,
+        "restored_raw_logits": 24,
+        "code_attention_only": 35,
+        "paper_attention_only": 35,
+        "code_AGD_processed": 32,
+        "paper_equations_processed": 29,
+        "code_only_pooling_replaced_processed": 27,
+        "code_AGD_raw": 23,
+        "paper_equations_raw": 23,
+        "code_only_pooling_replaced_raw": 25
+      },
+      "penalty_changed_predictions": 49,
+      "penalized_candidate_patterns": [
+        [
+          1,
+          0,
+          0,
+          1
+        ]
+      ],
+      "details": {
+        "processed": {
+          "paper_loggamma": 2.0462730580646147,
+          "code_k": 2.0619029998779297,
+          "pooling_Jensen_gap_max": 0.5935542532743157
+        },
+        "raw": {
+          "paper_loggamma": 0.9106455445289612,
+          "code_k": 0.8999996185302734,
+          "pooling_Jensen_gap_max": 0.1472759547126663
+        }
+      }
+    },
+    "P015:baseline": {
+      "n": 76,
+      "correct": {
+        "processed_logits": 39,
+        "restored_raw_logits": 38,
+        "code_attention_only": 46,
+        "paper_attention_only": 47,
+        "code_AGD_processed": 42,
+        "paper_equations_processed": 44,
+        "code_only_pooling_replaced_processed": 40,
+        "code_AGD_raw": 41,
+        "paper_equations_raw": 41,
+        "code_only_pooling_replaced_raw": 38
+      },
+      "penalty_changed_predictions": 14,
+      "penalized_candidate_patterns": [
+        [
+          1,
+          0,
+          0,
+          1
+        ]
+      ],
+      "details": {
+        "processed": {
+          "paper_loggamma": 4.013409041888714,
+          "code_k": 4.308331298828122,
+          "pooling_Jensen_gap_max": 1.9998037806345135
+        },
+        "raw": {
+          "paper_loggamma": 2.5904688835144043,
+          "code_k": 3.125,
+          "pooling_Jensen_gap_max": 1.1824884794958583
+        }
+      }
+    },
+    "P015:scale": {
+      "n": 76,
+      "correct": {
+        "processed_logits": 20,
+        "restored_raw_logits": 22,
+        "code_attention_only": 48,
+        "paper_attention_only": 51,
+        "code_AGD_processed": 40,
+        "paper_equations_processed": 38,
+        "code_only_pooling_replaced_processed": 36,
+        "code_AGD_raw": 33,
+        "paper_equations_raw": 33,
+        "code_only_pooling_replaced_raw": 32
+      },
+      "penalty_changed_predictions": 27,
+      "penalized_candidate_patterns": [
+        [
+          1,
+          0,
+          0,
+          1
+        ]
+      ],
+      "details": {
+        "processed": {
+          "paper_loggamma": 1.5620102738600414,
+          "code_k": 2.1321407318115213,
+          "pooling_Jensen_gap_max": 1.1835871539741505
+        },
+        "raw": {
+          "paper_loggamma": 0.2478262186050415,
+          "code_k": 0.7250003814697266,
+          "pooling_Jensen_gap_max": 0.42720914320434683
+        }
+      }
+    },
+    "P017:square336": {
+      "n": 76,
+      "correct": {
+        "processed_logits": 39,
+        "restored_raw_logits": 38,
+        "code_attention_only": 50,
+        "paper_attention_only": 51,
+        "code_AGD_processed": 48,
+        "paper_equations_processed": 49,
+        "code_only_pooling_replaced_processed": 48,
+        "code_AGD_raw": 48,
+        "paper_equations_raw": 47,
+        "code_only_pooling_replaced_raw": 48
+      },
+      "penalty_changed_predictions": 21,
+      "penalized_candidate_patterns": [
+        [
+          1,
+          0,
+          0,
+          1
+        ]
+      ],
+      "details": {
+        "processed": {
+          "paper_loggamma": 3.103609986199227,
+          "code_k": 4.0142845153808615,
+          "pooling_Jensen_gap_max": 2.0391539388423285
+        },
+        "raw": {
+          "paper_loggamma": 2.2736330032348633,
+          "code_k": 3.450000762939453,
+          "pooling_Jensen_gap_max": 1.6308768876659285
+        }
+      }
+    },
+    "P017:native2048": {
+      "n": 76,
+      "correct": {
+        "processed_logits": 39,
+        "restored_raw_logits": 47,
+        "code_attention_only": 45,
+        "paper_attention_only": 45,
+        "code_AGD_processed": 46,
+        "paper_equations_processed": 46,
+        "code_only_pooling_replaced_processed": 46,
+        "code_AGD_raw": 45,
+        "paper_equations_raw": 46,
+        "code_only_pooling_replaced_raw": 45
+      },
+      "penalty_changed_predictions": 11,
+      "penalized_candidate_patterns": [
+        [
+          1,
+          0,
+          0,
+          1
+        ]
+      ],
+      "details": {
+        "processed": {
+          "paper_loggamma": 3.015740066305024,
+          "code_k": 4.1976177215576165,
+          "pooling_Jensen_gap_max": 1.9590456461515258
+        },
+        "raw": {
+          "paper_loggamma": 1.6437969207763672,
+          "code_k": 2.8999996185302734,
+          "pooling_Jensen_gap_max": 1.0905342314612894
+        }
+      }
+    }
+  },
+  "limitations": [
+    "Paper-style equations use the same recorded last-15-layer range and image spans; no claim of end-to-end paper reproduction.",
+    "Eq5 bias weights are used without additional row renormalization, following the displayed equation.",
+    "Recorded four single-token candidate scores are normalized over those four candidates for the probability variant.",
+    "This is post-hoc baseline auditing, not a new method or confirmatory selection."
+  ],
+  "patch_vs_corrected_raw": {
+    "square336": {
+      "n": 76,
+      "clusters": 15,
+      "patch_correct": 60,
+      "raw_correct": 38,
+      "difference_pp": 28.947368421052634,
+      "cluster_95ci_pp": [
+        14.285714285714285,
+        45.0
+      ]
+    },
+    "native2048": {
+      "n": 76,
+      "clusters": 15,
+      "patch_correct": 52,
+      "raw_correct": 47,
+      "difference_pp": 6.578947368421052,
+      "cluster_95ci_pp": [
+        -2.380952380952381,
+        19.444444444444446
+      ]
+    }
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "complete": true,
+  "n_eval_questions": 19,
+  "n_eval_permutations": 76,
+  "n_image_clusters": 15,
+  "siglip_correct": 28,
+  "correct_unique_questions": 7,
+  "permutation_consistent_questions": 19,
+  "reference_note": "Original P017 logits and AGD use processed scores with repetition_penalty=1.05; see P021 for corrected raw comparisons.",
+  "comparisons": {
+    "square336:logits": {
+      "reference_correct": 39,
+      "siglip_minus_reference_cluster_95ci_pp": [
+        -38.88888888888889,
+        10.294117647058822
+      ],
+      "siglip_gains": 11,
+      "siglip_losses": 22
+    },
+    "square336:agd_official": {
+      "reference_correct": 48,
+      "siglip_minus_reference_cluster_95ci_pp": [
+        -56.25,
+        1.6666666666666667
+      ],
+      "siglip_gains": 7,
+      "siglip_losses": 27
+    },
+    "square336:patch_attention_calibrated": {
+      "reference_correct": 60,
+      "siglip_minus_reference_cluster_95ci_pp": [
+        -72.05882352941177,
+        -13.23529411764706
+      ],
+      "siglip_gains": 7,
+      "siglip_losses": 39
+    },
+    "native2048:logits": {
+      "reference_correct": 39,
+      "siglip_minus_reference_cluster_95ci_pp": [
+        -42.64705882352941,
+        13.23529411764706
+      ],
+      "siglip_gains": 13,
+      "siglip_losses": 24
+    },
+    "native2048:agd_official": {
+      "reference_correct": 46,
+      "siglip_minus_reference_cluster_95ci_pp": [
+        -54.166666666666664,
+        6.666666666666667
+      ],
+      "siglip_gains": 10,
+      "siglip_losses": 28
+    },
+    "native2048:patch_attention_calibrated": {
+      "reference_correct": 52,
+      "siglip_minus_reference_cluster_95ci_pp": [
+        -62.5,
+        -2.941176470588235
+      ],
+      "siglip_gains": 9,
+      "siglip_losses": 33
+    }
+  },
+  "limitations": [
+    "Same repeatedly used Mantis questions; no new-data generalization claim.",
+    "Independent image encoding makes permutation invariance intrinsic; its four permutations are not four independent examples.",
+    "Encoder uses official 384px preprocessing; VLM resolution protocols reported separately."
+  ]
+}

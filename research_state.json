@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17",
+  "as_of": "2026-09-17T05:59:26.439443+08:00",
   "goal_status": "active",
-  "phase": "P020直接图文检索强基线；并审计LAD公式/实现",
+  "phase": "在独立ImageCoDe数据上检验注意力读出；先纠正解码规则和基线协议",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -194,9 +194,33 @@
       "verification": "models/siglip2-so400m-patch14-384/verification.json"
     },
     "P020": {
-      "status": "preregistered",
-      "config": "configs/P020_siglip_retrieval.json",
+      "status": "completed",
+      "exitcode": 0,
       "analysis": "results/P020_siglip_retrieval.json"
+    },
+    "P021": {
+      "status": "completed",
+      "analysis": "results/P021_lad_protocol.json"
+    },
+    "P022": {
+      "status": "completed",
+      "exitcode": 0,
+      "analysis": "results/P022_raw_score_validation.json"
+    },
+    "ImageCoDe_download": {
+      "status": "running",
+      "driver_pid": 509048,
+      "manifest": "literature/ImageCoDe_manifest.json",
+      "exitcode_file": "runs/ImageCoDe_download.exitcode"
+    },
+    "P023": {
+      "status": "preregistered_smoke_passed",
+      "config": "configs/P023_imagecode.json",
+      "expected_calibration": 40,
+      "expected_evaluation": 256,
+      "script": "scripts/run_P023.sh",
+      "analysis": "results/P023_imagecode.json",
+      "protocol_smoke": "results/P023_protocol_smoke.json"
     }
   },
   "monitor": {
@@ -205,7 +229,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "Local automation gpu3 TOML inspected; active heartbeat every 20 minutes, silent on unchanged state"
   },
-  "next": "完成SigLIP2与P017的配对比较；进一步核验默认repetition_penalty及论文概率混合和公开代码logit混合的差异。",
+  "next": "核验P023十图输入冒烟检查，启动依赖ImageCoDe下载的串行GPU3评测；比较纠正后的7B、LAD代码版、patch/密度校准与SigLIP2。若新数据优势消失，停止将旧19题收益作为方法线索。",
   "results": {
     "P001": {
       "n": 4,
@@ -602,7 +626,7 @@
     },
     "P016": {
       "analysis": "results/P016_lad_decomposition.json",
-      "scope": "post-hoc algebra and calibration sensitivity",
+      "scope": "仅LAD公开代码版本的代数分解和校准敏感性；不涵盖论文公式的概率算术混合",
       "interpretation": "AGD可精确分解为条件均值残差加对称的注意力分数注入；7B原模型1000次校准题bootstrap的AGD正确数2.5/50/97.5分位40/42/44。不是泛化置信区间，不是新方法。"
     },
     "P017": {
@@ -649,7 +673,129 @@
       "analysis": "results/P019_backend_diagnostic.json",
       "n_selected_diagnostic_cases": 3,
       "interpretation": "eager/SDPA均精确重放各自旧分数（误差0），eager关闭输出attention误差0；换成eager视觉特征后SDPA仍有0.52至0.89的中心化候选差异，语言后端差异不能忽略。视觉特征相对L2差约0.038至0.061，也可改变低间隔答案；不应跨后端比较微小涨点。"
+    },
+    "P020": {
+      "analysis": "results/P020_siglip_retrieval.json",
+      "siglip_correct": 28,
+      "n": 76,
+      "n_questions": 19,
+      "n_image_clusters": 15,
+      "interpretation": "SigLIP2只答对7/19原题；同题重复排列不是独立新样本。直接forward与特征重建最大误差1.14e-5。"
+    },
+    "P021": {
+      "analysis": "results/P021_lad_protocol.json",
+      "correct": {
+        "P007:baseline": {
+          "processed_logits": 18,
+          "restored_raw_logits": 25,
+          "code_attention_only": 32,
+          "paper_attention_only": 34,
+          "code_AGD_processed": 27,
+          "paper_equations_processed": 32,
+          "code_only_pooling_replaced_processed": 28,
+          "code_AGD_raw": 22,
+          "paper_equations_raw": 23,
+          "code_only_pooling_replaced_raw": 22
+        },
+        "P007:scale": {
+          "processed_logits": 22,
+          "restored_raw_logits": 24,
+          "code_attention_only": 35,
+          "paper_attention_only": 35,
+          "code_AGD_processed": 32,
+          "paper_equations_processed": 29,
+          "code_only_pooling_replaced_processed": 27,
+          "code_AGD_raw": 23,
+          "paper_equations_raw": 23,
+          "code_only_pooling_replaced_raw": 25
+        },
+        "P015:baseline": {
+          "processed_logits": 39,
+          "restored_raw_logits": 38,
+          "code_attention_only": 46,
+          "paper_attention_only": 47,
+          "code_AGD_processed": 42,
+          "paper_equations_processed": 44,
+          "code_only_pooling_replaced_processed": 40,
+          "code_AGD_raw": 41,
+          "paper_equations_raw": 41,
+          "code_only_pooling_replaced_raw": 38
+        },
+        "P015:scale": {
+          "processed_logits": 20,
+          "restored_raw_logits": 22,
+          "code_attention_only": 48,
+          "paper_attention_only": 51,
+          "code_AGD_processed": 40,
+          "paper_equations_processed": 38,
+          "code_only_pooling_replaced_processed": 36,
+          "code_AGD_raw": 33,
+          "paper_equations_raw": 33,
+          "code_only_pooling_replaced_raw": 32
+        },
+        "P017:square336": {
+          "processed_logits": 39,
+          "restored_raw_logits": 38,
+          "code_attention_only": 50,
+          "paper_attention_only": 51,
+          "code_AGD_processed": 48,
+          "paper_equations_processed": 49,
+          "code_only_pooling_replaced_processed": 48,
+          "code_AGD_raw": 48,
+          "paper_equations_raw": 47,
+          "code_only_pooling_replaced_raw": 48
+        },
+        "P017:native2048": {
+          "processed_logits": 39,
+          "restored_raw_logits": 47,
+          "code_attention_only": 45,
+          "paper_attention_only": 45,
+          "code_AGD_processed": 46,
+          "paper_equations_processed": 46,
+          "code_only_pooling_replaced_processed": 46,
+          "code_AGD_raw": 45,
+          "paper_equations_raw": 46,
+          "code_only_pooling_replaced_raw": 45
+        }
+      },
+      "patch_vs_corrected_raw": {
+        "square336": {
+          "n": 76,
+          "clusters": 15,
+          "patch_correct": 60,
+          "raw_correct": 38,
+          "difference_pp": 28.947368421052634,
+          "cluster_95ci_pp": [
+            14.285714285714285,
+            45.0
+          ]
+        },
+        "native2048": {
+          "n": 76,
+          "clusters": 15,
+          "patch_correct": 52,
+          "raw_correct": 47,
+          "difference_pp": 6.578947368421052,
+          "cluster_95ci_pp": [
+            -2.380952380952381,
+            19.444444444444446
+          ]
+        }
+      },
+      "interpretation": "默认重复惩罚压低提示中出现过的1和4；修正BF16反推舍入后，7B高分辨率原始logits为47/76、patch为52/76，差值区间[-2.38,19.44]百分点跨0。LAD展示公式与公开代码在条件统计、层池化和偏置混合上不同；公式级对照不等于完整论文复现。"
+    },
+    "P022": {
+      "analysis": "results/P022_raw_score_validation.json",
+      "complete": true,
+      "n": 18,
+      "processed_replay_max_error": 0.0,
+      "inverse_max_error": 3.814697265625e-06,
+      "inverse_bfloat16_max_error": 0.0,
+      "unrounded_argmax_mismatches": 2,
+      "rounded_argmax_mismatches": 0,
+      "all_raw_bfloat16_representable": true,
+      "interpretation": "六个设置18个真实GPU forward，processed分数精确重放；逆重复惩罚后回到BF16网格能精确恢复raw logits，未经舍入有两处并列答案被错误打破。"
     }
   },
-  "novelty_status": "尚未建立满足目标的新颖方法；P014停止，P015/P017只提供后续研究的强基线和机制线索。"
+  "novelty_status": "仍无满足目标的新颖方法或SOTA；注意力校准、证据头与候选间判别性均有直接近邻。"
 }
