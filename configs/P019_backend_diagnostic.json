@@ -1,0 +1,18 @@
+{
+  "id": "P019",
+  "purpose": "Post-hoc technical localization of eager/SDPA differences; not method evaluation or novelty.",
+  "ids": [
+    "wc_67:p1",
+    "wc_55:p1",
+    "wc_76:p2"
+  ],
+  "selection": "Largest absolute score discrepancy, high-discrepancy answer flip, and smallest-discrepancy control from P017 square audit. Selected for diagnostics, not accuracy.",
+  "references": {
+    "eager": "runs/P015_lad_baseline/predictions.jsonl",
+    "sdpa": "runs/P017_lad_square336/predictions.jsonl"
+  },
+  "reference_sha256": {
+    "eager": "5ba38b10d8e259463403af7a8951777307aa23f5a35448d69cba23eed024cd0f",
+    "sdpa": "bc7003c69ded82dc39319c60b2a94018cbfde78dd8e8fc09bf5bb9d2fb58b533"
+  }
+}
