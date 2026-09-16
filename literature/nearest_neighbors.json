@@ -43,7 +43,8 @@
     {
       "id": "ParallelContext_ACL2025",
       "url": "https://aclanthology.org/2025.acl-long.485/",
-      "overlap": "Shared sink prefix and selective context attention; canonical boundary reference must be distinguished from these interventions."
+      "overlap": "Shared content-insensitive prefixes and selective parallel-context readout already studied. Entropy calibration or adding generic anchors alone is not new.",
+      "evidence": "Read sections 3 and 4.1: key-state scales, query attention entropy, shared sinks and top-K context selection; no implementation reproduction."
     },
     {
       "id": "Pathways_2026",
@@ -116,8 +117,8 @@
     {
       "id": "ParallelContextEntropy_2025_recheck",
       "url": "https://aclanthology.org/2025.acl-long.485/",
-      "evidence": "Official ACL abstract read",
-      "overlap": "Parallel context encoding performance loss explained by high attention entropy; attention sinks and selection mitigate. Simply isolating images plus entropy/sink adjustment is not enough novelty.",
+      "evidence": "Read sections 3 and 4.1: key-state scales, query attention entropy, shared sinks and top-K context selection; no implementation reproduction.",
+      "overlap": "Shared content-insensitive prefixes and selective parallel-context readout already studied. Entropy calibration or adding generic anchors alone is not new.",
       "limitation": "Specific visual ordinal state transport is not evaluated in the inspected abstract; full implementation not audited."
     },
     {
@@ -140,6 +141,14 @@
       "url": "https://arxiv.org/html/2605.22168v1",
       "evidence": "Intro and methods through definitions and redundancy counterexample read; full metric derivation and experiments not yet audited.",
       "overlap": "Crossmodal Harsanyi/Shapley interactions for explanation faithfulness; naive multimodal synergy metric is not new."
+    },
+    {
+      "id": "PEVLM_2025",
+      "url": "https://arxiv.org/html/2506.19651v3",
+      "evidence": "Read observations, partition/position methods, long-video results and component ablations. No implementation audited.",
+      "overlap": "Parallel visual encoding with shared initial text/frames and sequential positions already exists; isolation plus visual sinks is not novel.",
+      "difference_to_test": "P014 removes actual cross-image pixel conditioning while supplying ordinal structure; a distinct mechanism is only a candidate distinction, not established novelty.",
+      "caveat": "Fixed block sizes yield linear attention complexity; our current dense-mask diagnostic does not implement or demonstrate sparse speedup. PEVLM measures long-video tasks, whereas P014 uses reused four-image retrieval questions."
     }
   ]
 }
