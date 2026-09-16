@@ -1,7 +1,7 @@
 {
   "as_of": "2026-09-17",
   "goal_status": "active",
-  "phase": "P015/P016完成；P017跨分辨率与读出组成对照",
+  "phase": "P014-P019完成；隔离方案被否定，patch读出保留为强基线候选",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -170,10 +170,21 @@
       "preregister_commit": "0508ca2"
     },
     "P017": {
-      "status": "preregistered",
+      "status": "completed",
       "config": "configs/P017_lad_resolution.json",
       "n_records": 192,
-      "analysis": "results/P017_lad_bridge.json"
+      "analysis": "results/P017_lad_bridge.json",
+      "exitcode": 0,
+      "pid": 507651,
+      "preregister_commit": "bf5a75d"
+    },
+    "P019": {
+      "status": "completed",
+      "exitcode": 0,
+      "pid": 507886,
+      "child_pid": 507888,
+      "preregister_commit": "b51bf67",
+      "analysis": "results/P019_backend_diagnostic.json"
     }
   },
   "monitor": {
@@ -182,7 +193,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "Local automation gpu3 TOML inspected; active heartbeat every 20 minutes, silent on unchanged state"
   },
-  "next": "先确认P017方图SDPA与P015 eager差异，再看原比例高分辨率下patch读出及固定层对照。",
+  "next": "补足SigLIP2等直接图文检索强基线与真正独立数据，核查非边界/patch选层读出的已有方法；只有明确超出简单检索和现有LAD才形成新方案。不得将当前简单patch读出称创新或SOTA。",
   "results": {
     "P001": {
       "n": 4,
@@ -581,6 +592,52 @@
       "analysis": "results/P016_lad_decomposition.json",
       "scope": "post-hoc algebra and calibration sensitivity",
       "interpretation": "AGD可精确分解为条件均值残差加对称的注意力分数注入；7B原模型1000次校准题bootstrap的AGD正确数2.5/50/97.5分位40/42/44。不是泛化置信区间，不是新方法。"
+    },
+    "P017": {
+      "analysis": "results/P017_lad_bridge.json",
+      "n_eval_per_resolution": 76,
+      "n_image_clusters": 15,
+      "correct": {
+        "square336": {
+          "logits": 39,
+          "attention_raw": 38,
+          "attention_calibrated": 50,
+          "agd_official": 48,
+          "patch_attention_calibrated": 60,
+          "agd_baseline_calibration": 48,
+          "patch_attention_raw": 53,
+          "patch_on_total_layers_calibrated": 59,
+          "total_on_patch_layers_calibrated": 55,
+          "agd_patch": 54
+        },
+        "native2048": {
+          "logits": 39,
+          "attention_raw": 35,
+          "attention_calibrated": 45,
+          "agd_official": 46,
+          "patch_attention_calibrated": 52,
+          "agd_baseline_calibration": 48,
+          "patch_attention_raw": 40,
+          "patch_on_total_layers_calibrated": 48,
+          "total_on_patch_layers_calibrated": 49,
+          "agd_patch": 48
+        }
+      },
+      "interpretation": "同SDPA协议下patch读出方图60/76、较高分辨率52/76，原输出均39。固定总attention选层后patch为59/48，收益不全由换层造成。新分辨率下相对AGD的区间仍跨0，不作SOTA。",
+      "limits": "所有输入实际仍是同尺寸方图，未测试不同宽高比/不同图像token数；Mantis反复使用，仅探索证据。"
+    },
+    "P018": {
+      "analyses": [
+        "results/P018_patch_controls_P015.json",
+        "results/P018_patch_controls_P017.json"
+      ],
+      "interpretation": "P017 patch校准重采样的正确数2.5/50/97.5分位：方图57/60/62，较高分辨率47/50/52。只是固定评测集的校准敏感性。所有图像token数相同，密度归一化对照退化为常数，不能证明不等长度鲁棒性。"
+    },
+    "P019": {
+      "analysis": "results/P019_backend_diagnostic.json",
+      "n_selected_diagnostic_cases": 3,
+      "interpretation": "eager/SDPA均精确重放各自旧分数（误差0），eager关闭输出attention误差0；换成eager视觉特征后SDPA仍有0.52至0.89的中心化候选差异，语言后端差异不能忽略。视觉特征相对L2差约0.038至0.061，也可改变低间隔答案；不应跨后端比较微小涨点。"
     }
-  }
+  },
+  "novelty_status": "尚未建立满足目标的新颖方法；P014停止，P015/P017只提供后续研究的强基线和机制线索。"
 }

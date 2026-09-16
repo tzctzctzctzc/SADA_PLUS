@@ -1,0 +1,739 @@
+{
+  "purpose": "Check whether the P015 patch-only attention retrieval signal survives native aspect ratio and higher visual resolution; square SDPA sidecar control separates implementation differences.",
+  "n_base_questions": 19,
+  "n_image_clusters": 15,
+  "calibration_base_questions": 5,
+  "calibration_eval_exact_image_overlap": false,
+  "models": {
+    "square336": {
+      "n_permutations": 76,
+      "methods": {
+        "logits": {
+          "correct": 39,
+          "accuracy": 0.5131578947368421,
+          "all_permutations_correct_questions": 2,
+          "prediction_counts": {
+            "3": 16,
+            "2": 30,
+            "1": 26,
+            "0": 4
+          }
+        },
+        "attention_raw": {
+          "correct": 38,
+          "accuracy": 0.5,
+          "all_permutations_correct_questions": 2,
+          "prediction_counts": {
+            "3": 29,
+            "2": 22,
+            "1": 22,
+            "0": 3
+          }
+        },
+        "attention_calibrated": {
+          "correct": 50,
+          "accuracy": 0.6578947368421053,
+          "all_permutations_correct_questions": 9,
+          "prediction_counts": {
+            "3": 18,
+            "2": 23,
+            "1": 20,
+            "0": 15
+          }
+        },
+        "agd_official": {
+          "correct": 48,
+          "accuracy": 0.631578947368421,
+          "all_permutations_correct_questions": 10,
+          "prediction_counts": {
+            "3": 20,
+            "2": 20,
+            "1": 19,
+            "0": 17
+          }
+        },
+        "patch_attention_calibrated": {
+          "correct": 60,
+          "accuracy": 0.7894736842105263,
+          "all_permutations_correct_questions": 10,
+          "prediction_counts": {
+            "3": 18,
+            "2": 19,
+            "1": 19,
+            "0": 20
+          }
+        },
+        "agd_baseline_calibration": {
+          "correct": 48,
+          "accuracy": 0.631578947368421,
+          "all_permutations_correct_questions": 10,
+          "prediction_counts": {
+            "3": 20,
+            "2": 20,
+            "1": 19,
+            "0": 17
+          }
+        },
+        "patch_attention_raw": {
+          "correct": 53,
+          "accuracy": 0.6973684210526315,
+          "all_permutations_correct_questions": 6,
+          "prediction_counts": {
+            "3": 28,
+            "2": 23,
+            "1": 19,
+            "0": 6
+          }
+        },
+        "patch_on_total_layers_calibrated": {
+          "correct": 59,
+          "accuracy": 0.7763157894736842,
+          "all_permutations_correct_questions": 12,
+          "prediction_counts": {
+            "3": 19,
+            "2": 19,
+            "1": 22,
+            "0": 16
+          }
+        },
+        "total_on_patch_layers_calibrated": {
+          "correct": 55,
+          "accuracy": 0.7236842105263158,
+          "all_permutations_correct_questions": 9,
+          "prediction_counts": {
+            "0": 22,
+            "1": 17,
+            "3": 18,
+            "2": 19
+          }
+        },
+        "agd_patch": {
+          "correct": 54,
+          "accuracy": 0.7105263157894737,
+          "all_permutations_correct_questions": 11,
+          "prediction_counts": {
+            "3": 20,
+            "2": 18,
+            "1": 21,
+            "0": 17
+          }
+        }
+      },
+      "mean_selected_boundary_mass_fraction": 0.5879051363700221,
+      "agd_minus_logits_cluster_bootstrap_95ci_pp": [
+        2.380952380952381,
+        22.36842105263158
+      ],
+      "attention_correct_logits_wrong": 15,
+      "logits_correct_attention_wrong": 4,
+      "patch_attention_calibrated_minus_logits_cluster_bootstrap_95ci_pp": [
+        16.304347826086957,
+        40.0
+      ],
+      "patch_attention_calibrated_minus_attention_calibrated_cluster_bootstrap_95ci_pp": [
+        2.1739130434782608,
+        25.0
+      ],
+      "patch_attention_calibrated_minus_agd_official_cluster_bootstrap_95ci_pp": [
+        2.272727272727273,
+        30.263157894736842
+      ],
+      "patch_on_total_layers_calibrated_minus_attention_calibrated_cluster_bootstrap_95ci_pp": [
+        4.411764705882353,
+        20.3125
+      ]
+    },
+    "native2048": {
+      "n_permutations": 76,
+      "methods": {
+        "logits": {
+          "correct": 39,
+          "accuracy": 0.5131578947368421,
+          "all_permutations_correct_questions": 3,
+          "prediction_counts": {
+            "2": 27,
+            "1": 28,
+            "0": 6,
+            "3": 15
+          }
+        },
+        "attention_raw": {
+          "correct": 35,
+          "accuracy": 0.4605263157894737,
+          "all_permutations_correct_questions": 1,
+          "prediction_counts": {
+            "3": 37,
+            "2": 24,
+            "1": 12,
+            "0": 3
+          }
+        },
+        "attention_calibrated": {
+          "correct": 45,
+          "accuracy": 0.5921052631578947,
+          "all_permutations_correct_questions": 7,
+          "prediction_counts": {
+            "3": 21,
+            "2": 20,
+            "1": 21,
+            "0": 14
+          }
+        },
+        "agd_official": {
+          "correct": 46,
+          "accuracy": 0.6052631578947368,
+          "all_permutations_correct_questions": 8,
+          "prediction_counts": {
+            "3": 20,
+            "2": 21,
+            "1": 20,
+            "0": 15
+          }
+        },
+        "patch_attention_calibrated": {
+          "correct": 52,
+          "accuracy": 0.6842105263157895,
+          "all_permutations_correct_questions": 9,
+          "prediction_counts": {
+            "3": 17,
+            "2": 20,
+            "1": 21,
+            "0": 18
+          }
+        },
+        "agd_baseline_calibration": {
+          "correct": 48,
+          "accuracy": 0.631578947368421,
+          "all_permutations_correct_questions": 8,
+          "prediction_counts": {
+            "3": 20,
+            "2": 23,
+            "1": 16,
+            "0": 17
+          }
+        },
+        "patch_attention_raw": {
+          "correct": 40,
+          "accuracy": 0.5263157894736842,
+          "all_permutations_correct_questions": 1,
+          "prediction_counts": {
+            "3": 41,
+            "2": 18,
+            "1": 13,
+            "0": 4
+          }
+        },
+        "patch_on_total_layers_calibrated": {
+          "correct": 48,
+          "accuracy": 0.631578947368421,
+          "all_permutations_correct_questions": 8,
+          "prediction_counts": {
+            "3": 18,
+            "2": 21,
+            "1": 22,
+            "0": 15
+          }
+        },
+        "total_on_patch_layers_calibrated": {
+          "correct": 49,
+          "accuracy": 0.6447368421052632,
+          "all_permutations_correct_questions": 6,
+          "prediction_counts": {
+            "3": 19,
+            "2": 17,
+            "1": 19,
+            "0": 21
+          }
+        },
+        "agd_patch": {
+          "correct": 48,
+          "accuracy": 0.631578947368421,
+          "all_permutations_correct_questions": 8,
+          "prediction_counts": {
+            "3": 19,
+            "2": 18,
+            "1": 20,
+            "0": 19
+          }
+        }
+      },
+      "mean_selected_boundary_mass_fraction": 0.577238625016576,
+      "agd_minus_logits_cluster_bootstrap_95ci_pp": [
+        2.5,
+        16.25
+      ],
+      "attention_correct_logits_wrong": 9,
+      "logits_correct_attention_wrong": 3,
+      "patch_attention_calibrated_minus_logits_cluster_bootstrap_95ci_pp": [
+        7.5,
+        30.0
+      ],
+      "patch_attention_calibrated_minus_attention_calibrated_cluster_bootstrap_95ci_pp": [
+        1.0416666666666665,
+        20.588235294117645
+      ],
+      "patch_attention_calibrated_minus_agd_official_cluster_bootstrap_95ci_pp": [
+        -1.1363636363636365,
+        20.3125
+      ],
+      "patch_on_total_layers_calibrated_minus_attention_calibrated_cluster_bootstrap_95ci_pp": [
+        0.0,
+        8.333333333333332
+      ]
+    }
+  },
+  "limitations": [
+    "Exploratory reused Mantis questions; no independent confirmation",
+    "Calibration and evaluation byte-disjoint, not perceptual near-duplicate checked",
+    "LAD transfer uses original code aggregation; preprocessing: square336 and native-aspect-ratio 256-to-2048 tokens per image; SDPA with last-query sidecar; not original paper benchmark",
+    "Do not treat 4 permutations of a question as 4 independent examples"
+  ],
+  "calibrations": {
+    "square336": {
+      "B": [
+        [
+          -4.373063516616824,
+          2.3066953182220473,
+          2.1316953182220466,
+          0.6174115657806389
+        ],
+        [
+          -1.263541650772094,
+          -1.532589197158817,
+          2.8066953182220473,
+          0.23645873069763113
+        ],
+        [
+          -1.382589197158815,
+          2.0566953182220473,
+          -1.382589197158815,
+          0.022173070907591352
+        ],
+        [
+          -2.001636362075807,
+          1.3566953182220445,
+          3.1316953182220466,
+          -2.7302061557769797
+        ]
+      ],
+      "prior": [
+        [
+          0.01751708984375,
+          0.03212890625,
+          0.040411376953125,
+          0.0463134765625
+        ],
+        [
+          0.0378662109375,
+          0.0183441162109375,
+          0.0181915283203125,
+          0.021380615234375
+        ],
+        [
+          0.00784912109375,
+          0.0122833251953125,
+          0.014788818359375,
+          0.0211395263671875
+        ],
+        [
+          0.0134246826171875,
+          0.0221038818359375,
+          0.029852294921875,
+          0.042205810546875
+        ],
+        [
+          0.012353515625,
+          0.02215576171875,
+          0.0277191162109375,
+          0.030523681640625
+        ],
+        [
+          0.00816497802734375,
+          0.026422119140625,
+          0.0475341796875,
+          0.06209716796875
+        ],
+        [
+          0.01131439208984375,
+          0.0410064697265625,
+          0.07518310546875,
+          0.08675537109375
+        ],
+        [
+          0.01214752197265625,
+          0.03245849609375,
+          0.04415283203125,
+          0.04244384765625
+        ],
+        [
+          0.01254425048828125,
+          0.0223968505859375,
+          0.02484130859375,
+          0.03114013671875
+        ],
+        [
+          0.01380462646484375,
+          0.052215576171875,
+          0.0453125,
+          0.054974365234375
+        ],
+        [
+          0.01451873779296875,
+          0.026287841796875,
+          0.0214019775390625,
+          0.03153076171875
+        ],
+        [
+          0.0153228759765625,
+          0.0301116943359375,
+          0.03509521484375,
+          0.040582275390625
+        ],
+        [
+          0.01832275390625,
+          0.036407470703125,
+          0.033514404296875,
+          0.0385009765625
+        ],
+        [
+          0.0188720703125,
+          0.0266021728515625,
+          0.02137451171875,
+          0.024993896484375
+        ],
+        [
+          0.03934326171875,
+          0.050469970703125,
+          0.036859130859375,
+          0.047747802734375
+        ]
+      ],
+      "patch_prior": [
+        [
+          0.008643341064453126,
+          0.013687896728515624,
+          0.01852874755859375,
+          0.0225494384765625
+        ],
+        [
+          0.007635498046875,
+          0.006028366088867187,
+          0.010312652587890625,
+          0.01025238037109375
+        ],
+        [
+          0.004433441162109375,
+          0.00577545166015625,
+          0.00747528076171875,
+          0.00951690673828125
+        ],
+        [
+          0.005442047119140625,
+          0.008052825927734375,
+          0.01240692138671875,
+          0.0174774169921875
+        ],
+        [
+          0.00545501708984375,
+          0.00761871337890625,
+          0.01214752197265625,
+          0.014892578125
+        ],
+        [
+          0.005597686767578125,
+          0.0118865966796875,
+          0.018475341796875,
+          0.023284912109375
+        ],
+        [
+          0.008119964599609375,
+          0.0151519775390625,
+          0.0240692138671875,
+          0.02772064208984375
+        ],
+        [
+          0.00801544189453125,
+          0.01180267333984375,
+          0.01654052734375,
+          0.0178985595703125
+        ],
+        [
+          0.0100189208984375,
+          0.006879425048828125,
+          0.009194183349609374,
+          0.01234588623046875
+        ],
+        [
+          0.008699798583984375,
+          0.01332244873046875,
+          0.0120880126953125,
+          0.01501312255859375
+        ],
+        [
+          0.00972442626953125,
+          0.01112518310546875,
+          0.0093994140625,
+          0.010411834716796875
+        ],
+        [
+          0.010052490234375,
+          0.00988922119140625,
+          0.01134490966796875,
+          0.0113311767578125
+        ],
+        [
+          0.00884857177734375,
+          0.01549835205078125,
+          0.01367034912109375,
+          0.0163482666015625
+        ],
+        [
+          0.01150970458984375,
+          0.0150970458984375,
+          0.01374053955078125,
+          0.01608123779296875
+        ],
+        [
+          0.0220062255859375,
+          0.028680419921875,
+          0.0230316162109375,
+          0.026190185546875
+        ]
+      ]
+    },
+    "native2048": {
+      "B": [
+        [
+          -3.6533462047576855,
+          2.514507722854617,
+          2.5895077228546164,
+          1.044271516799931
+        ],
+        [
+          -1.3366809368133517,
+          -1.983109998703,
+          2.1145077228546185,
+          -0.5033473491668659
+        ],
+        [
+          -1.4081099987030008,
+          1.6145077228546185,
+          -1.4081099987030008,
+          -0.8843001842498737
+        ],
+        [
+          -0.7176333904266343,
+          1.8395077228546164,
+          2.6645077228546157,
+          -2.4866797924041713
+        ]
+      ],
+      "prior": [
+        [
+          0.0168731689453125,
+          0.033258056640625,
+          0.041339111328125,
+          0.050927734375
+        ],
+        [
+          0.04134521484375,
+          0.0186492919921875,
+          0.0209686279296875,
+          0.025885009765625
+        ],
+        [
+          0.00986328125,
+          0.011627197265625,
+          0.0158935546875,
+          0.0249755859375
+        ],
+        [
+          0.01339111328125,
+          0.0192230224609375,
+          0.034130859375,
+          0.05772705078125
+        ],
+        [
+          0.013037109375,
+          0.0216461181640625,
+          0.03134765625,
+          0.0415283203125
+        ],
+        [
+          0.00887298583984375,
+          0.0293121337890625,
+          0.052105712890625,
+          0.07930908203125
+        ],
+        [
+          0.012615966796875,
+          0.038201904296875,
+          0.08165283203125,
+          0.097998046875
+        ],
+        [
+          0.0140869140625,
+          0.034002685546875,
+          0.05196533203125,
+          0.052490234375
+        ],
+        [
+          0.017572021484375,
+          0.022113037109375,
+          0.034564208984375,
+          0.039825439453125
+        ],
+        [
+          0.0135986328125,
+          0.04697265625,
+          0.051458740234375,
+          0.061993408203125
+        ],
+        [
+          0.013604736328125,
+          0.02291259765625,
+          0.026361083984375,
+          0.04013671875
+        ],
+        [
+          0.01346588134765625,
+          0.0272796630859375,
+          0.039617919921875,
+          0.04749755859375
+        ],
+        [
+          0.0151031494140625,
+          0.03421630859375,
+          0.0357879638671875,
+          0.0448486328125
+        ],
+        [
+          0.0156646728515625,
+          0.02266845703125,
+          0.0216796875,
+          0.030401611328125
+        ],
+        [
+          0.04091796875,
+          0.043121337890625,
+          0.03992919921875,
+          0.054986572265625
+        ]
+      ],
+      "patch_prior": [
+        [
+          0.00933837890625,
+          0.01461639404296875,
+          0.0183746337890625,
+          0.0223907470703125
+        ],
+        [
+          0.010736083984375,
+          0.006705474853515625,
+          0.01182403564453125,
+          0.01261138916015625
+        ],
+        [
+          0.0071807861328125,
+          0.005881500244140625,
+          0.0076263427734375,
+          0.0114044189453125
+        ],
+        [
+          0.0067840576171875,
+          0.007018280029296875,
+          0.0128448486328125,
+          0.0232025146484375
+        ],
+        [
+          0.00703125,
+          0.008013916015625,
+          0.0134429931640625,
+          0.0210357666015625
+        ],
+        [
+          0.00679931640625,
+          0.01464080810546875,
+          0.0237579345703125,
+          0.036981201171875
+        ],
+        [
+          0.00889129638671875,
+          0.015273284912109376,
+          0.0273193359375,
+          0.0344482421875
+        ],
+        [
+          0.01032867431640625,
+          0.012750244140625,
+          0.018463134765625,
+          0.024176025390625
+        ],
+        [
+          0.014990234375,
+          0.00789947509765625,
+          0.01121978759765625,
+          0.01823883056640625
+        ],
+        [
+          0.0080078125,
+          0.0104583740234375,
+          0.01446075439453125,
+          0.01844482421875
+        ],
+        [
+          0.008428955078125,
+          0.0091552734375,
+          0.010092926025390626,
+          0.01322021484375
+        ],
+        [
+          0.0080780029296875,
+          0.007817840576171875,
+          0.01201019287109375,
+          0.01515655517578125
+        ],
+        [
+          0.0056304931640625,
+          0.012357330322265625,
+          0.0134246826171875,
+          0.01954498291015625
+        ],
+        [
+          0.008043670654296875,
+          0.0132049560546875,
+          0.01434173583984375,
+          0.0214752197265625
+        ],
+        [
+          0.02333984375,
+          0.0240509033203125,
+          0.02503662109375,
+          0.03311767578125
+        ]
+      ]
+    }
+  },
+  "backend_audit": {
+    "n": 96,
+    "same_raw_as_P015": 85,
+    "max_absolute_candidate_score_difference": 4.523809432983398,
+    "max_centered_candidate_score_difference": 3.56101131439209,
+    "max_pairwise_margin_difference": 5.595237731933594,
+    "interpretation": "Backend results are not interchangeable. Use within-backend method comparisons; P019 separately replays and localizes discrepancies."
+  },
+  "resolution_audit": {
+    "n": 96,
+    "all_native_image_grids": [
+      [
+        1,
+        36,
+        36
+      ]
+    ],
+    "native_visual_tokens_per_image": 324,
+    "square336_visual_tokens_per_image": 144,
+    "samples_with_unequal_image_token_counts": 0,
+    "interpretation": "This data varies the image resolution budget but every actual native image has the same square grid. It does not test aspect-ratio diversity or unequal per-image token counts."
+  }
+}
