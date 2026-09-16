@@ -57,7 +57,7 @@ eval_manifest=$base_artifact/rq1_val_gt_segments.jsonl
         --cache-namespace rq1_8f --frame-count 8 \
         --output-prefix "$artifact/features/qwen3_vl_8b_static" \
         --model-path Qwen/Qwen3-VL-8B-Instruct --offline \
-        --segment-batch-size 4
+        --segment-batch-size 16
 ) >"$artifact/logs/gpu0_clip_then_qwen8.log" 2>&1 &
 gpu0_pid=$!
 
@@ -67,7 +67,7 @@ gpu0_pid=$!
         --cache-namespace rq1_8f --frame-count 8 \
         --output-prefix "$artifact/features/qwen3_vl_32b_static" \
         --model-path Qwen/Qwen3-VL-32B-Instruct --offline \
-        --segment-batch-size 4
+        --segment-batch-size 16
 ) >"$artifact/logs/gpu1_qwen32.log" 2>&1 &
 gpu1_pid=$!
 
