@@ -1,0 +1,52 @@
+{
+  "repo": "pinterest/pinpoint-dataset",
+  "revision": "059d6e4ae191d3f0775cbe2e9cf77baa0e714126",
+  "fetched_at": "2026-09-16T23:00:19.150120+00:00",
+  "files": [
+    {
+      "path": "evaluate.py",
+      "bytes": 9590,
+      "blob_sha1": "d682965465f536ad18f9d0dbbaa854d6fc6f981e",
+      "sha256": "39f131def681970a60d8ffa876cdc4de7b04ff052a28a951cd61217a7ed72ad8",
+      "url": "https://raw.githubusercontent.com/pinterest/pinpoint-dataset/059d6e4ae191d3f0775cbe2e9cf77baa0e714126/evaluate.py"
+    },
+    {
+      "path": "rerank.py",
+      "bytes": 15055,
+      "blob_sha1": "f5ed1d0e8cea882ad2d83752084a790c949d25fd",
+      "sha256": "40211123a50b9021bb2c08dde52451f9884d2201229beb7cc162365dbaf21044",
+      "url": "https://raw.githubusercontent.com/pinterest/pinpoint-dataset/059d6e4ae191d3f0775cbe2e9cf77baa0e714126/rerank.py"
+    },
+    {
+      "path": "utils/data_utils.py",
+      "bytes": 1023,
+      "blob_sha1": "3bfca3b6fea6991d6aa75e761914666f38aafe4d",
+      "sha256": "941113831c8f69007d5eebe06dbe253f80ad69eb44dbe4cf2260e0b11c489a0b",
+      "url": "https://raw.githubusercontent.com/pinterest/pinpoint-dataset/059d6e4ae191d3f0775cbe2e9cf77baa0e714126/utils/data_utils.py"
+    },
+    {
+      "path": "utils/metrics.py",
+      "bytes": 1893,
+      "blob_sha1": "f68e4a6627d00b09c427aef5e79faa2b33915dbc",
+      "sha256": "476b319d3428597e03a001ff0e9d8b3c5cce446904e68bc116306d275a259efb",
+      "url": "https://raw.githubusercontent.com/pinterest/pinpoint-dataset/059d6e4ae191d3f0775cbe2e9cf77baa0e714126/utils/metrics.py"
+    }
+  ],
+  "data_files": [
+    {
+      "path": "image_attribution.json",
+      "sha": "ff61e074e17b39dcf292c47726e7da26330ae8d4",
+      "size": 17751148
+    },
+    {
+      "path": "index_signatures.txt",
+      "sha": "7150b4ea9a990aa5f5579f27dd97aedeb0ff6230",
+      "size": 3616799
+    },
+    {
+      "path": "pinpoint_licensed.parquet",
+      "sha": "54e2b3c3d572fe342e84e50a0374cecf43f65aaf",
+      "size": 2072753
+    }
+  ]
+}

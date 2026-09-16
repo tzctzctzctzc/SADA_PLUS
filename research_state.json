@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-16T22:57:46.222008+00:00",
+  "as_of": "2026-09-16T23:05:59.904143+00:00",
   "goal_status": "active",
-  "phase": "完成强基线与分辨率诊断，局部描述条件错误定位",
+  "phase": "排除简单分辨率和四题条款聚合修补；核验多参考图检索的完整输入基线",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -315,15 +315,31 @@
       "preregister_commit": "7b802a0",
       "analysis": "results/P028_qwen3_resolution.json",
       "exitcode_file": "runs/P028.exitcode"
+    },
+    "P029": {
+      "status": "completed",
+      "exitcode": 0,
+      "driver_pid": 511800,
+      "preregister_commit": "0fad0e0",
+      "config": "configs/P029_clause_diagnostic.json",
+      "analysis": "results/P029_clause_diagnostic.json",
+      "exitcode_file": "runs/P029.exitcode",
+      "n_forward": 26
+    },
+    "PinPoint_reference_audit": {
+      "status": "completed",
+      "uses_gpu": false,
+      "analysis": "results/PinPoint_reference_audit.json",
+      "source_manifest": "literature/PinPoint_source_manifest.json"
     }
   },
   "monitor": {
     "automation_id": "gpu3",
     "interval_minutes": 20,
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
-    "verified_active": "Local automation gpu3 TOML inspected; active heartbeat every 20 minutes, silent on unchanged state"
+    "verified_active": "本轮再次读取本地gpu3自动化：ACTIVE heartbeat；已有20分钟安排保留。"
   },
-  "next": "P029四组共同错例逐条必要条件评分，区分细节识别与整体约束评分失配；仍无创新方法，不扫旧patch或分辨率参数。",
+  "next": "下一步核验PinPoint已发布检索候选及评测口径，建立完整提供两张参考图的7B逐图重排序对照。按参考图共享/指令变体分组，预先保留确认数据。补齐输入属于协议修复，不能作为创新；之后才定位真实多来源约束失配并形成方法。",
   "results": {
     "P001": {
       "n": 4,
@@ -999,7 +1015,33 @@
       ],
       "actual_grid_changed_video_questions": 190,
       "decision": "该固定最小分辨率提升无整体收益，停止参数扫描。"
+    },
+    "P029": {
+      "analysis": "results/P029_clause_diagnostic.json",
+      "n_posthoc_cases": 4,
+      "n_clauses": 9,
+      "error_dominated_cases": 4,
+      "full_caption_logit_replay_error": 0.0,
+      "conclusion": "固定逐条分数中，四个标注目标均被错图逐坐标支配；任何坐标单调不减聚合不能严格将目标排在该错图之上。仅限该后验小样本，不是新定理或总体结论。"
+    },
+    "PinPoint_reference_audit": {
+      "analysis": "results/PinPoint_reference_audit.json",
+      "revision": "059d6e4ae191d3f0775cbe2e9cf77baa0e714126",
+      "n_real_multi_reference_queries": 1006,
+      "n_second_reference_in_payload": 0,
+      "n_payloads_unchanged_after_column_drop": 1006,
+      "scope": "只证明当前公开代码的信息通路遗漏，尚未验证论文表格使用的历史实现或性能影响。"
     }
   },
-  "novelty_status": "仍无满足目标的新颖方法或SOTA；注意力校准、证据头与候选间判别性均有直接近邻。"
+  "novelty_status": "仍未满足创新与充分验证目标。已停止patch候选、分辨率扫描；拆谓词/逻辑聚合有OrLog和NDCR等近邻且四题分量分数仍错。PinPoint公开脚本漏第二参考图是基线协议问题，不是新方法。",
+  "last_progress_audit": {
+    "previous_goal_turn": "verified_wait (summary-reported live P025); intervening directory-status reply was not research progress",
+    "this_turn": "progress",
+    "evidence": [
+      "P025/P026/P027/P028/P029 all exit 0 and analyzed",
+      "PinPoint pinned source trace over 1006 real multi-reference queries",
+      "No new method or SOTA established; goal remains active"
+    ],
+    "running_gpu_jobs_at_end": []
+  }
 }

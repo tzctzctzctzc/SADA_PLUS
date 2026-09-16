@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-16T22:52:34.061653+00:00",
+  "as_of": "2026-09-16T23:05:59.904143+00:00",
   "status": "Novelty not established; generic ordinal binding amplification and syntax/content source separation are already covered by close neighbors",
   "records": [
     {
@@ -208,9 +208,15 @@
       "id": "PinPoint_CVPR2026",
       "url": "https://github.com/pinterest/pinpoint-dataset",
       "paper": "https://arxiv.org/abs/2603.04598",
-      "evidence": "已读官方README：Qwen2.5-VL-7B逐候选True/False评分范式；P024/P025采用自定固定提示，未完整复现PinPoint。",
+      "evidence": "已读论文§4.1-4.3、§5和§6-7及README、公开rerank完整源码。论文yes/no与当前实现True/False提示不同；当前README与论文表格数值不同，后续应使用固定代码和数据口径。",
       "overlap": "逐图匹配属于基线，不能当本项目新方法。",
-      "unknown": "论文全文待读。"
+      "unknown": "论文表格是否使用当前公开实现、遗漏第二参考图的实际性能影响均未验证。",
+      "source_audit": {
+        "revision": "059d6e4ae191d3f0775cbe2e9cf77baa0e714126",
+        "path": "literature/PinPoint_source_manifest.json",
+        "result": "results/PinPoint_reference_audit.json",
+        "finding": "1006条真实双参考查询，所有请求仅含第一参考图与候选图；删除第二参考图列后全部payload不变。仅限固定公开脚本。"
+      }
     },
     {
       "id": "Qwen3_VL_Reranker_2026",
@@ -218,7 +224,7 @@
       "code": "https://github.com/QwenLM/Qwen3-VL-Embedding",
       "model_card": "https://huggingface.co/Qwen/Qwen3-VL-Reranker-2B",
       "evidence": "已读模型卡和报告架构、数据及§5.2：逐query-document二分类，sigmoid(logit_yes-logit_no)，检索专用训练。现代强基线候选。",
-      "implementation_status": "固定模型rev 4bd860ac4f15ad1897a214615cccc700f8f71818已下载并校验；官方reranker源码rev393e2978d27852b0d0230d6994f37f9c15bed73c已审。独立envs/qwen3完成，P027已预注册并等待P025后仅GPU3执行。",
+      "implementation_status": "P027/P028已完成独立环境GPU3推理。256题default99、bounded100、提高min_pixels97；本pilot弱于7B matching118，不是完整benchmark结论。",
       "source_audit": "保留官方yes-no权重差线性头及BF16 sigmoid；同时存储sigmoid前margin审计饱和并列。对官方图像加载异常转NULL的回退加入图token数断言，拒绝伪成功。"
     },
     {
@@ -250,6 +256,15 @@
       "evidence": "已读主文与附录A/B/C开头：比较像素序列、位置ID、时间戳各通道，Qwen3/Molmo2/PerceptionLM，TempCompass/TVBench；使用对应帧activation patching并处理DeepStack注入。",
       "overlap": "独立干预视频帧顺序与位置、架构注意力掩码解释、patch恢复temporal现象已有。",
       "unverified_question": "在视觉全双向且token/position/mask/附加特征共同置换时，query不变可能由置换等变性保证；真实模型是否满足前提仍需源码审计，不能据此声称论文错误。"
+    },
+    {
+      "id": "OrLog_ECIR2026",
+      "url": "https://arxiv.org/html/2601.23085v1",
+      "code": "https://github.com/informagi/RSN",
+      "evidence": "已读§2-4和§5后半/§6：LLM析取/合取/否定谓词化，逐谓词True/False logits，经ProbLog加权模型计数；合取退化为谓词概率乘积。QUEST top20，跨模型比较、描述可用性分层。",
+      "overlap": "拆分必要条件并以概率逻辑聚合已有明确跨领域近邻，不应仅把文本实体换成图像即称创新。",
+      "limits": "谓词plausibility非严格校准概率，作者明确讨论失准和解析误差；代码尚未审计/复现。",
+      "connection": "P029的四个固定分数组中，目标图对所有局部条件都弱于错误图，因此单调聚合无法严格翻转该对。需要先改善可用证据或局部判断，不能假设逻辑后端自动补救。"
     }
   ]
 }

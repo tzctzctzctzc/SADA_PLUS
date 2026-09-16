@@ -1,0 +1,174 @@
+{
+  "complete": true,
+  "n_records": 26,
+  "n_cases": 4,
+  "config_sha256": "bfe2f1e0abd9e7b42b7548c7dea46103a0c9f59c4ba636fede9d93ff834dbf52",
+  "runner_sha256": "9fea651483f25db82d5ff66b8e393772a1637a60df33358e785788fcd26b44a6",
+  "full_caption_replay_max_logit_error": 0.0,
+  "interpretation": "Compare signed gold-vs-error margin for unchanged full description and manually separated necessary clauses. Favoring gold for an isolated clause does not prove a general aggregation failure; pair and prompts are post-hoc.",
+  "limits": [
+    "Manual decompositions and only four error-selected questions; no generalization/statistical significance claim.",
+    "No new visual evidence is added; adjective thresholds and about-to temporal wording can still be ambiguous.",
+    "Raw margins from different clause prompts are not assumed calibrated or combined into a proposed method."
+  ],
+  "cases": [
+    {
+      "id": "YouCook-video0009-shot1_0:3",
+      "gold": 3,
+      "error_image": 4,
+      "claims": [
+        {
+          "text": "About three quarters of the bowl of chocolate chips are shown and you can see a hand about to reach towards that bowl.",
+          "claim_index": 0,
+          "gold_margin": 0.375,
+          "error_margin": 5.0,
+          "gold_minus_error": -4.625
+        },
+        {
+          "text": "About three quarters of the bowl of chocolate chips are shown.",
+          "claim_index": 1,
+          "gold_margin": 0.25,
+          "error_margin": 0.375,
+          "gold_minus_error": -0.125
+        },
+        {
+          "text": "A hand is about to reach towards the bowl of chocolate chips.",
+          "claim_index": 2,
+          "gold_margin": 1.375,
+          "error_margin": 7.75,
+          "gold_minus_error": -6.375
+        }
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8555-shot6_0:2",
+      "gold": 2,
+      "error_image": 8,
+      "claims": [
+        {
+          "text": "The door is open halfway and half of the person is visible.",
+          "claim_index": 0,
+          "gold_margin": 0.5,
+          "error_margin": 1.75,
+          "gold_minus_error": -1.25
+        },
+        {
+          "text": "The door is open halfway.",
+          "claim_index": 1,
+          "gold_margin": 0.375,
+          "error_margin": 1.5,
+          "gold_minus_error": -1.125
+        },
+        {
+          "text": "Half of the person is visible.",
+          "claim_index": 2,
+          "gold_margin": -1.0,
+          "error_margin": 0.75,
+          "gold_minus_error": -1.75
+        }
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8703-shot1_0:7",
+      "gold": 7,
+      "error_image": 8,
+      "claims": [
+        {
+          "text": "There is a picture of a man.  He is glancing straight down and not looking off to either side. ",
+          "claim_index": 0,
+          "gold_margin": -3.25,
+          "error_margin": 0.125,
+          "gold_minus_error": -3.375
+        },
+        {
+          "text": "The man is glancing straight down.",
+          "claim_index": 1,
+          "gold_margin": -1.375,
+          "error_margin": -1.25,
+          "gold_minus_error": -0.125
+        },
+        {
+          "text": "The man is not looking off to either side.",
+          "claim_index": 2,
+          "gold_margin": -0.125,
+          "error_margin": 0.875,
+          "gold_minus_error": -1.0
+        }
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9823-shot7_0:4",
+      "gold": 4,
+      "error_image": 3,
+      "claims": [
+        {
+          "text": "The man in the middle is leaning slightly forward with an outstretched arm and his mouth is open",
+          "claim_index": 0,
+          "gold_margin": 3.625,
+          "error_margin": 5.25,
+          "gold_minus_error": -1.625
+        },
+        {
+          "text": "The man in the middle is leaning slightly forward.",
+          "claim_index": 1,
+          "gold_margin": 1.375,
+          "error_margin": 2.0,
+          "gold_minus_error": -0.625
+        },
+        {
+          "text": "The man in the middle has an outstretched arm.",
+          "claim_index": 2,
+          "gold_margin": 1.125,
+          "error_margin": 3.0,
+          "gold_minus_error": -1.875
+        },
+        {
+          "text": "The man in the middle has his mouth open.",
+          "claim_index": 3,
+          "gold_margin": 1.5,
+          "error_margin": 2.25,
+          "gold_minus_error": -0.75
+        }
+      ]
+    }
+  ],
+  "dominance_audit": {
+    "analysis_sha256": "d78ea9a7c41370b70bce8495a845961e8d173ef771aeb44a09255bd049e6ce55",
+    "cases": [
+      {
+        "id": "YouCook-video0009-shot1_0:3",
+        "n_clauses": 2,
+        "all_clauses_strictly_favor_error": true,
+        "largest_gold_minus_error": -0.125
+      },
+      {
+        "id": "MSR-VTT-videoTestVideo_video8555-shot6_0:2",
+        "n_clauses": 2,
+        "all_clauses_strictly_favor_error": true,
+        "largest_gold_minus_error": -1.125
+      },
+      {
+        "id": "MSR-VTT-videoTestVideo_video8703-shot1_0:7",
+        "n_clauses": 2,
+        "all_clauses_strictly_favor_error": true,
+        "largest_gold_minus_error": -0.125
+      },
+      {
+        "id": "MSR-VTT-videoTestVideo_video9823-shot7_0:4",
+        "n_clauses": 3,
+        "all_clauses_strictly_favor_error": true,
+        "largest_gold_minus_error": -0.625
+      }
+    ],
+    "n_error_dominated_cases": 4,
+    "argument": "For the fixed clause score vectors, s(gold)<=s(error) coordinatewise implies F(s(gold))<=F(s(error)) for every coordinatewise nondecreasing aggregation F. It cannot strictly rank gold above error.",
+    "scope": "Necessary-order property only for these four post-hoc pairs, this exact decomposition and frozen pointwise scores. This is a standard Pareto-order property, not a new theorem.",
+    "does_not_rule_out": [
+      "Improving clause estimation",
+      "Adding/changing visual evidence",
+      "Better or alternative faithful decompositions",
+      "Joint dependency/context models",
+      "Other examples"
+    ]
+  }
+}

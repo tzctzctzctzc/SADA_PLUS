@@ -1,0 +1,42 @@
+{
+  "complete": true,
+  "repo": "pinterest/pinpoint-dataset",
+  "revision": "059d6e4ae191d3f0775cbe2e9cf77baa0e714126",
+  "source_sha256": "40211123a50b9021bb2c08dde52451f9884d2201229beb7cc162365dbaf21044",
+  "n_rows": 7635,
+  "n_unique_query_ids": 7635,
+  "n_valid_second_reference_rows": 1006,
+  "n_distinct_ordered_reference_pairs": 179,
+  "n_traced": 1006,
+  "payload_image_counts": {
+    "2": 1006
+  },
+  "first_reference_present": 1006,
+  "second_reference_present": 0,
+  "identical_after_dropping_second_column": 1006,
+  "source_locations": {
+    "signature_to_url": {
+      "start": 90,
+      "end": 93
+    },
+    "build_messages": {
+      "start": 96,
+      "end": 150
+    },
+    "rerank_query": {
+      "start": 277,
+      "end": 301
+    },
+    "rerank_results": {
+      "start": 304,
+      "end": 355
+    }
+  },
+  "scope": "Pinned publicly released rerank.py input path only. No GPU, API calls, image downloads or model scoring.",
+  "limits": [
+    "This does not establish which code/version produced the paper tables.",
+    "A missing second reference does not quantify accuracy impact; a complete-input baseline is still required.",
+    "The literal string None is present in metadata; valid second references are identified by the 32-hex signature format.",
+    "Multiple instruction variants reuse reference pairs; future splits must account for shared images."
+  ]
+}
