@@ -1,0 +1,112 @@
+{
+  "id": "P029",
+  "purpose": "Exploratory localization of whole-caption vs individual-clause failure on four inspected common errors.",
+  "selection": "First four seed-hash video errors shared by five baselines; chosen after P027. This is an exploratory diagnostic, not accuracy evaluation or a new reranker.",
+  "model": "Qwen2.5-VL-7B-Instruct",
+  "min_pixels": 3136,
+  "max_pixels": 200704,
+  "matching_prompt": "Does the image match the following description? Answer True or False only.\nDescription: {caption}\nAnswer:",
+  "data_records": "runs/P023_data/records.json",
+  "gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
+  "cases": [
+    {
+      "id": "YouCook-video0009-shot1_0:3",
+      "caption": "About three quarters of the bowl of chocolate chips are shown and you can see a hand about to reach towards that bowl.",
+      "gold": 3,
+      "kind": "video",
+      "context_positive": false,
+      "predictions": {
+        "raw_logits": 4,
+        "matching_score": 4,
+        "caption_logprob_mean": 6,
+        "SigLIP2": 7,
+        "qwen3": 7
+      },
+      "all_wrong": true,
+      "clauses": [
+        "About three quarters of the bowl of chocolate chips are shown.",
+        "A hand is about to reach towards the bowl of chocolate chips."
+      ],
+      "image_indices": [
+        3,
+        4
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8555-shot6_0:2",
+      "caption": "The door is open halfway and half of the person is visible.",
+      "gold": 2,
+      "kind": "video",
+      "context_positive": false,
+      "predictions": {
+        "raw_logits": 1,
+        "matching_score": 8,
+        "caption_logprob_mean": 5,
+        "SigLIP2": 3,
+        "qwen3": 3
+      },
+      "all_wrong": true,
+      "clauses": [
+        "The door is open halfway.",
+        "Half of the person is visible."
+      ],
+      "image_indices": [
+        2,
+        8
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8703-shot1_0:7",
+      "caption": "There is a picture of a man.  He is glancing straight down and not looking off to either side. ",
+      "gold": 7,
+      "kind": "video",
+      "context_positive": true,
+      "predictions": {
+        "raw_logits": 6,
+        "matching_score": 8,
+        "caption_logprob_mean": 6,
+        "SigLIP2": 9,
+        "qwen3": 5
+      },
+      "all_wrong": true,
+      "clauses": [
+        "The man is glancing straight down.",
+        "The man is not looking off to either side."
+      ],
+      "image_indices": [
+        7,
+        8
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9823-shot7_0:4",
+      "caption": "The man in the middle is leaning slightly forward with an outstretched arm and his mouth is open",
+      "gold": 4,
+      "kind": "video",
+      "context_positive": false,
+      "predictions": {
+        "raw_logits": 3,
+        "matching_score": 3,
+        "caption_logprob_mean": 6,
+        "SigLIP2": 7,
+        "qwen3": 3
+      },
+      "all_wrong": true,
+      "clauses": [
+        "The man in the middle is leaning slightly forward.",
+        "The man in the middle has an outstretched arm.",
+        "The man in the middle has his mouth open."
+      ],
+      "image_indices": [
+        4,
+        3
+      ]
+    }
+  ],
+  "interpretation": "Compare signed gold-vs-error margin for unchanged full description and manually separated necessary clauses. Favoring gold for an isolated clause does not prove a general aggregation failure; pair and prompts are post-hoc.",
+  "limits": [
+    "Manual decompositions and only four error-selected questions; no generalization/statistical significance claim.",
+    "No new visual evidence is added; adjective thresholds and about-to temporal wording can still be ambiguous.",
+    "Raw margins from different clause prompts are not assumed calibrated or combined into a proposed method."
+  ]
+}

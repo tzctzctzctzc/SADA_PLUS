@@ -1,0 +1,314 @@
+{
+  "complete": true,
+  "n_evaluation": 256,
+  "n_clusters": 256,
+  "settings": {
+    "official_default": {
+      "scores": {
+        "scores": {
+          "correct": 99,
+          "n_top_ties": 11,
+          "expected_correct_uniform_tie": 99.5,
+          "by_kind": {
+            "static": {
+              "n": 56,
+              "correct": 49
+            },
+            "video": {
+              "n": 200,
+              "correct": 50
+            }
+          },
+          "comparisons": {
+            "raw_logits": {
+              "difference_pp": -0.390625,
+              "cluster_95ci_pp": [
+                -6.640625,
+                5.46875
+              ],
+              "gains": 30,
+              "losses": 31
+            },
+            "patch_attention_calibrated": {
+              "difference_pp": 2.734375,
+              "cluster_95ci_pp": [
+                -3.515625,
+                8.984375
+              ],
+              "gains": 35,
+              "losses": 28
+            },
+            "patch_density_calibrated": {
+              "difference_pp": 3.125,
+              "cluster_95ci_pp": [
+                -3.125,
+                9.375
+              ],
+              "gains": 36,
+              "losses": 28
+            },
+            "caption_logprob_mean": {
+              "difference_pp": 0.0,
+              "cluster_95ci_pp": [
+                -6.25,
+                6.25
+              ],
+              "gains": 32,
+              "losses": 32
+            },
+            "matching_score": {
+              "difference_pp": -7.421875,
+              "cluster_95ci_pp": [
+                -13.671875,
+                -1.171875
+              ],
+              "gains": 24,
+              "losses": 43
+            },
+            "SigLIP2": {
+              "difference_pp": 5.859375,
+              "cluster_95ci_pp": [
+                -0.390625,
+                12.109375
+              ],
+              "gains": 40,
+              "losses": 25
+            }
+          }
+        },
+        "pre_sigmoid_margins": {
+          "correct": 99,
+          "n_top_ties": 0,
+          "expected_correct_uniform_tie": 99.0,
+          "by_kind": {
+            "static": {
+              "n": 56,
+              "correct": 49
+            },
+            "video": {
+              "n": 200,
+              "correct": 50
+            }
+          },
+          "comparisons": {
+            "raw_logits": {
+              "difference_pp": -0.390625,
+              "cluster_95ci_pp": [
+                -6.25,
+                5.46875
+              ],
+              "gains": 30,
+              "losses": 31
+            },
+            "patch_attention_calibrated": {
+              "difference_pp": 2.734375,
+              "cluster_95ci_pp": [
+                -3.515625,
+                8.984375
+              ],
+              "gains": 36,
+              "losses": 29
+            },
+            "patch_density_calibrated": {
+              "difference_pp": 3.125,
+              "cluster_95ci_pp": [
+                -3.125,
+                9.375
+              ],
+              "gains": 37,
+              "losses": 29
+            },
+            "caption_logprob_mean": {
+              "difference_pp": 0.0,
+              "cluster_95ci_pp": [
+                -5.859375,
+                6.25
+              ],
+              "gains": 31,
+              "losses": 31
+            },
+            "matching_score": {
+              "difference_pp": -7.421875,
+              "cluster_95ci_pp": [
+                -13.671875,
+                -1.171875
+              ],
+              "gains": 25,
+              "losses": 44
+            },
+            "SigLIP2": {
+              "difference_pp": 5.859375,
+              "cluster_95ci_pp": [
+                -0.390625,
+                12.109375
+              ],
+              "gains": 39,
+              "losses": 24
+            }
+          }
+        }
+      },
+      "token_range": [
+        80,
+        1736
+      ]
+    },
+    "bounded_pixels": {
+      "scores": {
+        "scores": {
+          "correct": 100,
+          "n_top_ties": 11,
+          "expected_correct_uniform_tie": 100.5,
+          "by_kind": {
+            "static": {
+              "n": 56,
+              "correct": 48
+            },
+            "video": {
+              "n": 200,
+              "correct": 52
+            }
+          },
+          "comparisons": {
+            "raw_logits": {
+              "difference_pp": 0.0,
+              "cluster_95ci_pp": [
+                -6.25,
+                5.859375
+              ],
+              "gains": 32,
+              "losses": 32
+            },
+            "patch_attention_calibrated": {
+              "difference_pp": 3.125,
+              "cluster_95ci_pp": [
+                -3.125,
+                9.375
+              ],
+              "gains": 37,
+              "losses": 29
+            },
+            "patch_density_calibrated": {
+              "difference_pp": 3.515625,
+              "cluster_95ci_pp": [
+                -2.734375,
+                9.765625
+              ],
+              "gains": 38,
+              "losses": 29
+            },
+            "caption_logprob_mean": {
+              "difference_pp": 0.390625,
+              "cluster_95ci_pp": [
+                -5.859375,
+                7.03125
+              ],
+              "gains": 35,
+              "losses": 34
+            },
+            "matching_score": {
+              "difference_pp": -7.03125,
+              "cluster_95ci_pp": [
+                -13.28125,
+                -0.78125
+              ],
+              "gains": 24,
+              "losses": 42
+            },
+            "SigLIP2": {
+              "difference_pp": 6.25,
+              "cluster_95ci_pp": [
+                0.0,
+                12.5
+              ],
+              "gains": 41,
+              "losses": 25
+            }
+          }
+        },
+        "pre_sigmoid_margins": {
+          "correct": 100,
+          "n_top_ties": 0,
+          "expected_correct_uniform_tie": 100.0,
+          "by_kind": {
+            "static": {
+              "n": 56,
+              "correct": 48
+            },
+            "video": {
+              "n": 200,
+              "correct": 52
+            }
+          },
+          "comparisons": {
+            "raw_logits": {
+              "difference_pp": 0.0,
+              "cluster_95ci_pp": [
+                -6.25,
+                5.859375
+              ],
+              "gains": 32,
+              "losses": 32
+            },
+            "patch_attention_calibrated": {
+              "difference_pp": 3.125,
+              "cluster_95ci_pp": [
+                -3.125,
+                9.375
+              ],
+              "gains": 38,
+              "losses": 30
+            },
+            "patch_density_calibrated": {
+              "difference_pp": 3.515625,
+              "cluster_95ci_pp": [
+                -2.7441406249999964,
+                9.765625
+              ],
+              "gains": 39,
+              "losses": 30
+            },
+            "caption_logprob_mean": {
+              "difference_pp": 0.390625,
+              "cluster_95ci_pp": [
+                -5.859375,
+                7.03125
+              ],
+              "gains": 34,
+              "losses": 33
+            },
+            "matching_score": {
+              "difference_pp": -7.03125,
+              "cluster_95ci_pp": [
+                -13.28125,
+                -0.78125
+              ],
+              "gains": 25,
+              "losses": 43
+            },
+            "SigLIP2": {
+              "difference_pp": 6.25,
+              "cluster_95ci_pp": [
+                0.0,
+                12.5
+              ],
+              "gains": 40,
+              "losses": 24
+            }
+          }
+        }
+      },
+      "token_range": [
+        80,
+        196
+      ]
+    }
+  },
+  "limits": [
+    "This is a retrieval-trained 2B model, not a same-backbone intervention comparison.",
+    "Official-default visual budget differs from P023/P025; bounded_pixels uses the same maximum pixel budget but a different patch size.",
+    "One fixed instruction; no tuning on pilot labels.",
+    "256-question exploratory validation pilot, not full benchmark or SOTA.",
+    "Official binary weight-difference head retained; BF16 probability ties separately audited."
+  ]
+}

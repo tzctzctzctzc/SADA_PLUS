@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-16T22:52:34.061653+00:00",
+  "as_of": "2026-09-16T22:57:46.222008+00:00",
   "goal_status": "active",
-  "phase": "逐图强基线118/256优于原始100/256；专用检索运行，核验分辨率与细粒度残余错误",
+  "phase": "完成强基线与分辨率诊断，局部描述条件错误定位",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -295,7 +295,7 @@
       "validation": "pip check, CPU preprocessing, and actual GPU3 inference succeeded; P027 live PID 511395"
     },
     "P027": {
-      "status": "running",
+      "status": "completed",
       "driver_pid": 511024,
       "dependency_pid": 511022,
       "config": "configs/P027_qwen3_imagecode.json",
@@ -304,7 +304,17 @@
       "analysis": "results/P027_qwen3_imagecode.json",
       "expected_records": 512,
       "protocol_preflight": "results/P027_protocol_cpu.json",
-      "child_pid": 511395
+      "child_pid": 511395,
+      "exitcode": 0
+    },
+    "P028": {
+      "status": "completed",
+      "exitcode": 0,
+      "driver_pid": 511613,
+      "child_pid": 511616,
+      "preregister_commit": "7b802a0",
+      "analysis": "results/P028_qwen3_resolution.json",
+      "exitcode_file": "runs/P028.exitcode"
     }
   },
   "monitor": {
@@ -313,7 +323,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "Local automation gpu3 TOML inspected; active heartbeat every 20 minutes, silent on unchanged state"
   },
-  "next": "完成P027；P028固定提高最小分辨率，先排查细节表征不足，避免把所有con题失败归因为跨图推理缺失。",
+  "next": "P029四组共同错例逐条必要条件评分，区分细节识别与整体约束评分失配；仍无创新方法，不扫旧patch或分辨率参数。",
   "results": {
     "P001": {
       "n": 4,
@@ -963,6 +973,32 @@
       "con_raw": 10,
       "con_patch": 10,
       "interpretation": "正标签49题仍难；差值区间宽，不能据此宣布联合上下文有效。空白不是阴性。"
+    },
+    "P027": {
+      "analysis": "results/P027_qwen3_imagecode.json",
+      "n": 256,
+      "default_correct": 99,
+      "bounded_correct": 100,
+      "default_static": 49,
+      "default_video": 50,
+      "default_vs_matching_pp": -7.421875,
+      "default_vs_matching_cluster_95ci_pp": [
+        -13.671875,
+        -1.171875
+      ]
+    },
+    "P028": {
+      "analysis": "results/P028_qwen3_resolution.json",
+      "n": 256,
+      "floor448_correct": 97,
+      "default_correct": 99,
+      "difference_pp": -0.78125,
+      "cluster_95ci_pp": [
+        -5.078125,
+        3.515625
+      ],
+      "actual_grid_changed_video_questions": 190,
+      "decision": "该固定最小分辨率提升无整体收益，停止参数扫描。"
     }
   },
   "novelty_status": "仍无满足目标的新颖方法或SOTA；注意力校准、证据头与候选间判别性均有直接近邻。"
