@@ -1,0 +1,89 @@
+{
+  "complete": true,
+  "n_questions": 19,
+  "n_permutations": 76,
+  "n_image_clusters": 15,
+  "correct": {
+    "matching_score": 44,
+    "caption_logprob_mean": 52,
+    "listwise_raw": 47,
+    "patch_calibrated": 52,
+    "code_AGD_raw": 45,
+    "SigLIP2": 28
+  },
+  "ties": {
+    "matching_score": {
+      "questions_with_top_ties": 0,
+      "expected_correct_questions_uniform_tie": 11.0
+    },
+    "caption_logprob_mean": {
+      "questions_with_top_ties": 0,
+      "expected_correct_questions_uniform_tie": 13.0
+    }
+  },
+  "comparisons": {
+    "matching_score minus listwise_raw": {
+      "difference_pp": -3.9473684210526314,
+      "cluster_95ci_pp": [
+        -25.0,
+        13.88888888888889
+      ]
+    },
+    "matching_score minus patch_calibrated": {
+      "difference_pp": -10.526315789473683,
+      "cluster_95ci_pp": [
+        -31.57894736842105,
+        7.142857142857142
+      ]
+    },
+    "matching_score minus code_AGD_raw": {
+      "difference_pp": -1.3157894736842104,
+      "cluster_95ci_pp": [
+        -22.058823529411764,
+        15.909090909090908
+      ]
+    },
+    "matching_score minus SigLIP2": {
+      "difference_pp": 21.052631578947366,
+      "cluster_95ci_pp": [
+        -6.25,
+        46.666666666666664
+      ]
+    },
+    "caption_logprob_mean minus listwise_raw": {
+      "difference_pp": 6.578947368421052,
+      "cluster_95ci_pp": [
+        -12.5,
+        22.50297619047593
+      ]
+    },
+    "caption_logprob_mean minus patch_calibrated": {
+      "difference_pp": 0.0,
+      "cluster_95ci_pp": [
+        -21.875,
+        17.045454545454543
+      ]
+    },
+    "caption_logprob_mean minus code_AGD_raw": {
+      "difference_pp": 9.210526315789473,
+      "cluster_95ci_pp": [
+        -10.294117647058822,
+        26.38888888888889
+      ]
+    },
+    "caption_logprob_mean minus SigLIP2": {
+      "difference_pp": 31.57894736842105,
+      "cluster_95ci_pp": [
+        0.0,
+        61.111111111111114
+      ]
+    }
+  },
+  "scope": "Two established pointwise scoring paradigms on the same frozen backbone and Mantis questions. New prompts are explicit adaptations, not PinPoint reproduction. No prompt sweep or calibration.",
+  "limitations": [
+    "Repeatedly used exploration questions, not independent data.",
+    "One-image scores cannot use cross-image context.",
+    "Different scoring prompts from the listwise baseline; any gain is a baseline result, not a mechanism proof.",
+    "Tie-breaking uses displayed candidate order, matching the listwise baseline; a uniform-tie expected accuracy is additionally reported."
+  ]
+}

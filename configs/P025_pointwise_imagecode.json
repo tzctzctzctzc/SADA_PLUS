@@ -1,0 +1,23 @@
+{
+  "id": "P025",
+  "model": "Qwen2.5-VL-7B-Instruct",
+  "data_config": "configs/P023_imagecode.json",
+  "data_config_sha256": "66bfa9451f617aa57d04212cb161a4e1bbb7b53ca04f30e8f75c9ad9adfcfbaa",
+  "min_pixels": 3136,
+  "max_pixels": 200704,
+  "matching_prompt": "Does the image match the following description? Answer True or False only.\nDescription: {caption}\nAnswer:",
+  "caption_prompt": "Describe this image.",
+  "metrics": [
+    "256-question accuracy",
+    "paired cluster CI",
+    "static/video breakdown"
+  ],
+  "scope": "Transfer the exact P024 pointwise prompts and scoring rules to the frozen P023 ImageCoDe sample and preprocessing; no prompt tuning.",
+  "limits": [
+    "Same frozen P023 pilot, not full benchmark.",
+    "One-image scores lack cross-candidate and temporal context.",
+    "Caption likelihood is an established scoring baseline, not a new method."
+  ],
+  "data_records": "runs/P023_data/records.json",
+  "expected_images": 2960
+}
