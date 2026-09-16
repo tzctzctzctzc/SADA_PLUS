@@ -20,7 +20,8 @@
     "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
     "Pathways 2026 发现干预可触发备用信息路径，因此仅看 attention 或遮挡消融不足以证明自然推理机制。",
     "P008所有7B固定DTS条件各退化3至5/32；3B各变化正负1/32。相同P006协议生成全文64/64一致；P007 eager与P008 SDPA BF16的32个baseline候选argmax有3个差异，不能跨后端解读微小增益。",
-    "PinPoint全部发布排名指标复算完成：官方mAP10为13.1418%/16.9785%，仅去重后13.2530%/17.1452%，影响有限。results/PinPoint_metric_replay.json。"
+    "PinPoint全部发布排名指标复算完成：官方mAP10为13.1418%/16.9785%，仅去重后13.2530%/17.1452%，影响有限。results/PinPoint_metric_replay.json。",
+    "P030 cohort scope audit: all 48 selected queries are Composition; 909 clean dual-reference rows contain 105 non-Composition rows, mostly 94 Context Fit. results/P030_scope_audit.json."
   ],
   "hypotheses": [
     {
@@ -364,7 +365,8 @@
       "driver_pid": 512794,
       "child_pid": 512797,
       "preregister_commit": "4bfa65d",
-      "protocol_smoke": "runs/P030_pinpoint_references/protocol_smoke.json"
+      "protocol_smoke": "runs/P030_pinpoint_references/protocol_smoke.json",
+      "scope_audit": "results/P030_scope_audit.json"
     },
     "PinPoint_metric_replay": {
       "status": "completed",
@@ -417,7 +419,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "本轮读取本地gpu3 heartbeat：ACTIVE，每20分钟；读取research_state并核验真实PID，保持原有监控。"
   },
-  "next": "等待P030完整结果；P032按已锁公式做探索分析，P031接着比较Coral与同底座3B。仅当P032固定主公式和机制方向同时成立，才在未见分数的60个保留参考组件上预注册确认。",
+  "next": "P030/P032 conclusions are limited to Composition. If a held-out confirmation is justified, choose within reserved components with explicit category reporting and add a separate non-Composition sensitivity cohort; do not claim category-wide independence.",
   "results": {
     "P001": {
       "n": 4,
