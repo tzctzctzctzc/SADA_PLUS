@@ -1,7 +1,7 @@
 {
   "as_of": "2026-09-17",
   "goal_status": "active",
-  "phase": "P011完成；准备P013缓存路径分解，P012为信息指标的编码对照",
+  "phase": "P013完成；准备P014内容隔离与序号结构保留",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -139,6 +139,14 @@
       "driver_log": "logs/P011_driver.log",
       "exitcode": 0,
       "analysis": "results/P011_geometry_transport.json"
+    },
+    "P013": {
+      "status": "completed",
+      "exitcode": 0,
+      "pid": 506437,
+      "child_pid": 506439,
+      "preregister_commit": "86571ea",
+      "analysis": "results/P013_cache_paths.json"
     }
   },
   "monitor": {
@@ -147,7 +155,7 @@
     "gpu_queue": "P002-P011 drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "Local automation gpu3 TOML inspected; active heartbeat every 20 minutes, silent on unchanged state"
   },
-  "next": "核验P011活进程和退出码。完成后先看标准图片标签基线，再看匹配/统一几何下正反向状态迁移；没有跨新题证据就停止泛泛的结构模板路线。",
+  "next": "预注册P014：直接隔离、隔离+标准编号、隔离+donor起始状态、仅起始结构边，对比原完整基线及显式mask数值对照。",
   "results": {
     "P001": {
       "n": 4,
@@ -489,6 +497,26 @@
       "analysis": "results/P012_protocol_information.json",
       "scope": "post-hoc finite protocol design",
       "interpretation": "全对wc48与全错wc69/wc76均可产生2bit排列协同，解码到图片身份后0；说明编码协作不能直接当内容推理，未复现或推翻BATCH论文结论。"
+    },
+    "P013": {
+      "analysis": "results/P013_cache_paths.json",
+      "n_records": 880,
+      "decision": "仅起始标记KV改变不足以重编号；效应主要保留在其余prefix KV。停止只改start缓存的简单方案。",
+      "start_only_no_change_out_of_88": {
+        "+1": 87,
+        "-1": 87
+      },
+      "other_prefix_agreement_with_full_changed_cases": {
+        "+1": [
+          68,
+          68
+        ],
+        "-1": [
+          63,
+          67
+        ]
+      },
+      "limitations": "其余prefix包含视觉patch及end标记，非唯一自然路径证明。BF16拆分prefill与P011有3/88全文差异，微小精度变化不作收益。"
     }
   }
 }

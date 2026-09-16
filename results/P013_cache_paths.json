@@ -1,0 +1,225 @@
+{
+  "complete": true,
+  "n_records": 880,
+  "n_per_mode": 88,
+  "modes": {
+    "baseline_cached": {
+      "n": 88,
+      "correct": 57,
+      "gains_vs_baseline": 0,
+      "losses_vs_baseline": 0,
+      "same_image_position_as_baseline": 88,
+      "invalid": 0
+    },
+    "full:0": {
+      "n": 88,
+      "correct": 58,
+      "gains_vs_baseline": 2,
+      "losses_vs_baseline": 1,
+      "same_image_position_as_baseline": 85,
+      "invalid": 0
+    },
+    "start_only:0": {
+      "n": 88,
+      "correct": 58,
+      "gains_vs_baseline": 2,
+      "losses_vs_baseline": 1,
+      "same_image_position_as_baseline": 85,
+      "invalid": 0
+    },
+    "other_prefix:0": {
+      "n": 88,
+      "correct": 58,
+      "gains_vs_baseline": 2,
+      "losses_vs_baseline": 1,
+      "same_image_position_as_baseline": 85,
+      "invalid": 0
+    },
+    "full:1": {
+      "n": 88,
+      "correct": 20,
+      "gains_vs_baseline": 6,
+      "losses_vs_baseline": 43,
+      "same_image_position_as_baseline": 19,
+      "invalid": 0
+    },
+    "start_only:1": {
+      "n": 88,
+      "correct": 57,
+      "gains_vs_baseline": 2,
+      "losses_vs_baseline": 2,
+      "same_image_position_as_baseline": 84,
+      "invalid": 0
+    },
+    "other_prefix:1": {
+      "n": 88,
+      "correct": 20,
+      "gains_vs_baseline": 6,
+      "losses_vs_baseline": 43,
+      "same_image_position_as_baseline": 19,
+      "invalid": 0
+    },
+    "full:3": {
+      "n": 88,
+      "correct": 21,
+      "gains_vs_baseline": 6,
+      "losses_vs_baseline": 42,
+      "same_image_position_as_baseline": 21,
+      "invalid": 0
+    },
+    "start_only:3": {
+      "n": 88,
+      "correct": 59,
+      "gains_vs_baseline": 3,
+      "losses_vs_baseline": 1,
+      "same_image_position_as_baseline": 84,
+      "invalid": 0
+    },
+    "other_prefix:3": {
+      "n": 88,
+      "correct": 19,
+      "gains_vs_baseline": 6,
+      "losses_vs_baseline": 44,
+      "same_image_position_as_baseline": 21,
+      "invalid": 0
+    }
+  },
+  "transport": {
+    "full:1": {
+      "n_pairs": 88,
+      "valid_pairs": 88,
+      "shift_histogram_mod4": {
+        "0": 20,
+        "1": 52,
+        "3": 10,
+        "2": 6
+      },
+      "expected_count": 52,
+      "opposite_count": 10,
+      "expected_minus_opposite_cluster_95ci_pp": [
+        35.714285714285715,
+        60.22727272727273
+      ],
+      "agreement_with_full_on_full_changed_cases": 68,
+      "n_full_changed_cases": 68
+    },
+    "full:3": {
+      "n_pairs": 88,
+      "valid_pairs": 88,
+      "shift_histogram_mod4": {
+        "3": 53,
+        "0": 21,
+        "2": 6,
+        "1": 8
+      },
+      "expected_count": 53,
+      "opposite_count": 8,
+      "expected_minus_opposite_cluster_95ci_pp": [
+        31.818181818181817,
+        68.18181818181817
+      ],
+      "agreement_with_full_on_full_changed_cases": 67,
+      "n_full_changed_cases": 67
+    },
+    "start_only:1": {
+      "n_pairs": 88,
+      "valid_pairs": 88,
+      "shift_histogram_mod4": {
+        "0": 87,
+        "1": 1
+      },
+      "expected_count": 1,
+      "opposite_count": 0,
+      "expected_minus_opposite_cluster_95ci_pp": [
+        0.0,
+        3.75
+      ],
+      "agreement_with_full_on_full_changed_cases": 0,
+      "n_full_changed_cases": 68
+    },
+    "start_only:3": {
+      "n_pairs": 88,
+      "valid_pairs": 88,
+      "shift_histogram_mod4": {
+        "0": 87,
+        "2": 1
+      },
+      "expected_count": 0,
+      "opposite_count": 0,
+      "expected_minus_opposite_cluster_95ci_pp": [
+        0.0,
+        0.0
+      ],
+      "agreement_with_full_on_full_changed_cases": 0,
+      "n_full_changed_cases": 67
+    },
+    "other_prefix:1": {
+      "n_pairs": 88,
+      "valid_pairs": 88,
+      "shift_histogram_mod4": {
+        "0": 20,
+        "1": 52,
+        "3": 10,
+        "2": 6
+      },
+      "expected_count": 52,
+      "opposite_count": 10,
+      "expected_minus_opposite_cluster_95ci_pp": [
+        35.714285714285715,
+        60.22727272727273
+      ],
+      "agreement_with_full_on_full_changed_cases": 68,
+      "n_full_changed_cases": 68
+    },
+    "other_prefix:3": {
+      "n_pairs": 88,
+      "valid_pairs": 88,
+      "shift_histogram_mod4": {
+        "3": 54,
+        "0": 22,
+        "2": 4,
+        "1": 8
+      },
+      "expected_count": 54,
+      "opposite_count": 8,
+      "expected_minus_opposite_cluster_95ci_pp": [
+        32.95454545454545,
+        68.75
+      ],
+      "agreement_with_full_on_full_changed_cases": 63,
+      "n_full_changed_cases": 67
+    }
+  },
+  "integrity": {
+    "baseline_cached": {
+      "n": 88,
+      "same_raw_as_P011": 85,
+      "candidate_score_max_error": 0.47619056701660156,
+      "candidate_score_p95_error": 0.375
+    },
+    "full:0": {
+      "n": 88,
+      "same_raw_as_P011": 88,
+      "candidate_score_max_error": 0.47619056701660156,
+      "candidate_score_p95_error": 0.375
+    },
+    "full:1": {
+      "n": 88,
+      "same_raw_as_P011": 85,
+      "candidate_score_max_error": 0.47619056701660156,
+      "candidate_score_p95_error": 0.36875019073486315
+    },
+    "full:3": {
+      "n": 88,
+      "same_raw_as_P011": 85,
+      "candidate_score_max_error": 0.47619056701660156,
+      "candidate_score_p95_error": 0.3571434020996094
+    }
+  },
+  "limitations": [
+    "Same eleven questions as P011; a new intervention, not new data.",
+    "Non-start prefix includes image patches AND end delimiters; it cannot alone localize propagation to patches.",
+    "Hybrid caches are artificial; causal effects do not establish a naturally exclusive path.",
+    "Kamera already studies readout versus conditioning for cross-chunk cache reuse; this experiment concerns source-index interpretation, not a novelty claim."
+  ]
+}
