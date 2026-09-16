@@ -1,0 +1,89 @@
+{
+  "id": "P006",
+  "date": "2026-09-17",
+  "purpose": "Disambiguate source-image position bias from option-letter/order bias after delimiter scaling",
+  "selection": "Eight hash-selected questions of four-image caption matching; selection independent of correctness and shift direction",
+  "seed": "ordinal-vs-letter-20260917",
+  "ids": [
+    "wc_67",
+    "wc_48",
+    "wc_57",
+    "wc_69",
+    "wc_71",
+    "wc_64",
+    "wc_76",
+    "wc_65"
+  ],
+  "conditions": [
+    "baseline",
+    "scale",
+    "canonical_start"
+  ],
+  "image_permutations": [
+    [
+      0,
+      1,
+      2,
+      3
+    ],
+    [
+      1,
+      2,
+      3,
+      0
+    ],
+    [
+      2,
+      3,
+      0,
+      1
+    ],
+    [
+      3,
+      0,
+      1,
+      2
+    ]
+  ],
+  "option_permutations": [
+    [
+      0,
+      1,
+      2,
+      3
+    ],
+    [
+      1,
+      2,
+      3,
+      0
+    ],
+    [
+      2,
+      3,
+      0,
+      1
+    ],
+    [
+      3,
+      0,
+      1,
+      2
+    ]
+  ],
+  "decoding": "greedy, max_new_tokens=16",
+  "max_pixels": 1605632,
+  "measurements": [
+    "Accuracy across 16 balanced permutations per question",
+    "Predicted option-letter distribution versus predicted image-position distribution",
+    "Within-question consistency when option order alone changes",
+    "Within-question equivariance when image order changes",
+    "Processed first-step scores conditional on single-token answer formats: bare A-D and parenthesized A-D when tokenizer supports all four."
+  ],
+  "interpretation": "Exploratory post-hoc follow-up to P002. Not independent held-out confirmation or evidence of novelty.",
+  "falsifiers": [
+    "If bias follows option letter rather than image index, reject the ordinal-boundary hypothesis",
+    "If shifts disappear under permutations/greedy decoding, do not claim systematic source-index corruption"
+  ],
+  "format_caveat": "These are generation-processed scores, including repetition penalty, not raw logits; only groups with one token per candidate are compared."
+}
