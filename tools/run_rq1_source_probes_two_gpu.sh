@@ -35,7 +35,7 @@ eval_manifest=$base_artifact/rq1_val_gt_segments.jsonl
     --manifest "$manifest" --video-root "$video_root" \
     --epic55-splits /vepfs/vlms/data/EPIC_KITCHENS/epic_55_splits.csv \
     --md5-csv /vepfs/vlms/data/EPIC_KITCHENS/epic_md5.csv \
-    --workers 8 --connections 8 --retries 5 --use-http \
+    --workers 8 --connections 16 --retries 5 --use-http \
     >"$artifact/logs/download_videos.log" 2>&1
 
 "$sada_python" tools/prepare_rq1_frames.py \
