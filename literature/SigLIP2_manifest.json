@@ -1,0 +1,64 @@
+{
+  "repository": "google/siglip2-so400m-patch14-384",
+  "revision": "e8e487298228002f3d8a82e0cd5c8ea9c567f57f",
+  "type": "model",
+  "files": [
+    {
+      "path": ".gitattributes",
+      "size": 1570,
+      "lfs": null
+    },
+    {
+      "path": "README.md",
+      "size": 3381,
+      "lfs": null
+    },
+    {
+      "path": "config.json",
+      "size": 559,
+      "lfs": null
+    },
+    {
+      "path": "model.safetensors",
+      "size": 4544143072,
+      "lfs": {
+        "size": 4544143072,
+        "sha256": "9f4f4a49f908ef0c979bce8ff5a5c0e88882dc6c5dc4304387cbbd152558e2c2",
+        "pointer_size": 135
+      }
+    },
+    {
+      "path": "preprocessor_config.json",
+      "size": 394,
+      "lfs": null
+    },
+    {
+      "path": "special_tokens_map.json",
+      "size": 636,
+      "lfs": null
+    },
+    {
+      "path": "tokenizer.json",
+      "size": 34363039,
+      "lfs": {
+        "size": 34363039,
+        "sha256": "cb9140fae3ac5122c972d37adf83e1248471a38147ad76f8215c8872c6fd8322",
+        "pointer_size": 133
+      }
+    },
+    {
+      "path": "tokenizer.model",
+      "size": 4241003,
+      "lfs": {
+        "size": 4241003,
+        "sha256": "61a7b147390c64585d6c3543dd6fc636906c9af3865a5548f27f31aee1d4c8e2",
+        "pointer_size": 132
+      }
+    },
+    {
+      "path": "tokenizer_config.json",
+      "size": 47164,
+      "lfs": null
+    }
+  ]
+}
