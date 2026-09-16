@@ -1,0 +1,30 @@
+{
+  "upstream_commit": "a2880738e3ed7284953f3611e7c06a3c0ede9334",
+  "interleave_default": false,
+  "unindexed_markers_deleted": true,
+  "lines": {
+    "interleave_default": 55,
+    "marker_deletion": [
+      234,
+      239
+    ],
+    "prefix_images": 266
+  },
+  "files": {
+    "third_party/delim_protocol/qwen2_5_vl.py": {
+      "sha256": "d91cb0f7de5b83fdace1ba707776425e9449ffe3cb16d7a8736879cea8e3c14f",
+      "git_blob_sha1": "bd94c59281ef3542d1fc54011031467bf20d89e6"
+    },
+    "third_party/delim_protocol/muir_utils.py": {
+      "sha256": "70e06d58f6ef871d90455e90d7d44abb5afd5ea6dc0da2173f845907bea766ab",
+      "git_blob_sha1": "d1f1a95ae6d930a91402361481e92381fd42bca4"
+    },
+    "third_party/delim_protocol/muirbench.yaml": {
+      "sha256": "87ec2da42266a753948d0895485a2e03905159204a6404ccaa92a21d35dec01e",
+      "git_blob_sha1": "82d58adfbc1952f2574dd7fa37fef107c7306d56"
+    }
+  },
+  "affected_dev_rows": 88,
+  "P005_follows_public_adapter": true,
+  "interpretation": "All unindexed image markers are deleted before prefix/interleaved branch. P010 retains references without changing heldout."
+}

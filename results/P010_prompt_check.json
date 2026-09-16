@@ -1,0 +1,14 @@
+{
+  "checked": 176,
+  "passed": true,
+  "original_seed_indices_match": true,
+  "affected": 88,
+  "by_task": {
+    "Geographic Understanding": 6,
+    "Image-Text Matching": 20,
+    "Diagram Understanding": 38,
+    "Attribute Similarity": 8,
+    "Visual Retrieval": 16
+  },
+  "marker_count_matches_image_count": true
+}

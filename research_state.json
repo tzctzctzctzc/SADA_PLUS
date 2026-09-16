@@ -1,7 +1,7 @@
 {
   "as_of": "2026-09-17",
   "goal_status": "active",
-  "phase": "P009边界因果恢复实验运行中；先判定独立内容同序号状态是否保留作用",
+  "phase": "P009完成；P010图像指代协议审计已冻结，即将运行",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -113,13 +113,13 @@
     "P009": {
       "pid": 504649,
       "child_pid": 504651,
-      "status": "running; parent and Python child verified, 12/1664 observed",
+      "status": "completed",
       "log": "logs/P009_boundary_restore.log",
       "driver_log": "logs/P009_driver.log",
-      "exitcode": "runs/P009.exitcode",
+      "exitcode": 0,
       "preregister_commit": "3ac716e",
       "config": "configs/P009_boundary_restore.json",
-      "analysis": "scripts/analyze_P009.py"
+      "analysis": "results/P009_boundary_restore.json"
     }
   },
   "monitor": {
@@ -127,7 +127,7 @@
     "interval_minutes": 20,
     "gpu_queue": "P002-P009 drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock"
   },
-  "next": "先核验P009父子进程和退出码。若仍活跃不重复启动。全部完成后读取results/P009_boundary_restore.json，分开分析clean-start/end因果恢复与donor同序号/错序号对照；clean-both按构造恢复基线不算科学收益。若同序号无关内容不能稳定救回或区分不了错序号，应放弃简单结构模板假设。",
+  "next": "先检查P010真实PID与退出码，完成后区分协议/拒答效应；P009下一步需要序号与token/RoPE位置正交对照，且与Source-Modality Monitoring及Dual Spatial Binding核对创新边界。",
   "results": {
     "P001": {
       "n": 4,
@@ -406,6 +406,33 @@
         }
       },
       "parser_corrections": 0
+    },
+    "P009": {
+      "analysis": "results/P009_boundary_restore.json",
+      "n_records": 1664,
+      "n_unique_questions": 8,
+      "correct": {
+        "baseline": 55,
+        "scale": 42,
+        "clean_start": 53,
+        "clean_end": 52,
+        "clean_both": 55,
+        "donor_start": 51,
+        "donor_end": 43,
+        "donor_both": 55,
+        "donor_shift_start": 31,
+        "donor_shift_end": 44,
+        "donor_shift_both": 35,
+        "base_donor_both": 55,
+        "base_donor_shift_both": 35
+      },
+      "integrity": {
+        "oracle_max_score_error": 0.0,
+        "oracle_all_generated_match": true,
+        "baseline_same_as_P006": 128,
+        "scale_same_as_P006": 128
+      },
+      "interpretation": "同序号无关内容start恢复51/128，对应错序号31/128；end对照43/44。支持start存在位置敏感作用，但序号与绝对位置混淆，尚无新方法收益。"
     }
   }
 }

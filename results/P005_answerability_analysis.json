@@ -1,0 +1,221 @@
+{
+  "scope": "P005 Muir dev only, no heldout; diagnostic breakdown under original fixed prompt protocol",
+  "groups": {
+    "ALL": {
+      "n": 168,
+      "gold_none": 84,
+      "baseline": {
+        "correct": 85,
+        "predicted_none": 39,
+        "none_correct": 35,
+        "answerable_correct": 50,
+        "invalid_letter": 0
+      },
+      "scale": {
+        "correct": 84,
+        "predicted_none": 50,
+        "none_correct": 41,
+        "answerable_correct": 43,
+        "invalid_letter": 0
+      }
+    },
+    "Action Understanding": {
+      "n": 14,
+      "gold_none": 7,
+      "baseline": {
+        "correct": 7,
+        "predicted_none": 1,
+        "none_correct": 1,
+        "answerable_correct": 6,
+        "invalid_letter": 0
+      },
+      "scale": {
+        "correct": 6,
+        "predicted_none": 1,
+        "none_correct": 1,
+        "answerable_correct": 5,
+        "invalid_letter": 0
+      }
+    },
+    "Attribute Similarity": {
+      "n": 8,
+      "gold_none": 4,
+      "baseline": {
+        "correct": 7,
+        "predicted_none": 4,
+        "none_correct": 4,
+        "answerable_correct": 3,
+        "invalid_letter": 0
+      },
+      "scale": {
+        "correct": 7,
+        "predicted_none": 4,
+        "none_correct": 4,
+        "answerable_correct": 3,
+        "invalid_letter": 0
+      }
+    },
+    "Cartoon Understanding": {
+      "n": 8,
+      "gold_none": 4,
+      "baseline": {
+        "correct": 3,
+        "predicted_none": 0,
+        "none_correct": 0,
+        "answerable_correct": 3,
+        "invalid_letter": 0
+      },
+      "scale": {
+        "correct": 3,
+        "predicted_none": 0,
+        "none_correct": 0,
+        "answerable_correct": 3,
+        "invalid_letter": 0
+      }
+    },
+    "Counting": {
+      "n": 12,
+      "gold_none": 6,
+      "baseline": {
+        "correct": 3,
+        "predicted_none": 0,
+        "none_correct": 0,
+        "answerable_correct": 3,
+        "invalid_letter": 0
+      },
+      "scale": {
+        "correct": 4,
+        "predicted_none": 0,
+        "none_correct": 0,
+        "answerable_correct": 4,
+        "invalid_letter": 0
+      }
+    },
+    "Diagram Understanding": {
+      "n": 38,
+      "gold_none": 19,
+      "baseline": {
+        "correct": 21,
+        "predicted_none": 12,
+        "none_correct": 12,
+        "answerable_correct": 9,
+        "invalid_letter": 0
+      },
+      "scale": {
+        "correct": 18,
+        "predicted_none": 12,
+        "none_correct": 12,
+        "answerable_correct": 6,
+        "invalid_letter": 0
+      }
+    },
+    "Difference Spotting": {
+      "n": 12,
+      "gold_none": 6,
+      "baseline": {
+        "correct": 6,
+        "predicted_none": 0,
+        "none_correct": 0,
+        "answerable_correct": 6,
+        "invalid_letter": 0
+      },
+      "scale": {
+        "correct": 5,
+        "predicted_none": 1,
+        "none_correct": 1,
+        "answerable_correct": 4,
+        "invalid_letter": 0
+      }
+    },
+    "Geographic Understanding": {
+      "n": 6,
+      "gold_none": 3,
+      "baseline": {
+        "correct": 1,
+        "predicted_none": 1,
+        "none_correct": 1,
+        "answerable_correct": 0,
+        "invalid_letter": 0
+      },
+      "scale": {
+        "correct": 3,
+        "predicted_none": 3,
+        "none_correct": 3,
+        "answerable_correct": 0,
+        "invalid_letter": 0
+      }
+    },
+    "Image-Text Matching": {
+      "n": 22,
+      "gold_none": 11,
+      "baseline": {
+        "correct": 12,
+        "predicted_none": 10,
+        "none_correct": 8,
+        "answerable_correct": 4,
+        "invalid_letter": 0
+      },
+      "scale": {
+        "correct": 13,
+        "predicted_none": 9,
+        "none_correct": 8,
+        "answerable_correct": 5,
+        "invalid_letter": 0
+      }
+    },
+    "Scene Understanding": {
+      "n": 14,
+      "gold_none": 7,
+      "baseline": {
+        "correct": 10,
+        "predicted_none": 3,
+        "none_correct": 3,
+        "answerable_correct": 7,
+        "invalid_letter": 0
+      },
+      "scale": {
+        "correct": 9,
+        "predicted_none": 2,
+        "none_correct": 2,
+        "answerable_correct": 7,
+        "invalid_letter": 0
+      }
+    },
+    "Visual Grounding": {
+      "n": 18,
+      "gold_none": 9,
+      "baseline": {
+        "correct": 11,
+        "predicted_none": 5,
+        "none_correct": 4,
+        "answerable_correct": 7,
+        "invalid_letter": 0
+      },
+      "scale": {
+        "correct": 8,
+        "predicted_none": 5,
+        "none_correct": 3,
+        "answerable_correct": 5,
+        "invalid_letter": 0
+      }
+    },
+    "Visual Retrieval": {
+      "n": 16,
+      "gold_none": 8,
+      "baseline": {
+        "correct": 4,
+        "predicted_none": 3,
+        "none_correct": 2,
+        "answerable_correct": 2,
+        "invalid_letter": 0
+      },
+      "scale": {
+        "correct": 8,
+        "predicted_none": 13,
+        "none_correct": 7,
+        "answerable_correct": 1,
+        "invalid_letter": 0
+      }
+    }
+  }
+}
