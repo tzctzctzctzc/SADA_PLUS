@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 
 import numpy as np
+from PIL import Image
 
 from tools.build_rq1_semantic_manifest import midpoint_labels
 from tools.evaluate_rq1_semantics import confusion_metrics, jensen_shannon
@@ -81,3 +82,13 @@ def test_prepare_frames_video_subset_uses_selected_segment_count(tmp_path, monke
     report = json.loads((tmp_path / "test_prepare_report.json").read_text(encoding="utf-8"))
     assert report["total_segments"] == 1
     assert report["prepared_segments"] == 1
+
+
+def test_frames_complete_rejects_a_truncated_jpeg(tmp_path):
+    output = tmp_path / "frames"
+    output.mkdir()
+    path = prepare_rq1_frames.frame_path(output, 1)
+    Image.new("RGB", (8, 8), "white").save(path)
+    payload = path.read_bytes()
+    path.write_bytes(payload[:-8])
+    assert not prepare_rq1_frames.frames_complete(output, 1)

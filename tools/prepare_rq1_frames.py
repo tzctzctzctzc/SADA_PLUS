@@ -14,11 +14,18 @@ def frame_path(output_dir, index):
 
 
 def frames_complete(output_dir, frame_count):
-    return all(
-        frame_path(output_dir, index).is_file()
-        and frame_path(output_dir, index).stat().st_size > 0
-        for index in range(1, frame_count + 1)
-    )
+    from PIL import Image
+
+    for index in range(1, frame_count + 1):
+        path = frame_path(output_dir, index)
+        if not path.is_file() or not path.stat().st_size:
+            return False
+        try:
+            with Image.open(path) as image:
+                image.load()
+        except (OSError, ValueError):
+            return False
+    return True
 
 
 def prepare_video(video_id, rows, video_root, output_root, frame_count, force=False):
