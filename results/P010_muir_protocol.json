@@ -1,0 +1,375 @@
+{
+  "complete": true,
+  "n_records": 352,
+  "n_unique_questions": 88,
+  "heldout_used": false,
+  "scope": "Descriptive paired protocol audit on selected dev rows; reused images and counterparts are not independent trials",
+  "groups": {
+    "ALL": {
+      "explicit_indices:baseline": {
+        "n": 88,
+        "correct": 58,
+        "gold_none": 44,
+        "none_correct": 22,
+        "answerable_correct": 36,
+        "predicted_none": 22,
+        "invalid_letter": 0
+      },
+      "explicit_indices:scale": {
+        "n": 88,
+        "correct": 40,
+        "gold_none": 44,
+        "none_correct": 20,
+        "answerable_correct": 20,
+        "predicted_none": 21,
+        "invalid_letter": 0
+      },
+      "interleaved:baseline": {
+        "n": 88,
+        "correct": 70,
+        "gold_none": 44,
+        "none_correct": 30,
+        "answerable_correct": 40,
+        "predicted_none": 31,
+        "invalid_letter": 0
+      },
+      "interleaved:scale": {
+        "n": 88,
+        "correct": 71,
+        "gold_none": 44,
+        "none_correct": 33,
+        "answerable_correct": 38,
+        "predicted_none": 36,
+        "invalid_letter": 0
+      },
+      "original:baseline": {
+        "n": 88,
+        "correct": 43,
+        "gold_none": 44,
+        "none_correct": 26,
+        "answerable_correct": 17,
+        "predicted_none": 29,
+        "invalid_letter": 0
+      },
+      "original:scale": {
+        "n": 88,
+        "correct": 47,
+        "gold_none": 44,
+        "none_correct": 33,
+        "answerable_correct": 14,
+        "predicted_none": 40,
+        "invalid_letter": 0
+      }
+    },
+    "Attribute Similarity": {
+      "explicit_indices:baseline": {
+        "n": 8,
+        "correct": 5,
+        "gold_none": 4,
+        "none_correct": 4,
+        "answerable_correct": 1,
+        "predicted_none": 4,
+        "invalid_letter": 0
+      },
+      "explicit_indices:scale": {
+        "n": 8,
+        "correct": 5,
+        "gold_none": 4,
+        "none_correct": 4,
+        "answerable_correct": 1,
+        "predicted_none": 4,
+        "invalid_letter": 0
+      },
+      "interleaved:baseline": {
+        "n": 8,
+        "correct": 6,
+        "gold_none": 4,
+        "none_correct": 4,
+        "answerable_correct": 2,
+        "predicted_none": 5,
+        "invalid_letter": 0
+      },
+      "interleaved:scale": {
+        "n": 8,
+        "correct": 7,
+        "gold_none": 4,
+        "none_correct": 4,
+        "answerable_correct": 3,
+        "predicted_none": 4,
+        "invalid_letter": 0
+      },
+      "original:baseline": {
+        "n": 8,
+        "correct": 7,
+        "gold_none": 4,
+        "none_correct": 4,
+        "answerable_correct": 3,
+        "predicted_none": 4,
+        "invalid_letter": 0
+      },
+      "original:scale": {
+        "n": 8,
+        "correct": 7,
+        "gold_none": 4,
+        "none_correct": 4,
+        "answerable_correct": 3,
+        "predicted_none": 4,
+        "invalid_letter": 0
+      }
+    },
+    "Diagram Understanding": {
+      "explicit_indices:baseline": {
+        "n": 38,
+        "correct": 26,
+        "gold_none": 19,
+        "none_correct": 9,
+        "answerable_correct": 17,
+        "predicted_none": 9,
+        "invalid_letter": 0
+      },
+      "explicit_indices:scale": {
+        "n": 38,
+        "correct": 19,
+        "gold_none": 19,
+        "none_correct": 10,
+        "answerable_correct": 9,
+        "predicted_none": 10,
+        "invalid_letter": 0
+      },
+      "interleaved:baseline": {
+        "n": 38,
+        "correct": 30,
+        "gold_none": 19,
+        "none_correct": 13,
+        "answerable_correct": 17,
+        "predicted_none": 13,
+        "invalid_letter": 0
+      },
+      "interleaved:scale": {
+        "n": 38,
+        "correct": 32,
+        "gold_none": 19,
+        "none_correct": 14,
+        "answerable_correct": 18,
+        "predicted_none": 14,
+        "invalid_letter": 0
+      },
+      "original:baseline": {
+        "n": 38,
+        "correct": 21,
+        "gold_none": 19,
+        "none_correct": 12,
+        "answerable_correct": 9,
+        "predicted_none": 12,
+        "invalid_letter": 0
+      },
+      "original:scale": {
+        "n": 38,
+        "correct": 18,
+        "gold_none": 19,
+        "none_correct": 12,
+        "answerable_correct": 6,
+        "predicted_none": 12,
+        "invalid_letter": 0
+      }
+    },
+    "Geographic Understanding": {
+      "explicit_indices:baseline": {
+        "n": 6,
+        "correct": 3,
+        "gold_none": 3,
+        "none_correct": 0,
+        "answerable_correct": 3,
+        "predicted_none": 0,
+        "invalid_letter": 0
+      },
+      "explicit_indices:scale": {
+        "n": 6,
+        "correct": 1,
+        "gold_none": 3,
+        "none_correct": 0,
+        "answerable_correct": 1,
+        "predicted_none": 0,
+        "invalid_letter": 0
+      },
+      "interleaved:baseline": {
+        "n": 6,
+        "correct": 6,
+        "gold_none": 3,
+        "none_correct": 3,
+        "answerable_correct": 3,
+        "predicted_none": 3,
+        "invalid_letter": 0
+      },
+      "interleaved:scale": {
+        "n": 6,
+        "correct": 5,
+        "gold_none": 3,
+        "none_correct": 2,
+        "answerable_correct": 3,
+        "predicted_none": 2,
+        "invalid_letter": 0
+      },
+      "original:baseline": {
+        "n": 6,
+        "correct": 1,
+        "gold_none": 3,
+        "none_correct": 1,
+        "answerable_correct": 0,
+        "predicted_none": 1,
+        "invalid_letter": 0
+      },
+      "original:scale": {
+        "n": 6,
+        "correct": 3,
+        "gold_none": 3,
+        "none_correct": 3,
+        "answerable_correct": 0,
+        "predicted_none": 3,
+        "invalid_letter": 0
+      }
+    },
+    "Image-Text Matching": {
+      "explicit_indices:baseline": {
+        "n": 20,
+        "correct": 14,
+        "gold_none": 10,
+        "none_correct": 5,
+        "answerable_correct": 9,
+        "predicted_none": 5,
+        "invalid_letter": 0
+      },
+      "explicit_indices:scale": {
+        "n": 20,
+        "correct": 12,
+        "gold_none": 10,
+        "none_correct": 5,
+        "answerable_correct": 7,
+        "predicted_none": 5,
+        "invalid_letter": 0
+      },
+      "interleaved:baseline": {
+        "n": 20,
+        "correct": 18,
+        "gold_none": 10,
+        "none_correct": 8,
+        "answerable_correct": 10,
+        "predicted_none": 8,
+        "invalid_letter": 0
+      },
+      "interleaved:scale": {
+        "n": 20,
+        "correct": 16,
+        "gold_none": 10,
+        "none_correct": 7,
+        "answerable_correct": 9,
+        "predicted_none": 7,
+        "invalid_letter": 0
+      },
+      "original:baseline": {
+        "n": 20,
+        "correct": 10,
+        "gold_none": 10,
+        "none_correct": 7,
+        "answerable_correct": 3,
+        "predicted_none": 9,
+        "invalid_letter": 0
+      },
+      "original:scale": {
+        "n": 20,
+        "correct": 11,
+        "gold_none": 10,
+        "none_correct": 7,
+        "answerable_correct": 4,
+        "predicted_none": 8,
+        "invalid_letter": 0
+      }
+    },
+    "Visual Retrieval": {
+      "explicit_indices:baseline": {
+        "n": 16,
+        "correct": 10,
+        "gold_none": 8,
+        "none_correct": 4,
+        "answerable_correct": 6,
+        "predicted_none": 4,
+        "invalid_letter": 0
+      },
+      "explicit_indices:scale": {
+        "n": 16,
+        "correct": 3,
+        "gold_none": 8,
+        "none_correct": 1,
+        "answerable_correct": 2,
+        "predicted_none": 2,
+        "invalid_letter": 0
+      },
+      "interleaved:baseline": {
+        "n": 16,
+        "correct": 10,
+        "gold_none": 8,
+        "none_correct": 2,
+        "answerable_correct": 8,
+        "predicted_none": 2,
+        "invalid_letter": 0
+      },
+      "interleaved:scale": {
+        "n": 16,
+        "correct": 11,
+        "gold_none": 8,
+        "none_correct": 6,
+        "answerable_correct": 5,
+        "predicted_none": 9,
+        "invalid_letter": 0
+      },
+      "original:baseline": {
+        "n": 16,
+        "correct": 4,
+        "gold_none": 8,
+        "none_correct": 2,
+        "answerable_correct": 2,
+        "predicted_none": 3,
+        "invalid_letter": 0
+      },
+      "original:scale": {
+        "n": 16,
+        "correct": 8,
+        "gold_none": 8,
+        "none_correct": 7,
+        "answerable_correct": 1,
+        "predicted_none": 13,
+        "invalid_letter": 0
+      }
+    }
+  },
+  "paired": {
+    "original:scale_vs_baseline": {
+      "gains": 8,
+      "losses": 4
+    },
+    "explicit_indices:scale_vs_baseline": {
+      "gains": 4,
+      "losses": 22
+    },
+    "interleaved:scale_vs_baseline": {
+      "gains": 7,
+      "losses": 6
+    },
+    "explicit_indices:baseline_vs_original": {
+      "gains": 23,
+      "losses": 8
+    },
+    "explicit_indices:scale_vs_original": {
+      "gains": 11,
+      "losses": 18
+    },
+    "interleaved:baseline_vs_original": {
+      "gains": 30,
+      "losses": 3
+    },
+    "interleaved:scale_vs_original": {
+      "gains": 28,
+      "losses": 4
+    }
+  }
+}

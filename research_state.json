@@ -1,7 +1,7 @@
 {
   "as_of": "2026-09-17",
   "goal_status": "active",
-  "phase": "P009完成；P010图像指代协议审计已冻结，即将运行",
+  "phase": "P010协议审计完成；P011已实现并完成CPU检查，准备启动",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -120,6 +120,14 @@
       "preregister_commit": "3ac716e",
       "config": "configs/P009_boundary_restore.json",
       "analysis": "results/P009_boundary_restore.json"
+    },
+    "P010": {
+      "pid": 505364,
+      "child_pid": 505366,
+      "status": "completed",
+      "exitcode": 0,
+      "preregister_commit": "52a12c2",
+      "analysis": "results/P010_muir_protocol.json"
     }
   },
   "monitor": {
@@ -127,7 +135,7 @@
     "interval_minutes": 20,
     "gpu_queue": "P002-P009 drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock"
   },
-  "next": "先检查P010真实PID与退出码，完成后区分协议/拒答效应；P009下一步需要序号与token/RoPE位置正交对照，且与Source-Modality Monitoring及Dual Spatial Binding核对创新边界。",
+  "next": "核验P011活进程和退出码。完成后先看标准图片标签基线，再看匹配/统一几何下正反向状态迁移；没有跨新题证据就停止泛泛的结构模板路线。",
   "results": {
     "P001": {
       "n": 4,
@@ -433,6 +441,20 @@
         "scale_same_as_P006": 128
       },
       "interpretation": "同序号无关内容start恢复51/128，对应错序号31/128；end对照43/44。支持start存在位置敏感作用，但序号与绝对位置混淆，尚无新方法收益。"
+    },
+    "P010": {
+      "analysis": "results/P010_muir_protocol.json",
+      "n_per_cell": 88,
+      "complete": true,
+      "correct": {
+        "explicit_indices:baseline": 58,
+        "explicit_indices:scale": 40,
+        "interleaved:baseline": 70,
+        "interleaved:scale": 71,
+        "original:baseline": 43,
+        "original:scale": 47
+      },
+      "decision": "保留明确图像指代是必要强基线；原始格式与编号/交错结果不可混作算法收益。"
     }
   }
 }

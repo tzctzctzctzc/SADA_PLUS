@@ -84,7 +84,7 @@
       "url": "https://arxiv.org/abs/2603.22278",
       "project": "https://spatial.baulab.info/",
       "overlap": "Vision-derived distributed ordering and LM backup ordering; global probe direction amplification improves spatial reasoning. A generic ordinal probe plus amplification is already studied.",
-      "evidence": "Primary project detailed setup, interventions and results inspected; full paper not yet read.",
+      "evidence": "Primary HTML main text setup and methods through section 5.2.2 read; section 5.3 beginning inspected. Last-token and visual-strip interchange, content-preserving spatial ordering interventions overlap. Full later experiments/appendix not yet audited.",
       "limitation": "Within-image spatial order is available to vision encoder; image-list ordinal identity is not. This distinction is a candidate question, not demonstrated novelty."
     },
     {
@@ -92,7 +92,7 @@
       "url": "https://arxiv.org/abs/2604.22038",
       "code": "https://github.com/ethahtz/source-modality-monitoring",
       "overlap": "Semantic versus syntactic source binding, arbitrary labels, marker swapping/removal, freeze-remove interventions, learned transformation vectors across 11 VLMs. Generic source syntax/content disentanglement and marker perturbation are not new.",
-      "evidence": "Read primary manuscript main body including symbolic vs distributional probes, marker perturbation, freeze-remove content restoration, and learned-vector interventions; appendix implementation details not fully audited.",
+      "evidence": "Primary main body plus Appendix H freeze-remove protocol read; contextualized content restoration and marker/source learned deltas are direct neighbors.",
       "limitation": "Primarily image/text modality identity, not sources within a single modality; venue claim from authors' repository not independently audited."
     },
     {
@@ -112,6 +112,13 @@
       "url": "https://arxiv.org/abs/2512.12977",
       "overlap": "Cumulative multimodal non-prefix cache-reuse error and dynamic layerwise recomputation already studied.",
       "evidence": "Primary abstract only."
+    },
+    {
+      "id": "ParallelContextEntropy_2025_recheck",
+      "url": "https://aclanthology.org/2025.acl-long.485/",
+      "evidence": "Official ACL abstract read",
+      "overlap": "Parallel context encoding performance loss explained by high attention entropy; attention sinks and selection mitigate. Simply isolating images plus entropy/sink adjustment is not enough novelty.",
+      "limitation": "Specific visual ordinal state transport is not evaluated in the inspected abstract; full implementation not audited."
     }
   ]
 }

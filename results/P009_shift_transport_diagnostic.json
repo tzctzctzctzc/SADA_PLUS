@@ -1,0 +1,228 @@
+{
+  "scope": "Post-hoc diagnostic, directional identity transport, no independent replication",
+  "contrasts": {
+    "start": {
+      "ALL": {
+        "n_pairs": 128,
+        "output_position_shift_mod4": {
+          "3": 13,
+          "1": 48,
+          "0": 56,
+          "2": 9
+        }
+      },
+      "wc_48": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "0": 11,
+          "1": 5
+        }
+      },
+      "wc_57": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "0": 7,
+          "1": 4,
+          "2": 5
+        }
+      },
+      "wc_64": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "3": 4,
+          "1": 7,
+          "2": 2,
+          "0": 3
+        }
+      },
+      "wc_65": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "1": 2,
+          "0": 13,
+          "2": 1
+        }
+      },
+      "wc_67": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "3": 4,
+          "1": 7,
+          "0": 5
+        }
+      },
+      "wc_69": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "1": 10,
+          "0": 6
+        }
+      },
+      "wc_71": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "3": 5,
+          "0": 6,
+          "1": 2,
+          "2": 1
+        }
+      },
+      "wc_76": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "1": 11,
+          "0": 5
+        }
+      }
+    },
+    "end": {
+      "ALL": {
+        "n_pairs": 128,
+        "output_position_shift_mod4": {
+          "0": 110,
+          "3": 7,
+          "1": 7,
+          "2": 3
+        }
+      },
+      "wc_48": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "3": 2,
+          "0": 13,
+          "1": 1
+        }
+      },
+      "wc_57": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "0": 14,
+          "1": 1,
+          "3": 1
+        }
+      },
+      "wc_64": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "0": 14,
+          "1": 1,
+          "2": 1
+        }
+      },
+      "wc_65": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "0": 14,
+          "3": 1,
+          "2": 1
+        }
+      },
+      "wc_67": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "0": 16
+        }
+      },
+      "wc_69": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "0": 12,
+          "1": 2,
+          "3": 1,
+          "2": 1
+        }
+      },
+      "wc_71": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "0": 11,
+          "3": 2,
+          "1": 2
+        }
+      },
+      "wc_76": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "0": 16
+        }
+      }
+    },
+    "both": {
+      "ALL": {
+        "n_pairs": 128,
+        "output_position_shift_mod4": {
+          "1": 42,
+          "3": 9,
+          "2": 12,
+          "0": 64
+        }
+      },
+      "wc_48": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "2": 2,
+          "0": 8,
+          "1": 6
+        }
+      },
+      "wc_57": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "0": 8,
+          "2": 5,
+          "1": 2,
+          "3": 1
+        }
+      },
+      "wc_64": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "0": 9,
+          "1": 5,
+          "2": 1,
+          "3": 1
+        }
+      },
+      "wc_65": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "0": 15,
+          "2": 1
+        }
+      },
+      "wc_67": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "1": 6,
+          "3": 1,
+          "2": 2,
+          "0": 7
+        }
+      },
+      "wc_69": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "1": 10,
+          "0": 6
+        }
+      },
+      "wc_71": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "3": 5,
+          "0": 7,
+          "1": 2,
+          "2": 1
+        }
+      },
+      "wc_76": {
+        "n_pairs": 16,
+        "output_position_shift_mod4": {
+          "3": 1,
+          "1": 11,
+          "0": 4
+        }
+      }
+    }
+  }
+}

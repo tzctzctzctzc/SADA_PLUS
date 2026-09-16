@@ -1,0 +1,7 @@
+{
+  "passed": true,
+  "baseline_tokenizer_and_processor_match": true,
+  "labeled_diff_only_four_picture_labels": true,
+  "processor_custom_kwarg_is_dropped_in_installed_version": true,
+  "template_sha256": "a0bc6f6fc7a29a80017a433e8f03a1cc1236e838a944a2d034295a60c4f2fddb"
+}
