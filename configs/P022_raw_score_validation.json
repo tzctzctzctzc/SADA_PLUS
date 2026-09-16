@@ -1,0 +1,73 @@
+{
+  "id": "P022",
+  "purpose": "Validate raw logit inversion and BF16 tie recovery against generate output_logits; diagnostic only",
+  "settings": [
+    {
+      "tag": "P007",
+      "mode": "baseline",
+      "config": "configs/P007_lad_bridge.json",
+      "backend": "eager",
+      "ids": [
+        "wc_46:p0",
+        "wc_49:p1",
+        "wc_48:p0"
+      ]
+    },
+    {
+      "tag": "P007",
+      "mode": "scale",
+      "config": "configs/P007_lad_bridge.json",
+      "backend": "eager",
+      "ids": [
+        "wc_64:p1",
+        "wc_48:p1",
+        "wc_46:p0"
+      ]
+    },
+    {
+      "tag": "P015",
+      "mode": "baseline",
+      "config": "configs/P015_lad_bridge.json",
+      "backend": "eager",
+      "ids": [
+        "wc_48:p3",
+        "wc_81:p2",
+        "wc_45:p0"
+      ]
+    },
+    {
+      "tag": "P015",
+      "mode": "scale",
+      "config": "configs/P015_lad_bridge.json",
+      "backend": "eager",
+      "ids": [
+        "wc_62:p2",
+        "wc_64:p1",
+        "wc_45:p0"
+      ]
+    },
+    {
+      "tag": "P017",
+      "mode": "square336",
+      "config": "configs/P017_lad_resolution.json",
+      "backend": "sdpa",
+      "ids": [
+        "wc_56:p2",
+        "wc_57:p2",
+        "wc_45:p0"
+      ]
+    },
+    {
+      "tag": "P017",
+      "mode": "native2048",
+      "config": "configs/P017_lad_resolution.json",
+      "backend": "sdpa",
+      "ids": [
+        "wc_45:p0",
+        "wc_63:p3",
+        "wc_45:p1"
+      ]
+    }
+  ],
+  "source_hash": "52a6e5c4e75f015fc73c18623e20ba266c20ec9412e3cefd45d7bf7571469e77"
+}
