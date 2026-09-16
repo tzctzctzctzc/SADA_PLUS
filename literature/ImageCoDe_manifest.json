@@ -1,0 +1,47 @@
+{
+  "repository": "BennoKrojer/ImageCoDe",
+  "type": "dataset",
+  "revision": "b7b7a73dbc74b681b384048716232b243ad25a99",
+  "files": [
+    {
+      "path": ".gitattributes",
+      "size": 1566,
+      "blob_id": "a770de78287b5353fb380cf8774b1e6caf2881d9",
+      "lfs": null
+    },
+    {
+      "path": "README.md",
+      "size": 1932,
+      "blob_id": "71e65796b3f76c7e1da32297fe6492c500931996",
+      "lfs": null
+    },
+    {
+      "path": "image-sets.zip",
+      "size": 13813366444,
+      "blob_id": "7b22bb7caff7087f275d86bbd8526d4c54c1c3f7",
+      "lfs": {
+        "sha256": "6abe316c71ecc764d915ff6d92b18953025414ec56a30ac0aff114f144de869c",
+        "size": 13813366444,
+        "pointerSize": 136
+      }
+    },
+    {
+      "path": "test_data_unlabeled.jsonl",
+      "size": 469686,
+      "blob_id": "3a85556e4ad80462a2dc2bcaa69077d3b01b09ea",
+      "lfs": null
+    },
+    {
+      "path": "train_data.jsonl",
+      "size": 3449263,
+      "blob_id": "cbe8cbe217cd2d14f3f6fdeaac9678c4451e2b07",
+      "lfs": null
+    },
+    {
+      "path": "valid_data.jsonl",
+      "size": 460604,
+      "blob_id": "1d6ea8aecb2bd777d91418208a6aba05d9333163",
+      "lfs": null
+    }
+  ]
+}

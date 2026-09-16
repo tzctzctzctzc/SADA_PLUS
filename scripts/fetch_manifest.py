@@ -1,4 +1,4 @@
-import argparse,hashlib,json,os,time
+import argparse,hashlib,json,os,time,fnmatch
 from pathlib import Path
 from huggingface_hub import snapshot_download
 root=Path('/vepfs/vlms/1')
@@ -7,14 +7,15 @@ p=argparse.ArgumentParser();p.add_argument('--manifest',required=True);p.add_arg
 args=p.parse_args();dest=Path(args.destination).resolve();assert dest.is_relative_to(root)
 m=json.loads(Path(args.manifest).read_text());dest.mkdir(parents=True,exist_ok=True)
 (dest/'source_manifest.json').write_text(json.dumps(m,indent=2)+'\n')
-patterns=['*.json','*.safetensors','*.txt','*.model','*.parquet']
+patterns=['*.json','*.jsonl','*.safetensors','*.txt','*.model','*.parquet','*.zip']
 print('START',m['repository'],m['revision'],flush=True)
 snapshot_download(repo_id=m['repository'],repo_type=m['type'],revision=m['revision'],local_dir=dest,
  allow_patterns=patterns,max_workers=4,token=False)
 checked=[]
 for row in m['files']:
+ if not any(fnmatch.fnmatch(row['path'],pattern) for pattern in patterns):continue
  q=dest/row['path']
- if not q.exists():continue
+ assert q.exists(),row['path']
  assert q.stat().st_size==row['size'],row['path']
  h=hashlib.sha256()
  with q.open('rb') as f:
