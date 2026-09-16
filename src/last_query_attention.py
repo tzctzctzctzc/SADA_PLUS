@@ -4,7 +4,7 @@ import torch
 from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import rotate_half, repeat_kv
 
 class LastQueryAttention:
-    def __init__(self, model, input_ids, layers=None, keep_rows=False):
+    def __init__(self, model, input_ids, layers=None, keep_rows=False, keep_parts=False):
         assert input_ids.shape[0] == 1
         self.model = model
         self.length = input_ids.shape[1]
@@ -14,6 +14,8 @@ class LastQueryAttention:
         assert len(starts) == len(ends) and starts
         self.ranges = list(zip(starts, [x+1 for x in ends]))
         self.keep_rows = keep_rows
+        self.keep_parts = keep_parts
+        self.parts = {}
         self.rows = {}
         self.scores = {}
         self.handles = []
@@ -42,6 +44,12 @@ class LastQueryAttention:
             weights = scores.softmax(-1,dtype=torch.float32).to(q.dtype)[0,:,0,:]
             # Include both boundary tokens to match the official LAD range parser.
             self.scores[layer_id] = torch.stack([weights[:,a:b].sum(-1).mean() for a,b in self.ranges]).float().cpu()
+            if self.keep_parts:
+                self.parts[layer_id] = torch.stack([
+                    torch.stack([weights[:,a].mean() for a,b in self.ranges]),
+                    torch.stack([weights[:,a+1:b-1].sum(-1).mean() for a,b in self.ranges]),
+                    torch.stack([weights[:,b-1].mean() for a,b in self.ranges]),
+                ]).float().cpu()
             if self.keep_rows:
                 self.rows[layer_id] = weights.float().cpu()
         return capture
