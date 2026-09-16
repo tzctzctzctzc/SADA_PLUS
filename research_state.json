@@ -1,7 +1,7 @@
 {
   "as_of": "2026-09-17",
   "goal_status": "active",
-  "phase": "P010协议审计完成；P011已实现并完成CPU检查，准备启动",
+  "phase": "P011跨几何序号迁移实验运行中",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -128,12 +128,24 @@
       "exitcode": 0,
       "preregister_commit": "52a12c2",
       "analysis": "results/P010_muir_protocol.json"
+    },
+    "P011": {
+      "pid": 505796,
+      "child_pid": 505798,
+      "status": "running; parent and Python child verified live, 22/704 observed",
+      "preregister_commit": "5c72c27",
+      "config": "configs/P011_geometry_transport.json",
+      "log": "logs/P011_geometry_transport.log",
+      "driver_log": "logs/P011_driver.log",
+      "exitcode": "runs/P011.exitcode",
+      "analysis": "scripts/analyze_P011.py"
     }
   },
   "monitor": {
     "automation_id": "gpu3",
     "interval_minutes": 20,
-    "gpu_queue": "P002-P009 drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock"
+    "gpu_queue": "P002-P011 drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
+    "verified_active": "Local automation gpu3 TOML inspected; active heartbeat every 20 minutes, silent on unchanged state"
   },
   "next": "核验P011活进程和退出码。完成后先看标准图片标签基线，再看匹配/统一几何下正反向状态迁移；没有跨新题证据就停止泛泛的结构模板路线。",
   "results": {
