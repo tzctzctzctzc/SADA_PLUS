@@ -1,0 +1,197 @@
+{
+  "_id": "68e8a37b049e19e584693e55",
+  "id": "Bia/CORAL",
+  "private": false,
+  "tags": [
+    "safetensors",
+    "qwen2_5_vl",
+    "en",
+    "id",
+    "ms",
+    "th",
+    "vn",
+    "dataset:WeiChow/merit",
+    "arxiv:2506.03144",
+    "base_model:Qwen/Qwen2.5-3B-Instruct",
+    "base_model:finetune:Qwen/Qwen2.5-3B-Instruct",
+    "license:apache-2.0",
+    "region:us"
+  ],
+  "downloads": 16,
+  "likes": 4,
+  "modelId": "Bia/CORAL",
+  "author": "Bia",
+  "sha": "2442266b8e160c29192551ec0dba289774af6932",
+  "lastModified": "2025-10-13T09:14:29.000Z",
+  "gated": false,
+  "disabled": false,
+  "model-index": null,
+  "config": {
+    "architectures": [
+      "Qwen2_5_VLForConditionalGeneration"
+    ],
+    "model_type": "qwen2_5_vl",
+    "processor_config": {
+      "chat_template": "{% set image_count = namespace(value=0) %}{% set video_count = namespace(value=0) %}{% for message in messages %}{% if loop.first and message['role'] != 'system' %}<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n{% endif %}<|im_start|>{{ message['role'] }}\n{% if message['content'] is string %}{{ message['content'] }}<|im_end|>\n{% else %}{% for content in message['content'] %}{% if content['type'] == 'image' or 'image' in content or 'image_url' in content %}{% set image_count.value = image_count.value + 1 %}{% if add_vision_id %}Picture {{ image_count.value }}: {% endif %}<|vision_start|><|image_pad|><|vision_end|>{% elif content['type'] == 'video' or 'video' in content %}{% set video_count.value = video_count.value + 1 %}{% if add_vision_id %}Video {{ video_count.value }}: {% endif %}<|vision_start|><|video_pad|><|vision_end|>{% elif 'text' in content %}{{ content['text'] }}{% endif %}{% endfor %}<|im_end|>\n{% endif %}{% endfor %}{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}"
+    },
+    "tokenizer_config": {
+      "bos_token": null,
+      "chat_template": "{% set image_count = namespace(value=0) %}{% set video_count = namespace(value=0) %}{% for message in messages %}{% if loop.first and message['role'] != 'system' %}<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n{% endif %}<|im_start|>{{ message['role'] }}\n{% if message['content'] is string %}{{ message['content'] }}<|im_end|>\n{% else %}{% for content in message['content'] %}{% if content['type'] == 'image' or 'image' in content or 'image_url' in content %}{% set image_count.value = image_count.value + 1 %}{% if add_vision_id %}Picture {{ image_count.value }}: {% endif %}<|vision_start|><|image_pad|><|vision_end|>{% elif content['type'] == 'video' or 'video' in content %}{% set video_count.value = video_count.value + 1 %}{% if add_vision_id %}Video {{ video_count.value }}: {% endif %}<|vision_start|><|video_pad|><|vision_end|>{% elif 'text' in content %}{{ content['text'] }}{% endif %}{% endfor %}<|im_end|>\n{% endif %}{% endfor %}{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}",
+      "eos_token": "<|im_end|>",
+      "pad_token": "<|endoftext|>",
+      "unk_token": null
+    }
+  },
+  "cardData": {
+    "license": "apache-2.0",
+    "datasets": [
+      "WeiChow/merit"
+    ],
+    "language": [
+      "en",
+      "id",
+      "ms",
+      "th",
+      "vn"
+    ],
+    "base_model": [
+      "Qwen/Qwen2.5-3B-Instruct"
+    ]
+  },
+  "siblings": [
+    {
+      "rfilename": ".gitattributes",
+      "blobId": "e7c3c83512ba43cffc9c5c72f14d9516677ad114",
+      "size": 1745
+    },
+    {
+      "rfilename": "README.md",
+      "blobId": "0900105f8518cfdb3bd17a5a7798587a5be8eab2",
+      "size": 6021
+    },
+    {
+      "rfilename": "chat_template.json",
+      "blobId": "732bd68bc5427d1fb6c06a59b3bf2456b2155d24",
+      "size": 1050
+    },
+    {
+      "rfilename": "config.json",
+      "blobId": "eb873aed28e3fbb752f105c36f274d4729171f88",
+      "size": 2782
+    },
+    {
+      "rfilename": "generation_config.json",
+      "blobId": "36aae8f86f1c10ff981e0ff6bcecd8f384e2b0a1",
+      "size": 219
+    },
+    {
+      "rfilename": "images/example.jpg",
+      "blobId": "bc266d8bf4d89f5f5d7ab3ed09c0899000f04737",
+      "size": 719053,
+      "lfs": {
+        "sha256": "a954997aa7c77dcf3f359e3757afd02974fbf8feb81beb2697bdbf5b2394418c",
+        "size": 719053,
+        "pointerSize": 131
+      }
+    },
+    {
+      "rfilename": "images/product_1.png",
+      "blobId": "caf8ab2ea798ca5670bba9d4fb3768fbe5dd0992",
+      "size": 353702,
+      "lfs": {
+        "sha256": "341dcc5cd2e11a8da5080a8232a1d60d834e1f7829b91a7e3d4383ed91332b27",
+        "size": 353702,
+        "pointerSize": 131
+      }
+    },
+    {
+      "rfilename": "images/product_2.png",
+      "blobId": "f8c2090f6344904be31259435740c4701e05c055",
+      "size": 4986008,
+      "lfs": {
+        "sha256": "a39b61816d9e53aac3f71877b10d908944769b5eb2459e3e8118dbe96bf91e5a",
+        "size": 4986008,
+        "pointerSize": 132
+      }
+    },
+    {
+      "rfilename": "images/product_3.png",
+      "blobId": "a3e66589dfb76340aba3533cf1f0b5f44f133666",
+      "size": 429056,
+      "lfs": {
+        "sha256": "033a09db0b1d0f008e7f454d1e2407bdef0320dc1324b1e2d8f144a4d1047d42",
+        "size": 429056,
+        "pointerSize": 131
+      }
+    },
+    {
+      "rfilename": "merges.txt",
+      "blobId": "20024bfe7c83998e9aeaf98a0cd6a2ce6306c2f0",
+      "size": 1671839
+    },
+    {
+      "rfilename": "model-00001-of-00003.safetensors",
+      "blobId": "3de234bd675266692e2b84b97ad6f0218d688f74",
+      "size": 622329992,
+      "lfs": {
+        "sha256": "960100e4b12737ab58ec98999adcb87d5e886c1b03ab6aac15099c4cd0533849",
+        "size": 622329992,
+        "pointerSize": 134
+      }
+    },
+    {
+      "rfilename": "model-00002-of-00003.safetensors",
+      "blobId": "a1b8cabfe5bd5daf2c8b337e7b8c36adc30f5d4a",
+      "size": 4992042144,
+      "lfs": {
+        "sha256": "004b8b1715491c4d0becb5a52b0e99e7f0dba8fd49f87de3c72b132e7c91daff",
+        "size": 4992042144,
+        "pointerSize": 135
+      }
+    },
+    {
+      "rfilename": "model-00003-of-00003.safetensors",
+      "blobId": "e64263ed52c804accb018059c940579d83026138",
+      "size": 1894965728,
+      "lfs": {
+        "sha256": "3634823dea78412e0c18209f193934ccad46cc840036e0465dd40007c00f7c3c",
+        "size": 1894965728,
+        "pointerSize": 135
+      }
+    },
+    {
+      "rfilename": "model.safetensors.index.json",
+      "blobId": "b60213baabf97db3c4852fc92f374776a07d47d5",
+      "size": 65449
+    },
+    {
+      "rfilename": "preprocessor_config.json",
+      "blobId": "265fee68a6ef732accb0c8d47b857c36755a160b",
+      "size": 348
+    },
+    {
+      "rfilename": "tokenizer.json",
+      "blobId": "443909a61d429dff23010e5bddd28ff530edda00",
+      "size": 7031645
+    },
+    {
+      "rfilename": "tokenizer_config.json",
+      "blobId": "91684ea3dc135a7d815e2c932054ce88c1aab41f",
+      "size": 5702
+    },
+    {
+      "rfilename": "vocab.json",
+      "blobId": "4783fe10ac3adce15ac8f358ef5462739852c569",
+      "size": 2776833
+    }
+  ],
+  "spaces": [],
+  "createdAt": "2025-10-10T06:11:07.000Z",
+  "safetensors": {
+    "parameters": {
+      "BF16": 3754622976
+    },
+    "total": 3754622976
+  },
+  "usedStorage": 7515825683
+}

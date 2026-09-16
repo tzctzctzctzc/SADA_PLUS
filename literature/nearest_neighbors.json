@@ -265,6 +265,31 @@
       "overlap": "拆分必要条件并以概率逻辑聚合已有明确跨领域近邻，不应仅把文本实体换成图像即称创新。",
       "limits": "谓词plausibility非严格校准概率，作者明确讨论失准和解析误差；代码尚未审计/复现。",
       "connection": "P029的四个固定分数组中，目标图对所有局部条件都弱于错误图，因此单调聚合无法严格翻转该对。需要先改善可用证据或局部判断，不能假设逻辑后端自动补救。"
+    },
+    {
+      "id": "MERIT_Coral_NeurIPS2025",
+      "url": "https://arxiv.org/html/2506.03144v3",
+      "code": "https://github.com/weichow23/merit",
+      "model": "https://huggingface.co/Bia/CORAL",
+      "evidence": "已读§3–4和附录10.3：多来源属性组合检索，Coral以InfoNCE及query→target/target→target视觉和语言重构训练。固定源码证实重构用目标KV、查询EOS播种；推理取末token并归一化。",
+      "overlap": "多条件属性抽取、顺序输入、重构保留细节均已有。拟作为专门训练基线，不将协议修复包装成方法。",
+      "limits": "论文损失符号与源码存在书写口径差别，源码实际使用正MSE并相加最小化，不能据公式符号指控实现。当前尚未运行权重；PinPoint无产品标题，迁移评测不同于MERIT原评测。",
+      "source_manifest": "literature/MERIT_source_manifest.json"
+    },
+    {
+      "id": "TRACE_Bench_MM2026",
+      "url": "https://arxiv.org/html/2608.16765",
+      "evidence": "已读§3.2–3.5、§4.4：Anchor/Disentangle/Apply/Compose符号分解、算子问题判分及以文本替代被移除参考项的诊断树。",
+      "overlap": "来源属性绑定与组合干扰定位已有生成侧直接近邻。",
+      "limits": "生成任务；Gemini裁判；树上首次修复节点是诊断归因，不自动等于唯一因果机制。未复现实验。"
+    },
+    {
+      "id": "MCMR_CVPR2026",
+      "url": "https://arxiv.org/html/2603.01082",
+      "code": "https://github.com/EIT-NLP/MCMR",
+      "evidence": "已读摘要和引言：文本查询同时要求候选图片与长文本支持的多项条件。",
+      "overlap": "多模态条件完整性和逐候选一致性重排已有直接近邻。",
+      "limits": "本轮仅初筛，方法细节与代码尚未读。"
     }
   ]
 }

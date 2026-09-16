@@ -1,0 +1,41 @@
+{
+  "id": "P031",
+  "purpose": "专门训练的多条件检索基线及同底座迁移对照；不是新方法",
+  "cohort_config": "configs/P030_pinpoint_references.json",
+  "cohort_sha256": "ea6c0191464a12dcbb5c6b634554f55cb4d0a1633f9ad0027b373be8312eab44",
+  "models": {
+    "base3b": {
+      "path": "models/Qwen2.5-VL-3B-Instruct",
+      "revision": "66285546d2b821cf421d4f5eb2576359d3770cd3"
+    },
+    "coral": {
+      "path": "models/Coral",
+      "revision": "2442266b8e160c29192551ec0dba289774af6932"
+    }
+  },
+  "conditions": [
+    "single",
+    "dual",
+    "sham",
+    "text_only"
+  ],
+  "gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
+  "min_pixels": 3136,
+  "max_pixels": 451584,
+  "batch_size": 4,
+  "dtype": "bfloat16",
+  "backend": "sdpa",
+  "pooling": "官方最终隐藏层的末token；经lm_head输入钩子取出，预检与hidden_states[-1]逐元素相同",
+  "primary_scoring": "float32归一化和余弦；同时报告模型卡BF16归一化及点积，稳定并列维持原序",
+  "input_protocol": "在原指令的首次引用位置插入对应图，替换为Product编号；候选使用模型卡Represent the given product；无产品标题，不生成标题",
+  "ranking": "仅重排P030同一top20，21–50保持原样",
+  "expected_embeddings_per_model": 1104,
+  "primary_comparison": "coral/dual/float32_cosine minus base3b/dual/float32_cosine",
+  "limits": [
+    "48组诊断pilot，非完整基准/SOTA",
+    "PinPoint图像无产品标题，不是MERIT原域复现",
+    "3B对7B有底座、训练、分辨率差异；同底座比较才用于检查专门训练影响",
+    "sham跨组置换引入依赖，相关区间仅描述",
+    "不得用于确定创新；保留60个参考组件未做模型预测"
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "revision": "4d65ef94fc471526907edfbb9db4b1cf0d031c99",
+  "files": [
+    {
+      "path": "coral/model/modeling_coral.py",
+      "url": "https://raw.githubusercontent.com/weichow23/merit/4d65ef94fc471526907edfbb9db4b1cf0d031c99/coral/model/modeling_coral.py",
+      "git_blob": "fc32dc0cf5a6d9ad7022205c4ba2476b5590144c",
+      "sha256": "0d83d206c15f00567d5eb3a1852d28fda4953ab8ce3ca91d17fc3be36aa261eb"
+    },
+    {
+      "path": "coral/model/modeling_cl.py",
+      "url": "https://raw.githubusercontent.com/weichow23/merit/4d65ef94fc471526907edfbb9db4b1cf0d031c99/coral/model/modeling_cl.py",
+      "git_blob": "ab64428f139e02f219463d3d2c001b4444a37107",
+      "sha256": "4ae2c44ef3004b103533559a72d5b102fa10dc9a577d462943016f9b5e0eff48"
+    },
+    {
+      "path": "coral/model/enhancedDecoder.py",
+      "url": "https://raw.githubusercontent.com/weichow23/merit/4d65ef94fc471526907edfbb9db4b1cf0d031c99/coral/model/enhancedDecoder.py",
+      "git_blob": "d980b9f2c56715802530f1865dbbc7d4724939df",
+      "sha256": "52c847cbb58d15f2cde7e2588185b7203470977116ba37d19851317fb15d2452"
+    },
+    {
+      "path": "coral/scripts/run_infer.py",
+      "url": "https://raw.githubusercontent.com/weichow23/merit/4d65ef94fc471526907edfbb9db4b1cf0d031c99/coral/scripts/run_infer.py",
+      "git_blob": "a70386e5a8cb6f48aa564cd9d49be5ef3a6f4f88",
+      "sha256": "93416ad75824180fd9beb7bcdd2770ade1d4518cbc8ce0aa6ec463379514a18f"
+    },
+    {
+      "path": "coral/data/dataset.py",
+      "url": "https://raw.githubusercontent.com/weichow23/merit/4d65ef94fc471526907edfbb9db4b1cf0d031c99/coral/data/dataset.py",
+      "git_blob": "32b2fb78cbad897a26a4124acf9d1455c6ba97a7",
+      "sha256": "8282b09289fa3206abac438cec2e5dba71ce8d73720bfb36dbf13c2f072610c0"
+    },
+    {
+      "path": "coral/yamls/cora_demo.yaml",
+      "url": "https://raw.githubusercontent.com/weichow23/merit/4d65ef94fc471526907edfbb9db4b1cf0d031c99/coral/yamls/cora_demo.yaml",
+      "git_blob": "807eba6f05c730d374c3527efd562eebc5e93a8e",
+      "sha256": "02432bcafbe8bb59a4bad9930d76e74b3950faef5d9ef1a7f12b7201c16bda31"
+    },
+    {
+      "path": "coral/argument/arguments.py",
+      "url": "https://raw.githubusercontent.com/weichow23/merit/4d65ef94fc471526907edfbb9db4b1cf0d031c99/coral/argument/arguments.py",
+      "git_blob": "d921152d9a4b82bab99e915b0a1520497584aeb0",
+      "sha256": "c080f853864dd1f33769b3562e208cc286f883d899650fbf7d6baa6b3dd3bbdf"
+    },
+    {
+      "path": "merit/compose_query.py",
+      "url": "https://raw.githubusercontent.com/weichow23/merit/4d65ef94fc471526907edfbb9db4b1cf0d031c99/merit/compose_query.py",
+      "git_blob": "260a9cb46137f5a71eaacd833ce67031b4dfced9",
+      "sha256": "1ac41e33deeb8f278aec91ce5b21cedea1a1370e9a737ce442670885627d0639"
+    }
+  ]
+}

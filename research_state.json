@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-16T23:26:23.737636+00:00",
+  "as_of": "2026-09-16T23:28:39.267629+00:00",
   "goal_status": "active",
-  "phase": "P030固定48参考图组件的完整输入对照：数据就绪，准备GPU3运行",
+  "phase": "P030四条件在GPU3运行；发布排名复算完成，准备Coral同候选迁移基线",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -351,7 +351,7 @@
       "transport": "Existing system proxy over temporary SSH reverse forwarding; only downloader process used proxy, tunnel closed after completion"
     },
     "P030": {
-      "status": "ready_to_run",
+      "status": "running",
       "config": "configs/P030_pinpoint_references.json",
       "script": "scripts/run_P030.sh",
       "exitcode_file": "runs/P030.exitcode",
@@ -359,7 +359,19 @@
       "expected_records": 3840,
       "n_queries": 48,
       "n_reference_components": 48,
-      "reserved_reference_components": 60
+      "reserved_reference_components": 60,
+      "driver_pid": 512794,
+      "child_pid": 512797,
+      "preregister_commit": "4bfa65d",
+      "protocol_smoke": "runs/P030_pinpoint_references/protocol_smoke.json"
+    },
+    "PinPoint_metric_replay": {
+      "status": "completed",
+      "driver_pid": 512930,
+      "uses_gpu": false,
+      "exitcode_file": "runs/PinPoint_metric_replay.exitcode",
+      "analysis": "results/PinPoint_metric_replay.json",
+      "exitcode": 0
     }
   },
   "monitor": {
@@ -368,7 +380,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "本轮再次读取本地gpu3自动化：ACTIVE heartbeat；已有20分钟安排保留。"
   },
-  "next": "运行P030四条件固定对照，主比较labelled_dual对labelled_single，辅助检查labelled_sham与released_single；同时复算发布候选列表评测。补齐输入、格式标记和标签去重均属协议修复，不能作为创新。",
+  "next": "完成P030完整输入诊断，并在固定48组、同一top20候选上比较Coral与同底座3B的末token归一化表征；不扩展保留组，不据部分结果调参。",
   "results": {
     "P001": {
       "n": 4,
@@ -1078,13 +1090,12 @@
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
-      "P027-P029 completed and audited; PinPoint released source omission traced on 1006 queries"
+      "P030 preregistered and 996 images verified; GPU driver started"
     ],
     "this_turn": "progress",
     "new_evidence": [
-      "Pinned published candidate files cover all 7635 queries with 50 unique candidates each",
-      "P030 clean cohort frozen before GPU scores",
-      "996 required images downloaded and hashed using a temporary tunnel to the existing system proxy; tunnel closed"
+      "PinPoint full published-ranking replay completed with exit 0",
+      "MERIT/Coral method and pinned inference/training source read; checkpoint identified"
     ]
   }
 }
