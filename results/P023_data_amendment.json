@@ -1,0 +1,12 @@
+{
+  "reason": "One exact RGB pixel image shared between calibration and evaluation in official train/valid data.",
+  "removed_calibration_id": "open-images-2941_39f8ffc4fd097fa1:7",
+  "replacement_calibration_id": "open-images-277_01d75fd69704b083:7",
+  "selection_rule": "First original-seed hash-ranked unused training source cluster with same target index and static/video kind, whose 10 images have no exact RGB pixel overlap with retained data.",
+  "original_config_sha256": "66bfa9451f617aa57d04212cb161a4e1bbb7b53ca04f30e8f75c9ad9adfcfbaa",
+  "unchanged_evaluation_sha256": "12fa6b1e107fa03e2a4c4659ed4caf50a357467cd9e1d152983667172fda63c9",
+  "n_evaluation": 256,
+  "before_any_P023_evaluation_inference": true,
+  "source": "scripts/amend_P023_dedup.py",
+  "amended_config_sha256": "bb752add2528275eff9dabcaf4f980e44bf4aa092d146f62ef33beb2d6bc5509"
+}

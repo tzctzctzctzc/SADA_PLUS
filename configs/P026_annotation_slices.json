@@ -3,7 +3,7 @@
   "purpose": "Author-positive phenomenon slices for P023/P025; exploratory diagnostic, no new benchmark.",
   "source_url": "https://raw.githubusercontent.com/McGill-NLP/imagecode/609f07611aed2599f946c30d730f40a41af1079b/data/analysis/manual_annotation_valid.yaml",
   "source_sha256": "39cfbd1cc81d3811bcb346bf4b84521ef1e8ae3641dcb1d05b397454d702b8a4",
-  "P023_config_sha256": "66bfa9451f617aa57d04212cb161a4e1bbb7b53ca04f30e8f75c9ad9adfcfbaa",
+  "P023_config_sha256": "bb752add2528275eff9dabcaf4f980e44bf4aa092d146f62ef33beb2d6bc5509",
   "n_evaluation": 256,
   "status_counts": {
     "blank": 164,

@@ -282,12 +282,12 @@
       "split": "calibration"
     },
     {
-      "id": "open-images-2941_39f8ffc4fd097fa1:7",
-      "directory": "open-images-2941_39f8ffc4fd097fa1",
-      "cluster": "open-images-2941_39f8ffc4fd097fa1",
+      "id": "open-images-277_01d75fd69704b083:7",
+      "directory": "open-images-277_01d75fd69704b083",
+      "cluster": "open-images-277_01d75fd69704b083",
       "kind": "static",
       "gold": 7,
-      "caption": "Solid white laptop with a messy desk. ",
+      "caption": "weaved hair with a tattoo clearly visible on her neck",
       "split": "calibration"
     },
     {
@@ -3117,5 +3117,16 @@
     "Original chronological context retained because descriptions can be relational or temporal.",
     "Official training split is used for calibration; attention-only priors do not use labels, code AGD does.",
     "Pointwise SigLIP2 cannot condition on other images; results test this limitation without attributing all differences to reasoning."
-  ]
+  ],
+  "data_integrity_amendment": {
+    "reason": "One exact RGB pixel image shared between calibration and evaluation in official train/valid data.",
+    "removed_calibration_id": "open-images-2941_39f8ffc4fd097fa1:7",
+    "replacement_calibration_id": "open-images-277_01d75fd69704b083:7",
+    "selection_rule": "First original-seed hash-ranked unused training source cluster with same target index and static/video kind, whose 10 images have no exact RGB pixel overlap with retained data.",
+    "original_config_sha256": "66bfa9451f617aa57d04212cb161a4e1bbb7b53ca04f30e8f75c9ad9adfcfbaa",
+    "unchanged_evaluation_sha256": "12fa6b1e107fa03e2a4c4659ed4caf50a357467cd9e1d152983667172fda63c9",
+    "n_evaluation": 256,
+    "before_any_P023_evaluation_inference": true,
+    "source": "scripts/amend_P023_dedup.py"
+  }
 }
