@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-16T23:49:16.272334+00:00",
+  "as_of": "2026-09-16T23:54:15.001287+00:00",
   "goal_status": "active",
   "phase": "P030四条件在GPU3运行；P031 Coral与同底座3B的迁移对照已排队",
   "scope": {
@@ -14,7 +14,7 @@
     ],
     "submission_year_assumption": 2027
   },
-  "direction": "多图 VLM 的证据来源归属与有用跨图组合之间的机制区别；尚未确定创新方案",
+  "direction": "多参考检索中的来源证据利用：先区分真实第二参考、错配第二参考和单参考，再测试错配参考能否作为负控制校准二分类log-odds。",
   "known_evidence": [
     "SoFA 使用跨图双向 attention 插值；Delimiter Scaling 加强图像边界，两者报告收益，但实验设置不同，不能直接声称矛盾。",
     "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
@@ -395,6 +395,19 @@
       "analysis": "results/P031_coral_transfer.json",
       "cpu_preflight": "runs/P031_coral_transfer/cpu_preflight.json",
       "cpu_preflight_exitcode": 0
+    },
+    "P032": {
+      "status": "queued_waiting_for_P030",
+      "driver_pid": 513876,
+      "dependency_pid": 512794,
+      "config": "configs/P032_reference_contrast.json",
+      "script": "scripts/run_P032.sh",
+      "exitcode_file": "runs/P032.exitcode",
+      "analysis": "results/P032_reference_contrast.json",
+      "protocol_commit": "558af2e",
+      "protocol_fix_commit": "562165d",
+      "uses_gpu": false,
+      "evidence_status": "exploratory_on_development_cohort"
     }
   },
   "monitor": {
@@ -403,7 +416,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "本轮读取本地gpu3 heartbeat：ACTIVE，每20分钟；读取research_state并核验真实PID，保持原有监控。"
   },
-  "next": "完成P030完整输入诊断，并在固定48组、同一top20候选上比较Coral与同底座3B的末token归一化表征；不扩展保留组，不据部分结果调参。",
+  "next": "等待P030完整结果；P032按已锁公式做探索分析，P031接着比较Coral与同底座3B。仅当P032固定主公式和机制方向同时成立，才在未见分数的60个保留参考组件上预注册确认。",
   "results": {
     "P001": {
       "n": 4,
@@ -1120,7 +1133,8 @@
       "PinPoint full published-ranking replay completed with exit 0",
       "MERIT/Coral method and pinned inference/training source read; checkpoint identified",
       "Coral weights verified on 12 files",
-      "P031 frozen at c741d79, both CPU preflights passed; live driver 513690 waits for P030 512794"
+      "P031 frozen at c741d79, both CPU preflights passed; live driver 513690 waits for P030 512794",
+      "P032 negative-control reference contrast protocol locked before viewing P030 metrics; queued CPU driver 513876"
     ]
   }
 }
