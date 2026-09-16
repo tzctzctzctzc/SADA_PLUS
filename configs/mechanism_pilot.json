@@ -1,0 +1,26 @@
+{
+  "id": "P001",
+  "created": "2026-09-17",
+  "status": "预注册，尚未执行",
+  "purpose": "检验 pre-norm 网络中 delimiter 层后缩放与逐 token 残差更新门控的等价性；这是机制检查，不是新方法性能证明",
+  "derivation": {
+    "normalization": "RMSNorm(s*h; eps)=RMSNorm(h; eps/s^2)，s>0",
+    "coordinates": "h_scaled_l=s_l*z_l；s_l 为该 token 此前全部缩放的乘积",
+    "attention_update": "z_mid=z_l+Attn(Norm(z_l))/s_l",
+    "mlp_update": "z_next=z_mid+MLP(Norm(z_mid))/s_l",
+    "assumption": "eps=0 时精确等价；真实 eps、有限精度、量化、非 pre-norm 架构可能破坏精确等价"
+  },
+  "conditions": [
+    "原模型",
+    "按官方位置进行 delimiter post-layer scaling，lambda=8，layers=0,1,2,3",
+    "按累积尺度的倒数门控 delimiter 的 attention 和 MLP residual 更新"
+  ],
+  "measurements": [
+    "float64 小型随机 pre-norm Transformer 的误差",
+    "Qwen2.5-VL-7B 前向 logits 最大误差与相对误差",
+    "预测一致率、RMSNorm 后表示方向",
+    "相同模型、数据、精度下的固定参数基线准确率"
+  ],
+  "falsifier": "在排除实现差异后，缩放与理论门控仍有大幅 logit/预测差异；若等价成立，也只支持重参数化解释，不自动支持新颖性或涨点",
+  "evaluation_separation": "Mantis-Eval 在本阶段仅用于公开 baseline 复现和机制探索；后续方法调优需单独开发集，Mantis 不能再冒充完全未见确认集。"
+}

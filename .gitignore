@@ -1,0 +1,10 @@
+envs/
+.cache/
+.tmp/
+models/
+data/
+third_party/
+logs/
+runs/
+literature/*.pdf
+__pycache__/

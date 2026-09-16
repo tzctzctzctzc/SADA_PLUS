@@ -1,0 +1,65 @@
+{
+  "as_of": "2026-09-17",
+  "goal_status": "active",
+  "phase": "文献深读与基线准备",
+  "scope": {
+    "root": "/vepfs/vlms/1",
+    "physical_gpu": 3,
+    "gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
+    "only_write_inside_root": true,
+    "target_venues": [
+      "CVPR",
+      "ICML",
+      "ACL"
+    ],
+    "submission_year_assumption": 2027
+  },
+  "direction": "多图 VLM 的证据来源归属与有用跨图组合之间的机制区别；尚未确定创新方案",
+  "known_evidence": [
+    "SoFA 使用跨图双向 attention 插值；Delimiter Scaling 加强图像边界，两者报告收益，但实验设置不同，不能直接声称矛盾。",
+    "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
+    "Pathways 2026 发现干预可触发备用信息路径，因此仅看 attention 或遮挡消融不足以证明自然推理机制。"
+  ],
+  "hypotheses": [
+    {
+      "id": "H0",
+      "statement": "基线原模型与公开 Delimiter Scaling 能在统一协议下得到可复核结果",
+      "status": "未运行"
+    },
+    {
+      "id": "H1",
+      "statement": "跨图干扰与跨图推理可能依赖不同路径；保留来源信息的机制可能在归属任务与组合任务之间改善权衡",
+      "status": "未验证",
+      "risk": "直接阻断跨图 attention 或缩放 delimiter 已有相近工作；必须用反事实配对与跨任务验证区分。"
+    }
+  ],
+  "evaluation_policy": {
+    "tuning": "只用预先划定的开发集；测试集只用于冻结配置后的验证",
+    "reporting": "保存逐样本预测、数据版本、模型版本、耗时和显存；区分受限复现与官方协议复现",
+    "completion": "需有经过文献核查的创新、强基线、跨数据集与模型验证、机制消融和统计不确定性；当前远未达到"
+  },
+  "jobs": {
+    "setup_env": {
+      "pid": 500194,
+      "log": "logs/setup_env.log"
+    },
+    "clone_delim": {
+      "pid": 500140,
+      "log": "logs/clone_delim.log"
+    },
+    "setup_io": {
+      "pid": 500293,
+      "log": "logs/setup_io.log"
+    }
+  },
+  "monitor": {
+    "automation_id": "gpu3",
+    "interval_minutes": 20
+  },
+  "next": [
+    "下载 Qwen2.5-VL-7B-Instruct 和 Mantis-Eval",
+    "核查官方 Delimiter Scaling 实现与论文配置",
+    "跑原模型和固定公开参数基线，建立逐样本配对记录",
+    "深读 SoFA、DTS、FOCUS、RSCD、Pathways，与跨领域因果干预和信息流理论对照"
+  ]
+}
