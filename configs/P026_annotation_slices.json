@@ -1,0 +1,2112 @@
+{
+  "id": "P026",
+  "purpose": "Author-positive phenomenon slices for P023/P025; exploratory diagnostic, no new benchmark.",
+  "source_url": "https://raw.githubusercontent.com/McGill-NLP/imagecode/609f07611aed2599f946c30d730f40a41af1079b/data/analysis/manual_annotation_valid.yaml",
+  "source_sha256": "39cfbd1cc81d3811bcb346bf4b84521ef1e8ae3641dcb1d05b397454d702b8a4",
+  "P023_config_sha256": "66bfa9451f617aa57d04212cb161a4e1bbb7b53ca04f30e8f75c9ad9adfcfbaa",
+  "n_evaluation": 256,
+  "status_counts": {
+    "blank": 164,
+    "positive_codes": 87,
+    "missing": 5
+  },
+  "positive_slices": {
+    "col": [
+      "MSR-VTT-videoTestVideo_video9082-shot1_1:3",
+      "open-images-2331_7fc026c02723e9ec:3",
+      "MSR-VTT-videoTestVideo_video7020-shot1_1:4",
+      "MSR-VTT-videoTestVideo_video7689-shot1_0:2",
+      "open-images-1815_f91d6f546e63f20d:7",
+      "MSR-VTT-videoTestVideo_video7047-shot1_0:9",
+      "open-images-411_480d72ee0f97da49:6",
+      "MSR-VTT-videoTestVideo_video9787-shot1_0:8",
+      "MSR-VTT-videoTestVideo_video9235-shot2_0:8",
+      "MSR-VTT-videoTestVideo_video8013-shot1_0:7",
+      "open-images-2612_7f80d3f52da645e9:7"
+    ],
+    "con": [
+      "MSR-VTT-videoTestVideo_video8831-shot12_0:8",
+      "MSR-VTT-videoTestVideo_video9469-shot0_3:8",
+      "MSR-VTT-videoTestVideo_video7128-shot1_1:3",
+      "MSR-VTT-videoTestVideo_video7564-shot1_0:2",
+      "MSR-VTT-videoTestVideo_video7020-shot1_1:4",
+      "open-images-1911_391ed01976e19a72:2",
+      "MSR-VTT-videoTestVideo_video9608-shot8_0:5",
+      "MSR-VTT-videoTestVideo_video8755-shot1_0:3",
+      "MSR-VTT-videoTestVideo_video9703-shot1_0:5",
+      "MSR-VTT-videoTestVideo_video8700-shot3_2:2",
+      "MSR-VTT-videoTestVideo_video7476-shot1_6:6",
+      "MSR-VTT-videoTestVideo_video9654-shot1_0:4",
+      "MSR-VTT-videoTestVideo_video7429-shot0_0:2",
+      "MSR-VTT-videoTestVideo_video7174-shot1_0:4",
+      "MSR-VTT-videoTestVideo_video8006-shot1_1:5",
+      "MSR-VTT-videoTestVideo_video9566-shot0_1:5",
+      "MSR-VTT-videoTestVideo_video7705-shot1_0:4",
+      "MSR-VTT-videoTestVideo_video7550-shot1_0:3",
+      "MSR-VTT-videoTestVideo_video8582-shot0_1:0",
+      "MSR-VTT-videoTestVideo_video8465-shot1_0:2",
+      "MSR-VTT-videoTestVideo_video7047-shot1_0:9",
+      "MSR-VTT-videoTestVideo_video8703-shot1_0:7",
+      "MSR-VTT-videoTestVideo_video8657-shot1_1:4",
+      "MSR-VTT-videoTestVideo_video8522-shot1_1:7",
+      "MSR-VTT-videoTestVideo_video7146-shot0_0:1",
+      "MSR-VTT-videoTestVideo_video9421-shot1_1:6",
+      "MSR-VTT-videoTestVideo_video9709-shot1_5:7",
+      "MSR-VTT-videoTestVideo_video8432-shot4_0:6",
+      "MSR-VTT-videoTestVideo_video7022-shot0_0:6",
+      "MSR-VTT-videoTestVideo_video9166-shot0_0:5",
+      "MSR-VTT-videoTestVideo_video9970-shot1_4:4",
+      "MSR-VTT-videoTestVideo_video8513-shot4_1:4",
+      "YouCook-video0063-shot19_1:6",
+      "YouCook-video0037-shot3_0:3",
+      "MSR-VTT-videoTestVideo_video9241-shot1_0:4",
+      "MSR-VTT-videoTestVideo_video9048-shot1_8:6",
+      "MSR-VTT-videoTestVideo_video9787-shot1_0:8",
+      "MSR-VTT-videoTestVideo_video9903-shot1_3:7",
+      "MSR-VTT-videoTestVideo_video7523-shot2_0:3",
+      "MSR-VTT-videoTestVideo_video8509-shot1_1:1",
+      "MSR-VTT-videoTestVideo_video9375-shot1_4:7",
+      "MSR-VTT-videoTestVideo_video8603-shot1_1:8",
+      "MSR-VTT-videoTestVideo_video9858-shot1_1:7",
+      "MSR-VTT-videoTestVideo_video7925-shot1_2:5",
+      "MSR-VTT-videoTestVideo_video8191-shot4_0:4",
+      "MSR-VTT-videoTestVideo_video9562-shot0_0:4",
+      "MSR-VTT-videoTestVideo_video8952-shot1_1:3",
+      "MSR-VTT-videoTestVideo_video7465-shot7_0:0",
+      "MSR-VTT-videoTestVideo_video9917-shot1_5:2"
+    ],
+    "cor": [
+      "MSR-VTT-videoTestVideo_video9082-shot1_1:3",
+      "open-images-2331_7fc026c02723e9ec:3",
+      "MSR-VTT-videoTestVideo_video7020-shot1_1:4",
+      "MSR-VTT-videoTestVideo_video7689-shot1_0:2",
+      "open-images-471_1121e9f97c200ac0:7",
+      "MSR-VTT-videoTestVideo_video9379-shot1_1:2",
+      "MSR-VTT-videoTestVideo_video7146-shot0_0:1",
+      "MSR-VTT-videoTestVideo_video7022-shot0_0:6",
+      "MSR-VTT-videoTestVideo_video9235-shot2_0:8",
+      "MSR-VTT-videoTestVideo_video8013-shot1_0:7"
+    ],
+    "img": [
+      "MSR-VTT-videoTestVideo_video7020-shot1_1:4",
+      "MSR-VTT-videoTestVideo_video9003-shot1_8:1",
+      "YouCook-video0037-shot3_0:3",
+      "MSR-VTT-videoTestVideo_video8013-shot1_0:7",
+      "MSR-VTT-videoTestVideo_video7925-shot1_2:5"
+    ],
+    "n": [
+      "MSR-VTT-videoTestVideo_video9469-shot0_3:8",
+      "MSR-VTT-videoTestVideo_video7128-shot1_1:3",
+      "open-images-2331_7fc026c02723e9ec:3",
+      "MSR-VTT-videoTestVideo_video7564-shot1_0:2",
+      "MSR-VTT-videoTestVideo_video9608-shot8_0:5",
+      "MSR-VTT-videoTestVideo_video8755-shot1_0:3",
+      "MSR-VTT-videoTestVideo_video8604-shot1_0:2",
+      "MSR-VTT-videoTestVideo_video9003-shot1_8:1",
+      "MSR-VTT-videoTestVideo_video8310-shot1_5:5",
+      "MSR-VTT-videoTestVideo_video7996-shot2_0:7",
+      "MSR-VTT-videoTestVideo_video7174-shot1_0:4",
+      "MSR-VTT-videoTestVideo_video9566-shot0_1:5",
+      "open-images-1815_f91d6f546e63f20d:7",
+      "MSR-VTT-videoTestVideo_video7550-shot1_0:3",
+      "MSR-VTT-videoTestVideo_video9649-shot1_2:8",
+      "MSR-VTT-videoTestVideo_video9379-shot1_1:2",
+      "MSR-VTT-videoTestVideo_video8904-shot1_1:5",
+      "MSR-VTT-videoTestVideo_video8465-shot1_0:2",
+      "MSR-VTT-videoTestVideo_video7047-shot1_0:9",
+      "MSR-VTT-videoTestVideo_video8657-shot1_1:4",
+      "open-images-1527_b0e5ace40a071465:6",
+      "MSR-VTT-videoTestVideo_video8262-shot1_6:3",
+      "MSR-VTT-videoTestVideo_video9970-shot1_4:4",
+      "MSR-VTT-videoTestVideo_video8513-shot4_1:4",
+      "YouCook-video0063-shot19_1:6",
+      "YouCook-video0037-shot3_0:3",
+      "MSR-VTT-videoTestVideo_video9235-shot2_0:8",
+      "MSR-VTT-videoTestVideo_video8603-shot1_1:8",
+      "MSR-VTT-videoTestVideo_video7925-shot1_2:5",
+      "MSR-VTT-videoTestVideo_video9562-shot0_0:4"
+    ],
+    "neg": [
+      "MSR-VTT-videoTestVideo_video7669-shot1_0:6",
+      "MSR-VTT-videoTestVideo_video9469-shot0_3:8",
+      "MSR-VTT-videoTestVideo_video7128-shot1_1:3",
+      "MSR-VTT-videoTestVideo_video9082-shot1_1:3",
+      "open-images-2331_7fc026c02723e9ec:3",
+      "MSR-VTT-videoTestVideo_video7020-shot1_1:4",
+      "MSR-VTT-videoTestVideo_video7429-shot0_0:2",
+      "MSR-VTT-videoTestVideo_video7705-shot1_0:4",
+      "MSR-VTT-videoTestVideo_video8465-shot1_0:2",
+      "MSR-VTT-videoTestVideo_video8335-shot1_0:5",
+      "MSR-VTT-videoTestVideo_video8703-shot1_0:7",
+      "MSR-VTT-videoTestVideo_video8657-shot1_1:4",
+      "MSR-VTT-videoTestVideo_video8246-shot1_3:4",
+      "MSR-VTT-videoTestVideo_video7265-shot1_2:7",
+      "MSR-VTT-videoTestVideo_video8522-shot1_1:7",
+      "YouCook-video0063-shot19_1:6",
+      "YouCook-video0037-shot3_0:3",
+      "MSR-VTT-videoTestVideo_video9241-shot1_0:4",
+      "MSR-VTT-videoTestVideo_video9048-shot1_8:6",
+      "MSR-VTT-videoTestVideo_video9235-shot2_0:8",
+      "MSR-VTT-videoTestVideo_video8013-shot1_0:7",
+      "MSR-VTT-videoTestVideo_video9917-shot1_5:2"
+    ],
+    "q": [
+      "MSR-VTT-videoTestVideo_video9082-shot1_1:3",
+      "open-images-2331_7fc026c02723e9ec:3",
+      "open-images-471_1121e9f97c200ac0:7",
+      "open-images-1815_f91d6f546e63f20d:7",
+      "MSR-VTT-videoTestVideo_video9379-shot1_1:2",
+      "MSR-VTT-videoTestVideo_video7047-shot1_0:9",
+      "open-images-411_480d72ee0f97da49:6",
+      "MSR-VTT-videoTestVideo_video7522-shot8_0:4",
+      "MSR-VTT-videoTestVideo_video9235-shot2_0:8",
+      "MSR-VTT-videoTestVideo_video7523-shot2_0:3",
+      "open-images-2612_7f80d3f52da645e9:7",
+      "MSR-VTT-videoTestVideo_video9375-shot1_4:7"
+    ],
+    "s": [
+      "MSR-VTT-videoTestVideo_video9082-shot1_1:3",
+      "MSR-VTT-videoTestVideo_video7020-shot1_1:4",
+      "MSR-VTT-videoTestVideo_video9003-shot1_8:1",
+      "MSR-VTT-videoTestVideo_video7692-shot2_3:2",
+      "MSR-VTT-videoTestVideo_video7996-shot2_0:7",
+      "MSR-VTT-videoTestVideo_video7689-shot1_0:2",
+      "open-images-471_1121e9f97c200ac0:7",
+      "open-images-1815_f91d6f546e63f20d:7",
+      "MSR-VTT-videoTestVideo_video9379-shot1_1:2",
+      "MSR-VTT-videoTestVideo_video7047-shot1_0:9",
+      "open-images-411_480d72ee0f97da49:6",
+      "MSR-VTT-videoTestVideo_video7146-shot0_0:1",
+      "MSR-VTT-videoTestVideo_video7022-shot0_0:6",
+      "YouCook-video0037-shot3_0:3",
+      "MSR-VTT-videoTestVideo_video9787-shot1_0:8",
+      "MSR-VTT-videoTestVideo_video9235-shot2_0:8",
+      "MSR-VTT-videoTestVideo_video7523-shot2_0:3",
+      "open-images-2612_7f80d3f52da645e9:7",
+      "MSR-VTT-videoTestVideo_video9858-shot1_1:7",
+      "MSR-VTT-videoTestVideo_video7925-shot1_2:5"
+    ],
+    "t": [
+      "open-images-2331_7fc026c02723e9ec:3",
+      "MSR-VTT-videoTestVideo_video9003-shot1_8:1",
+      "MSR-VTT-videoTestVideo_video7692-shot2_3:2",
+      "YouCook-video0037-shot3_0:3"
+    ],
+    "v": [
+      "MSR-VTT-videoTestVideo_video8040-shot1_1:3",
+      "MSR-VTT-videoTestVideo_video7669-shot1_0:6",
+      "MSR-VTT-videoTestVideo_video9405-shot1_0:0",
+      "MSR-VTT-videoTestVideo_video8831-shot12_0:8",
+      "MSR-VTT-videoTestVideo_video9469-shot0_3:8",
+      "MSR-VTT-videoTestVideo_video7406-shot1_2:7",
+      "MSR-VTT-videoTestVideo_video7128-shot1_1:3",
+      "MSR-VTT-videoTestVideo_video9082-shot1_1:3",
+      "MSR-VTT-videoTestVideo_video9608-shot8_0:5",
+      "MSR-VTT-videoTestVideo_video7692-shot2_3:2",
+      "MSR-VTT-videoTestVideo_video9169-shot2_0:2",
+      "MSR-VTT-videoTestVideo_video9566-shot0_1:5",
+      "MSR-VTT-videoTestVideo_video7689-shot1_0:2",
+      "MSR-VTT-videoTestVideo_video7550-shot1_0:3",
+      "MSR-VTT-videoTestVideo_video8582-shot0_1:0",
+      "MSR-VTT-videoTestVideo_video7036-shot1_0:6",
+      "MSR-VTT-videoTestVideo_video8904-shot1_1:5",
+      "MSR-VTT-videoTestVideo_video8465-shot1_0:2",
+      "MSR-VTT-videoTestVideo_video8335-shot1_0:5",
+      "MSR-VTT-videoTestVideo_video8657-shot1_1:4",
+      "MSR-VTT-videoTestVideo_video8246-shot1_3:4",
+      "MSR-VTT-videoTestVideo_video7265-shot1_2:7",
+      "MSR-VTT-videoTestVideo_video8522-shot1_1:7",
+      "MSR-VTT-videoTestVideo_video9007-shot1_0:1",
+      "MSR-VTT-videoTestVideo_video7105-shot3_0:5",
+      "open-images-2751_0b5fa80868e8eb74:4",
+      "MSR-VTT-videoTestVideo_video7022-shot0_0:6",
+      "MSR-VTT-videoTestVideo_video8262-shot1_6:3",
+      "MSR-VTT-videoTestVideo_video9876-shot1_0:2",
+      "MSR-VTT-videoTestVideo_video9970-shot1_4:4",
+      "MSR-VTT-videoTestVideo_video7522-shot8_0:4",
+      "MSR-VTT-videoTestVideo_video8513-shot4_1:4",
+      "YouCook-video0063-shot19_1:6",
+      "YouCook-video0037-shot3_0:3",
+      "MSR-VTT-videoTestVideo_video9580-shot1_0:3",
+      "MSR-VTT-videoTestVideo_video9048-shot1_8:6",
+      "MSR-VTT-videoTestVideo_video9903-shot1_3:7",
+      "MSR-VTT-videoTestVideo_video9235-shot2_0:8",
+      "MSR-VTT-videoTestVideo_video7523-shot2_0:3",
+      "MSR-VTT-videoTestVideo_video7983-shot1_1:2",
+      "MSR-VTT-videoTestVideo_video8603-shot1_1:8",
+      "MSR-VTT-videoTestVideo_video9858-shot1_1:7",
+      "MSR-VTT-videoTestVideo_video7051-shot3_0:5",
+      "MSR-VTT-videoTestVideo_video8468-shot1_2:9",
+      "MSR-VTT-videoTestVideo_video9562-shot0_0:4",
+      "MSR-VTT-videoTestVideo_video8952-shot1_1:3",
+      "MSR-VTT-videoTestVideo_video7063-shot4_0:7",
+      "MSR-VTT-videoTestVideo_video9917-shot1_5:2"
+    ]
+  },
+  "primary_diagnostic_slice": "con",
+  "comparisons": [
+    [
+      "patch_attention_calibrated",
+      "caption_logprob_mean"
+    ],
+    [
+      "patch_density_calibrated",
+      "caption_logprob_mean"
+    ],
+    [
+      "raw_logits",
+      "caption_logprob_mean"
+    ],
+    [
+      "patch_attention_calibrated",
+      "matching_score"
+    ]
+  ],
+  "bootstrap": {
+    "replicates": 5000,
+    "seed": 17026,
+    "unit": "P025 source-video/pixel-overlap connected component"
+  },
+  "limitations": [
+    "Only explicit positive annotation codes define slices. Missing/blank/absent codes are not negative labels.",
+    "Author context labels include gradability as well as other-frame grounding; this is not an irreducible-context gold label.",
+    "Small overlapping slices are diagnostic only, with no hyperparameter tuning or selection based on their results.",
+    "The frozen 256-question validation pilot is not the complete ImageCoDe evaluation."
+  ],
+  "records": [
+    {
+      "id": "MSR-VTT-videoTestVideo_video7960-shot0_2:2",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8040-shot1_1:3",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7669-shot1_0:6",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "neg",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9405-shot1_0:0",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8399-shot3_0:1",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8831-shot12_0:8",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "v"
+      ]
+    },
+    {
+      "id": "open-images-1023_34a5360414504ffb:0",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9469-shot0_3:8",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "n",
+        "neg",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8717-shot0_0:8",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-1537_48527f791ca3b716:8",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8606-shot1_0:4",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8491-shot1_1:1",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9292-shot1_1:9",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7406-shot1_2:7",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "v"
+      ]
+    },
+    {
+      "id": "open-images-1430_0fe9f117ec4c4480:0",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9979-shot1_2:6",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7625-shot6_0:8",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-2278_0b1a8687c6cfeff8:9",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7128-shot1_1:3",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "n",
+        "neg",
+        "v"
+      ]
+    },
+    {
+      "id": "open-images-1433_0001143bfa4f6ae7:4",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7075-shot1_4:6",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8385-shot1_0:4",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7068-shot2_0:3",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-1448_b90bdd1d5608a7be:6",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7113-shot1_1:8",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8088-shot2_0:7",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "YouCook-video0024-shot5_0:9",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-425_01caab4739a293b3:2",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-638_1626d26351c41a0f:0",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-18_1862752798240e2b:6",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-741_053f477e809c2918:4",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9203-shot1_0:6",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7167-shot0_1:2",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8675-shot1_1:3",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7168-shot1_1:5",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9082-shot1_1:3",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "col",
+        "cor",
+        "neg",
+        "q",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "id": "open-images-2452_17a5c0a498d9a19e:5",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-2331_7fc026c02723e9ec:3",
+      "kind": "static",
+      "status": "positive_codes",
+      "codes": [
+        "col",
+        "cor",
+        "n",
+        "neg",
+        "q",
+        "t"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8197-shot1_0:2",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7564-shot1_0:2",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "n"
+      ]
+    },
+    {
+      "id": "YouCook-video0035-shot7_0:6",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7267-shot1_1:5",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8633-shot1_0:6",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9652-shot1_0:6",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7652-shot1_2:6",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9875-shot6_0:6",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9236-shot1_0:5",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9899-shot1_0:4",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9996-shot1_3:9",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7020-shot1_1:4",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "col",
+        "con",
+        "cor",
+        "img",
+        "neg",
+        "s"
+      ]
+    },
+    {
+      "id": "open-images-1911_391ed01976e19a72:2",
+      "kind": "static",
+      "status": "positive_codes",
+      "codes": [
+        "con"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7710-shot0_0:2",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7657-shot2_0:5",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7547-shot1_0:0",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9608-shot8_0:5",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "n",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7473-shot11_3:6",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7599-shot1_0:6",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8755-shot1_0:3",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "n"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7321-shot1_3:7",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8604-shot1_0:2",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "n"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7016-shot1_2:4",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9003-shot1_8:1",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "img",
+        "n",
+        "s",
+        "t"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8495-shot2_1:5",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8771-shot0_0:6",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9228-shot4_1:2",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9703-shot1_0:5",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7692-shot2_3:2",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "s",
+        "t",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8310-shot1_5:5",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "n"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9169-shot2_0:2",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8700-shot3_2:2",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7476-shot1_6:6",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9654-shot1_0:4",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9746-shot3_0:1",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-1594_1304f6c16a4733c8:9",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7642-shot1_0:3",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8555-shot6_0:2",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-567_0c82e3fb4a9ab1c8:5",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7429-shot0_0:2",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "neg"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7996-shot2_0:7",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "n",
+        "s"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7174-shot1_0:4",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "n"
+      ]
+    },
+    {
+      "id": "open-images-2409_7d66082616dbcbb8:2",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8006-shot1_1:5",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9566-shot0_1:5",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "n",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9823-shot7_0:4",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7705-shot1_0:4",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "neg"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7689-shot1_0:2",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "col",
+        "cor",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9446-shot1_0:6",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9021-shot3_0:7",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-471_1121e9f97c200ac0:7",
+      "kind": "static",
+      "status": "positive_codes",
+      "codes": [
+        "cor",
+        "q",
+        "s"
+      ]
+    },
+    {
+      "id": "open-images-1815_f91d6f546e63f20d:7",
+      "kind": "static",
+      "status": "positive_codes",
+      "codes": [
+        "col",
+        "n",
+        "q",
+        "s"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7550-shot1_0:3",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "n",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8156-shot3_1:4",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8970-shot1_0:3",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-2886_0a21f87f98687003:7",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8525-shot1_1:5",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9095-shot1_1:8",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9634-shot1_0:1",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8776-shot1_0:9",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7686-shot3_0:3",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9248-shot0_1:4",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9649-shot1_2:8",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "n"
+      ]
+    },
+    {
+      "id": "YouCook-video0033-shot6_1:3",
+      "kind": "video",
+      "status": "missing",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7650-shot1_0:2",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-1886_3db71eaddb618934:2",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-106_1816079b01eb2afa:5",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9379-shot1_1:2",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "cor",
+        "n",
+        "q",
+        "s"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8143-shot1_1:6",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8064-shot5_0:3",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9921-shot1_3:7",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9687-shot3_0:6",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-2447_128483a48e1552f4:1",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-973_0a4827f20c8aef05:9",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9555-shot2_5:6",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8582-shot0_1:0",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9758-shot2_1:7",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7036-shot1_0:6",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "v"
+      ]
+    },
+    {
+      "id": "open-images-958_686caac9c5b322e7:5",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-1998_096f1393d9381139:9",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7434-shot1_1:9",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7480-shot1_2:4",
+      "kind": "video",
+      "status": "missing",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8904-shot1_1:5",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "n",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7059-shot1_1:4",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8022-shot1_1:6",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7725-shot2_6:8",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8465-shot1_0:2",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "n",
+        "neg",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8335-shot1_0:5",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "neg",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7047-shot1_0:9",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "col",
+        "con",
+        "n",
+        "q",
+        "s"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8703-shot1_0:7",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "neg"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7541-shot1_1:8",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8657-shot1_1:4",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "n",
+        "neg",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8246-shot1_3:4",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "neg",
+        "v"
+      ]
+    },
+    {
+      "id": "open-images-411_480d72ee0f97da49:6",
+      "kind": "static",
+      "status": "positive_codes",
+      "codes": [
+        "col",
+        "q",
+        "s"
+      ]
+    },
+    {
+      "id": "open-images-2437_002ab5f774cd54f3:6",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9543-shot1_3:4",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9983-shot1_0:3",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8917-shot1_0:5",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7265-shot1_2:7",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "neg",
+        "v"
+      ]
+    },
+    {
+      "id": "open-images-1589_00d6346cd9a08867:6",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8427-shot1_2:6",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7533-shot1_8:6",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9837-shot1_0:3",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8522-shot1_1:7",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "neg",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8129-shot1_3:1",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7146-shot0_0:1",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "cor",
+        "s"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9402-shot1_1:7",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8093-shot1_0:3",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-1527_b0e5ace40a071465:6",
+      "kind": "static",
+      "status": "positive_codes",
+      "codes": [
+        "n"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7973-shot3_0:9",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-2817_17f425318a696ec7:3",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9389-shot1_0:7",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8239-shot1_4:8",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-978_06e034fc9e021dcd:5",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9528-shot1_0:3",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9007-shot1_0:1",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8203-shot1_2:8",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9421-shot1_1:6",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9709-shot1_5:7",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8984-shot1_2:7",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "YouCook-video0009-shot1_0:3",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-1724_013efc66b15d181a:3",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8432-shot4_0:6",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con"
+      ]
+    },
+    {
+      "id": "open-images-2387_78a24295769e35d6:4",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8321-shot0_1:5",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7844-shot4_0:7",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8959-shot2_0:5",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7850-shot1_0:5",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-2854_0896ed49f92e5e75:7",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9914-shot1_6:3",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9677-shot1_0:7",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7105-shot3_0:5",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7038-shot6_0:4",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-2751_0b5fa80868e8eb74:4",
+      "kind": "static",
+      "status": "positive_codes",
+      "codes": [
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9525-shot1_7:8",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-2521_074d6af730ed17a6:3",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9955-shot0_1:4",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-1345_0d5166a28fa7cca4:0",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7022-shot0_0:6",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "cor",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "id": "open-images-2391_0deaddd48f27164e:0",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-1548_0168cc219dace4a8:6",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9166-shot0_0:5",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8262-shot1_6:3",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "n",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8842-shot1_0:5",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9876-shot1_0:2",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9585-shot1_0:7",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9970-shot1_4:4",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "n",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8777-shot1_1:5",
+      "kind": "video",
+      "status": "missing",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8574-shot1_0:4",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8052-shot1_1:4",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7522-shot8_0:4",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "q",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7295-shot1_10:7",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8513-shot4_1:4",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "n",
+        "v"
+      ]
+    },
+    {
+      "id": "YouCook-video0063-shot19_1:6",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "n",
+        "neg",
+        "v"
+      ]
+    },
+    {
+      "id": "YouCook-video0037-shot3_0:3",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "img",
+        "n",
+        "neg",
+        "s",
+        "t",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9951-shot1_0:5",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9241-shot1_0:4",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "neg"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9580-shot1_0:3",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9048-shot1_8:6",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "neg",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8721-shot1_1:4",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7836-shot1_2:2",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-882_06ec0182ef51ceba:5",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "YouCook-video0058-shot9_0:0",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9787-shot1_0:8",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "col",
+        "con",
+        "s"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9903-shot1_3:7",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9773-shot1_0:4",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7224-shot1_2:3",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8108-shot1_1:8",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7726-shot3_0:8",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8874-shot1_0:1",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9235-shot2_0:8",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "col",
+        "cor",
+        "n",
+        "neg",
+        "q",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7057-shot1_11:5",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-404_478dbb56fe0caf64:8",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-196_13dd3bdbfed05c50:8",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-101_0fd92c490a73d328:0",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-1099_3488d78340f2da11:2",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8882-shot0_0:3",
+      "kind": "video",
+      "status": "missing",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9577-shot1_2:7",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-1835_05c4519d1bdf8c4a:8",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9723-shot1_1:5",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8013-shot1_0:7",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "col",
+        "cor",
+        "img",
+        "neg"
+      ]
+    },
+    {
+      "id": "open-images-2536_0d3a831c23cc328a:3",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-250_02039517e63a91fb:5",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7523-shot2_0:3",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "q",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7983-shot1_1:2",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "v"
+      ]
+    },
+    {
+      "id": "open-images-46_4cfd640952ecfb28:1",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-2612_7f80d3f52da645e9:7",
+      "kind": "static",
+      "status": "positive_codes",
+      "codes": [
+        "col",
+        "q",
+        "s"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8237-shot1_4:8",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-2454_a8c3a218e62e73fb:4",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9279-shot1_1:2",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8509-shot1_1:1",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9375-shot1_4:7",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "q"
+      ]
+    },
+    {
+      "id": "open-images-377_05c06faedbf36b46:0",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9342-shot1_2:2",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8603-shot1_1:8",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "n",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9858-shot1_1:7",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "s",
+        "v"
+      ]
+    },
+    {
+      "id": "open-images-2333_01085b7e8fe79cd2:2",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7051-shot3_0:5",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "v"
+      ]
+    },
+    {
+      "id": "open-images-1596_08ca6dd306609bca:7",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "open-images-516_2322cc545820fbb4:8",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9842-shot1_0:4",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8037-shot1_0:3",
+      "kind": "video",
+      "status": "missing",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7925-shot1_2:5",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "img",
+        "n",
+        "s"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8191-shot4_0:4",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8468-shot1_2:9",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7332-shot4_0:3",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9562-shot0_0:4",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "n",
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8243-shot0_1:1",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video8952-shot1_1:3",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "v"
+      ]
+    },
+    {
+      "id": "open-images-2429_12f357388db95c18:0",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "video-storytelling-videowedding_Bp8t824h5NE-shot58_1:2",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9267-shot3_0:2",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7063-shot4_0:7",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "v"
+      ]
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video7465-shot7_0:0",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con"
+      ]
+    },
+    {
+      "id": "open-images-739_0618c8efa93b2d25:2",
+      "kind": "static",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "MSR-VTT-videoTestVideo_video9917-shot1_5:2",
+      "kind": "video",
+      "status": "positive_codes",
+      "codes": [
+        "con",
+        "neg",
+        "v"
+      ]
+    },
+    {
+      "id": "video-storytelling-videowedding_46xhFCXBMJs-shot88_0:2",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    },
+    {
+      "id": "YouCook-video0003-shot1_2:2",
+      "kind": "video",
+      "status": "blank",
+      "codes": []
+    }
+  ]
+}
