@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T06:31:24.586029+00:00",
+  "as_of": "2026-09-17T07:01:32.643615+00:00",
   "goal_status": "active",
-  "phase": "P038 bounded SIRC pilot preregistered on ten observed development queries; no P038 scores yet and no held-out access.",
+  "phase": "P038 bounded SIRC pilot completed on ten observed development queries; one of five frozen gates failed, so no full-scale or held-out execution is authorized.",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -14,7 +14,7 @@
     ],
     "submission_year_assumption": 2027
   },
-  "direction": "Test semantic reference-role interleaving as a materially different transfer mechanism. Run only the frozen 600-score P038 pilot; design no larger experiment unless all five gates pass.",
+  "direction": "Stop enlarging the current SIRC input-level role-card method. Retain its position-sensitivity reduction and correct-binding signal as diagnostic evidence; next candidate must use a materially different structural binding mechanism and pass a new bounded pilot. All future experiments use physical GPU1 after an occupancy check.",
   "known_evidence": [
     "SoFA 使用跨图双向 attention 插值；Delimiter Scaling 加强图像边界，两者报告收益，但实验设置不同，不能直接声称矛盾。",
     "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
@@ -95,9 +95,10 @@
     {
       "id": "H6",
       "statement": "Placing each reference directly beside a source-local semantic role will reduce joint-relabeling sensitivity and recover correct source binding in multi-image composed retrieval.",
-      "status": "P038 protocol frozen before scores; bounded pilot pending.",
+      "status": "P038 showed a diagnostic mechanism signal but failed the task gate: the AB/BA equivalence gap fell from 1.045 to 0.868 and positive correct-minus-wrong binding was +0.1389, while AP@10 decreased by 1.568pp. Stop enlarging this SIRC implementation.",
       "transfer_origin": "ReBind explicit semantic reference placement, Janossy permutation orbits, and MultiBind confusion-aware diagnosis.",
-      "risk": "TAPR already covers constraint factorization in single-reference CIR; generic interleaving, permutation averaging, and VLM reranking are not novel. The claim requires retrieval-specific joint-role equivariance and wrong-binding controls."
+      "risk": "TAPR already covers constraint factorization in single-reference CIR; generic interleaving, permutation averaging, and VLM reranking are not novel. The claim requires retrieval-specific joint-role equivariance and wrong-binding controls.",
+      "decision": "Retain semantic interleaving as a diagnostic/control; do not claim it as a retrieval improvement or run full scale."
     }
   ],
   "evaluation_policy": {
@@ -701,22 +702,68 @@
       "stop_reason": "Three of four frozen pilot gates failed; source-interventional contrast did not separate positive candidates or improve AP@10."
     },
     "P038": {
-      "status": "preregistered_not_started",
+      "status": "completed_pilot_gate_failed",
       "config": "configs/P038_semantically_interleaved_role_cards.json",
       "script": "scripts/run_P038.sh",
       "expected_records": 600,
       "n_queries": 10,
       "n_reference_components": 10,
-      "heldout_accessed": false
+      "heldout_accessed": false,
+      "analysis": "results/P038_semantically_interleaved_role_cards.json",
+      "exitcode": 0,
+      "score_records": 600,
+      "actual_gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
+      "protocol_smoke": {
+        "full_vs_last_head_max_error": 0.0,
+        "single_vs_batch_max_error_first_example": 0.125,
+        "matched_image_signatures_equal": true,
+        "matched_image_grids_equal": true,
+        "matched_input_tokens_equal": true,
+        "matched_logits_finite": true
+      },
+      "gate_all_pass": false,
+      "gate_checks": {
+        "sirc_ab_minus_original_dual_ap10_gt_0": false,
+        "sirc_ab_minus_original_dual_negative_precision_at10_le_0": true,
+        "sirc_equivalence_gap_below_p037": true,
+        "positive_correct_minus_wrong_binding_mean_gt_0": true,
+        "binding_contrast_macro_auc_gt_0_5": true
+      },
+      "key_result": {
+        "original_dual_ap10": 0.11892328042328042,
+        "sirc_ab_ap10": 0.10324404761904762,
+        "sirc_ab_minus_original_ap10_pp": -1.5679232804232799,
+        "sirc_ab_minus_original_ap10_95ci_pp": [
+          -5.220087632275133,
+          1.7110863095238042
+        ],
+        "sirc_ab_precision_at1": 0.5,
+        "original_dual_precision_at1": 0.3,
+        "sirc_ab_minus_original_negative_precision_at10_pp": 0.0,
+        "mean_absolute_ab_ba_margin_gap": 0.868125,
+        "p037_reference_gap": 1.045,
+        "positive_mean_correct_minus_wrong_binding": 0.1388888888888889,
+        "positive_correct_binding_win_rate": 0.7222222222222222,
+        "binding_contrast_macro_auc": 0.5000000000000001,
+        "sirc_ab_score_macro_auc": 0.7583333333333333,
+        "original_dual_score_macro_auc": 0.8083333333333332
+      },
+      "full_scale_authorized": false,
+      "stop_reason": "Primary AP@10 gate failed despite four diagnostic/safety gates passing; enlarging the same method is forbidden by the preregistered pilot policy."
     }
   },
   "monitor": {
-    "automation_id": "gpu3",
-    "interval_minutes": 20,
-    "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
-    "verified_active": "本轮读取本地gpu3 heartbeat：ACTIVE，每20分钟；读取research_state并核验真实PID，保持原有监控。"
+    "preferred_gpu_index": 1,
+    "preferred_gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
+    "launch_rule": "Check live GPU1 memory/utilization and process occupancy immediately before every new experiment; do not silently fall back to another GPU.",
+    "gpu_queue": "Future drivers should serialize with flock on /vepfs/vlms/1/runs/gpu1.lock.",
+    "last_check": {
+      "memory_used_mib": 5455,
+      "memory_total_mib": 81920,
+      "utilization_percent": 0
+    }
   },
-  "next": "Commit the frozen P038 protocol, verify GPU3 is free, then run exactly the 600-score pilot. Stop the route unless every mechanism and task gate passes.",
+  "next": "Do not run P038 at larger scale. Design and preregister a small GPU1 pilot for a materially different structural binding mechanism; keep all confirmation and held-out components untouched until every new gate passes.",
   "results": {
     "P001": {
       "n": 4,
@@ -1492,9 +1539,25 @@
       "and_minus_dual_negative_precision_at10_pp": -1.6666666666666667,
       "gate_all_pass": false,
       "decision": "Reject this source-isolated predicate judging plus fixed probabilistic AND implementation; do not access P033 or any reserved component. This does not reject cross-domain transfer in general."
+    },
+    "P038": {
+      "analysis": "results/P038_semantically_interleaved_role_cards.json",
+      "n_queries": 10,
+      "n_score_records": 600,
+      "gate_all_pass": false,
+      "sirc_ab_minus_original_ap10_pp": -1.5679232804232799,
+      "sirc_ab_minus_original_ap10_95ci_pp": [
+        -5.220087632275133,
+        1.7110863095238042
+      ],
+      "equivalence_gap_before": 1.045,
+      "equivalence_gap_after": 0.868125,
+      "positive_mean_correct_minus_wrong_binding": 0.1388888888888889,
+      "binding_contrast_macro_auc": 0.5000000000000001,
+      "decision": "Stop full-scale SIRC. Keep it as diagnostic evidence that semantic interleaving reduces relabeling sensitivity but does not improve ranking on this pilot."
     }
   },
-  "novelty_status": "A credible transfer hypothesis exists but is unvalidated: source-local semantic interleaving plus a joint-relabeling/wrong-binding diagnostic may be new for multi-image composed retrieval. Direct CIR factorization, generic order correction, and permutation pooling are excluded from the claim.",
+  "novelty_status": "P038 provides a possible diagnostic contribution, not a successful retrieval method: semantic role-reference interleaving reduced joint-relabeling sensitivity and exposed a weak correct-binding signal, but AP@10 and score AUC declined. Any next method claim must add a materially different structural binding mechanism and pass a new GPU1 pilot.",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
@@ -1526,7 +1589,10 @@
       "P037 pilot completed 1920 unique finite scores and failed 3/4 frozen gates: PCSI AP@10 -0.100pp, positive binding contrast mean -0.0357, contrast macro AUC 0.4625; explicit-negative precision improved -0.417pp. Full-scale PCSI is stopped.",
       "Screened nine additional primary sources spanning direct CIR, multi-image position bias, adjacent multi-reference binding, and set invariance.",
       "P038 SIRC freezes ten observed development queries, 600 new scores, three matched conditions, and five all-required gates before any score.",
-      "P038 confirmation and all new components remain untouched."
+      "P038 confirmation and all new components remain untouched.",
+      "P038 completed 600/600 unique scores with exit 0 and protocol smoke checks passing; no held-out or confirmation data were accessed.",
+      "P038 passed four diagnostic/safety gates but failed the primary AP@10 gate: SIRC AB was -1.568pp versus original dual, so full-scale execution is stopped.",
+      "The user changed the resource policy: all future experiments must use physical GPU1 (GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f) after an immediate occupancy check."
     ]
   },
   "idea_audits": {

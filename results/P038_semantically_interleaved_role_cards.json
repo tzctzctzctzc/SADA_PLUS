@@ -1,0 +1,205 @@
+{
+  "complete": true,
+  "evidence_status": "prospective_bounded_pilot_on_observed_P030_development_queries",
+  "n_queries": 10,
+  "n_reference_components": 10,
+  "summaries": {
+    "original_dual": {
+      "ap@10": 0.11892328042328042,
+      "precision@1": 0.3,
+      "precision@10": 0.17,
+      "negative_precision@10": 0.06999999999999999
+    },
+    "sirc_ab": {
+      "ap@10": 0.10324404761904762,
+      "precision@1": 0.5,
+      "precision@10": 0.15000000000000002,
+      "negative_precision@10": 0.06999999999999999
+    },
+    "sirc_ba_equivalent": {
+      "ap@10": 0.10246031746031745,
+      "precision@1": 0.4,
+      "precision@10": 0.14,
+      "negative_precision@10": 0.08
+    },
+    "sirc_orbit_min": {
+      "ap@10": 0.10275992063492063,
+      "precision@1": 0.4,
+      "precision@10": 0.14,
+      "negative_precision@10": 0.09
+    }
+  },
+  "paired": {
+    "sirc_ab minus original_dual": {
+      "ap@10": {
+        "difference_pp": -1.5679232804232799,
+        "component_cluster_95ci_pp": [
+          -5.220087632275133,
+          1.7110863095238042
+        ],
+        "query_gains": 3,
+        "query_losses": 5
+      },
+      "precision@1": {
+        "difference_pp": 20.0,
+        "component_cluster_95ci_pp": [
+          0.0,
+          50.0
+        ],
+        "query_gains": 2,
+        "query_losses": 0
+      },
+      "precision@10": {
+        "difference_pp": -2.0,
+        "component_cluster_95ci_pp": [
+          -5.0,
+          0.0
+        ],
+        "query_gains": 0,
+        "query_losses": 2
+      },
+      "negative_precision@10": {
+        "difference_pp": 0.0,
+        "component_cluster_95ci_pp": [
+          -3.0000000000000004,
+          3.0000000000000004
+        ],
+        "query_gains": 1,
+        "query_losses": 1
+      }
+    },
+    "sirc_ba_equivalent minus original_dual": {
+      "ap@10": {
+        "difference_pp": -1.6462962962962961,
+        "component_cluster_95ci_pp": [
+          -5.6489417989418,
+          2.1570171957671946
+        ],
+        "query_gains": 3,
+        "query_losses": 5
+      },
+      "precision@1": {
+        "difference_pp": 10.0,
+        "component_cluster_95ci_pp": [
+          -20.0,
+          40.0
+        ],
+        "query_gains": 2,
+        "query_losses": 1
+      },
+      "precision@10": {
+        "difference_pp": -3.0000000000000004,
+        "component_cluster_95ci_pp": [
+          -6.0,
+          0.0
+        ],
+        "query_gains": 0,
+        "query_losses": 3
+      },
+      "negative_precision@10": {
+        "difference_pp": 1.0,
+        "component_cluster_95ci_pp": [
+          -2.0000000000000004,
+          4.0
+        ],
+        "query_gains": 2,
+        "query_losses": 1
+      }
+    },
+    "sirc_orbit_min minus original_dual": {
+      "ap@10": {
+        "difference_pp": -1.6163359788359786,
+        "component_cluster_95ci_pp": [
+          -5.556732804232803,
+          2.1238640873015866
+        ],
+        "query_gains": 3,
+        "query_losses": 5
+      },
+      "precision@1": {
+        "difference_pp": 10.0,
+        "component_cluster_95ci_pp": [
+          -20.0,
+          40.0
+        ],
+        "query_gains": 2,
+        "query_losses": 1
+      },
+      "precision@10": {
+        "difference_pp": -3.0000000000000004,
+        "component_cluster_95ci_pp": [
+          -6.0,
+          0.0
+        ],
+        "query_gains": 0,
+        "query_losses": 3
+      },
+      "negative_precision@10": {
+        "difference_pp": 2.0,
+        "component_cluster_95ci_pp": [
+          -2.0,
+          6.0
+        ],
+        "query_gains": 3,
+        "query_losses": 1
+      }
+    }
+  },
+  "mechanism": {
+    "mean_absolute_sirc_ab_minus_ba_margin": 0.868125,
+    "p037_reference_mean_absolute_gap": 1.045,
+    "equivalence_gap_ratio": 0.8307416267942584,
+    "positive_candidates": 18,
+    "positive_mean_correct_minus_wrong_binding": 0.1388888888888889,
+    "positive_mean_component_95ci": [
+      -0.2767857142857143,
+      0.41911764705882354
+    ],
+    "positive_correct_binding_win_rate": 0.7222222222222222,
+    "explicit_negative_candidates": 16,
+    "explicit_negative_mean_correct_minus_wrong_binding": 0.125,
+    "explicit_negative_mean_component_95ci": [
+      -0.2708333333333333,
+      0.4375
+    ],
+    "binding_contrast_macro_positive_vs_explicit_negative_auc": 0.5000000000000001,
+    "n_binding_auc_queries": 10,
+    "score_macro_auc": {
+      "original_dual": {
+        "n_eligible_queries": 10,
+        "macro_positive_vs_explicit_negative_auc": 0.8083333333333332
+      },
+      "sirc_ab": {
+        "n_eligible_queries": 10,
+        "macro_positive_vs_explicit_negative_auc": 0.7583333333333333
+      },
+      "sirc_ba_equivalent": {
+        "n_eligible_queries": 10,
+        "macro_positive_vs_explicit_negative_auc": 0.7333333333333333
+      },
+      "sirc_orbit_min": {
+        "n_eligible_queries": 10,
+        "macro_positive_vs_explicit_negative_auc": 0.7333333333333333
+      }
+    }
+  },
+  "continuation_gate_evaluation": {
+    "checks": {
+      "sirc_ab_minus_original_dual_ap10_gt_0": false,
+      "sirc_ab_minus_original_dual_negative_precision_at10_le_0": true,
+      "sirc_equivalence_gap_below_p037": true,
+      "positive_correct_minus_wrong_binding_mean_gt_0": true,
+      "binding_contrast_macro_auc_gt_0_5": true
+    },
+    "all_pass": false,
+    "meaning": "Eligibility to design a component-disjoint held-out pilot; not significance, novelty, or SOTA evidence."
+  },
+  "score_file_sha256": "868df217c151cd6d736c23d4ae3c0b478c4099c0654d1ad57ae7a4e78fe177bc",
+  "config_sha256": "a0c64df1c3ccfc3064652e03899420748901984987a705fabb64991e78b8b71c",
+  "limits": [
+    "Only ten previously observed Composition queries have both a positive and an explicit negative in the frozen top20.",
+    "Role cards are human-written from released instructions and may introduce authoring bias.",
+    "The pilot is a selected top20 diagnostic, not a full-corpus retrieval evaluation.",
+    "No confirmation component may be accessed unless every frozen gate passes."
+  ]
+}
