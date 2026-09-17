@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T01:29:44.731259+00:00",
+  "as_of": "2026-09-17T01:31:55.148758+00:00",
   "goal_status": "active",
-  "phase": "P030/P032 completed and rejected the negative-control calibration branch; P033 is stopped without held-out access; P031 config compatibility fix passed CPU preflight and is ready to resume.",
+  "phase": "P030/P032 rejected the negative-control branch; P033 is stopped; P031 Coral retry is running on physical GPU3.",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -401,7 +401,7 @@
       "uses_gpu": false
     },
     "P031": {
-      "status": "retry_ready_after_config_compatibility_fix",
+      "status": "running_retry_2",
       "driver_pid": 513690,
       "preregister_commit": "c741d79",
       "config": "configs/P031_coral_transfer.json",
@@ -420,7 +420,12 @@
       ],
       "attempt_1_failure": "Coral config contains a redundant nested text_config from a newer transformers version; transformers 4.51 treated it as a raw dict.",
       "fix": "Construct the compatible Qwen2_5_VLConfig from the same flat fields while dropping only redundant nested text_config; weight hashes and prompts unchanged.",
-      "runner_sha256_retry": "d3902ba5fd956ad2edf8dbc8d9a577571c73e9aff6d4896854f0071882b1e898"
+      "runner_sha256_retry": "d3902ba5fd956ad2edf8dbc8d9a577571c73e9aff6d4896854f0071882b1e898",
+      "retry_driver_pid": 519350,
+      "retry_child_pid": 519354,
+      "actual_gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
+      "base3b_embeddings_reused": 1104,
+      "coral_embeddings_before_retry": 0
     },
     "P032": {
       "status": "completed",
