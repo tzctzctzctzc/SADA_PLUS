@@ -1,13 +1,20 @@
 """Extract resumable prompt-free CLIP segment features for RQ1 linear probes."""
 
 import argparse
+import json
 import time
 from pathlib import Path
 
 import numpy as np
 
 from tools.rq1_feature_store import FeatureStore, summarize_frame_features
-from tools.run_clip_target_adapter import read_jsonl
+from tools.run_clip_target_adapter import (
+    LABELS,
+    PROMPT_SHA256,
+    PROMPT_VERSION,
+    read_jsonl,
+    text_features,
+)
 from tools.run_clip_then_llava import frame_paths
 
 
@@ -24,6 +31,7 @@ def parse_args():
     parser.add_argument("--segment-batch-size", type=int, default=64)
     parser.add_argument("--image-batch-size", type=int, default=256)
     parser.add_argument("--pooling", choices=("static", "static_transition"), default="static")
+    parser.add_argument("--text-features-output", default=None)
     parser.add_argument("--limit", type=int, default=0)
     return parser.parse_args()
 
@@ -41,6 +49,18 @@ def main():
         args.model, device=args.device, jit=False, download_root=args.model_cache
     )
     model.eval()
+    if args.text_features_output:
+        text = text_features(model, clip, args.device)
+        text_output = Path(args.text_features_output)
+        text_output.parent.mkdir(parents=True, exist_ok=True)
+        np.save(text_output, text.detach().cpu().numpy().astype(np.float32))
+        Path(str(text_output) + ".meta.json").write_text(json.dumps({
+            "model": args.model,
+            "prompt_version": PROMPT_VERSION,
+            "prompt_sha256": PROMPT_SHA256,
+            "labels": list(LABELS),
+            "logit_scale": float(model.logit_scale.exp().detach().cpu()),
+        }, indent=2, sort_keys=True), encoding="utf-8")
     dimensions = int(model.visual.output_dim)
     if args.pooling == "static_transition":
         dimensions *= 2
