@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-16T23:54:15.001287+00:00",
+  "as_of": "2026-09-17T00:07:30.219893+00:00",
   "goal_status": "active",
   "phase": "P030四条件在GPU3运行；P031 Coral与同底座3B的迁移对照已排队",
   "scope": {
@@ -21,7 +21,8 @@
     "Pathways 2026 发现干预可触发备用信息路径，因此仅看 attention 或遮挡消融不足以证明自然推理机制。",
     "P008所有7B固定DTS条件各退化3至5/32；3B各变化正负1/32。相同P006协议生成全文64/64一致；P007 eager与P008 SDPA BF16的32个baseline候选argmax有3个差异，不能跨后端解读微小增益。",
     "PinPoint全部发布排名指标复算完成：官方mAP10为13.1418%/16.9785%，仅去重后13.2530%/17.1452%，影响有限。results/PinPoint_metric_replay.json。",
-    "P030 cohort scope audit: all 48 selected queries are Composition; 909 clean dual-reference rows contain 105 non-Composition rows, mostly 94 Context Fit. results/P030_scope_audit.json."
+    "P030 cohort scope audit: all 48 selected queries are Composition; 909 clean dual-reference rows contain 105 non-Composition rows, mostly 94 Context Fit. results/P030_scope_audit.json.",
+    "CoCI（MAGMaR 2025）已显示对比图选择是核心变量：自然配对可改善，而随机或仅最相似对比图在Qwen2-VL上低于基线；P032的单一错配sham因此只能作开发集淘汰门槛。"
   ],
   "hypotheses": [
     {
@@ -1125,19 +1126,17 @@
       "official_metrics_retained": true
     }
   },
-  "novelty_status": "P032 quick strict audit: current main-track readiness low, development potential medium. VCD formula transfer alone is insufficient; causal language is disallowed unless structured controls and held-out multi-model evidence support it.",
+  "novelty_status": "P032 current main-track readiness remains low. CoCI 2025 directly studies contrast-image decoding and shows arbitrary contrast selection can degrade; formula transfer plus one cyclic sham is not a contribution. Continue only if the locked pilot passes, then preregister held-out structured controls and multi-model validation.",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
-      "P030 preregistered and 996 images verified; GPU driver started"
+      "P030 protocol and queue were locked before scores; P031/P032 waiting without GPU contention"
     ],
     "this_turn": "progress",
     "new_evidence": [
-      "PinPoint full published-ranking replay completed with exit 0",
-      "MERIT/Coral method and pinned inference/training source read; checkpoint identified",
-      "Coral weights verified on 12 files",
-      "P031 frozen at c741d79, both CPU preflights passed; live driver 513690 waits for P030 512794",
-      "P032 negative-control reference contrast protocol locked before viewing P030 metrics; queued CPU driver 513876"
+      "P030 live scoring verified on physical GPU3 with no exit/result yet",
+      "P031/P032 queue scripts statically audited against frozen dependencies",
+      "CoCI 2025 full method/results/control ablation read; it materially tightens P032 novelty and control requirements"
     ]
   },
   "idea_audits": {

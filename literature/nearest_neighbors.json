@@ -1,6 +1,6 @@
 {
-  "as_of": "2026-09-16T23:05:59.904143+00:00",
-  "status": "Novelty not established; generic ordinal binding amplification and syntax/content source separation are already covered by close neighbors",
+  "as_of": "2026-09-17T00:07:30.215024+00:00",
+  "status": "Novelty not established; CoCI and VCD directly cover contrast-image decoding, so P032 remains only a development kill gate pending held-out structured controls.",
   "records": [
     {
       "id": "DTS_ICLR2026",
@@ -326,6 +326,14 @@
       "evidence": "已读§3–4.4：去图、降采样、扩散噪声和编辑等对比样本在不同模型/任务上效果显著不同；作者用熵与分布距离分析，并指出纠错同时会把正确答案改错。",
       "overlap": "直接说明P032的错配参考控制不能默认有效，负控制类型本身必须消融并报告correct-to-wrong翻转。",
       "limits": "研究对象是生成式幻觉，不是检索；熵加权融合仍是已有机制近邻。"
+    },
+    {
+      "id": "CoCI_MAGMaR2025",
+      "title": "Making LVLMs Look Twice: Contrastive Decoding with Contrast Images",
+      "url": "https://aclanthology.org/2025.magmar-1.6/",
+      "evidence": "已读§2、主结果与附录A.3：以对比图概率惩罚目标图输出；Qwen2-VL上自然配对对比图明显改善，但top-5随机图、输入最相似图均低于基线。论文固定VQA alpha=0.5，明确指出对比图选择决定效果。",
+      "overlap": "P032同属视觉对比输入的推理时校准；错配第二参考若只是任意sham，已有最近邻证据表明可能退化，公式迁移和单一随机控制均不足以构成创新。",
+      "limits": "CoCI是单图VQA/生成，P032是多参考候选相关性二分类；其自然对比图与P032错配参考语义不同，不能直接推断本地结果。"
     }
   ]
 }
