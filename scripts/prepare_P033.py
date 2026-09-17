@@ -200,6 +200,7 @@ config = {
     },
     "fixed_scores": {
         "pilot_replication": "2*m(valid_dual)-m(sham_r2_0)",
+        "pilot_reference_lift": "m(valid_dual)-m(sham_r2_0)",
         "symmetric_multisham": "2*m(valid_dual)-0.5*(mean_k m(sham_r1_k)+mean_k m(sham_r2_k))",
         "factorial_interaction": "mean_k[m(valid_dual)-m(sham_r1_k)-m(sham_r2_k)+m(sham_both_k)]",
         "interaction_augmented": "m(valid_dual)+factorial_interaction",
@@ -209,8 +210,8 @@ config = {
         "primary": "pilot_replication minus valid_dual on canonical-set AP@10",
         "primary_pass": "reference-RGB-component bootstrap 95% interval lower endpoint strictly greater than 0",
         "mechanism_checks": [
-            "reference lift positive-vs-explicit-negative macro query AUC bootstrap 95% interval lower endpoint strictly greater than 0.5",
-            "positive minus explicit-negative mean reference lift bootstrap 95% interval lower endpoint strictly greater than 0",
+            "pilot_reference_lift positive-vs-explicit-negative macro query AUC bootstrap 95% interval lower endpoint strictly greater than 0.5",
+            "positive minus explicit-negative mean pilot_reference_lift bootstrap 95% interval lower endpoint strictly greater than 0",
         ],
         "secondary": [
             "symmetric_multisham minus valid_dual",

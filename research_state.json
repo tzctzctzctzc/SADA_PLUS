@@ -433,7 +433,7 @@
       "status": "prospectively_frozen_metadata_only_waiting_for_P032_gate",
       "config": "configs/P033_heldout_reference_contrast.json",
       "prepare_script": "scripts/prepare_P033.py",
-      "config_sha256": "c0250b2e69128f4c2694363211a56ca8b5a2f70c646564e5f7036de3296386da",
+      "config_sha256": "61d889a9506d3bfd9b18b5fa3255483574da23e34c37ccf0bb01a993c2d7a87b",
       "n_reserved_components_total": 60,
       "n_eligible_components": 54,
       "n_queries": 54,
@@ -448,7 +448,8 @@
       "expected_score_records_if_authorized": 16200,
       "execution_gate": "results/P032_reference_contrast.json confirmatory_gate_evaluation.all_pass == true",
       "scores_seen": false,
-      "images_fetched": false
+      "images_fetched": false,
+      "mechanism_definition": "pilot_reference_lift = m(valid_dual)-m(sham_r2_0)"
     }
   },
   "monitor": {
