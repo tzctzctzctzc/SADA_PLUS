@@ -81,6 +81,10 @@ def parse_args():
     parser.add_argument("--model-name", required=True)
     parser.add_argument("--alphas", default="1e-6,1e-5,1e-4,1e-3,1e-2")
     parser.add_argument("--seeds", default="0,1,2,3,4")
+    parser.add_argument(
+        "--selection-seeds", default=None,
+        help="seeds used only for source-val alpha selection; defaults to --seeds",
+    )
     parser.add_argument("--max-iter", type=int, default=2000)
     parser.add_argument("--write-seed-predictions", action="store_true")
     return parser.parse_args()
@@ -94,6 +98,10 @@ def main():
 
     alphas = parse_csv_values(args.alphas, float)
     seeds = parse_csv_values(args.seeds, int)
+    selection_seeds = parse_csv_values(
+        args.selection_seeds if args.selection_seeds is not None else args.seeds,
+        int,
+    )
     if any(alpha <= 0 for alpha in alphas):
         raise ValueError("alphas must be positive")
 
@@ -138,7 +146,7 @@ def main():
             grid = {}
             for alpha in alphas:
                 scores = []
-                for seed in seeds:
+                for seed in selection_seeds:
                     classifier = fit_classifier(
                         train_x, train_y, alpha, seed, args.max_iter
                     )
@@ -211,6 +219,7 @@ def main():
         "target_labels_used_for_training_or_selection": False,
         "alphas": alphas,
         "seeds": seeds,
+        "selection_seeds": selection_seeds,
         "prediction_aggregation": "mean class probabilities across seeds",
         "selection_report": report,
     }

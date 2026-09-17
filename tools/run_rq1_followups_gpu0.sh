@@ -29,6 +29,7 @@ egovideo_prefix=$egovideo_artifact/features/egovideo_l_joint_8f
     --model-name EgoVideo-HOD-source-linear-tuned \
     --output "$artifact/egovideo_source_linear_tuned.jsonl" \
     --alphas 1e-6,1e-5,1e-4,1e-3,1e-2 --seeds 0,1,2,3,4 \
+    --selection-seeds 0 \
     --write-seed-predictions \
     >"$artifact/logs/egovideo_tuned_probe.log" 2>&1 &
 probe_pid=$!
@@ -74,6 +75,7 @@ CUDA_VISIBLE_DEVICES=$gpu0 "$python" tools/extract_rq1_clip_features.py \
     --model-name CLIP-ViT-L14-336-source-linear-tuned \
     --output "$artifact/clip_vit_l14_336_source_linear_tuned.jsonl" \
     --alphas 1e-6,1e-5,1e-4,1e-3,1e-2 --seeds 0,1,2,3,4 \
+    --selection-seeds 0 \
     --write-seed-predictions \
     >"$artifact/logs/clip_l14_336_tuned_probe.log" 2>&1
 
