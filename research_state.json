@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T00:44:25.059188+00:00",
+  "as_of": "2026-09-17T01:29:44.731259+00:00",
   "goal_status": "active",
-  "phase": "P030 is running on GPU3; P031/P032 are waiting; the untouched P033 metadata protocol was frozen before results.",
+  "phase": "P030/P032 completed and rejected the negative-control calibration branch; P033 is stopped without held-out access; P031 config compatibility fix passed CPU preflight and is ready to resume.",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -32,7 +32,10 @@
     "P033 freezes one clean query from each of 54 eligible reserved reference components before P030/P032 results; 53 are Composition and 1 is Context Fit.",
     "The 102 clean non-Composition reserved rows occupy only two reference components, so they are a descriptive sensitivity pool and cannot support independent category generalization.",
     "RMCD (WACV 2026) already performs relevance-weighted signed multi-context logit aggregation; MultiSHAP already attributes generic multimodal interactions. Multi-sham averaging or ordinary interaction contrasts are not novel by themselves.",
-    "ARS-MMT (CMES 2026) already contrasts zeroed and batch-shuffled visual features to separate modality presence from image-specific content; reference shuffling is a control, not standalone novelty."
+    "ARS-MMT (CMES 2026) already contrasts zeroed and batch-shuffled visual features to separate modality presence from image-specific content; reference shuffling is a control, not standalone novelty.",
+    "P030 completed with 3840 unique finite scores. Labelled dual improved AP@10 over labelled single by 0.662 pp, but the 95% component interval crossed zero; dual was 0.117 pp below sham.",
+    "P032 failed its locked gate: RCR reduced AP@10 by 0.414 pp and positive-vs-explicit-negative macro AUC was 0.4975. P033 held-out execution is cancelled without image fetching or scoring.",
+    "P031 attempt 1 completed all 1104 base3b embeddings, then failed before any Coral embedding because a redundant nested text_config was incompatible with transformers 4.51; a same-weight config adapter passed CPU preflight."
   ],
   "hypotheses": [
     {
@@ -364,7 +367,7 @@
       "transport": "Existing system proxy over temporary SSH reverse forwarding; only downloader process used proxy, tunnel closed after completion"
     },
     "P030": {
-      "status": "running",
+      "status": "completed",
       "config": "configs/P030_pinpoint_references.json",
       "script": "scripts/run_P030.sh",
       "exitcode_file": "runs/P030.exitcode",
@@ -377,7 +380,9 @@
       "child_pid": 512797,
       "preregister_commit": "4bfa65d",
       "protocol_smoke": "runs/P030_pinpoint_references/protocol_smoke.json",
-      "scope_audit": "results/P030_scope_audit.json"
+      "scope_audit": "results/P030_scope_audit.json",
+      "exitcode": 0,
+      "score_records": 3840
     },
     "PinPoint_metric_replay": {
       "status": "completed",
@@ -396,7 +401,7 @@
       "uses_gpu": false
     },
     "P031": {
-      "status": "queued_waiting_for_P030",
+      "status": "retry_ready_after_config_compatibility_fix",
       "driver_pid": 513690,
       "preregister_commit": "c741d79",
       "config": "configs/P031_coral_transfer.json",
@@ -408,10 +413,17 @@
       "analysis": "results/P031_coral_transfer.json",
       "cpu_preflight": "runs/P031_coral_transfer/cpu_preflight.json",
       "cpu_preflight_exitcode": 0,
-      "input_fix": "text-only keeps literal original placeholders without malformed Product tags; no GPU scores existed"
+      "input_fix": "text-only keeps literal original placeholders without malformed Product tags; no GPU scores existed",
+      "attempt_1_exitcode": 1,
+      "attempt_1_completed_models": [
+        "base3b"
+      ],
+      "attempt_1_failure": "Coral config contains a redundant nested text_config from a newer transformers version; transformers 4.51 treated it as a raw dict.",
+      "fix": "Construct the compatible Qwen2_5_VLConfig from the same flat fields while dropping only redundant nested text_config; weight hashes and prompts unchanged.",
+      "runner_sha256_retry": "d3902ba5fd956ad2edf8dbc8d9a577571c73e9aff6d4896854f0071882b1e898"
     },
     "P032": {
-      "status": "queued_waiting_for_P030",
+      "status": "completed",
       "driver_pid": 513876,
       "dependency_pid": 512794,
       "config": "configs/P032_reference_contrast.json",
@@ -428,10 +440,12 @@
         "rcr_alpha1 minus labelled_dual canonical AP@10 point estimate > 0",
         "macro per-query AUC of reference lift for positive vs explicit negative > 0.5",
         "mean positive reference lift > mean explicit-negative reference lift"
-      ]
+      ],
+      "exitcode": 0,
+      "gate_all_pass": false
     },
     "P033": {
-      "status": "prospectively_frozen_metadata_only_waiting_for_P032_gate",
+      "status": "stopped_without_execution_P032_gate_failed",
       "config": "configs/P033_heldout_reference_contrast.json",
       "prepare_script": "scripts/prepare_P033.py",
       "config_sha256": "61d889a9506d3bfd9b18b5fa3255483574da23e34c37ccf0bb01a993c2d7a87b",
@@ -450,7 +464,8 @@
       "execution_gate": "results/P032_reference_contrast.json confirmatory_gate_evaluation.all_pass == true",
       "scores_seen": false,
       "images_fetched": false,
-      "mechanism_definition": "pilot_reference_lift = m(valid_dual)-m(sham_r2_0)"
+      "mechanism_definition": "pilot_reference_lift = m(valid_dual)-m(sham_r2_0)",
+      "stop_reason": "P032 failed 2 of 3 preregistered directional checks."
     }
   },
   "monitor": {
@@ -459,7 +474,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "本轮读取本地gpu3 heartbeat：ACTIVE，每20分钟；读取research_state并核验真实PID，保持原有监控。"
   },
-  "next": "Wait for frozen P030/P032. If any P032 gate check fails, stop P033 without fetching or scoring held-out data. If all pass, implement the already frozen P033 scorer, verify exact-RGB grouping, run only on GPU3, then require interval-level replication before interpreting multi-sham secondary scores. P031 remains a transfer baseline; full-corpus SOTA still requires pinned MMRet and official-comparable evaluation.",
+  "next": "Resume P031 from the 1104 completed base3b embeddings using the audited config compatibility adapter, then analyze Coral transfer. Do not execute P033. Use the negative result and P031 baseline to retire this branch and select a new direction outside generic contrastive calibration.",
   "results": {
     "P001": {
       "n": 4,
@@ -1163,9 +1178,40 @@
       "reserved_components": 60,
       "primary_labels": "deduplicated positive/negative sets; selected rows have no positive-negative overlap",
       "official_metrics_retained": true
+    },
+    "P030": {
+      "analysis": "results/P030_pinpoint_references.json",
+      "n_queries": 48,
+      "n_score_records": 3840,
+      "labelled_dual_ap10": 0.0317201278659612,
+      "labelled_single_ap10": 0.025100033068783067,
+      "labelled_sham_ap10": 0.03289186507936508,
+      "dual_minus_single_ap10_pp": 0.6620094797178129,
+      "dual_minus_single_95ci_pp": [
+        -0.06643311838624356,
+        1.484702932098765
+      ],
+      "dual_minus_sham_ap10_pp": -0.11717372134038793,
+      "interpretation": "Dual input has a small descriptive gain over labelled single, but its interval crosses zero and it is slightly worse than the fixed sham. The 48-query cohort is Composition only."
+    },
+    "P032": {
+      "analysis": "results/P032_reference_contrast.json",
+      "gate_all_pass": false,
+      "gate_checks": {
+        "rcr_ap10_improves": false,
+        "macro_auc_gt_0_5": false,
+        "positive_mean_lift_gt_explicit_negative": true
+      },
+      "rcr_minus_dual_ap10_pp": -0.41407627865961205,
+      "rcr_minus_dual_95ci_pp": [
+        -1.255128417107584,
+        0.31201636904761887
+      ],
+      "macro_auc": 0.49749999999999994,
+      "decision": "Kill P032/P033 negative-control calibration branch; do not fetch or score held-out P033 data."
     }
   },
-  "novelty_status": "Current main-track readiness remains low. VCD, CoCI, and RMCD occupy visual or multi-context contrastive logit aggregation; MultiSHAP occupies generic interaction attribution; WISER and ReCALL occupy verifier calibration and retrieval adaptation. A surviving claim must isolate source-bound evidence unique to multi-reference retrieval and replicate on untouched components and another model.",
+  "novelty_status": "P032 negative-control calibration is empirically rejected on its frozen development cohort and must not proceed to held-out P033. No novelty or SOTA claim exists. P031 remains a baseline transfer measurement; the overall research goal stays active and needs a new direction after P031.",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
@@ -1184,7 +1230,10 @@
       "Reserved metadata audit found only 54 eligible components and severe category concentration; non-Composition sensitivity is limited to two components",
       "Annotation nulls verified as negative-list padding only; conflict counts are unchanged after excluding nulls",
       "RMCD and MultiSHAP primary sources audited and added as novelty boundaries",
-      "ARS-MMT added as a direct boundary for shuffled-visual specificity controls"
+      "ARS-MMT added as a direct boundary for shuffled-visual specificity controls",
+      "P030 completed with integrity checks passing and a non-significant dual-input gain over single input",
+      "P032 failed two of three locked gates, so P033 was stopped before any held-out access",
+      "P031 failure was localized to versioned config parsing after base3b completion; compatibility adapter passed CPU preflight"
     ]
   },
   "idea_audits": {

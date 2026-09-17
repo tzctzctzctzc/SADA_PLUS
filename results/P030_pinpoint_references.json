@@ -1,0 +1,508 @@
+{
+  "complete": true,
+  "n_queries": 48,
+  "n_signature_components": 48,
+  "n_reference_rgb_components": 48,
+  "conditions": {
+    "official_lists": {
+      "original_retrieval": {
+        "precision@1": 0.041666666666666664,
+        "recall@1": 0.002904647435897436,
+        "ap@1": 0.041666666666666664,
+        "precision@10": 0.025000000000000005,
+        "recall@10": 0.03160008394383394,
+        "ap@10": 0.018090277777777778,
+        "NegRecall@10": 0.075,
+        "negative_precision@10": 0.075,
+        "unjudged_precision@10": 0.9,
+        "ap@10_noNeg": 0.02206845238095238
+      },
+      "published_reranked": {
+        "precision@1": 0.125,
+        "recall@1": 0.014546804298642533,
+        "ap@1": 0.125,
+        "precision@10": 0.03958333333333334,
+        "recall@10": 0.051303430025856495,
+        "ap@10": 0.03567956349206349,
+        "NegRecall@10": 0.052083333333333336,
+        "negative_precision@10": 0.052083333333333336,
+        "unjudged_precision@10": 0.9083333333333333,
+        "ap@10_noNeg": 0.03567956349206349
+      },
+      "oracle_top20": {
+        "precision@1": 0.25,
+        "recall@1": 0.03129808814551461,
+        "ap@1": 0.25,
+        "precision@10": 0.04374999999999999,
+        "recall@10": 0.05205482834159305,
+        "ap@10": 0.06408730158730158,
+        "NegRecall@10": 0.075,
+        "negative_precision@10": 0.075,
+        "unjudged_precision@10": 0.88125,
+        "ap@10_noNeg": 0.06408730158730158
+      },
+      "released_single": {
+        "precision@1": 0.041666666666666664,
+        "recall@1": 0.0020461309523809525,
+        "ap@1": 0.041666666666666664,
+        "precision@10": 0.041666666666666664,
+        "recall@10": 0.05082933814551462,
+        "ap@10": 0.021911375661375663,
+        "NegRecall@10": 0.08958333333333335,
+        "negative_precision@10": 0.08958333333333335,
+        "unjudged_precision@10": 0.86875,
+        "ap@10_noNeg": 0.023057208994708995
+      },
+      "labelled_single": {
+        "precision@1": 0.0,
+        "recall@1": 0.0,
+        "ap@1": 0.0,
+        "precision@10": 0.04374999999999999,
+        "recall@10": 0.05205482834159305,
+        "ap@10": 0.024666005291005294,
+        "NegRecall@10": 0.08333333333333333,
+        "negative_precision@10": 0.08333333333333333,
+        "unjudged_precision@10": 0.8729166666666668,
+        "ap@10_noNeg": 0.02519923941798942
+      },
+      "labelled_dual": {
+        "precision@1": 0.08333333333333333,
+        "recall@1": 0.008083129084967321,
+        "ap@1": 0.08333333333333333,
+        "precision@10": 0.041666666666666664,
+        "recall@10": 0.05101316167492637,
+        "ap@10": 0.029984016754850084,
+        "NegRecall@10": 0.09375,
+        "negative_precision@10": 0.09375,
+        "unjudged_precision@10": 0.8645833333333334,
+        "ap@10_noNeg": 0.030695822310405643
+      },
+      "labelled_sham": {
+        "precision@1": 0.08333333333333333,
+        "recall@1": 0.015389384920634921,
+        "ap@1": 0.08333333333333333,
+        "precision@10": 0.0375,
+        "recall@10": 0.04848558814551462,
+        "ap@10": 0.03219742063492063,
+        "NegRecall@10": 0.08333333333333333,
+        "negative_precision@10": 0.08333333333333333,
+        "unjudged_precision@10": 0.8791666666666668,
+        "ap@10_noNeg": 0.03243303571428571
+      }
+    },
+    "canonical_sets": {
+      "original_retrieval": {
+        "precision@1": 0.041666666666666664,
+        "recall@1": 0.002904647435897436,
+        "ap@1": 0.041666666666666664,
+        "precision@10": 0.025000000000000005,
+        "recall@10": 0.03160008394383394,
+        "ap@10": 0.018090277777777778,
+        "NegRecall@10": 0.075,
+        "negative_precision@10": 0.075,
+        "unjudged_precision@10": 0.9,
+        "ap@10_noNeg": 0.02206845238095238
+      },
+      "published_reranked": {
+        "precision@1": 0.125,
+        "recall@1": 0.014546804298642533,
+        "ap@1": 0.125,
+        "precision@10": 0.03958333333333334,
+        "recall@10": 0.054937401730480374,
+        "ap@10": 0.037415674603174603,
+        "NegRecall@10": 0.052083333333333336,
+        "negative_precision@10": 0.052083333333333336,
+        "unjudged_precision@10": 0.9083333333333333,
+        "ap@10_noNeg": 0.037415674603174603
+      },
+      "oracle_top20": {
+        "precision@1": 0.25,
+        "recall@1": 0.03477031036773684,
+        "ap@1": 0.25,
+        "precision@10": 0.04374999999999999,
+        "recall@10": 0.05552705056381527,
+        "ap@10": 0.0675595238095238,
+        "NegRecall@10": 0.075,
+        "negative_precision@10": 0.075,
+        "unjudged_precision@10": 0.88125,
+        "ap@10_noNeg": 0.0675595238095238
+      },
+      "released_single": {
+        "precision@1": 0.041666666666666664,
+        "recall@1": 0.0020461309523809525,
+        "ap@1": 0.041666666666666664,
+        "precision@10": 0.041666666666666664,
+        "recall@10": 0.05430156036773683,
+        "ap@10": 0.023068783068783072,
+        "NegRecall@10": 0.08958333333333335,
+        "negative_precision@10": 0.08958333333333335,
+        "unjudged_precision@10": 0.86875,
+        "ap@10_noNeg": 0.024214616402116404
+      },
+      "labelled_single": {
+        "precision@1": 0.0,
+        "recall@1": 0.0,
+        "ap@1": 0.0,
+        "precision@10": 0.04374999999999999,
+        "recall@10": 0.05552705056381527,
+        "ap@10": 0.025100033068783067,
+        "NegRecall@10": 0.08333333333333333,
+        "negative_precision@10": 0.08333333333333333,
+        "unjudged_precision@10": 0.8729166666666668,
+        "ap@10_noNeg": 0.025633267195767195
+      },
+      "labelled_dual": {
+        "precision@1": 0.08333333333333333,
+        "recall@1": 0.008083129084967321,
+        "ap@1": 0.08333333333333333,
+        "precision@10": 0.041666666666666664,
+        "recall@10": 0.0544853838971486,
+        "ap@10": 0.0317201278659612,
+        "NegRecall@10": 0.09375,
+        "negative_precision@10": 0.09375,
+        "unjudged_precision@10": 0.8645833333333334,
+        "ap@10_noNeg": 0.032431933421516755
+      },
+      "labelled_sham": {
+        "precision@1": 0.08333333333333333,
+        "recall@1": 0.015389384920634921,
+        "ap@1": 0.08333333333333333,
+        "precision@10": 0.0375,
+        "recall@10": 0.051957810367736834,
+        "ap@10": 0.03289186507936508,
+        "NegRecall@10": 0.08333333333333333,
+        "negative_precision@10": 0.08333333333333333,
+        "unjudged_precision@10": 0.8791666666666668,
+        "ap@10_noNeg": 0.03312748015873016
+      }
+    }
+  },
+  "paired": {
+    "official_lists": {
+      "labelled_dual minus labelled_single": {
+        "ap@10": {
+          "difference_pp": 0.5318011463844796,
+          "reference_cluster_95ci_pp": [
+            -0.08904252094356281,
+            1.2042142030423275
+          ],
+          "query_gains": 8,
+          "query_losses": 3
+        },
+        "precision@1": {
+          "difference_pp": 8.333333333333332,
+          "reference_cluster_95ci_pp": [
+            2.083333333333333,
+            16.666666666666664
+          ],
+          "query_gains": 4,
+          "query_losses": 0
+        },
+        "precision@10": {
+          "difference_pp": -0.2083333333333333,
+          "reference_cluster_95ci_pp": [
+            -0.6249999999999999,
+            0.0
+          ],
+          "query_gains": 0,
+          "query_losses": 1
+        },
+        "negative_precision@10": {
+          "difference_pp": 1.041666666666667,
+          "reference_cluster_95ci_pp": [
+            -0.6249999999999999,
+            2.7083333333333335
+          ],
+          "query_gains": 7,
+          "query_losses": 4
+        }
+      },
+      "labelled_dual minus labelled_sham": {
+        "ap@10": {
+          "difference_pp": -0.2213403880070546,
+          "reference_cluster_95ci_pp": [
+            -1.91412037037037,
+            1.0408730158730126
+          ],
+          "query_gains": 6,
+          "query_losses": 3
+        },
+        "precision@1": {
+          "difference_pp": 0.0,
+          "reference_cluster_95ci_pp": [
+            -8.333333333333332,
+            8.333333333333332
+          ],
+          "query_gains": 2,
+          "query_losses": 2
+        },
+        "precision@10": {
+          "difference_pp": 0.41666666666666674,
+          "reference_cluster_95ci_pp": [
+            0.0,
+            1.041666666666667
+          ],
+          "query_gains": 2,
+          "query_losses": 0
+        },
+        "negative_precision@10": {
+          "difference_pp": 1.0416666666666665,
+          "reference_cluster_95ci_pp": [
+            -0.2083333333333333,
+            2.5
+          ],
+          "query_gains": 6,
+          "query_losses": 2
+        }
+      },
+      "labelled_single minus released_single": {
+        "ap@10": {
+          "difference_pp": 0.27546296296296297,
+          "reference_cluster_95ci_pp": [
+            -0.19362599206349204,
+            0.7721726190476189
+          ],
+          "query_gains": 7,
+          "query_losses": 3
+        },
+        "precision@1": {
+          "difference_pp": -4.166666666666666,
+          "reference_cluster_95ci_pp": [
+            -10.416666666666668,
+            0.0
+          ],
+          "query_gains": 0,
+          "query_losses": 2
+        },
+        "precision@10": {
+          "difference_pp": 0.20833333333333334,
+          "reference_cluster_95ci_pp": [
+            0.0,
+            0.6250000000000001
+          ],
+          "query_gains": 1,
+          "query_losses": 0
+        },
+        "negative_precision@10": {
+          "difference_pp": -0.6249999999999999,
+          "reference_cluster_95ci_pp": [
+            -1.6666666666666667,
+            0.41666666666666674
+          ],
+          "query_gains": 2,
+          "query_losses": 5
+        }
+      },
+      "released_single minus original_retrieval": {
+        "ap@10": {
+          "difference_pp": 0.3821097883597885,
+          "reference_cluster_95ci_pp": [
+            -0.40781249999999986,
+            1.175305886243386
+          ],
+          "query_gains": 8,
+          "query_losses": 4
+        },
+        "precision@1": {
+          "difference_pp": 0.0,
+          "reference_cluster_95ci_pp": [
+            -6.25,
+            6.25
+          ],
+          "query_gains": 1,
+          "query_losses": 1
+        },
+        "precision@10": {
+          "difference_pp": 1.6666666666666667,
+          "reference_cluster_95ci_pp": [
+            0.6250000000000001,
+            2.916666666666667
+          ],
+          "query_gains": 7,
+          "query_losses": 0
+        },
+        "negative_precision@10": {
+          "difference_pp": 1.458333333333333,
+          "reference_cluster_95ci_pp": [
+            -5.218626456896889e-16,
+            3.1249999999999996
+          ],
+          "query_gains": 10,
+          "query_losses": 4
+        }
+      }
+    },
+    "canonical_sets": {
+      "labelled_dual minus labelled_single": {
+        "ap@10": {
+          "difference_pp": 0.6620094797178129,
+          "reference_cluster_95ci_pp": [
+            -0.06643311838624356,
+            1.484702932098765
+          ],
+          "query_gains": 8,
+          "query_losses": 3
+        },
+        "precision@1": {
+          "difference_pp": 8.333333333333332,
+          "reference_cluster_95ci_pp": [
+            2.083333333333333,
+            16.666666666666664
+          ],
+          "query_gains": 4,
+          "query_losses": 0
+        },
+        "precision@10": {
+          "difference_pp": -0.2083333333333333,
+          "reference_cluster_95ci_pp": [
+            -0.6249999999999999,
+            0.0
+          ],
+          "query_gains": 0,
+          "query_losses": 1
+        },
+        "negative_precision@10": {
+          "difference_pp": 1.041666666666667,
+          "reference_cluster_95ci_pp": [
+            -0.6249999999999999,
+            2.7083333333333335
+          ],
+          "query_gains": 7,
+          "query_losses": 4
+        }
+      },
+      "labelled_dual minus labelled_sham": {
+        "ap@10": {
+          "difference_pp": -0.11717372134038793,
+          "reference_cluster_95ci_pp": [
+            -1.8392319775132273,
+            1.1855158730158728
+          ],
+          "query_gains": 6,
+          "query_losses": 3
+        },
+        "precision@1": {
+          "difference_pp": 0.0,
+          "reference_cluster_95ci_pp": [
+            -8.333333333333332,
+            8.333333333333332
+          ],
+          "query_gains": 2,
+          "query_losses": 2
+        },
+        "precision@10": {
+          "difference_pp": 0.41666666666666674,
+          "reference_cluster_95ci_pp": [
+            0.0,
+            1.041666666666667
+          ],
+          "query_gains": 2,
+          "query_losses": 0
+        },
+        "negative_precision@10": {
+          "difference_pp": 1.0416666666666665,
+          "reference_cluster_95ci_pp": [
+            -0.2083333333333333,
+            2.5
+          ],
+          "query_gains": 6,
+          "query_losses": 2
+        }
+      },
+      "labelled_single minus released_single": {
+        "ap@10": {
+          "difference_pp": 0.203125,
+          "reference_cluster_95ci_pp": [
+            -0.3495659722222222,
+            0.7433945105820104
+          ],
+          "query_gains": 7,
+          "query_losses": 3
+        },
+        "precision@1": {
+          "difference_pp": -4.166666666666666,
+          "reference_cluster_95ci_pp": [
+            -10.416666666666668,
+            0.0
+          ],
+          "query_gains": 0,
+          "query_losses": 2
+        },
+        "precision@10": {
+          "difference_pp": 0.20833333333333334,
+          "reference_cluster_95ci_pp": [
+            0.0,
+            0.6250000000000001
+          ],
+          "query_gains": 1,
+          "query_losses": 0
+        },
+        "negative_precision@10": {
+          "difference_pp": -0.6249999999999999,
+          "reference_cluster_95ci_pp": [
+            -1.6666666666666667,
+            0.41666666666666674
+          ],
+          "query_gains": 2,
+          "query_losses": 5
+        }
+      },
+      "released_single minus original_retrieval": {
+        "ap@10": {
+          "difference_pp": 0.49785052910052924,
+          "reference_cluster_95ci_pp": [
+            -0.32739748677248665,
+            1.3912161044973543
+          ],
+          "query_gains": 8,
+          "query_losses": 4
+        },
+        "precision@1": {
+          "difference_pp": 0.0,
+          "reference_cluster_95ci_pp": [
+            -6.25,
+            6.25
+          ],
+          "query_gains": 1,
+          "query_losses": 1
+        },
+        "precision@10": {
+          "difference_pp": 1.6666666666666667,
+          "reference_cluster_95ci_pp": [
+            0.6250000000000001,
+            2.916666666666667
+          ],
+          "query_gains": 7,
+          "query_losses": 0
+        },
+        "negative_precision@10": {
+          "difference_pp": 1.458333333333333,
+          "reference_cluster_95ci_pp": [
+            -5.218626456896889e-16,
+            3.1249999999999996
+          ],
+          "query_gains": 10,
+          "query_losses": 4
+        }
+      }
+    }
+  },
+  "ties_anywhere_in_top20_scores": {
+    "released_single": 48,
+    "labelled_single": 46,
+    "labelled_dual": 48,
+    "labelled_sham": 47
+  },
+  "score_file_sha256": "2a3c5fb55b4931f96f9c336d8ed788f72a9a3e99b11ecc433dcb6c21a061b973",
+  "config_sha256": "ea6c0191464a12dcbb5c6b634554f55cb4d0a1633f9ad0027b373be8312eab44",
+  "limits": [
+    "48-query diagnostic pilot, not full PinPoint or SOTA.",
+    "Reference groups are disjoint by signature; retrieval candidates can be shared across groups.",
+    "The 1M upper pixel budget is explicit; released API serving defaults are unspecified.",
+    "Published candidate lists are reused; this is not a reproduction of the first-stage retriever.",
+    "Sham references are input corruptions under the original labels, not counterfactual queries with relabelled ground truth.",
+    "Sham assignment couples reference groups; its bootstrap intervals are descriptive, not confirmatory.",
+    "Set-normalized metrics differ from released raw-list denominators and are not directly comparable to paper tables.",
+    "Unjudged images are not automatically treated as explicit negative evidence."
+  ]
+}

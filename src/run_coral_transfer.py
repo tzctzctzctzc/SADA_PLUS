@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
-from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+from transformers import AutoProcessor, GenerationConfig, Qwen2_5_VLConfig, Qwen2_5_VLForConditionalGeneration
 
 ROOT=Path("/vepfs/vlms/1")
 assert Path.cwd().resolve()==ROOT
@@ -93,15 +93,30 @@ def verify_weights(model_cfg):
         checked.append({"path":entry["path"],"sha256":h.hexdigest()})
     assert checked
     return checked
+def compatible_model_config(model_cfg):
+    raw=json.loads((ROOT/model_cfg["path"]/"config.json").read_text())
+    if isinstance(raw.get("text_config"),dict):
+        raw.pop("text_config")
+        compat=Qwen2_5_VLConfig.from_dict(raw)
+        GenerationConfig.from_model_config(compat)
+        return compat,"Removed redundant nested text_config emitted by a newer transformers version; flat Qwen2.5-VL fields and all weights are unchanged."
+    return None,None
 metadata={"config_sha256":hashlib.sha256(CFG_PATH.read_bytes()).hexdigest(),
           "runner_sha256":hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
           "n_tasks":len(tasks)}
 meta_path=out/"metadata.json"
-if meta_path.exists():assert json.loads(meta_path.read_text())==metadata
+if meta_path.exists():
+    prior=json.loads(meta_path.read_text())
+    assert prior["config_sha256"]==metadata["config_sha256"] and prior["n_tasks"]==metadata["n_tasks"]
+    if prior["runner_sha256"]!=metadata["runner_sha256"]:
+        retry={**metadata,"prior_runner_sha256":prior["runner_sha256"],
+               "reason":"Resume completed base3b embeddings after Coral config compatibility failure; no Coral embeddings or final analysis existed."}
+        (out/"retry_metadata.json").write_text(json.dumps(retry,indent=2)+"\n")
 else:meta_path.write_text(json.dumps(metadata,indent=2)+"\n")
 if args.preflight_only:
     checks={}
     for name,model_cfg in cfg["models"].items():
+        compatible_model_config(model_cfg)
         processor=AutoProcessor.from_pretrained(ROOT/model_cfg["path"],local_files_only=True,
                     min_pixels=cfg["min_pixels"],max_pixels=cfg["max_pixels"])
         processor.tokenizer.padding_side="left"
@@ -124,9 +139,13 @@ for name,model_cfg in cfg["models"].items():
     processor=AutoProcessor.from_pretrained(ROOT/model_cfg["path"],local_files_only=True,
                 min_pixels=cfg["min_pixels"],max_pixels=cfg["max_pixels"])
     processor.tokenizer.padding_side="left"
+    compat_config,config_compatibility=compatible_model_config(model_cfg)
+    load_kwargs={"local_files_only":True,"torch_dtype":torch.bfloat16,
+                 "attn_implementation":"sdpa","device_map":{"":"cuda:0"},
+                 "output_loading_info":True}
+    if compat_config is not None:load_kwargs["config"]=compat_config
     model,loading=Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        ROOT/model_cfg["path"],local_files_only=True,torch_dtype=torch.bfloat16,
-        attn_implementation="sdpa",device_map={"":"cuda:0"},output_loading_info=True)
+        ROOT/model_cfg["path"],**load_kwargs)
     assert not loading["missing_keys"] and not loading.get("mismatched_keys"),loading
     assert not loading["unexpected_keys"],loading
     model.eval()
@@ -148,7 +167,8 @@ for name,model_cfg in cfg["models"].items():
     assert batch_cos>0.995,batch_cos
     (folder/"protocol_smoke.json").write_text(json.dumps({
         "hook_vs_official_last_hidden_max_error":error,"single_vs_batch_cosine":batch_cos,
-        "loading_info":loading,"weights":checked},indent=2)+"\n")
+        "loading_info":loading,"weights":checked,
+        "config_compatibility":config_compatibility},indent=2)+"\n")
     pending=[t for t in tasks if not (folder/(t["key"]+".npy")).exists()]
     for start in range(0,len(pending),cfg["batch_size"]):
         batch=pending[start:start+cfg["batch_size"]];begin=time.perf_counter()

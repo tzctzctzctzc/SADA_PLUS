@@ -1,0 +1,280 @@
+{
+  "complete": true,
+  "evidence_status": "exploratory_on_development_cohort",
+  "n_queries": 48,
+  "n_reference_rgb_components": 48,
+  "conditions": {
+    "labelled_dual": {
+      "precision@1": 0.08333333333333333,
+      "recall@1": 0.008083129084967321,
+      "ap@1": 0.08333333333333333,
+      "precision@10": 0.041666666666666664,
+      "recall@10": 0.0544853838971486,
+      "ap@10": 0.0317201278659612,
+      "negative_precision@10": 0.09375,
+      "unjudged_precision@10": 0.8645833333333334
+    },
+    "labelled_single": {
+      "precision@1": 0.0,
+      "recall@1": 0.0,
+      "ap@1": 0.0,
+      "precision@10": 0.04374999999999999,
+      "recall@10": 0.05552705056381527,
+      "ap@10": 0.025100033068783067,
+      "negative_precision@10": 0.08333333333333333,
+      "unjudged_precision@10": 0.8729166666666668
+    },
+    "labelled_sham": {
+      "precision@1": 0.08333333333333333,
+      "recall@1": 0.015389384920634921,
+      "ap@1": 0.08333333333333333,
+      "precision@10": 0.0375,
+      "recall@10": 0.051957810367736834,
+      "ap@10": 0.03289186507936508,
+      "negative_precision@10": 0.08333333333333333,
+      "unjudged_precision@10": 0.8791666666666668
+    },
+    "rcr_alpha1": {
+      "precision@1": 0.0625,
+      "recall@1": 0.0035692401960784313,
+      "ap@1": 0.0625,
+      "precision@10": 0.03958333333333334,
+      "recall@10": 0.047540939452704156,
+      "ap@10": 0.02757936507936508,
+      "negative_precision@10": 0.08958333333333335,
+      "unjudged_precision@10": 0.8708333333333335
+    },
+    "additive_residual": {
+      "precision@1": 0.0625,
+      "recall@1": 0.0035692401960784313,
+      "ap@1": 0.0625,
+      "precision@10": 0.04374999999999999,
+      "recall@10": 0.05552705056381527,
+      "ap@10": 0.028916170634920635,
+      "negative_precision@10": 0.08958333333333333,
+      "unjudged_precision@10": 0.8666666666666667
+    },
+    "reference_lift": {
+      "precision@1": 0.0625,
+      "recall@1": 0.009472017973856208,
+      "ap@1": 0.0625,
+      "precision@10": 0.02916666666666667,
+      "recall@10": 0.031186481002657473,
+      "ap@10": 0.02017774470899471,
+      "negative_precision@10": 0.06875,
+      "unjudged_precision@10": 0.9020833333333335
+    }
+  },
+  "paired": {
+    "rcr_alpha1 minus labelled_dual": {
+      "ap@10": {
+        "difference_pp": -0.41407627865961205,
+        "reference_cluster_95ci_pp": [
+          -1.255128417107584,
+          0.31201636904761887
+        ],
+        "query_gains": 3,
+        "query_losses": 5
+      },
+      "precision@1": {
+        "difference_pp": -2.083333333333333,
+        "reference_cluster_95ci_pp": [
+          -8.333333333333332,
+          4.166666666666666
+        ],
+        "query_gains": 1,
+        "query_losses": 2
+      },
+      "precision@10": {
+        "difference_pp": -0.20833333333333334,
+        "reference_cluster_95ci_pp": [
+          -0.6250000000000001,
+          0.0
+        ],
+        "query_gains": 0,
+        "query_losses": 1
+      },
+      "negative_precision@10": {
+        "difference_pp": -0.4166666666666667,
+        "reference_cluster_95ci_pp": [
+          -1.6666666666666667,
+          0.8333333333333334
+        ],
+        "query_gains": 4,
+        "query_losses": 6
+      }
+    },
+    "additive_residual minus labelled_dual": {
+      "ap@10": {
+        "difference_pp": -0.2803957231040563,
+        "reference_cluster_95ci_pp": [
+          -0.9790812389770723,
+          0.36933283730158706
+        ],
+        "query_gains": 5,
+        "query_losses": 6
+      },
+      "precision@1": {
+        "difference_pp": -2.083333333333333,
+        "reference_cluster_95ci_pp": [
+          -8.333333333333332,
+          4.166666666666666
+        ],
+        "query_gains": 1,
+        "query_losses": 2
+      },
+      "precision@10": {
+        "difference_pp": 0.2083333333333333,
+        "reference_cluster_95ci_pp": [
+          0.0,
+          0.6249999999999999
+        ],
+        "query_gains": 1,
+        "query_losses": 0
+      },
+      "negative_precision@10": {
+        "difference_pp": -0.41666666666666685,
+        "reference_cluster_95ci_pp": [
+          -2.291666666666667,
+          1.25
+        ],
+        "query_gains": 4,
+        "query_losses": 5
+      }
+    },
+    "labelled_dual minus labelled_single": {
+      "ap@10": {
+        "difference_pp": 0.6620094797178129,
+        "reference_cluster_95ci_pp": [
+          -0.05876805004409169,
+          1.4926242835096992
+        ],
+        "query_gains": 8,
+        "query_losses": 3
+      },
+      "precision@1": {
+        "difference_pp": 8.333333333333332,
+        "reference_cluster_95ci_pp": [
+          2.083333333333333,
+          16.666666666666664
+        ],
+        "query_gains": 4,
+        "query_losses": 0
+      },
+      "precision@10": {
+        "difference_pp": -0.2083333333333333,
+        "reference_cluster_95ci_pp": [
+          -0.6249999999999999,
+          0.0
+        ],
+        "query_gains": 0,
+        "query_losses": 1
+      },
+      "negative_precision@10": {
+        "difference_pp": 1.041666666666667,
+        "reference_cluster_95ci_pp": [
+          -0.6249999999999998,
+          2.7135416666665915
+        ],
+        "query_gains": 7,
+        "query_losses": 4
+      }
+    },
+    "labelled_dual minus labelled_sham": {
+      "ap@10": {
+        "difference_pp": -0.11717372134038793,
+        "reference_cluster_95ci_pp": [
+          -1.8665481701940037,
+          1.1707713293650768
+        ],
+        "query_gains": 6,
+        "query_losses": 3
+      },
+      "precision@1": {
+        "difference_pp": 0.0,
+        "reference_cluster_95ci_pp": [
+          -8.333333333333332,
+          8.333333333333332
+        ],
+        "query_gains": 2,
+        "query_losses": 2
+      },
+      "precision@10": {
+        "difference_pp": 0.41666666666666674,
+        "reference_cluster_95ci_pp": [
+          0.0,
+          1.041666666666667
+        ],
+        "query_gains": 2,
+        "query_losses": 0
+      },
+      "negative_precision@10": {
+        "difference_pp": 1.0416666666666665,
+        "reference_cluster_95ci_pp": [
+          -0.2083333333333333,
+          2.5
+        ],
+        "query_gains": 6,
+        "query_losses": 2
+      }
+    }
+  },
+  "mechanism": {
+    "reference_lift_by_label": {
+      "positive": {
+        "n": 21,
+        "mean": 0.20238095238095238,
+        "median": 0.375
+      },
+      "explicit_negative": {
+        "n": 68,
+        "mean": -0.49816176470588236,
+        "median": -0.375
+      },
+      "unjudged": {
+        "n": 871,
+        "mean": -0.44776119402985076,
+        "median": -0.25
+      }
+    },
+    "macro_query_auc_positive_vs_explicit_negative": {
+      "n_eligible_queries": 10,
+      "mean": 0.49749999999999994,
+      "reference_cluster_95ci": [
+        0.21536458333333336,
+        0.7857142857142857
+      ]
+    }
+  },
+  "confirmatory_gate_evaluation": {
+    "checks": {
+      "primary_ap10_difference_pp_gt_0": false,
+      "mechanism_macro_auc_gt_0_5": false,
+      "mechanism_positive_mean_lift_gt_explicit_negative": true
+    },
+    "all_pass": false,
+    "meaning": "Eligibility to preregister a held-out confirmation only; not evidence of novelty, significance, causality, or SOTA."
+  },
+  "ties_anywhere_in_top20_scores": {
+    "labelled_dual": 48,
+    "labelled_single": 46,
+    "labelled_sham": 47,
+    "rcr_alpha1": 47,
+    "additive_residual": 42,
+    "reference_lift": 48
+  },
+  "score_file_sha256": "2a3c5fb55b4931f96f9c336d8ed788f72a9a3e99b11ecc433dcb6c21a061b973",
+  "config_sha256": "5019b36479e5af608078b3f2d404e669f7417bfed60edd832b336997becd7930",
+  "confirmatory_gate": "Only if the fixed primary score improves pilot AP@10 and mechanism direction agrees; then preregister untouched reserved reference components before any new scores.",
+  "novelty_boundary": [
+    "Visual Contrastive Decoding already uses (1+alpha) logits from an original image minus alpha logits from a distorted image for generation.",
+    "Contextual calibration and PMI-style scoring already subtract content-free/domain-conditioned priors.",
+    "P032 tests a task-specific negative-control construction for multi-reference retrieval; it is not yet a contribution."
+  ],
+  "limits": [
+    "One sham reference per query gives a noisy estimate of nuisance response.",
+    "The sham assignment couples reference groups, so intervals are descriptive.",
+    "Candidates can recur across queries; reference-component bootstrap does not remove every candidate-level dependence.",
+    "The PinPoint pilot contains 48 selected reference components and is not a full benchmark evaluation."
+  ]
+}
