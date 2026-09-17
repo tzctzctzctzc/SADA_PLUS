@@ -2,7 +2,7 @@
 # 所有写入与 GPU 使用均限定在本项目。
 export PROJECT_ROOT=/vepfs/vlms/1
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
-export CUDA_VISIBLE_DEVICES=GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1
+export CUDA_VISIBLE_DEVICES=GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f
 export XDG_CACHE_HOME=$PROJECT_ROOT/.cache
 export HF_HOME=$PROJECT_ROOT/.cache/huggingface
 export HF_DATASETS_CACHE=$PROJECT_ROOT/.cache/huggingface/datasets

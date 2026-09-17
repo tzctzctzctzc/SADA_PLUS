@@ -1,0 +1,115 @@
+{
+  "id": "P041",
+  "name": "instruction_conditioned_selective_dependence",
+  "status": "stage0_data_contract_only",
+  "claim": "同一来源属性变化是否影响检索，应由指令是否使用该属性决定；该成组监督应在同数据同预算普通训练之外带来真实全图库收益。",
+  "gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
+  "model": {
+    "id": "Qwen/Qwen3-VL-Embedding-8B",
+    "revision": "2c4565515e0f265c6511776e7193b22c0968ddc7",
+    "path": "models/Qwen3-VL-Embedding-8B",
+    "official_source_revision": "393e2978d27852b0d0230d6994f37f9c15bed73c"
+  },
+  "data": {
+    "dataset": "WeiChow/merit",
+    "revision": "main",
+    "train_query_path": "data/MERIT/queries-train.json",
+    "train_query_sha256": "34d9c785433b08ca5c1936161005969bcd76da3a06c0d1d8f78259b9e83bc241",
+    "selected_train_shards": {
+      "strategy": "linspace",
+      "count": 96,
+      "total": 281
+    },
+    "metadata_workers": 12,
+    "train_bundles": 512,
+    "validation_bundles": 256,
+    "data_audit_bundles": 100,
+    "split_rule": "sha256(query_idx) mod 5 == 0 is validation; exact product IDs are disjoint across selected train and validation bundles",
+    "visual_attribute_allowlist": [
+      "color",
+      "pattern/print",
+      "pattern",
+      "shape",
+      "closure type",
+      "closure",
+      "shoe type",
+      "toe style",
+      "sleeve length",
+      "sleeve type",
+      "collar type",
+      "neckline",
+      "waist line",
+      "pockets",
+      "strap type",
+      "bag type",
+      "chair type",
+      "table type",
+      "arm type",
+      "back type",
+      "hem shape",
+      "form factor",
+      "boot height",
+      "heel type",
+      "handle type",
+      "table base",
+      "movement type",
+      "number of drawers",
+      "number of cameras"
+    ],
+    "exclude_attribute_keys": [
+      "product style"
+    ],
+    "template": "Find a {target_class} with the same {key1} as Product 1 and the same {key2} as Product 2.",
+    "no_titles_or_attribute_values_in_query": true
+  },
+  "pilot": {
+    "arms": [
+      "ordinary_retrieval",
+      "generic_invariance",
+      "conditional_response"
+    ],
+    "seeds": [
+      20260917,
+      20260918,
+      20260919
+    ],
+    "max_steps_per_run": 200,
+    "max_gpu_hours_per_run": 2,
+    "max_training_gpu_hours": 18,
+    "primary_group_gain_pp": 5.0,
+    "primary_map10_gain": 0.005,
+    "confidence_level": 0.95,
+    "all_key_gates_must_pass": true
+  },
+  "stop_rules": [
+    "100组数据契约审计通过率低于95%",
+    "无法构造512个训练组和256个精确产品ID隔离验证组",
+    "实现审计发现必要机制未进入前向、损失或参数更新且未修复",
+    "条件响应不超过同数据同预算普通训练",
+    "只在构造组有效而真实完整图库检索不改善",
+    "任何关键门槛失败时禁止扩大到全量"
+  ],
+  "forbidden": [
+    "restart_P036",
+    "expand_P039_SBB",
+    "run_original_P040",
+    "access_confirmation_or_heldout_for_selection"
+  ],
+  "visual_audit": {
+    "judge_model": "models/Qwen2.5-VL-7B-Instruct",
+    "judge_revision": "cc594898137f460bfe9f0759e9844b3ce807cfb5",
+    "bundles": 100,
+    "min_pixels": 3136,
+    "max_pixels": 451584,
+    "batch_size": 4,
+    "positive_margin_min": 0.0,
+    "negative_margin_max": 0.0,
+    "bundle_pass_rate_min": 0.95,
+    "required_checks": [
+      "source_positive",
+      "source_swapped_negative",
+      "targets_positive",
+      "targets_swapped_negative"
+    ]
+  }
+}

@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T17:40:05.864970+08:00",
+  "as_of": "2026-09-18T00:18:00+08:00",
   "goal_status": "active",
-  "phase": "P001-P039 evidence re-audited; P039 Shadow Binding Bridges completed its bounded mechanism screen and failed the frozen continuation gates. No full-scale, P040, or held-out execution is authorized.",
+  "phase": "P041 completed model/data protocol smoke but failed the preregistered visual data-contract gate; no training was launched. P042 role-conditioned transform equivariance data revision is being designed from official MERIT triplets.",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 1,
@@ -51,7 +51,8 @@
     "TAPR (arXiv:2608.25305v2) already factorizes single-reference CIR into Target/Add/Preserve/Remove and applies factor-specific local matching; constraint factorization alone is not novel.",
     "ReBind (arXiv:2607.14681) validates explicit reference tokens at semantic positions for multi-reference video editing; this is the main adjacent-domain transfer primitive for P038.",
     "MultiBind (arXiv:2603.21937) separates self-degradation from cross-subject confusion in generation; P038 adapts that separation to equivalence gap versus wrong-binding contrast in retrieval.",
-    "Janossy Pooling, Set Transformer, and Multi-Set Transformer establish permutation/set operators; P038 must distinguish joint role-reference relabeling from unconditional image exchangeability."
+    "Janossy Pooling, Set Transformer, and Multi-Set Transformer establish permutation/set operators; P038 must distinguish joint role-reference relabeling from unconditional image exchangeability.",
+    "P041视觉数据门槛失败：100组中仅37组同时通过，正例源/目标检查为63%/60%，交换负对照为97%/91%；停止元数据替代路线且未启动训练，不能据此否定条件依赖假设。"
   ],
   "hypotheses": [
     {
@@ -868,15 +869,16 @@
     "launch_rule": "Check live GPU1 memory/utilization and process occupancy immediately before every new experiment; do not silently fall back to another GPU.",
     "gpu_queue": "Future drivers should serialize with flock on /vepfs/vlms/1/runs/gpu1.lock.",
     "last_check": {
-      "memory_used_mib": 5455,
+      "memory_used_mib": 3873,
       "memory_total_mib": 81920,
-      "utilization_percent": 0
+      "utilization_percent": 0,
+      "checked_at": "2026-09-18T00:18:00+08:00"
     },
     "automation_id": "gpu3",
     "automation_display_name": "GPU1 独立研究进展",
     "rules_first": "Read /vepfs/vlms/1/研究规则.md before continuing; the automation was updated to GPU1 and evidence-first/pilot-first execution on 2026-09-17."
   },
-  "next": "下一版指令条件选择性依赖学习方案已完成文献与旧证据审计，状态为供用户审阅、未实现。方案确认后先冻结数据/评测协议、审计干预标签和近期8B基线，再实现及自动审计，最后运行有上限的证伪pilot；当前方案不授权新GPU训练或全量。禁止重启P036、SBB及原P040，确认与held-out组件保持不访问。",
+  "next": "冻结P042角色条件变换等变性的数据构造与独立100组门槛；先验证官方正例的角色属性对齐、确定性色相变换的有效性及非颜色角色不变性。只有新门槛通过后才实现训练；P041训练、P036、P039/SBB和原P040均不启动。",
   "results": {
     "P001": {
       "n": 4,
@@ -1679,6 +1681,39 @@
       "all_layer_binding_macro_auc": 0.7016666666666667,
       "best_narrow_score_macro_auc": 0.6833333333333333,
       "decision": "Stop SBB expansion. No narrow bridge window met the required soft-plus-0.05 binding gain; the all-layer control was highest and is ineligible."
+    },
+    "P041_visual_data_gate": {
+      "status": "failed_stop_no_training",
+      "gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
+      "dataset_revision": "fd1c52c3ce3f1d53f7781afa64f350564cece6e8",
+      "logical_contract": {
+        "passed": 100,
+        "total": 100
+      },
+      "images": {
+        "extracted": 600,
+        "expected": 600
+      },
+      "model_smoke": {
+        "status": "pass",
+        "shape": [
+          2,
+          4096
+        ],
+        "max_gpu_allocated_bytes": 16315571712
+      },
+      "visual_contract": {
+        "bundle_passed": 37,
+        "bundles": 100,
+        "pass_rate": 0.37,
+        "required": 0.95,
+        "source_positive": 0.63,
+        "source_swapped_negative": 0.97,
+        "targets_positive": 0.6,
+        "targets_swapped_negative": 0.91,
+        "max_gpu_allocated_bytes": 19373166592
+      },
+      "conclusion": "The metadata-substitution construction is visually unreliable. Negative controls largely work, so lowering the gate is not justified. The conditional-dependence hypothesis was not trained or tested."
     }
   },
   "novelty_status": "No effective method is established. P039 showed that source-private bridge-state injection is technically causal but not sufficiently discriminative: the best narrow window binding AUC was 0.698 versus soft 0.658, below the required +0.05, and all-layer control was highest at 0.702. Any next claim needs a materially different learned or task-native binding objective and new prospective evidence.",
@@ -1777,7 +1812,7 @@
   "candidate_proposals": [
     {
       "id": "instruction_conditioned_selective_dependence_v1",
-      "status": "proposed_for_user_review_not_implemented",
+      "status": "stage0_failed_data_gate_no_training",
       "title": "指令条件选择性依赖学习：直接训练多参考全图库检索器",
       "hypothesis": "同一来源属性变化，在指令使用该属性时应改变目标，在指令不使用该属性时应保持检索语义；显式监督这种条件响应可能改善真实多参考检索。既有失败尚未证明此机制是主要瓶颈。",
       "old_evidence": [
@@ -1814,7 +1849,40 @@
         "P039/SBB expansion",
         "original P040 follow-up"
       ],
-      "created_at": "2026-09-17T17:40:05.864970+08:00"
+      "created_at": "2026-09-17T17:40:05.864970+08:00",
+      "stage0_result": {
+        "status": "failed_stop_no_training",
+        "gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
+        "dataset_revision": "fd1c52c3ce3f1d53f7781afa64f350564cece6e8",
+        "logical_contract": {
+          "passed": 100,
+          "total": 100
+        },
+        "images": {
+          "extracted": 600,
+          "expected": 600
+        },
+        "model_smoke": {
+          "status": "pass",
+          "shape": [
+            2,
+            4096
+          ],
+          "max_gpu_allocated_bytes": 16315571712
+        },
+        "visual_contract": {
+          "bundle_passed": 37,
+          "bundles": 100,
+          "pass_rate": 0.37,
+          "required": 0.95,
+          "source_positive": 0.63,
+          "source_swapped_negative": 0.97,
+          "targets_positive": 0.6,
+          "targets_swapped_negative": 0.91,
+          "max_gpu_allocated_bytes": 19373166592
+        },
+        "conclusion": "The metadata-substitution construction is visually unreliable. Negative controls largely work, so lowering the gate is not justified. The conditional-dependence hypothesis was not trained or tested."
+      }
     }
   ]
 }
