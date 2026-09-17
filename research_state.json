@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-17T08:00:00+00:00",
+  "as_of": "2026-09-17T17:40:05.864970+08:00",
   "goal_status": "active",
   "phase": "P001-P039 evidence re-audited; P039 Shadow Binding Bridges completed its bounded mechanism screen and failed the frozen continuation gates. No full-scale, P040, or held-out execution is authorized.",
   "scope": {
@@ -876,7 +876,7 @@
     "automation_display_name": "GPU1 独立研究进展",
     "rules_first": "Read /vepfs/vlms/1/研究规则.md before continuing; the automation was updated to GPU1 and evidence-first/pilot-first execution on 2026-09-17."
   },
-  "next": "First audit the learned source-role training idea against prior failures, swapped-label validity, fixed-candidate oracle and matched ordinary-training baselines; preregister a bounded falsification package before any new GPU1 training. Do not restart P036 or enlarge SBB; keep confirmation and held-out components untouched.",
+  "next": "下一版指令条件选择性依赖学习方案已完成文献与旧证据审计，状态为供用户审阅、未实现。方案确认后先冻结数据/评测协议、审计干预标签和近期8B基线，再实现及自动审计，最后运行有上限的证伪pilot；当前方案不授权新GPU训练或全量。禁止重启P036、SBB及原P040，确认与held-out组件保持不访问。",
   "results": {
     "P001": {
       "n": 4,
@@ -1773,5 +1773,48 @@
       "recommendation": "Run P039 only as a kill-gated mechanism screen; do not call the idea novel or effective unless later prospective evidence survives."
     }
   },
-  "research_rules_file": "研究规则.md"
+  "research_rules_file": "研究规则.md",
+  "candidate_proposals": [
+    {
+      "id": "instruction_conditioned_selective_dependence_v1",
+      "status": "proposed_for_user_review_not_implemented",
+      "title": "指令条件选择性依赖学习：直接训练多参考全图库检索器",
+      "hypothesis": "同一来源属性变化，在指令使用该属性时应改变目标，在指令不使用该属性时应保持检索语义；显式监督这种条件响应可能改善真实多参考检索。既有失败尚未证明此机制是主要瓶颈。",
+      "old_evidence": [
+        "P014全来源隔离曾损害该实现的检索，保留多图联合上下文。",
+        "P035来源谓词标量AND损害排序，避免将来源证据预先压成独立分数。",
+        "P037-P039代理绑定/顺序变化未提供稳定排序收益；改为可学习检索并同时要求真实检索收益。",
+        "P030已观察48个开发查询中仅12个top20含已标注正例；oracle_top20 mAP@10=0.0675595238。该结果只适用于该子集，要求区分全图库召回和重排。"
+      ],
+      "mechanism": {
+        "backbone": "候选Qwen3-VL-Embedding-8B；它在本项目尚未实测，不能声称优于现有基线。",
+        "query": "原生多图及带来源指代的指令联合编码；保留图间推理。",
+        "retrieval": "训练查询/候选共享编码器的检索空间，在完整图库召回；需要时各臂采用相同固定reranker。",
+        "training_scope": "拟采用覆盖语言模型所有层attention/MLP的高秩LoRA和可训练视觉merger，查询与候选分支均保留梯度；先做80GB显存/吞吐profiling再冻结具体配置。不是只训练分数头或若干role token。不得因显存而悄悄冻结必要通路。",
+        "data": "优先从MERIT训练产品属性及真实变体构造经过语义核验的有效改变/无关改变/语义等价重排组。来源组件隔离、多正例标注、排除参考目标重复和答案文本泄漏。MERIT官方字段支持此候选构造，但有效组数量与标签质量未核验。",
+        "objective": "多正例检索损失 + 无关改变/语义等价变换下的检索分布一致性 + 经核验的有效改变下正确候选对的双向排序约束。损失权重/温度须在任何效能pilot前冻结。",
+        "theory": "若指令定义目标语义G_t，则有效来源变换u对应目标语义变换u_t：G_t(uR)=u_t(G_t(R))；无关变化时u_t为恒等。该任务一致性条件不构成新定理，也不保证因果可识别或真实检索泛化。",
+        "novelty_boundary": "来源绑定、反事实增强、不变性、对比学习均已有先例。待验证增量是同一属性变换在不同来源角色指令下产生不同效应的成组监督及其全图库迁移；相同样本/预算普通微调必须作为核心反证。普通相关性训练在完整监督下也可能达到相同理想解。"
+      },
+      "pilot_draft": {
+        "status": "design_only_not_preregistered_no_GPU_authorization_from_this_proposal",
+        "stage0": "先对齐PinPoint论文与当前官方仓库的数据/脚本/切分/指标，检查独立开发组件清单；只做合法开发诊断，确认/held-out不访问。先测8B未微调基线及候选覆盖，审计实际错误是否包含足够来源选择性依赖问题。",
+        "data_gate": "拟抽检100组有效/无关干预对，至少95%按预定标准可确认有效；不确定标签排除，组内语义要求与数据来源必须可追溯。不能制造可靠组则停止此数据路线。",
+        "implementation_gate": "正式效能pilot前自动审计：完整实现/保守退化/最小原型/错误/证据不足。检查两图真实进入、角色及candidate标签、梯度与参数更新、有效/无关分支、损失方向、评估口径和训练期间缓存一致性。错误先修复，不能把bug结果解释为方法失败。",
+        "external_pilot": "拟512训练干预组、256来源组件独立验证组；3个训练臂为同数据普通检索、同数据加通用不变性、提出的条件响应学习；同8B初始化/输入/样本/优化器/有效batch/最大步数/训练参数范围。每臂3 seeds，每run最多200步或2 GPU小时先到即止，训练总上限18 GPU小时，不含另行固定的全图库编码评测预算。不得事后因结果不好扩步或搜索。",
+        "proposed_go_gates": "预先冻结组级完整判别指标；相对最强匹配对照组准确率至少+5个百分点，真实全图库mAP@10至少+0.005，两者按来源组件配对95% CI下界>0；无关变化的错误翻转率不恶化。文本单独/遮图/错误来源对照验证使用视觉来源。阈值为拟议研究决策门槛，不是理论保证。",
+        "real_transfer_gate": "外部机制门槛通过后，仅在此前未用于选法的合法独立开发组件做PinPoint真实全图库pilot；同时报告Recall@20/100、oracle和最终mAP，固定reranker以区分召回收益与排序收益。需在PinPoint多图mAP@10较最强匹配对照至少+0.005且配对95% CI下界>0；整体或单图mAP非劣容忍为0.005且CI须支持。组件不足或统计不充分记不确定，不全量。",
+        "stopped_cases": "标签不能成立、普通微调同样有效且无条件响应增益、只在合成组有效、遮图后增益仍保留、真实召回/排序不改善，则停止或修正对应假设。优化尚不充分记不确定，不归为机制被证伪，也不直接扩大。",
+        "prereg_required": "启动前冻结实际样本ID及组件划分、配置、训练自由度、种子、最大步数/总GPU小时、评测预算、CI聚类方式和全部门槛。当前数量和预算是供审阅的草案。"
+      },
+      "sotatarget": "PinPoint多图mAP@10及全体mAP@10/NegRecall@10，首先匹配数据版本和监督口径。论文v1多图0.074仅历史参考；当前官方README与论文部分全体数值不同，尚未解释差异。必须超过同口径复现的近期强方法及8B普通微调，而非只跨旧数值。",
+      "gpu": "physical GPU1 UUID GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f; live occupancy check before launch; no silent fallback",
+      "no_restart": [
+        "P036",
+        "P039/SBB expansion",
+        "original P040 follow-up"
+      ],
+      "created_at": "2026-09-17T17:40:05.864970+08:00"
+    }
+  ]
 }

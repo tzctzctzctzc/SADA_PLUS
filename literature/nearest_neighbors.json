@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-17T08:00:00+00:00",
+  "as_of": "2026-09-17T17:40:05.864970+08:00",
   "status": "Updated for the P001-P038 audit and P039: direct CIR boundaries, multi-image binding, private bridge paths, and causal intervention primitives.",
   "records": [
     {
@@ -269,13 +269,17 @@
     },
     {
       "id": "MERIT_Coral_NeurIPS2025",
-      "url": "https://arxiv.org/html/2506.03144v3",
+      "url": "https://arxiv.org/abs/2506.03144",
       "code": "https://github.com/weichow23/merit",
       "model": "https://huggingface.co/Bia/CORAL",
-      "evidence": "已读§3–4和附录10.3：多来源属性组合检索，Coral以InfoNCE及query→target/target→target视觉和语言重构训练。固定源码证实重构用目标KV、查询EOS播种；推理取末token并归一化。",
-      "overlap": "多条件属性抽取、顺序输入、重构保留细节均已有。拟作为专门训练基线，不将协议修复包装成方法。",
-      "limits": "论文损失符号与源码存在书写口径差别，源码实际使用正MSE并相加最小化，不能据公式符号指控实现。当前尚未运行权重；PinPoint无产品标题，迁移评测不同于MERIT原评测。",
-      "source_manifest": "literature/MERIT_source_manifest.json"
+      "evidence": "多参考检索及Coral训练；官方提供训练/测试产品、attribute字段和查询文件。",
+      "overlap": "多参考可训练检索和额外视觉监督已有工作。",
+      "limits": "产品属性可支持干预组构造是本轮推断；可靠组数量尚未审计。P031预训练Coral结果不等于本轮新训练结论。",
+      "source_manifest": "literature/MERIT_source_manifest.json",
+      "title": "MERIT: Multilingual Semantic Retrieval with Interleaved Multi-Condition Query",
+      "year": 2025,
+      "venue_status": "NeurIPS2025",
+      "checked_at": "2026-09-17T17:40:05.864970+08:00"
     },
     {
       "id": "TRACE_Bench_MM2026",
@@ -385,9 +389,13 @@
       "id": "INTENT_AAAI2026",
       "url": "https://ojs.aaai.org/index.php/AAAI/article/view/39181",
       "code": "https://github.com/iLearn-Lab/AAAI26-INTENT",
-      "evidence": "Read Sections 3.1-3.3 and ablations. INTENT constructs an FFT amplitude-mixed counterfactual reference while preserving phase, enforces CKA consistency between factual and intervened composed features, and combines negative-dominated and correspondence-dominated robust objectives for noisy CIR training.",
-      "overlap": "Counterfactual reference intervention, visual-invariance language, causal framing, and negative-aware CIR objectives are established. A reference perturbation plus causal terminology is not a sufficient novelty delta.",
-      "limits": "INTENT studies single-reference noisy-correspondence training on CIRR/FashionIQ; its FFT intervention is intended to preserve reference semantics, unlike P032's semantically mismatched second reference."
+      "evidence": "通过FFT幅度扰动构造干预视觉并约束不变性，结合噪声辨别训练。",
+      "overlap": "CIR中的干预、不变性与抗干扰已存在。",
+      "limits": "候选增量应针对同一语义属性变化因指令而需要变化/不变，不能宣称首次将因果或反事实引入CIR。",
+      "title": "INTENT: Invariance and Discrimination-aware Noise Mitigation for Robust Composed Image Retrieval",
+      "year": 2026,
+      "venue_status": "AAAI2026",
+      "checked_at": "2026-09-17T17:40:05.864970+08:00"
     },
     {
       "id": "RMCD_WACV2026",
@@ -494,10 +502,14 @@
     },
     {
       "id": "ReBind_arXiv2607.14681",
-      "url": "https://arxiv.org/html/2607.14681",
-      "evidence": "Primary 2026 preprint. ReBind places explicit visual reference tokens directly at their corresponding semantic positions and trains structured instruction plus reference-attribution stages for multi-reference video editing.",
-      "overlap": "Explicit reference-semantic binding is established in an adjacent multi-reference generation/editing task.",
-      "limits": "It is not a retrieval method and does not evaluate candidate ranking, explicit hard negatives, or permutation-equivariant reference-role scoring. SIRC transfers the primitive and adds retrieval-specific paired controls."
+      "url": "https://arxiv.org/abs/2607.14681",
+      "evidence": "多参考视频编辑中以嵌入指令的参考token及两阶段训练学习视觉属性和来源的显式绑定。",
+      "overlap": "跨领域学习来源角色绑定已存在。",
+      "limits": "可借鉴来源指代与训练，但绑定token不是本方案独立创新；编辑有效不保证检索有效。",
+      "title": "ReBind: Multi-Reference Video Editing via Structured Instructions with Explicit Reference Relationships",
+      "year": 2026,
+      "venue_status": "2026-07预印本；未确认会议录用",
+      "checked_at": "2026-09-17T17:40:05.864970+08:00"
     },
     {
       "id": "MultiBind_arXiv2603.21937",
@@ -582,6 +594,52 @@
       "evidence": "Primary ICLR 2026 paper. It changes causal visibility so multimodal tokens can use selected future context, demonstrating that attention-mask structure can repair information-flow limitations.",
       "overlap": "Task-specific causal-mask redesign in multimodal transformers is established.",
       "limits": "It does not create cached source-private evidence anchors or test role binding in multi-reference composed retrieval."
+    },
+    {
+      "id": "C2LIP_CVPR2026",
+      "title": "No Hard Negatives Required: Concept Centric Learning Leads to Compositionality without Degrading Zero-shot Capabilities of Contrastive Models",
+      "year": 2026,
+      "venue_status": "CVPR2026",
+      "url": "https://arxiv.org/abs/2603.25722",
+      "evidence": "概念多正例对齐及训练时跨模态池化，在组合性和原检索能力间做联合改进。",
+      "overlap": "概念级监督或改进组合性不能单独作为创新。",
+      "limits": "不是多来源指令条件的有效/无关干预组监督。",
+      "checked_at": "2026-09-17T17:40:05.864970+08:00"
+    },
+    {
+      "id": "TAPR_MulVec_arXiv2608.25305",
+      "title": "Atomic Edit Factorization for Training-Free Composed Image Retrieval",
+      "year": 2026,
+      "venue_status": "2026-09-04 v2预印本",
+      "url": "https://arxiv.org/html/2608.25305v2",
+      "evidence": "v2为TAPR，v1名MulVec；同一论文。Target/Add/Preserve/Remove分解与全局/局部多向量匹配。",
+      "overlap": "角色分解和局部多向量匹配已有近邻。",
+      "limits": "不能把两个版本作为两篇独立工作；不是本方案的多来源条件响应训练。",
+      "checked_at": "2026-09-17T17:40:05.864970+08:00"
+    },
+    {
+      "id": "Qwen3_VL_Embedding_2026",
+      "title": "Qwen3-VL-Embedding and Qwen3-VL-Reranker: A Unified Framework for State-of-the-Art Multimodal Retrieval and Ranking",
+      "year": 2026,
+      "venue_status": "2026-01技术报告",
+      "url": "https://arxiv.org/abs/2601.04720",
+      "code": "https://github.com/QwenLM/Qwen3-VL-Embedding",
+      "evidence": "官方8B多模态embedding模型及多图输入支持；可作为需要实测的近期强底座和公平普通微调基线。",
+      "overlap": "原生MLLM稠密检索不是创新。",
+      "limits": "尚未在本项目测量8B表现，不可推断已超过MMRet或PinPoint记录。",
+      "checked_at": "2026-09-17T17:40:05.864970+08:00"
+    },
+    {
+      "id": "PinPoint_protocol_recheck_20260917",
+      "title": "PinPoint official protocol recheck",
+      "year": 2026,
+      "venue_status": "CVPR2026",
+      "url": "https://github.com/pinterest/pinpoint-dataset",
+      "paper": "https://arxiv.org/html/2603.04598",
+      "evidence": "本轮核对发现论文v1表3整体MMRet-S1+rerank mAP@10=.290，而当前官方README整体表含GPT5 rerank=.184、BGE-VL S1 rerank=.170；不能默认同一口径。论文表4多图GPT5 Text Premerge+rerank=.074。",
+      "overlap": "评测版本须先对齐。",
+      "limits": "差异原因未查清；不能把历史.074视为已核验当前SOTA，也不能与P030的48题子集直接比较。",
+      "checked_at": "2026-09-17T17:40:05.864970+08:00"
     }
   ]
 }
