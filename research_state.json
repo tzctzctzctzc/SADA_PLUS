@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T03:15:28.806489+00:00",
+  "as_of": "2026-09-17T03:30:55.293375+00:00",
   "goal_status": "active",
-  "phase": "P036 risk-controlled source-veto protocol is frozen before any reserved-image scoring; development image acquisition is next.",
+  "phase": "P036 development scoring is running on physical GPU3; confirmation remains inaccessible.",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -546,7 +546,7 @@
       }
     },
     "P036": {
-      "status": "frozen_not_started",
+      "status": "running",
       "config": "configs/P036_risk_controlled_source_veto.json",
       "config_sha256": "d58a0a0d601335a9b3cd0b5ce98c1241624c1df1d2510207677efab8b0d24be3",
       "runner": "src/run_P036.py",
@@ -568,6 +568,18 @@
         "positive_candidate_veto_rate": "less than or equal to 0.05",
         "explicit_negative_veto_rate_minus_positive_veto_rate": "strictly > 0",
         "meaning": "Eligibility to access confirmation images; not significance, novelty, or SOTA."
+      },
+      "driver_pid": 533041,
+      "child_pid": 533052,
+      "development_manifest": "data/PinPoint/P036_development_image_manifest.json",
+      "development_images_verified": 2450,
+      "actual_gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
+      "protocol_smoke": {
+        "full_vs_last_head_max_error": 0.0,
+        "single_vs_batch_max_error_first_example": 0.125,
+        "joint_image_count": 3,
+        "source_image_count": 2,
+        "source_logits_finite": true
       }
     }
   },
