@@ -1,0 +1,312 @@
+{
+  "complete": true,
+  "evidence_status": "prospective_development_experiment_after_P034",
+  "n_queries": 48,
+  "n_reference_rgb_components": 48,
+  "summaries": {
+    "dual_raw": {
+      "ap@10": 0.0317201278659612,
+      "precision@1": 0.08333333333333333,
+      "precision@10": 0.041666666666666664,
+      "negative_precision@10": 0.09375
+    },
+    "source1": {
+      "ap@10": 0.019396494708994707,
+      "precision@1": 0.0625,
+      "precision@10": 0.03541666666666667,
+      "negative_precision@10": 0.08958333333333335
+    },
+    "source2": {
+      "ap@10": 0.020972222222222225,
+      "precision@1": 0.0625,
+      "precision@10": 0.03333333333333333,
+      "negative_precision@10": 0.07291666666666667
+    },
+    "log_prob_and": {
+      "ap@10": 0.021293816137566136,
+      "precision@1": 0.0625,
+      "precision@10": 0.03333333333333333,
+      "negative_precision@10": 0.07708333333333334
+    },
+    "min_margin": {
+      "ap@10": 0.015079365079365076,
+      "precision@1": 0.0,
+      "precision@10": 0.03125,
+      "negative_precision@10": 0.07916666666666668
+    },
+    "sum_margin": {
+      "ap@10": 0.02399305555555556,
+      "precision@1": 0.10416666666666667,
+      "precision@10": 0.03333333333333333,
+      "negative_precision@10": 0.07708333333333334
+    }
+  },
+  "paired": {
+    "log_prob_and minus dual_raw": {
+      "ap@10": {
+        "difference_pp": -1.0426311728395061,
+        "reference_cluster_95ci_pp": [
+          -2.3009149029982363,
+          -0.006859705687831852
+        ],
+        "query_gains": 3,
+        "query_losses": 8
+      },
+      "precision@1": {
+        "difference_pp": -2.083333333333333,
+        "reference_cluster_95ci_pp": [
+          -10.416666666666668,
+          6.25
+        ],
+        "query_gains": 2,
+        "query_losses": 3
+      },
+      "precision@10": {
+        "difference_pp": -0.8333333333333334,
+        "reference_cluster_95ci_pp": [
+          -1.8750000000000002,
+          0.0
+        ],
+        "query_gains": 0,
+        "query_losses": 3
+      },
+      "negative_precision@10": {
+        "difference_pp": -1.6666666666666667,
+        "reference_cluster_95ci_pp": [
+          -3.125,
+          -0.20833333333333343
+        ],
+        "query_gains": 2,
+        "query_losses": 9
+      }
+    },
+    "min_margin minus dual_raw": {
+      "ap@10": {
+        "difference_pp": -1.6640762786596117,
+        "reference_cluster_95ci_pp": [
+          -2.9182305445326278,
+          -0.6249586640211646
+        ],
+        "query_gains": 1,
+        "query_losses": 10
+      },
+      "precision@1": {
+        "difference_pp": -8.333333333333332,
+        "reference_cluster_95ci_pp": [
+          -16.666666666666664,
+          -2.083333333333333
+        ],
+        "query_gains": 0,
+        "query_losses": 4
+      },
+      "precision@10": {
+        "difference_pp": -1.0416666666666665,
+        "reference_cluster_95ci_pp": [
+          -2.5,
+          0.0
+        ],
+        "query_gains": 0,
+        "query_losses": 3
+      },
+      "negative_precision@10": {
+        "difference_pp": -1.4583333333333333,
+        "reference_cluster_95ci_pp": [
+          -3.5416666666666665,
+          0.41666666666666685
+        ],
+        "query_gains": 5,
+        "query_losses": 11
+      }
+    },
+    "sum_margin minus dual_raw": {
+      "ap@10": {
+        "difference_pp": -0.7727072310405643,
+        "reference_cluster_95ci_pp": [
+          -1.8895847111992943,
+          0.13692956349206312
+        ],
+        "query_gains": 4,
+        "query_losses": 7
+      },
+      "precision@1": {
+        "difference_pp": 2.083333333333333,
+        "reference_cluster_95ci_pp": [
+          -4.166666666666666,
+          10.416666666666668
+        ],
+        "query_gains": 2,
+        "query_losses": 1
+      },
+      "precision@10": {
+        "difference_pp": -0.8333333333333334,
+        "reference_cluster_95ci_pp": [
+          -1.8750000000000002,
+          0.0
+        ],
+        "query_gains": 0,
+        "query_losses": 3
+      },
+      "negative_precision@10": {
+        "difference_pp": -1.6666666666666667,
+        "reference_cluster_95ci_pp": [
+          -3.125,
+          -0.20833333333333343
+        ],
+        "query_gains": 2,
+        "query_losses": 9
+      }
+    },
+    "source1 minus dual_raw": {
+      "ap@10": {
+        "difference_pp": -1.232363315696649,
+        "reference_cluster_95ci_pp": [
+          -2.568506117724868,
+          -0.03014632936507927
+        ],
+        "query_gains": 3,
+        "query_losses": 9
+      },
+      "precision@1": {
+        "difference_pp": -2.083333333333333,
+        "reference_cluster_95ci_pp": [
+          -8.385416666666648,
+          4.166666666666666
+        ],
+        "query_gains": 1,
+        "query_losses": 2
+      },
+      "precision@10": {
+        "difference_pp": -0.6250000000000001,
+        "reference_cluster_95ci_pp": [
+          -1.875,
+          0.41666666666666646
+        ],
+        "query_gains": 1,
+        "query_losses": 3
+      },
+      "negative_precision@10": {
+        "difference_pp": -0.41666666666666674,
+        "reference_cluster_95ci_pp": [
+          -2.291666666666667,
+          1.4583333333333335
+        ],
+        "query_gains": 5,
+        "query_losses": 8
+      }
+    },
+    "source2 minus dual_raw": {
+      "ap@10": {
+        "difference_pp": -1.0747905643738975,
+        "reference_cluster_95ci_pp": [
+          -2.150974151234568,
+          -0.1316964285714284
+        ],
+        "query_gains": 2,
+        "query_losses": 8
+      },
+      "precision@1": {
+        "difference_pp": -2.083333333333333,
+        "reference_cluster_95ci_pp": [
+          -8.333333333333332,
+          4.166666666666666
+        ],
+        "query_gains": 1,
+        "query_losses": 2
+      },
+      "precision@10": {
+        "difference_pp": -0.8333333333333334,
+        "reference_cluster_95ci_pp": [
+          -1.8750000000000002,
+          0.0
+        ],
+        "query_gains": 0,
+        "query_losses": 3
+      },
+      "negative_precision@10": {
+        "difference_pp": -2.083333333333333,
+        "reference_cluster_95ci_pp": [
+          -3.958333333333334,
+          -0.20833333333333312
+        ],
+        "query_gains": 5,
+        "query_losses": 13
+      }
+    }
+  },
+  "mechanism": {
+    "dual_raw": {
+      "n_eligible_queries": 10,
+      "macro_query_auc_positive_vs_explicit_negative": 0.8083333333333332,
+      "reference_cluster_95ci": [
+        0.5925213675213675,
+        0.9666666666666666
+      ]
+    },
+    "source1": {
+      "n_eligible_queries": 10,
+      "macro_query_auc_positive_vs_explicit_negative": 0.6416666666666667,
+      "reference_cluster_95ci": [
+        0.3333333333333333,
+        0.9166666666666667
+      ]
+    },
+    "source2": {
+      "n_eligible_queries": 10,
+      "macro_query_auc_positive_vs_explicit_negative": 0.4958333333333333,
+      "reference_cluster_95ci": [
+        0.2222222222222222,
+        0.7651893939393933
+      ]
+    },
+    "log_prob_and": {
+      "n_eligible_queries": 10,
+      "macro_query_auc_positive_vs_explicit_negative": 0.5333333333333333,
+      "reference_cluster_95ci": [
+        0.2222222222222222,
+        0.8205128205128205
+      ]
+    },
+    "min_margin": {
+      "n_eligible_queries": 10,
+      "macro_query_auc_positive_vs_explicit_negative": 0.5416666666666667,
+      "reference_cluster_95ci": [
+        0.23804563492063494,
+        0.8333333333333333
+      ]
+    },
+    "sum_margin": {
+      "n_eligible_queries": 10,
+      "macro_query_auc_positive_vs_explicit_negative": 0.5583333333333333,
+      "reference_cluster_95ci": [
+        0.2738095238095238,
+        0.8333333333333333
+      ]
+    }
+  },
+  "ties_anywhere_in_top20_scores": {
+    "dual_raw": 48,
+    "source1": 48,
+    "source2": 48,
+    "log_prob_and": 12,
+    "min_margin": 48,
+    "sum_margin": 47
+  },
+  "continuation_gate_evaluation": {
+    "checks": {
+      "and_minus_dual_ap10_gt_0": false,
+      "and_macro_auc_minus_dual_gt_0": false,
+      "and_negative_precision_at10_minus_dual_le_0": true
+    },
+    "all_pass": false,
+    "meaning": "Eligibility to freeze an untouched confirmation and broader baselines; not significance, novelty, or SOTA."
+  },
+  "score_file_sha256": "664bb0e49a01dd95171370fc86d101f7b8d7673d7b3d1c004767edb3753a4d53",
+  "config_sha256": "e95aa343050b730ae0e2dc63cb07e4d50e3cc9753642e958950779222e0231cc",
+  "limits": [
+    "Development experiment on 48 Composition-only queries.",
+    "The VLM is instructed to infer source-specific requirements from tags; no human clause labels are available.",
+    "Conditional independence of source predicates is a scoring approximation, not a factual claim.",
+    "The selected top20 diagnostic is not a full PinPoint or SOTA evaluation.",
+    "The untouched reserved reference components remain unscored."
+  ]
+}

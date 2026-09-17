@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T02:12:21.014842+00:00",
+  "as_of": "2026-09-17T02:51:32.293854+00:00",
   "goal_status": "active",
-  "phase": "P035 source-bound predicate reranking is running on physical GPU3.",
+  "phase": "P035 completed and failed 2 of 3 frozen continuation gates; untouched reserved components remain unscored.",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -14,7 +14,7 @@
     ],
     "submission_year_assumption": 2027
   },
-  "direction": "多参考检索中的来源证据利用：先区分真实第二参考、错配第二参考和单参考，再测试错配参考能否作为负控制校准二分类log-odds。",
+  "direction": "继续寻找可迁移到多参考组合检索、且包含任务特定来源绑定机制的方法；P035的独立来源判别加概率合取实现已淘汰。",
   "known_evidence": [
     "SoFA 使用跨图双向 attention 插值；Delimiter Scaling 加强图像边界，两者报告收益，但实验设置不同，不能直接声称矛盾。",
     "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
@@ -37,7 +37,8 @@
     "P032 failed its locked gate: RCR reduced AP@10 by 0.414 pp and positive-vs-explicit-negative macro AUC was 0.4975. P033 held-out execution is cancelled without image fetching or scoring.",
     "P031 attempt 1 completed all 1104 base3b embeddings, then failed before any Coral embedding because a redundant nested text_config was incompatible with transformers 4.51; a same-weight config adapter passed CPU preflight.",
     "P034 fixed alpha=1 failed: RNCR changed AP@10 by -0.701 pp for Qwen7B and -0.512 pp for Coral; base3b changed by only +0.046 pp.",
-    "The missing-reference source-lift macro AUC was 0.225 for Qwen7B versus 0.553 for Coral, so direct subtraction is not a model-robust source-specific signal."
+    "The missing-reference source-lift macro AUC was 0.225 for Qwen7B versus 0.553 for Coral, so direct subtraction is not a model-robust source-specific signal.",
+    "P035 completed with 1920 unique finite source scores. Fixed probabilistic AND reduced AP@10 by 1.043 pp (95% component CI [-2.301, -0.007]) and macro positive-vs-explicit-negative AUC from 0.808 to 0.533; only explicit-negative precision@10 improved, so 2/3 locked gates failed and held-out execution is forbidden."
   ],
   "hypotheses": [
     {
@@ -501,7 +502,7 @@
       "gate_all_pass": false
     },
     "P035": {
-      "status": "running",
+      "status": "completed",
       "config": "configs/P035_source_bound_predicates.json",
       "config_sha256": "e95aa343050b730ae0e2dc63cb07e4d50e3cc9753642e958950779222e0231cc",
       "runner": "src/run_source_bound_predicates.py",
@@ -528,6 +529,17 @@
           2,
           2
         ]
+      },
+      "exitcode": 0,
+      "n_records": 1920,
+      "score_file": "runs/P035_source_bound_predicates/predictions.jsonl",
+      "score_file_sha256": "664bb0e49a01dd95171370fc86d101f7b8d7673d7b3d1c004767edb3753a4d53",
+      "integrity": "1920 unique keys; source1=960; source2=960; all margins/logits finite",
+      "gate_all_pass": false,
+      "gate_checks": {
+        "and_minus_dual_ap10_gt_0": false,
+        "and_macro_auc_minus_dual_gt_0": false,
+        "and_negative_precision_at10_minus_dual_le_0": true
       }
     }
   },
@@ -537,7 +549,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "本轮读取本地gpu3 heartbeat：ACTIVE，每20分钟；读取research_state并核验真实PID，保持原有监控。"
   },
-  "next": "Run P035 on physical GPU3. Continue only if the fixed probabilistic AND improves AP@10, improves positive-vs-explicit-negative macro AUC, and does not increase explicit-negative precision@10. If it passes, freeze a new untouched confirmation before any reserved image access.",
+  "next": "Do not execute held-out P033. Diagnose P035 only from development artifacts, then survey and freeze a materially different task-specific transfer candidate before any new GPU scoring; no tuning of the failed P035 aggregation on these outcomes.",
   "results": {
     "P001": {
       "n": 4,
@@ -1296,9 +1308,26 @@
       "coral_rncr_minus_dual_ap10_pp": -0.5120459656084656,
       "coral_macro_auc": 0.5526666666666666,
       "decision": "Reject fixed alpha=1 direct score subtraction. This does not reject cross-domain transfer; the transfer needs source-bound predicate construction rather than a raw counterfactual difference."
+    },
+    "P035": {
+      "analysis": "results/P035_source_bound_predicates.json",
+      "n_queries": 48,
+      "n_score_records": 1920,
+      "log_prob_and_ap10": 0.021293816137566136,
+      "dual_raw_ap10": 0.0317201278659612,
+      "and_minus_dual_ap10_pp": -1.0426311728395061,
+      "and_minus_dual_95ci_pp": [
+        -2.3009149029982363,
+        -0.006859705687831852
+      ],
+      "and_macro_auc": 0.5333333333333333,
+      "dual_macro_auc": 0.8083333333333332,
+      "and_minus_dual_negative_precision_at10_pp": -1.6666666666666667,
+      "gate_all_pass": false,
+      "decision": "Reject this source-isolated predicate judging plus fixed probabilistic AND implementation; do not access P033 or any reserved component. This does not reject cross-domain transfer in general."
     }
   },
-  "novelty_status": "Simple contrastive score transfer failed empirically, but cross-domain transfer remains allowed. The next candidate contribution is task-specific: transfer probabilistic predicate decomposition into multi-reference composed retrieval with explicit source binding, source-wise visual judging, and explicit-negative validation. It is not established until development and untouched confirmation succeed.",
+  "novelty_status": "The current SBPR implementation is empirically rejected: isolating source predicates and combining them with a fixed probabilistic AND harmed ranking and positive-vs-explicit-negative discrimination. Cross-domain transfer remains allowed, but this result cannot support a method claim or held-out evaluation.",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
@@ -1321,7 +1350,8 @@
       "P030 completed with integrity checks passing and a non-significant dual-input gain over single input",
       "P032 failed two of three locked gates, so P033 was stopped before any held-out access",
       "P031 failure was localized to versioned config parsing after base3b completion; compatibility adapter passed CPU preflight",
-      "P034 fixed-alpha missing-reference transfer failed ranking and Qwen7B mechanism gates; direct subtraction was rejected without touching held-out data"
+      "P034 fixed-alpha missing-reference transfer failed ranking and Qwen7B mechanism gates; direct subtraction was rejected without touching held-out data",
+      "P035 completed with exit 0 and integrity checks; it failed AP@10 and macro-AUC gates, so held-out execution remains blocked by the preregistered rule."
     ]
   },
   "idea_audits": {
