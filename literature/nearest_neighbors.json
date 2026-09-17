@@ -1,6 +1,6 @@
 {
-  "as_of": "2026-09-17T06:30:41.466379+00:00",
-  "status": "Updated with primary sources for P038: direct CIR boundaries, multi-image order bias, adjacent multi-reference binding, and set-invariance transfer primitives.",
+  "as_of": "2026-09-17T08:00:00+00:00",
+  "status": "Updated for the P001-P038 audit and P039: direct CIR boundaries, multi-image binding, private bridge paths, and causal intervention primitives.",
   "records": [
     {
       "id": "DTS_ICLR2026",
@@ -507,11 +507,11 @@
       "limits": "It requires deterministic generated-subject correspondences and specialist features; it does not diagnose ranking invariance or source-role binding in composed retrieval."
     },
     {
-      "id": "TAPR_arXiv2608.25305v2",
+      "id": "MulVec_arXiv2608.25305",
       "url": "https://arxiv.org/html/2608.25305",
-      "evidence": "Primary 2026 preprint (v2 title Atomic Edit Factorization). TAPR factorizes a single-reference CIR request into Target, Add, Preserve, and Remove atoms, then applies factor-specific global/local matching operators.",
+      "evidence": "Primary 2026 preprint, currently titled MulVec. It factorizes a single-reference CIR request into role-aware Global, Desired, Preserve, and Forbidden evidence and applies global/local multi-vector matching.",
       "overlap": "Constraint factorization, preserve/add/remove roles, local multi-vector evidence, and signed aggregation are directly occupied in CIR.",
-      "limits": "TAPR assumes one visual reference and does not address multiple source identities, joint relabeling invariance, or wrong-source binding controls."
+      "limits": "MulVec assumes one visual reference and does not address multiple source identities, joint relabeling invariance, or wrong-source binding controls."
     },
     {
       "id": "JanossyPooling_ICLR2019",
@@ -537,9 +537,51 @@
     {
       "id": "DreamRenderer_ICCV2025",
       "url": "https://openaccess.thecvf.com/content/ICCV2025/html/Zhou_DreamRenderer_Taming_Multi-Instance_Attribute_Control_in_Large-Scale_Text-to-Image_Models_ICCV_2025_paper.html",
-      "evidence": "Primary ICCV 2025 paper. DreamRenderer restricts cross-instance attention and uses bridge image tokens so each instance text embedding binds to the intended visual attributes.",
+      "evidence": "Primary ICCV 2025 paper. DreamRenderer restricts cross-instance attention and uses bridge image tokens so each instance text embedding binds to the intended visual attributes; its ablations motivate retaining a global path and applying hard binding only in selected layers.",
       "overlap": "Architectural masking for instance-attribute binding is established in text-to-image generation.",
-      "limits": "It requires access to and training of a diffusion generator; SIRC instead tests input-level semantic placement in a frozen retrieval verifier."
+      "limits": "It requires training a diffusion generator and does not score retrieval candidates. P039 transfers the private-bridge primitive into a frozen discriminative VLM while retaining the original joint stream."
+    },
+    {
+      "id": "InstanceDiffusion_CVPR2024",
+      "url": "https://openaccess.thecvf.com/content/CVPR2024/html/Wang_InstanceDiffusion_Instance-level_Control_for_Image_Generation_CVPR_2024_paper.html",
+      "evidence": "Primary CVPR 2024 paper. InstanceDiffusion represents individual instances with localized conditions and uses multi-instance sampling to improve instance-level control.",
+      "overlap": "Instance-private conditioning and multi-instance composition are established in image generation.",
+      "limits": "It does not intervene on frozen VLM hidden states or evaluate multi-reference retrieval and wrong-binding controls."
+    },
+    {
+      "id": "VisualRetrievalHeads_arXiv2608.27417",
+      "url": "https://arxiv.org/abs/2608.27417",
+      "evidence": "Primary 2026 preprint. Causal ablations find that a small fraction of attention heads carries visual-referent retrieval behavior in vision-language models.",
+      "overlap": "Sparse causal localization of visual retrieval behavior is prior art; layer or head selectivity alone is not novel.",
+      "limits": "The work does not study multiple reference-role pairs, source-private bridge states, candidate reranking, or matched wrong bindings."
+    },
+    {
+      "id": "MechanismsObjectLocalization_CVPR2026",
+      "url": "https://openaccess.thecvf.com/content/CVPR2026/html/Schaumloffel_Mechanisms_of_Object_Localization_in_Vision-Language_Models_CVPR_2026_paper.html",
+      "evidence": "Primary CVPR 2026 paper. Causal interventions localize object-grounding behavior to a small set of early-middle and middle-late attention heads.",
+      "overlap": "Causal localization and selective intervention in VLM computation are established.",
+      "limits": "It studies object localization, not source-role binding or composed-image retrieval. P039 uses only coarse layer windows and makes no head-discovery claim."
+    },
+    {
+      "id": "MultimodalCausalTrace_NeurIPS2024",
+      "url": "https://proceedings.neurips.cc/paper_files/paper/2024/hash/0dfe31d6e703e138d46a7d2fced38b7c-Abstract-Conference.html",
+      "evidence": "Primary NeurIPS 2024 paper. Multimodal causal tracing shows that early layers and a compact visual-token subset can mediate factual visual information and supports targeted model editing.",
+      "overlap": "Activation tracing and targeted hidden-state intervention in multimodal models are prior art.",
+      "limits": "It does not construct source-private anchors, preserve an intact joint path, or evaluate retrieval ranking under equivalent and wrong reference-role assignments."
+    },
+    {
+      "id": "VisionLanguageBindingICG_arXiv2605.24624",
+      "url": "https://arxiv.org/abs/2605.24624",
+      "evidence": "Primary 2026 preprint. Activation patching and attention knockout show distinct paths for high-level reference content and identity in in-context image generation.",
+      "overlap": "Causal analysis of reference-image binding paths is established in adjacent multimodal generation.",
+      "limits": "It analyzes generation rather than training-free multi-reference retrieval, and does not introduce source-private role anchors with matched ranking controls."
+    },
+    {
+      "id": "FutureAwareCausalMask_ICLR2026",
+      "url": "https://openreview.net/forum?id=DuDFytFC5Z",
+      "evidence": "Primary ICLR 2026 paper. It changes causal visibility so multimodal tokens can use selected future context, demonstrating that attention-mask structure can repair information-flow limitations.",
+      "overlap": "Task-specific causal-mask redesign in multimodal transformers is established.",
+      "limits": "It does not create cached source-private evidence anchors or test role binding in multi-reference composed retrieval."
     }
   ]
 }

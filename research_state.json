@@ -1,11 +1,11 @@
 {
-  "as_of": "2026-09-17T07:01:32.643615+00:00",
+  "as_of": "2026-09-17T08:00:00+00:00",
   "goal_status": "active",
-  "phase": "P038 bounded SIRC pilot completed on ten observed development queries; one of five frozen gates failed, so no full-scale or held-out execution is authorized.",
+  "phase": "P001-P038 evidence re-audited; P039 Shadow Binding Bridges is frozen as a bounded mechanism screen on the same ten observed development queries. No full-scale or held-out execution is authorized.",
   "scope": {
     "root": "/vepfs/vlms/1",
-    "physical_gpu": 3,
-    "gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
+    "physical_gpu": 1,
+    "gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
     "only_write_inside_root": true,
     "target_venues": [
       "CVPR",
@@ -14,7 +14,7 @@
     ],
     "submission_year_assumption": 2027
   },
-  "direction": "Stop enlarging the current SIRC input-level role-card method. Retain its position-sensitivity reduction and correct-binding signal as diagnostic evidence; next candidate must use a materially different structural binding mechanism and pass a new bounded pilot. All future experiments use physical GPU1 after an occupancy check.",
+  "direction": "Test Shadow Binding Bridges: form source-private role anchors in an isolated shadow path, inject only those high-dimensional anchor states into selected layer windows of the intact joint path, and select a window only with matched wrong-binding evidence. All future experiments use physical GPU1 after an occupancy check.",
   "known_evidence": [
     "SoFA 使用跨图双向 attention 插值；Delimiter Scaling 加强图像边界，两者报告收益，但实验设置不同，不能直接声称矛盾。",
     "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
@@ -750,6 +750,28 @@
       },
       "full_scale_authorized": false,
       "stop_reason": "Primary AP@10 gate failed despite four diagnostic/safety gates passing; enlarging the same method is forbidden by the preregistered pilot policy."
+    },
+    "P039": {
+      "status": "preregistered_not_started",
+      "config": "configs/P039_shadow_binding_bridges.json",
+      "config_sha256": "479a796902a32d5de976aeb6a1478067c4d79792e1c5e4c5fb1bc6fbd7c41e7f",
+      "runner": "src/run_P039.py",
+      "script": "scripts/run_P039.sh",
+      "analysis": "results/P039_shadow_binding_bridges.json",
+      "expected_records": 612,
+      "expected_base_tasks": 102,
+      "n_queries": 10,
+      "n_reference_components": 10,
+      "n_candidate_rows": 34,
+      "conditions": [
+        "correct_ab",
+        "equivalent_ba",
+        "wrong_binding_ba"
+      ],
+      "gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
+      "heldout_accessed": false,
+      "full_scale_authorized": false,
+      "scope": "Mechanism screen only; a pass may select one layer window for a separate component-disjoint P040 pilot."
     }
   },
   "monitor": {
@@ -763,7 +785,7 @@
       "utilization_percent": 0
     }
   },
-  "next": "Do not run P038 at larger scale. Design and preregister a small GPU1 pilot for a materially different structural binding mechanism; keep all confirmation and held-out components untouched until every new gate passes.",
+  "next": "Run only the frozen P039 mechanism screen on physical GPU1 after a live occupancy check. P039 may at most select one layer window for a separate component-disjoint P040 pilot; it cannot authorize full scale or held-out access.",
   "results": {
     "P001": {
       "n": 4,
@@ -1557,7 +1579,7 @@
       "decision": "Stop full-scale SIRC. Keep it as diagnostic evidence that semantic interleaving reduces relabeling sensitivity but does not improve ranking on this pilot."
     }
   },
-  "novelty_status": "P038 provides a possible diagnostic contribution, not a successful retrieval method: semantic role-reference interleaving reduced joint-relabeling sensitivity and exposed a weak correct-binding signal, but AP@10 and score AUC declined. Any next method claim must add a materially different structural binding mechanism and pass a new GPU1 pilot.",
+  "novelty_status": "Candidate, not established: bridge tokens, masked attention, causal activation intervention, and multi-vector evidence are prior art. The potentially new transfer is training-free source-private role-anchor injection into an intact joint multi-reference retrieval forward pass, evaluated with joint-role permutation and matched wrong-binding controls.",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
@@ -1592,7 +1614,9 @@
       "P038 confirmation and all new components remain untouched.",
       "P038 completed 600/600 unique scores with exit 0 and protocol smoke checks passing; no held-out or confirmation data were accessed.",
       "P038 passed four diagnostic/safety gates but failed the primary AP@10 gate: SIRC AB was -1.568pp versus original dual, so full-scale execution is stopped.",
-      "The user changed the resource policy: all future experiments must use physical GPU1 (GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f) after an immediate occupancy check."
+      "The user changed the resource policy: all future experiments must use physical GPU1 (GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f) after an immediate occupancy check.",
+      "P001-P038 were re-audited by mechanism family; prompt/position correction, scalar source fusion, raw subtraction, attention readout, and full-stream isolation repeatedly improved diagnostics without stable ranking gains.",
+      "Six additional primary sources were screened for causal visual paths and private instance binding. P039 freezes Shadow Binding Bridges as a 612-score GPU1 mechanism screen with four narrow layer windows, a soft baseline, an all-layer control, and five all-required gates."
     ]
   },
   "idea_audits": {
@@ -1627,6 +1651,24 @@
       ],
       "decision_rule": "Do not execute unless all locked P032 directional gates pass; after execution, the primary replication interval must exclude zero and the mechanism intervals must pass before secondary scores are interpreted.",
       "recommendation": "keep only as a gated confirmation/diagnostic protocol; novelty is not established"
+    },
+    "P039_quick": {
+      "mode": "quick",
+      "target": "CVPR/ICML/ACL main track",
+      "current_conference_readiness": "low",
+      "development_potential": "medium_if_P039_mechanism_and_P040_prospective_gates_pass",
+      "strongest_point": "The method preserves the useful joint stream while adding a narrow source-private high-dimensional path, directly combining the two strongest failure lessons from P014 and P035.",
+      "top_rejection_risks": [
+        "Bridge tokens, attention masking, and activation intervention are individually prior art; only the task-specific combination and evidence can support novelty.",
+        "P039 reuses ten observed development queries and cannot support an effectiveness claim.",
+        "A layer-window gain could be prompt-specific or model-specific unless it survives a frozen component-disjoint P040 pilot and later independent models."
+      ],
+      "score_change_conditions": [
+        "A narrow layer window must pass all frozen P039 binding, score-preservation, and order-equivalence gates while beating the all-layer control.",
+        "The selected window must then pass a separately frozen component-disjoint P040 pilot without retuning.",
+        "A later paper claim requires full-corpus retrieval, uncertainty by reference component, and at least one independently trained model family."
+      ],
+      "recommendation": "Run P039 only as a kill-gated mechanism screen; do not call the idea novel or effective unless later prospective evidence survives."
     }
   }
 }
