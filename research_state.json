@@ -143,6 +143,14 @@
         "A noisy interval crossing the preregistered gate is inconclusive and does not authorize full scale; it is not proof that the topic is false"
       ],
       "current_learned_binding_status": "Plausible training hypothesis; valid swap labels, benefit beyond ordinary hard-negative training, and real-retrieval transfer are not established. No new training launched."
+    },
+    "literature_priority": {
+      "preferred_years": [
+        2025,
+        2026
+      ],
+      "policy": "Prioritize recent primary papers and official implementations addressing similar mechanisms, including cross-domain work; earlier foundational sources remain eligible. Verify venue/status and novelty; recent year alone is not evidence of innovation.",
+      "cross_domain_transfer": "Identify mechanism correspondence, assumptions, task-specific adaptation, and a direct-transfer comparison. First-in-field claims require explicit literature verification."
     }
   },
   "jobs": {
@@ -839,7 +847,10 @@
       "memory_used_mib": 5455,
       "memory_total_mib": 81920,
       "utilization_percent": 0
-    }
+    },
+    "automation_id": "gpu3",
+    "automation_display_name": "GPU1 独立研究进展",
+    "rules_first": "Read /vepfs/vlms/1/研究规则.md before continuing; the automation was updated to GPU1 and evidence-first/pilot-first execution on 2026-09-17."
   },
   "next": "First audit the learned source-role training idea against prior failures, swapped-label validity, fixed-candidate oracle and matched ordinary-training baselines; preregister a bounded falsification package before any new GPU1 training. Do not restart P036 or enlarge SBB; keep confirmation and held-out components untouched.",
   "results": {
@@ -1737,5 +1748,6 @@
       ],
       "recommendation": "Run P039 only as a kill-gated mechanism screen; do not call the idea novel or effective unless later prospective evidence survives."
     }
-  }
+  },
+  "research_rules_file": "研究规则.md"
 }
