@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T05:01:19.883655+00:00",
+  "as_of": "2026-09-17T06:01:16.093719+00:00",
   "goal_status": "active",
-  "phase": "P036 stopped at user request; P037 small pilot is running on physical GPU3.",
+  "phase": "P037 pilot completed and failed its continuation gate; no full-scale follow-up is authorized.",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -14,7 +14,7 @@
     ],
     "submission_year_assumption": 2027
   },
-  "direction": "Test source-role binding with matched reference interventions that preserve image count, image order, layout, and prompt length; use P036 as a risk-veto diagnostic and P037 as a distinct source-interventional diagnostic.",
+  "direction": "Do not enlarge PCSI. The pilot indicates strong position/index sensitivity and no reliable source-binding contrast. The topic remains open only through a materially different, pilot-first mechanism or a diagnostic benchmark claim.",
   "known_evidence": [
     "SoFA 使用跨图双向 attention 插值；Delimiter Scaling 加强图像边界，两者报告收益，但实验设置不同，不能直接声称矛盾。",
     "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
@@ -625,7 +625,7 @@
       "stop_reason": "User requires a pilot gate before every full-scale experiment."
     },
     "P037": {
-      "status": "running_pilot",
+      "status": "completed_pilot_gate_failed",
       "config": "configs/P037_position_controlled_source_intervention.json",
       "config_sha256": "0419a7ded240fc3635e3061004170a458aabe2f59c00926454af3763cfe60164",
       "runner": "src/run_P037.py",
@@ -653,7 +653,7 @@
       "driver_pid": 540432,
       "lock_wait_pid": 540434,
       "preregister_commit": "bc3c6ac",
-      "score_records": 16,
+      "score_records": 1920,
       "analysis_metric_fix_commit": "cc27ed2",
       "child_pid": 540573,
       "actual_gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
@@ -664,7 +664,29 @@
         "matched_image_grids_equal": true,
         "matched_input_tokens_equal": true,
         "matched_logits_finite": true
-      }
+      },
+      "exitcode": 0,
+      "result_accessed": true,
+      "gate_all_pass": false,
+      "gate_checks": {
+        "positive_candidate_mean_binding_contrast_gt_0": false,
+        "binding_contrast_macro_auc_gt_0_5": false,
+        "pcsi_minus_original_ap10_gt_0": false,
+        "pcsi_minus_original_negative_precision_at10_le_0": true
+      },
+      "key_result": {
+        "original_dual_ap10": 0.0317201278659612,
+        "pcsi_ap10": 0.03072089947089947,
+        "pcsi_minus_original_ap10_pp": -0.0999228395061728,
+        "pcsi_minus_original_negative_precision_at10_pp": -0.4166666666666667,
+        "positive_mean_binding_contrast": -0.03571428571428571,
+        "positive_correct_binding_win_rate": 0.3333333333333333,
+        "binding_contrast_micro_auc": 0.4936974789915966,
+        "binding_contrast_macro_auc": 0.4625,
+        "equivalent_reindexed_ap10": 0.028939318783068785
+      },
+      "full_scale_authorized": false,
+      "stop_reason": "Three of four frozen pilot gates failed; source-interventional contrast did not separate positive candidates or improve AP@10."
     }
   },
   "monitor": {
@@ -673,7 +695,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "本轮读取本地gpu3 heartbeat：ACTIVE，每20分钟；读取research_state并核验真实PID，保持原有监控。"
   },
-  "next": "Complete the 48-query P037 pilot. Run no full-scale source-interventional experiment unless all four frozen P037 gates pass; apply the same pilot-first rule to every later experiment.",
+  "next": "Do not run P036 continuation or any PCSI full scale. If continuing the topic, first design a new bounded pilot that explicitly controls position/index effects and has a different mechanism; require the same pilot-before-full gate.",
   "results": {
     "P001": {
       "n": 4,
@@ -1451,7 +1473,7 @@
       "decision": "Reject this source-isolated predicate judging plus fixed probabilistic AND implementation; do not access P033 or any reserved component. This does not reject cross-domain transfer in general."
     }
   },
-  "novelty_status": "Novelty is not established. Generic MLLM reranking, constraint verification, counterfactual reference perturbation, calibration, and risk control are occupied. The strongest remaining candidate is a matched source-role intervention for multi-reference CIR: equivalent reindexing and wrong binding use identical images, order, layout, and prompt length. P037 is only an exploratory probe on observed P030 data.",
+  "novelty_status": "PCSI source-role contrast is not supported on the observed P030 pilot: the positive contrast mean is negative, contrast AUC is near chance, and the fused score loses AP@10. The useful finding is diagnostic—reindexing alone changes ranking substantially—while generic position-bias correction is already crowded. No full-scale claim is justified.",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
@@ -1479,7 +1501,8 @@
       "P036 froze a materially different joint-preserving source-veto protocol and a 27-component development/27-component untouched confirmation split before reserved model scores.",
       "P037 froze a position-controlled source intervention before new scores: equivalent reindexing and wrong binding share identical images/order/layout/length; 48 observed P030 queries, 1920 new scores, four directional gates, no held-out access.",
       "P036/P037 analysis AP cutoff corrected from 100 to 10 before either analysis ran and before any P037 score; this aligns code with the frozen AP@10 gate.",
-      "P036 was terminated at 2592/13980 records with exit 143 before analysis; confirmation stayed untouched. A mandatory preregistered pilot-before-full policy was added, and P037 began as the first compliant pilot."
+      "P036 was terminated at 2592/13980 records with exit 143 before analysis; confirmation stayed untouched. A mandatory preregistered pilot-before-full policy was added, and P037 began as the first compliant pilot.",
+      "P037 pilot completed 1920 unique finite scores and failed 3/4 frozen gates: PCSI AP@10 -0.100pp, positive binding contrast mean -0.0357, contrast macro AUC 0.4625; explicit-negative precision improved -0.417pp. Full-scale PCSI is stopped."
     ]
   },
   "idea_audits": {
