@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-17T00:17:51.016786+00:00",
+  "as_of": "2026-09-17T00:18:54.388764+00:00",
   "status": "Novelty not established. CoCI/VCD cover contrast-image decoding, WISER covers verifier-driven adaptive fusion/refinement, and ReCALL covers generative-versus-retrieval capability degradation and corrective training.",
   "records": [
     {
@@ -364,6 +364,22 @@
       "evidence": "Read Sections 3.1-3.3 and the primary tables. WISER uses text and image proxy retrieval, then a binary VLM yes/no verifier, branch confidence thresholds, candidate-level confidence fusion, and structured iterative refinement for uncertain queries.",
       "overlap": "Generic VLM verifier scoring, uncertainty-triggered reranking, adaptive fusion, and structured self-reflection are direct prior art. P032 must be distinguished by identifiable multi-reference controls and held-out evidence rather than by calibration or a verifier alone.",
       "limits": "WISER is training-free single-reference CIR on CIRCO/CIRR/FashionIQ; it does not test PinPoint multi-reference source controls."
+    },
+    {
+      "id": "TIIR_ACL2025",
+      "url": "https://aclanthology.org/2025.acl-long.214/",
+      "code": "https://github.com/vec-ai/wikiHow-TIIR",
+      "evidence": "Primary ACL paper abstract and task framing read. TIIR defines retrieval where both queries and documents are interleaved text-image sequences, adapts off-the-shelf retrievers, and proposes a Matryoshka Multimodal Embedder that compresses visual tokens at several granularities.",
+      "overlap": "Generic dense retrieval over multiple interleaved images and text, and efficient multi-image token compression, are established. A multi-reference embedding alone is not novel.",
+      "limits": "TIIR uses wikiHow interleaved tutorials and does not study PinPoint source-specific reference semantics or explicit hard negatives."
+    },
+    {
+      "id": "CoPE_ACL2025",
+      "url": "https://aclanthology.org/2025.acl-long.61/",
+      "code": "https://github.com/tanghme0w/ACL25-CoPE",
+      "evidence": "Primary ACL paper framing read. CoPE represents composed queries and targets as Gaussian distributions and trains hierarchical objectives for instance-level and feature-level quality/semantic uncertainty.",
+      "overlap": "Generic uncertainty modeling for CIR is established; uncertainty estimates or adaptive confidence weighting alone are insufficient novelty.",
+      "limits": "Single-reference mainstream CIR benchmarks; no multi-reference source-control study."
     }
   ]
 }
