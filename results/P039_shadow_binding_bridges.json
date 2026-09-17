@@ -1,0 +1,110 @@
+{
+  "complete": true,
+  "evidence_status": "prospective_bounded_mechanism_screen_on_observed_P038_development_queries",
+  "n_queries": 10,
+  "n_reference_components": 10,
+  "n_candidate_rows": 34,
+  "per_intervention": {
+    "soft": {
+      "correct_condition_score_macro_auc": 0.6833333333333333,
+      "binding_contrast_macro_auc": 0.6583333333333333,
+      "positive_correct_minus_wrong_binding_mean": -0.1527777777777778,
+      "positive_correct_binding_win_rate": 0.3333333333333333,
+      "explicit_negative_correct_minus_wrong_binding_mean": -0.484375,
+      "equivalent_order_mean_absolute_margin_gap": 1.099264705882353,
+      "n_query_aucs": 10
+    },
+    "bridge_layers_01_07": {
+      "correct_condition_score_macro_auc": 0.6666666666666667,
+      "binding_contrast_macro_auc": 0.6725,
+      "positive_correct_minus_wrong_binding_mean": -0.1111111111111111,
+      "positive_correct_binding_win_rate": 0.4444444444444444,
+      "explicit_negative_correct_minus_wrong_binding_mean": -0.5546875,
+      "equivalent_order_mean_absolute_margin_gap": 1.0772058823529411,
+      "n_query_aucs": 10
+    },
+    "bridge_layers_08_14": {
+      "correct_condition_score_macro_auc": 0.7000000000000001,
+      "binding_contrast_macro_auc": 0.605,
+      "positive_correct_minus_wrong_binding_mean": -0.1527777777777778,
+      "positive_correct_binding_win_rate": 0.3333333333333333,
+      "explicit_negative_correct_minus_wrong_binding_mean": -0.421875,
+      "equivalent_order_mean_absolute_margin_gap": 1.0441176470588236,
+      "n_query_aucs": 10
+    },
+    "bridge_layers_15_21": {
+      "correct_condition_score_macro_auc": 0.6916666666666667,
+      "binding_contrast_macro_auc": 0.6516666666666666,
+      "positive_correct_minus_wrong_binding_mean": -0.0625,
+      "positive_correct_binding_win_rate": 0.3333333333333333,
+      "explicit_negative_correct_minus_wrong_binding_mean": -0.5234375,
+      "equivalent_order_mean_absolute_margin_gap": 1.099264705882353,
+      "n_query_aucs": 10
+    },
+    "bridge_layers_22_28": {
+      "correct_condition_score_macro_auc": 0.6833333333333333,
+      "binding_contrast_macro_auc": 0.6983333333333334,
+      "positive_correct_minus_wrong_binding_mean": -0.11805555555555555,
+      "positive_correct_binding_win_rate": 0.3888888888888889,
+      "explicit_negative_correct_minus_wrong_binding_mean": -0.4921875,
+      "equivalent_order_mean_absolute_margin_gap": 1.1176470588235294,
+      "n_query_aucs": 10
+    },
+    "bridge_all_layers": {
+      "correct_condition_score_macro_auc": 0.6916666666666667,
+      "binding_contrast_macro_auc": 0.7016666666666667,
+      "positive_correct_minus_wrong_binding_mean": -0.125,
+      "positive_correct_binding_win_rate": 0.3888888888888889,
+      "explicit_negative_correct_minus_wrong_binding_mean": -0.546875,
+      "equivalent_order_mean_absolute_margin_gap": 1.0220588235294117,
+      "n_query_aucs": 10
+    }
+  },
+  "selection": {
+    "eligible_windows": [],
+    "selected_window": null,
+    "provisional_best_before_all_layer_control": null,
+    "all_layer_control_pass": false,
+    "all_pass": false,
+    "gate_checks": {
+      "bridge_layers_01_07": {
+        "positive_binding_mean_gt_soft": true,
+        "binding_macro_auc_gt_0_55": true,
+        "binding_macro_auc_at_least_soft_plus_0_05": false,
+        "correct_score_macro_auc_within_0_02_of_soft": true,
+        "equivalent_order_gap_lt_soft": true
+      },
+      "bridge_layers_08_14": {
+        "positive_binding_mean_gt_soft": false,
+        "binding_macro_auc_gt_0_55": true,
+        "binding_macro_auc_at_least_soft_plus_0_05": false,
+        "correct_score_macro_auc_within_0_02_of_soft": true,
+        "equivalent_order_gap_lt_soft": true
+      },
+      "bridge_layers_15_21": {
+        "positive_binding_mean_gt_soft": true,
+        "binding_macro_auc_gt_0_55": true,
+        "binding_macro_auc_at_least_soft_plus_0_05": false,
+        "correct_score_macro_auc_within_0_02_of_soft": true,
+        "equivalent_order_gap_lt_soft": false
+      },
+      "bridge_layers_22_28": {
+        "positive_binding_mean_gt_soft": true,
+        "binding_macro_auc_gt_0_55": true,
+        "binding_macro_auc_at_least_soft_plus_0_05": false,
+        "correct_score_macro_auc_within_0_02_of_soft": true,
+        "equivalent_order_gap_lt_soft": false
+      }
+    },
+    "meaning": "Eligibility to design P040 on frozen, component-disjoint observed data; no full-scale or held-out access."
+  },
+  "score_file_sha256": "b0d6d11e44690581e75e5cb9eccc4e78fdaa8e29c19a508b0cf9ed3917edba3e",
+  "config_sha256": "479a796902a32d5de976aeb6a1478067c4d79792e1c5e4c5fb1bc6fbd7c41e7f",
+  "limits": [
+    "The same ten observed development queries used by P038 are reused for a mechanism screen.",
+    "Only 18 positives and 16 explicit negatives are scored; uncertainty is high and no confirmatory claim is allowed.",
+    "Layer windows are coarse and chosen only by the frozen rule.",
+    "No reserved or held-out component may be accessed in P039.",
+    "Any later full-scale run requires a separate prospective pilot whose frozen gates all pass."
+  ]
+}
