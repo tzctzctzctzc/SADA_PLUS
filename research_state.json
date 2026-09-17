@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T01:59:53.531383+00:00",
+  "as_of": "2026-09-17T02:04:36.788379+00:00",
   "goal_status": "active",
-  "phase": "P031 completed; P034 fixed-alpha reference-necessity transfer is frozen for offline development analysis; no held-out access.",
+  "phase": "P034 rejected simple missing-reference score subtraction; designing source-bound predicate decomposition for multi-reference retrieval.",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -35,7 +35,9 @@
     "ARS-MMT (CMES 2026) already contrasts zeroed and batch-shuffled visual features to separate modality presence from image-specific content; reference shuffling is a control, not standalone novelty.",
     "P030 completed with 3840 unique finite scores. Labelled dual improved AP@10 over labelled single by 0.662 pp, but the 95% component interval crossed zero; dual was 0.117 pp below sham.",
     "P032 failed its locked gate: RCR reduced AP@10 by 0.414 pp and positive-vs-explicit-negative macro AUC was 0.4975. P033 held-out execution is cancelled without image fetching or scoring.",
-    "P031 attempt 1 completed all 1104 base3b embeddings, then failed before any Coral embedding because a redundant nested text_config was incompatible with transformers 4.51; a same-weight config adapter passed CPU preflight."
+    "P031 attempt 1 completed all 1104 base3b embeddings, then failed before any Coral embedding because a redundant nested text_config was incompatible with transformers 4.51; a same-weight config adapter passed CPU preflight.",
+    "P034 fixed alpha=1 failed: RNCR changed AP@10 by -0.701 pp for Qwen7B and -0.512 pp for Coral; base3b changed by only +0.046 pp.",
+    "The missing-reference source-lift macro AUC was 0.225 for Qwen7B versus 0.553 for Coral, so direct subtraction is not a model-robust source-specific signal."
   ],
   "hypotheses": [
     {
@@ -484,7 +486,7 @@
       "stop_reason": "P032 failed 2 of 3 preregistered directional checks."
     },
     "P034": {
-      "status": "protocol_frozen_before_analysis",
+      "status": "completed",
       "config": "configs/P034_reference_necessity.json",
       "uses_gpu": false,
       "heldout_access": false,
@@ -493,7 +495,10 @@
         "qwen2.5_vl_7b_pointwise",
         "qwen2.5_vl_3b_embedding",
         "coral_3b_embedding"
-      ]
+      ],
+      "exitcode": 0,
+      "analysis": "results/P034_reference_necessity.json",
+      "gate_all_pass": false
     }
   },
   "monitor": {
@@ -502,7 +507,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "本轮读取本地gpu3 heartbeat：ACTIVE，每20分钟；读取research_state并核验真实PID，保持原有监控。"
   },
-  "next": "Run the fixed-alpha P034 offline analysis across Qwen7B pointwise, base3B embedding, and Coral embedding scores. If the Qwen7B and Coral ranking/mechanism gates pass, freeze a new held-out protocol based on the untouched P033 component selection; otherwise reject this specific missing-reference transfer, not cross-domain transfer as a general strategy.",
+  "next": "Design a source-bound predicate reranker on the 48-query development cohort: score the candidate separately against requirements attributed to img1 and img2, then use a fixed probabilistic AND aggregation. Compare against direct dual scoring and validate each predicate with explicit negatives. Preserve the untouched reserved components.",
   "results": {
     "P001": {
       "n": 4,
@@ -1250,9 +1255,20 @@
       "coral_dual_minus_sham_ap10_pp": -0.3407738095238096,
       "coral_dual_minus_text_only_ap10_pp": -0.23437500000000017,
       "interpretation": "Coral improves over its base model descriptively, but neither model shows stable second-reference use on this pilot; Coral dual is no better than single and trails sham/text-only."
+    },
+    "P034": {
+      "analysis": "results/P034_reference_necessity.json",
+      "gate_all_pass": false,
+      "qwen7b_rncr_minus_dual_ap10_pp": -0.7011957671957673,
+      "qwen7b_macro_auc": 0.22483333333333336,
+      "base3b_rncr_minus_dual_ap10_pp": 0.04643783068783075,
+      "base3b_macro_auc": 0.558,
+      "coral_rncr_minus_dual_ap10_pp": -0.5120459656084656,
+      "coral_macro_auc": 0.5526666666666666,
+      "decision": "Reject fixed alpha=1 direct score subtraction. This does not reject cross-domain transfer; the transfer needs source-bound predicate construction rather than a raw counterfactual difference."
     }
   },
-  "novelty_status": "P032 negative-control calibration is empirically rejected on its frozen development cohort and must not proceed to held-out P033. No novelty or SOTA claim exists. P031 remains a baseline transfer measurement; the overall research goal stays active and needs a new direction after P031.",
+  "novelty_status": "Simple contrastive score transfer failed empirically, but cross-domain transfer remains allowed. The next candidate contribution is task-specific: transfer probabilistic predicate decomposition into multi-reference composed retrieval with explicit source binding, source-wise visual judging, and explicit-negative validation. It is not established until development and untouched confirmation succeed.",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
@@ -1274,7 +1290,8 @@
       "ARS-MMT added as a direct boundary for shuffled-visual specificity controls",
       "P030 completed with integrity checks passing and a non-significant dual-input gain over single input",
       "P032 failed two of three locked gates, so P033 was stopped before any held-out access",
-      "P031 failure was localized to versioned config parsing after base3b completion; compatibility adapter passed CPU preflight"
+      "P031 failure was localized to versioned config parsing after base3b completion; compatibility adapter passed CPU preflight",
+      "P034 fixed-alpha missing-reference transfer failed ranking and Qwen7B mechanism gates; direct subtraction was rejected without touching held-out data"
     ]
   },
   "idea_audits": {
