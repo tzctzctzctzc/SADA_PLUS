@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-17T00:19:57.892005+00:00",
+  "as_of": "2026-09-17T03:08:32.299858+00:00",
   "status": "Novelty not established. CoCI/VCD cover contrast-image decoding, WISER covers verifier-driven adaptive fusion/refinement, and ReCALL covers generative-versus-retrieval capability degradation and corrective training.",
   "records": [
     {
@@ -412,6 +412,41 @@
       "evidence": "The primary 2026 article reports both zeroed and batch-shuffled visual-feature controls: zeroing reduced BLEU by 0.81 while shuffling changed BLEU by +0.01, which the authors use to distinguish modality presence from image-specific content.",
       "overlap": "Shuffled visual inputs as a direct test of content-specific use are established outside retrieval. P033 reference shuffling is a necessary specificity control, not a standalone methodological novelty.",
       "limits": "The task is multimodal machine translation with learned visual features, not multi-reference composed image retrieval or explicit-negative reranking."
+    },
+    {
+      "id": "ConstraintVerification_Algorithms2026",
+      "url": "https://doi.org/10.3390/a19060462",
+      "evidence": "Read the primary article method and results. It parses free-form single-reference fashion CIR modifications into schema-bound absolute and relative atomic constraints, verifies them with Qwen2.5-VL against candidates (and the reference for relative operators), and reranks a top candidate pool.",
+      "overlap": "Explicit logical constraint extraction, VLM verification, and post-retrieval penalty are direct CIR prior art. A verifier or conjunction alone is not novel.",
+      "limits": "Single-reference FashionIQ/DeepFashion with a fashion-specific schema; it does not bind separate requirements to multiple reference images, control positive-veto risk, or evaluate PinPoint explicit negatives."
+    },
+    {
+      "id": "CalibratedInteraction_arXiv2605.24634",
+      "url": "https://arxiv.org/abs/2605.24634",
+      "evidence": "Read the primary paper framing and method. It wraps a single-reference CIR retriever in a conformal candidate-set layer, uses set size as ambiguity, and asks an expected-information-gain clarification question when ambiguity is high.",
+      "overlap": "Conformal calibration and coverage claims in CIR are occupied; P036 cannot claim novelty from adding a conformal threshold or calibrated candidate set.",
+      "limits": "The method targets ambiguity and interactive clarification on CIRR/CIRCO, not source-specific failure constraints in multi-reference queries or explicit-negative reranking."
+    },
+    {
+      "id": "RUNC_NeurIPS2025",
+      "url": "https://proceedings.neurips.cc/paper_files/paper/2025/hash/9f17cfd0f88dd03065ede133a6ea0f4b-Abstract-Conference.html",
+      "evidence": "Read the official NeurIPS abstract. RUNC explicitly models aleatoric and epistemic uncertainty and calibrates imbalanced semantic distributions for composed image retrieval.",
+      "overlap": "Generic uncertainty calibration for CIR is established; calibration language or confidence weighting alone is insufficient novelty.",
+      "limits": "The official abstract does not establish source-bound multi-reference vetoing or PinPoint explicit-negative controls."
+    },
+    {
+      "id": "Any2Any_arXiv2411.10513",
+      "url": "https://arxiv.org/abs/2411.10513",
+      "evidence": "Read Sections 4-6 of the primary paper. Any2Any maps heterogeneous pairwise cross-modal similarities to conformal probabilities and applies a second calibration stage to fuse incomplete modality evidence for retrieval.",
+      "overlap": "Conformal normalization and fusion of multiple multimodal similarity sources are established outside CIR.",
+      "limits": "It retrieves matching instances under missing modalities; it does not preserve a joint multi-reference composed-query expert while selectively vetoing source violations."
+    },
+    {
+      "id": "ConformalRiskControl_ICLR2024",
+      "url": "https://openreview.net/forum?id=33XGfHLtZg",
+      "evidence": "Read the primary method statement. Conformal Risk Control extends split conformal calibration to bounded monotone losses and selects a threshold to control expected risk.",
+      "overlap": "This is the cross-domain origin for risk-controlled source vetoing, not a novel contribution by itself.",
+      "limits": "P036 has only 21 dependent candidate-level calibration positives, so it explicitly avoids a formal distribution-free guarantee and treats the threshold as risk-inspired calibration."
     }
   ]
 }

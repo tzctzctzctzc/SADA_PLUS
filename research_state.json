@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T02:51:32.293854+00:00",
+  "as_of": "2026-09-17T03:15:28.806489+00:00",
   "goal_status": "active",
-  "phase": "P035 completed and failed 2 of 3 frozen continuation gates; untouched reserved components remain unscored.",
+  "phase": "P036 risk-controlled source-veto protocol is frozen before any reserved-image scoring; development image acquisition is next.",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -14,7 +14,7 @@
     ],
     "submission_year_assumption": 2027
   },
-  "direction": "继续寻找可迁移到多参考组合检索、且包含任务特定来源绑定机制的方法；P035的独立来源判别加概率合取实现已淘汰。",
+  "direction": "Preserve joint multi-reference interaction ranking and use calibrated source scores only to veto extreme violations; confirmation remains untouched until all development gates pass.",
   "known_evidence": [
     "SoFA 使用跨图双向 attention 插值；Delimiter Scaling 加强图像边界，两者报告收益，但实验设置不同，不能直接声称矛盾。",
     "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
@@ -38,7 +38,10 @@
     "P031 attempt 1 completed all 1104 base3b embeddings, then failed before any Coral embedding because a redundant nested text_config was incompatible with transformers 4.51; a same-weight config adapter passed CPU preflight.",
     "P034 fixed alpha=1 failed: RNCR changed AP@10 by -0.701 pp for Qwen7B and -0.512 pp for Coral; base3b changed by only +0.046 pp.",
     "The missing-reference source-lift macro AUC was 0.225 for Qwen7B versus 0.553 for Coral, so direct subtraction is not a model-robust source-specific signal.",
-    "P035 completed with 1920 unique finite source scores. Fixed probabilistic AND reduced AP@10 by 1.043 pp (95% component CI [-2.301, -0.007]) and macro positive-vs-explicit-negative AUC from 0.808 to 0.533; only explicit-negative precision@10 improved, so 2/3 locked gates failed and held-out execution is forbidden."
+    "P035 completed with 1920 unique finite source scores. Fixed probabilistic AND reduced AP@10 by 1.043 pp (95% component CI [-2.301, -0.007]) and macro positive-vs-explicit-negative AUC from 0.808 to 0.533; only explicit-negative precision@10 improved, so 2/3 locked gates failed and held-out execution is forbidden.",
+    "Direct 2026 prior art already uses LLM-parsed absolute/relative constraints and Qwen2.5-VL verification to rerank single-reference fashion CIR; explicit constraint verification alone is occupied.",
+    "Conformal candidate sets and uncertainty calibration already exist in single-reference CIR, while Any2Any calibrates heterogeneous multimodal retrieval scores; P036 therefore limits its candidate delta to source-bound multi-reference vetoing with joint-order preservation and explicit-negative evaluation.",
+    "Expanding all clean reserved-component rows yields 518 queries, 262 positive and 518 explicit-negative top20 candidate instances; a metadata-only staged split balances 16 positive-bearing components across development and confirmation."
   ],
   "hypotheses": [
     {
@@ -541,6 +544,31 @@
         "and_macro_auc_minus_dual_gt_0": false,
         "and_negative_precision_at10_minus_dual_le_0": true
       }
+    },
+    "P036": {
+      "status": "frozen_not_started",
+      "config": "configs/P036_risk_controlled_source_veto.json",
+      "config_sha256": "d58a0a0d601335a9b3cd0b5ce98c1241624c1df1d2510207677efab8b0d24be3",
+      "runner": "src/run_P036.py",
+      "development_driver": "scripts/run_P036_development.sh",
+      "development_expected_records": 13980,
+      "development_queries": 233,
+      "development_components": 27,
+      "development_new_model_scores_seen": false,
+      "confirmation_expected_records": 17100,
+      "confirmation_queries": 285,
+      "confirmation_components": 27,
+      "confirmation_image_access": false,
+      "threshold": -3.875,
+      "gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
+      "development_gate": {
+        "all_required": true,
+        "rsv_minus_joint_ap10": "strictly > 0",
+        "rsv_minus_joint_explicit_negative_precision_at10": "less than or equal to 0",
+        "positive_candidate_veto_rate": "less than or equal to 0.05",
+        "explicit_negative_veto_rate_minus_positive_veto_rate": "strictly > 0",
+        "meaning": "Eligibility to access confirmation images; not significance, novelty, or SOTA."
+      }
     }
   },
   "monitor": {
@@ -549,7 +577,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "本轮读取本地gpu3 heartbeat：ACTIVE，每20分钟；读取research_state并核验真实PID，保持原有监控。"
   },
-  "next": "Do not execute held-out P033. Diagnose P035 only from development artifacts, then survey and freeze a materially different task-specific transfer candidate before any new GPU scoring; no tuning of the failed P035 aggregation on these outcomes.",
+  "next": "Acquire only P036 development images, then score labelled_dual/source1/source2 on physical GPU3. Do not access confirmation images unless every frozen development gate passes.",
   "results": {
     "P001": {
       "n": 4,
@@ -1327,7 +1355,7 @@
       "decision": "Reject this source-isolated predicate judging plus fixed probabilistic AND implementation; do not access P033 or any reserved component. This does not reject cross-domain transfer in general."
     }
   },
-  "novelty_status": "The current SBPR implementation is empirically rejected: isolating source predicates and combining them with a fixed probabilistic AND harmed ranking and positive-vs-explicit-negative discrimination. Cross-domain transfer remains allowed, but this result cannot support a method claim or held-out evaluation.",
+  "novelty_status": "Constraint verification and conformal calibration are direct prior art in CIR. P036 is a narrower candidate transfer: source-bound multi-reference vetoing that preserves the joint interaction ranking, calibrates only extreme source failures, and tests explicit negatives with component-disjoint staged validation. It is not established until both stages pass.",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
@@ -1351,7 +1379,8 @@
       "P032 failed two of three locked gates, so P033 was stopped before any held-out access",
       "P031 failure was localized to versioned config parsing after base3b completion; compatibility adapter passed CPU preflight",
       "P034 fixed-alpha missing-reference transfer failed ranking and Qwen7B mechanism gates; direct subtraction was rejected without touching held-out data",
-      "P035 completed with exit 0 and integrity checks; it failed AP@10 and macro-AUC gates, so held-out execution remains blocked by the preregistered rule."
+      "P035 completed with exit 0 and integrity checks; it failed AP@10 and macro-AUC gates, so held-out execution remains blocked by the preregistered rule.",
+      "P036 froze a materially different joint-preserving source-veto protocol and a 27-component development/27-component untouched confirmation split before reserved model scores."
     ]
   },
   "idea_audits": {
