@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-17T17:40:05.864970+08:00",
+  "as_of": "2026-09-18T00:25:00+08:00",
   "status": "Updated for the P001-P038 audit and P039: direct CIR boundaries, multi-image binding, private bridge paths, and causal intervention primitives.",
   "records": [
     {
@@ -640,6 +640,63 @@
       "overlap": "评测版本须先对齐。",
       "limits": "差异原因未查清；不能把历史.074视为已核验当前SOTA，也不能与P030的48题子集直接比较。",
       "checked_at": "2026-09-17T17:40:05.864970+08:00"
+    },
+    {
+      "id": "GZS_CIR_CVPR2025",
+      "title": "Generative Zero-Shot Composed Image Retrieval",
+      "year": 2025,
+      "venue_status": "CVPR 2025 正式论文",
+      "url": "https://openaccess.thecvf.com/content/CVPR2025/html/Wang_Generative_Zero-Shot_Composed_Image_Retrieval_CVPR_2025_paper.html",
+      "evidence": "通过组合图像生成构造伪目标图，并将其作为附加视觉信息提升单参考CIR。",
+      "overlap": "生成伪目标用于检索已有直接先例。",
+      "limits": "面向单参考图像+修改文本，不研究同一视觉变换在多参考角色之间的条件等变/不变。",
+      "checked_at": "2026-09-18T00:25:00+08:00"
+    },
+    {
+      "id": "Visual_Leap_ICCV2025",
+      "title": "A Visual Leap in CLIP Compositionality Reasoning through Generation of Counterfactual Sets",
+      "year": 2025,
+      "venue_status": "ICCV 2025 正式论文",
+      "url": "https://www.openaccess.thecvf.com/content/ICCV2025/papers/Jia_A_Visual_Leap_in_CLIP_Compositionality_Reasoning_through_Generation_of_ICCV_2025_paper.pdf",
+      "evidence": "以LLM和扩散模型生成反事实集合，改善CLIP对属性、位置和关系的组合推理。",
+      "overlap": "反事实图像生成与组合监督均不是P042可单独主张的创新。",
+      "limits": "不针对多参考检索中的来源角色条件响应。",
+      "checked_at": "2026-09-18T00:25:00+08:00"
+    },
+    {
+      "id": "CIRCLES_CVPR2026",
+      "title": "Retrieving Counterfactuals Improves Visual In-Context Learning",
+      "year": 2026,
+      "venue_status": "CVPR 2026 正式论文",
+      "url": "https://openaccess.thecvf.com/content/CVPR2026/html/Xiong_Retrieving_Counterfactuals_Improves_Visual_In-Context_Learning_CVPR_2026_paper.html",
+      "code": "https://github.com/gzxiong/CIRCLES",
+      "evidence": "用属性引导的组合图像检索选择反事实式示例，改善VLM视觉上下文学习。",
+      "overlap": "属性干预和反事实选择已有2026直接近邻。",
+      "limits": "目标是ICL示例选择，不是训练多参考全图库检索器的角色条件等变性。",
+      "checked_at": "2026-09-18T00:25:00+08:00"
+    },
+    {
+      "id": "ConText_CIR_CVPR2025",
+      "title": "ConText-CIR: Learning from Concepts in Text for Composed Image Retrieval",
+      "year": 2025,
+      "venue_status": "CVPR 2025 正式论文",
+      "url": "https://openaccess.thecvf.com/content/CVPR2025/papers/Xing_ConText-CIR_Learning_from_Concepts_in_Text_for_Composed_Image_Retrieval_CVPR_2025_paper.pdf",
+      "evidence": "使用概念一致性损失并合成多属性文本标注，改善复杂CIR查询。",
+      "overlap": "多属性合成监督与概念一致性已有近邻。",
+      "limits": "不提供同一图像变换跨多参考角色的等变/不变成组反证。",
+      "checked_at": "2026-09-18T00:25:00+08:00"
+    },
+    {
+      "id": "CCIN_CVPR2025",
+      "title": "CCIN: Compositional Conflict Identification and Neutralization for Composed Image Retrieval",
+      "year": 2025,
+      "venue_status": "CVPR 2025 正式论文",
+      "url": "https://openaccess.thecvf.com/content/CVPR2025/html/Tian_CCIN_Compositional_Conflict_Identification_and_Neutralization_for_Composed_Image_Retrieval_CVPR_2025_paper.html",
+      "code": "https://github.com/LikaiTian/CCIN",
+      "evidence": "识别冲突属性，生成保留指令，并在保留与修改指令协同下中和组合冲突。",
+      "overlap": "显式区分应保留与应修改属性已有直接CIR先例。",
+      "limits": "P042不能把preserve/change分解本身作为创新，只能检验多参考角色条件的同变换响应。",
+      "checked_at": "2026-09-18T00:25:00+08:00"
     }
   ]
 }

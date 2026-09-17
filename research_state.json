@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-18T00:18:00+08:00",
+  "as_of": "2026-09-18T01:16:54.455765+08:00",
   "goal_status": "active",
-  "phase": "P041 completed model/data protocol smoke but failed the preregistered visual data-contract gate; no training was launched. P042 role-conditioned transform equivariance data revision is being designed from official MERIT triplets.",
+  "phase": "P043_stage0_data_contract",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 1,
@@ -878,7 +878,7 @@
     "automation_display_name": "GPU1 独立研究进展",
     "rules_first": "Read /vepfs/vlms/1/研究规则.md before continuing; the automation was updated to GPU1 and evidence-first/pilot-first execution on 2026-09-17."
   },
-  "next": "冻结P042角色条件变换等变性的数据构造与独立100组门槛；先验证官方正例的角色属性对齐、确定性色相变换的有效性及非颜色角色不变性。只有新门槛通过后才实现训练；P041训练、P036、P039/SBB和原P040均不启动。",
+  "next": "Wait for physical GPU1 to become suitable, recheck occupancy immediately before launch, then run the frozen 500-check P043 visual audit. Do not train before it passes.",
   "results": {
     "P001": {
       "n": 4,
@@ -1714,9 +1714,39 @@
         "max_gpu_allocated_bytes": 19373166592
       },
       "conclusion": "The metadata-substitution construction is visually unreliable. Negative controls largely work, so lowering the gate is not justified. The conditional-dependence hypothesis was not trained or tested."
+    },
+    "P042_pixel_data_gate": {
+      "status": "failed_stop_no_visual_no_training",
+      "dataset_revision": "fd1c52c3ce3f1d53f7781afa64f350564cece6e8",
+      "images": {
+        "extracted": 960,
+        "expected": 960,
+        "complete": true
+      },
+      "pixel_gate": {
+        "raw_candidates": 320,
+        "passed": 62,
+        "required": 100,
+        "role_pass_counts": {
+          "color_source": 160,
+          "other_source": 141,
+          "target": 167
+        },
+        "frozen_criteria": {
+          "min_mask_coverage": 0.08,
+          "min_full_image_mean_absolute_rgb_delta": 8
+        }
+      },
+      "implementation_audit": {
+        "classification": "intended gate implemented faithfully; failure diagnostics were initially insufficient",
+        "issue": "per-bundle pixel metrics were written only on success",
+        "fix": "persist per-bundle metrics before the gate on both pass and failure",
+        "rerun_result": "unchanged at 62/320"
+      },
+      "conclusion": "P042 is stopped. Full-image MAE confounded masked manipulation strength with background area, and the frozen pool did not yield 100 eligible bundles. No visual judge or training was run."
     }
   },
-  "novelty_status": "No effective method is established. P039 showed that source-private bridge-state injection is technically causal but not sufficiently discriminative: the best narrow window binding AUC was 0.698 versus soft 0.658, below the required +0.05, and all-layer control was highest at 0.702. Any next claim needs a materially different learned or task-native binding objective and new prospective evidence.",
+  "novelty_status": "No effective method is established. P042 failed before visual audit or training. P043 is a product-disjoint confirmation of a corrected mask-local data measurement and can only validate the data contract, not SOTA or novelty.",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
@@ -1882,6 +1912,126 @@
           "max_gpu_allocated_bytes": 19373166592
         },
         "conclusion": "The metadata-substitution construction is visually unreliable. Negative controls largely work, so lowering the gate is not justified. The conditional-dependence hypothesis was not trained or tested."
+      }
+    },
+    {
+      "id": "role_conditioned_transform_equivariance_v1",
+      "status": "stage0_failed_pixel_gate_no_visual_no_training",
+      "title": "角色条件变换等变性：同一颜色干预在多参考检索中的等变—不变二分",
+      "predecessor_evidence": [
+        "P041直接元数据替代的100组视觉契约仅37组完整通过，因此该数据路线已停止且没有训练。",
+        "P014反对切断多图联合上下文；P035反对把来源约束过早压成固定标量；P038/P039说明表示稳定或内部状态变化不能替代检索收益。",
+        "MERIT官方训练查询中有168,942条双参考单正例包含且仅包含一个color角色；固定96个shard及视觉非颜色白名单内、排除P041审计产品后有2,075条候选。"
+      ],
+      "mechanism": {
+        "data": "使用官方MERIT双参考正例；当一个来源负责color、另一个来源负责可见非颜色属性时，对饱和像素执行固定HSV色相旋转。颜色角色与正目标同步变换形成等变对；非颜色角色单独变换而目标保持形成不变对。",
+        "theory": "若检索语义由指令选择的角色属性决定，则颜色变换H应满足G(Hr_color,r_other)=H G(r_color,r_other)，而G(r_color,Hr_other)=G(r_color,r_other)。这只是任务一致性约束，不保证真实商品图库泛化。",
+        "training_if_gated": "仍使用Qwen3-VL-Embedding-8B共享查询/候选空间；与同数据普通检索、通用不变性做同预算对照。正式实现必须保留双图联合编码、候选梯度、高秩全层LoRA和视觉merger更新，并先自动审计。",
+        "novelty_boundary": "2025 Generative ZS-CIR和Visual Leap已覆盖伪目标及反事实生成；2025 ConText-CIR/CCIN覆盖多属性合成与preserve/change；2026 INTENT/CIRCLES覆盖反事实干预、不变性和属性引导反事实。仅把同一变换按多参考角色指令分成等变与不变，并验证真实全图库迁移，才是候选增量。"
+      },
+      "stage0": {
+        "raw_candidates": 320,
+        "audit_bundles": 100,
+        "isolation": "与P041固定100组产品完全隔离，P042候选内产品不重复。",
+        "pixel_filter": "固定HSV hue+64，仅处理S>=64且V>=48像素；三张图均需mask coverage>=0.08且全图平均RGB绝对变化>=8。",
+        "visual_checks": [
+          "官方正例基础角色对齐",
+          "颜色角色与目标同步变换等变",
+          "非颜色角色变色后属性不变",
+          "跨效应负对照",
+          "同图无变化负对照"
+        ],
+        "go_gate": "100组完整通过率>=95%，且两个负对照各自>=95%；任一失败即不训练。"
+      },
+      "gpu": "Only physical GPU1 UUID GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f; live check before launch; no fallback.",
+      "created_at": "2026-09-18T00:27:00+08:00",
+      "stage0_result": {
+        "status": "failed_stop_no_visual_no_training",
+        "dataset_revision": "fd1c52c3ce3f1d53f7781afa64f350564cece6e8",
+        "images": {
+          "extracted": 960,
+          "expected": 960,
+          "complete": true
+        },
+        "pixel_gate": {
+          "raw_candidates": 320,
+          "passed": 62,
+          "required": 100,
+          "role_pass_counts": {
+            "color_source": 160,
+            "other_source": 141,
+            "target": 167
+          },
+          "frozen_criteria": {
+            "min_mask_coverage": 0.08,
+            "min_full_image_mean_absolute_rgb_delta": 8
+          }
+        },
+        "implementation_audit": {
+          "classification": "intended gate implemented faithfully; failure diagnostics were initially insufficient",
+          "issue": "per-bundle pixel metrics were written only on success",
+          "fix": "persist per-bundle metrics before the gate on both pass and failure",
+          "rerun_result": "unchanged at 62/320"
+        },
+        "conclusion": "P042 is stopped. Full-image MAE confounded masked manipulation strength with background area, and the frozen pool did not yield 100 eligible bundles. No visual judge or training was run."
+      }
+    },
+    {
+      "id": "role_conditioned_transform_equivariance_maskaware_confirm_v2",
+      "status": "stage0_pixel_gate_passed_waiting_for_gpu1_visual_audit",
+      "title": "Mask-aware product-disjoint confirmation of role-conditioned transform equivariance",
+      "predecessor_evidence": [
+        "P042 failed its frozen pixel gate at 62/320 and remains failed; no visual audit or training was run.",
+        "On the P042 development pool, separating support coverage from within-mask effect produced 159/320 three-role intersections at a masked MAE threshold of 16/255; this is development evidence only.",
+        "The planned P043 pool is disjoint from all 600 P041 audit products and all 960 P042 raw-pool products."
+      ],
+      "theory_and_measurement": "The hue intervention acts only on a saturation/value mask. Spatial support and effect strength are therefore measured separately: coverage >= 0.08 and masked RGB MAE >= 16/255. The fixed hue shift remains +64/256.",
+      "novelty_boundary": "The method claim is unchanged from P042. P043 only validates whether a defensible data contract exists; it is not a new novelty claim and cannot establish retrieval effectiveness.",
+      "frozen_stage0": {
+        "raw_candidates": 260,
+        "unique_products": 780,
+        "audit_bundles": 100,
+        "selection_order": "ascending sha256(P043|query_idx)",
+        "blocked_products": 1560,
+        "overlap_with_blocked_products": 0,
+        "pixel_gate": {
+          "min_mask_coverage": 0.08,
+          "min_masked_mean_absolute_rgb_delta": 16,
+          "all_three_roles_required": true
+        },
+        "visual_checks": [
+          "base_alignment_positive",
+          "active_equivariance_positive",
+          "null_invariance_positive",
+          "cross_effect_negative",
+          "identity_change_negative"
+        ],
+        "go_gate": "100-bundle full pass rate >= 95% and each negative control >= 95%; otherwise stop without training."
+      },
+      "implementation_audit_before_gpu": "Static compile, JSON validation, product-isolation assertions, exact model revision, physical-GPU assertion, per-check margins, and fail-path artifacts are required. Training implementation does not exist and is forbidden before Stage-0 passes.",
+      "gpu": "Only physical GPU1 UUID GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f after a fresh live occupancy check; no fallback.",
+      "created_at": "2026-09-18T00:59:59.319248+08:00",
+      "stage0_progress": {
+        "raw_images": {
+          "extracted": 780,
+          "expected": 780,
+          "complete": true
+        },
+        "pixel_gate": {
+          "passed": 104,
+          "raw_candidates": 260,
+          "required": 100,
+          "selected_audit_bundles": 100,
+          "audit_unique_products": 300
+        },
+        "implementation_audit": "runs/P043_role_conditioned_equivariance_maskaware_confirm/implementation_audit.json",
+        "implementation_classification": "faithful full implementation of the frozen Stage-0 visual data audit",
+        "gpu1_live_check": {
+          "memory_used_mib": 62192,
+          "memory_total_mib": 81920,
+          "utilization_percent": 100,
+          "decision": "wait; do not launch or fallback"
+        }
       }
     }
   ]
