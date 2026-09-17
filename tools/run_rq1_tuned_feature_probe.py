@@ -85,7 +85,7 @@ def parse_args():
         "--selection-seeds", default=None,
         help="seeds used only for source-val alpha selection; defaults to --seeds",
     )
-    parser.add_argument("--max-iter", type=int, default=2000)
+    parser.add_argument("--max-iter", type=int, default=500)
     parser.add_argument("--write-seed-predictions", action="store_true")
     return parser.parse_args()
 
