@@ -1,0 +1,60 @@
+{
+  "id": "P034",
+  "created_at": "2026-09-17T01:59:53.513695+00:00",
+  "evidence_status": "posthoc_exploratory_on_development_cohort",
+  "purpose": "Test a fixed leave-second-reference contrast as source-necessity reranking across pointwise and embedding VLM scorers.",
+  "candidate_contribution": "A cross-domain transfer of contrastive/log-ratio calibration to multi-reference composed image retrieval, adapted to a semantically interpretable missing-source control and evaluated against explicit negatives.",
+  "source_sha256": {
+    "configs/P030_pinpoint_references.json": "ea6c0191464a12dcbb5c6b634554f55cb4d0a1633f9ad0027b373be8312eab44",
+    "configs/P031_coral_transfer.json": "dda6f387518a9c38c9fe3d7d6e90903e82203998fd9c153d288c9f910ce37c12",
+    "runs/P030_pinpoint_references/predictions.jsonl": "2a3c5fb55b4931f96f9c336d8ed788f72a9a3e99b11ecc433dcb6c21a061b973",
+    "results/P031_coral_transfer.json": "b1a189558559e9a77b68e5cc03bbdbce1ecb69e1b5b6362da3b60f89ab771ab1"
+  },
+  "cohort": "The same 48 P030 development components; no reserved component or held-out image is accessed.",
+  "conditions": {
+    "full": "dual reference query",
+    "counterfactual": "the identical instruction and first reference, with the second reference image omitted",
+    "source_lift": "delta2(c)=score(full,c)-score(counterfactual,c)",
+    "rncr_alpha1": "score(full,c)+delta2(c)=2*score(full,c)-score(counterfactual,c)"
+  },
+  "fixed_alpha": 1,
+  "models": {
+    "qwen2.5_vl_7b_pointwise": "raw True-minus-False margin from P030 labelled_dual and labelled_single",
+    "qwen2.5_vl_3b_embedding": "float32 cosine from P031 base3b dual and single",
+    "coral_3b_embedding": "float32 cosine from P031 coral dual and single"
+  },
+  "ranking": "Stable descending sort of raw RNCR scores over the frozen top20; ranks 21-50 remain unchanged.",
+  "metrics": [
+    "canonical-set AP@10",
+    "precision@1",
+    "explicit-negative precision@10"
+  ],
+  "mechanism": [
+    "macro per-query AUC of delta2 for positives versus explicit negatives",
+    "mean positive delta2 minus mean explicit-negative delta2"
+  ],
+  "bootstrap": {
+    "unit": "exact-RGB-connected reference component",
+    "replicates": 5000,
+    "seed": 17034
+  },
+  "continuation_gate": {
+    "all_required": true,
+    "qwen7b_rncr_minus_raw_dual_ap10": "strictly > 0",
+    "coral_rncr_minus_dual_ap10": "strictly > 0",
+    "qwen7b_macro_auc": "strictly > 0.5",
+    "coral_macro_auc": "strictly > 0.5",
+    "meaning": "Eligibility to freeze a new untouched confirmation; not significance, novelty, or SOTA."
+  },
+  "novelty_position": [
+    "Prior contrastive decoding and calibration make the algebra non-novel in isolation.",
+    "The potential contribution is the first task-specific use of a missing-reference necessity contrast for multi-reference composed retrieval, plus source-wise explicit-negative validation and required-source aggregation.",
+    "A publishable claim requires a nontrivial multi-source extension, untouched confirmation, official-comparable baselines, and at least two model families."
+  ],
+  "limits": [
+    "Posthoc exploratory analysis on a 48-query Composition-only development cohort.",
+    "Omitting the second image changes input length and semantics; delta2 is an operational source-necessity contrast, not an identified causal effect.",
+    "Top20 reranking is not a full PinPoint or SOTA evaluation.",
+    "No alpha sweep is permitted in P034."
+  ]
+}

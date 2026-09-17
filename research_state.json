@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T01:37:28.688102+00:00",
+  "as_of": "2026-09-17T01:59:53.531383+00:00",
   "goal_status": "active",
-  "phase": "P030/P032 rejected the negative-control branch; P033 is stopped; P031 Coral retry 3 is running on physical GPU3.",
+  "phase": "P031 completed; P034 fixed-alpha reference-necessity transfer is frozen for offline development analysis; no held-out access.",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -81,7 +81,8 @@
       "heldout_n": 2432,
       "grouping": "counterpart and exact image byte connected components",
       "heldout_predictions_seen": false
-    }
+    },
+    "novelty_transfer": "A method proven in another field can still be a valid contribution if this is its first use in the target task, the transfer requires task-specific technical adaptation, and experiments isolate the adaptation from a direct copy."
   },
   "jobs": {
     "P002": {
@@ -401,7 +402,7 @@
       "uses_gpu": false
     },
     "P031": {
-      "status": "running_retry_3",
+      "status": "completed",
       "driver_pid": 513690,
       "preregister_commit": "c741d79",
       "config": "configs/P031_coral_transfer.json",
@@ -433,7 +434,9 @@
       "runner_sha256_retry_3": "1690857219501886c2bf7037b78541ea4d2c980bb3e9338ea782628ad9dcd4b6",
       "retry_3_driver_pid": 520641,
       "retry_3_child_pid": 520645,
-      "coral_progress_verified": 4
+      "coral_progress_verified": 4,
+      "exitcode": 0,
+      "n_embeddings_per_model": 1104
     },
     "P032": {
       "status": "completed",
@@ -479,6 +482,18 @@
       "images_fetched": false,
       "mechanism_definition": "pilot_reference_lift = m(valid_dual)-m(sham_r2_0)",
       "stop_reason": "P032 failed 2 of 3 preregistered directional checks."
+    },
+    "P034": {
+      "status": "protocol_frozen_before_analysis",
+      "config": "configs/P034_reference_necessity.json",
+      "uses_gpu": false,
+      "heldout_access": false,
+      "alpha": 1,
+      "models": [
+        "qwen2.5_vl_7b_pointwise",
+        "qwen2.5_vl_3b_embedding",
+        "coral_3b_embedding"
+      ]
     }
   },
   "monitor": {
@@ -487,7 +502,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "本轮读取本地gpu3 heartbeat：ACTIVE，每20分钟；读取research_state并核验真实PID，保持原有监控。"
   },
-  "next": "Resume P031 from the 1104 completed base3b embeddings using the audited config compatibility adapter, then analyze Coral transfer. Do not execute P033. Use the negative result and P031 baseline to retire this branch and select a new direction outside generic contrastive calibration.",
+  "next": "Run the fixed-alpha P034 offline analysis across Qwen7B pointwise, base3B embedding, and Coral embedding scores. If the Qwen7B and Coral ranking/mechanism gates pass, freeze a new held-out protocol based on the untouched P033 component selection; otherwise reject this specific missing-reference transfer, not cross-domain transfer as a general strategy.",
   "results": {
     "P001": {
       "n": 4,
@@ -1222,6 +1237,19 @@
       ],
       "macro_auc": 0.49749999999999994,
       "decision": "Kill P032/P033 negative-control calibration branch; do not fetch or score held-out P033 data."
+    },
+    "P031": {
+      "analysis": "results/P031_coral_transfer.json",
+      "coral_dual_minus_base3b_dual_ap10_pp": 1.0834750566893425,
+      "coral_dual_minus_base3b_dual_95ci_pp": [
+        -0.1455534297052156,
+        2.80564944727891
+      ],
+      "base3b_dual_minus_single_ap10_pp": -0.07209388384983619,
+      "coral_dual_minus_single_ap10_pp": -0.004133597883597984,
+      "coral_dual_minus_sham_ap10_pp": -0.3407738095238096,
+      "coral_dual_minus_text_only_ap10_pp": -0.23437500000000017,
+      "interpretation": "Coral improves over its base model descriptively, but neither model shows stable second-reference use on this pilot; Coral dual is no better than single and trails sham/text-only."
     }
   },
   "novelty_status": "P032 negative-control calibration is empirically rejected on its frozen development cohort and must not proceed to held-out P033. No novelty or SOTA claim exists. P031 remains a baseline transfer measurement; the overall research goal stays active and needs a new direction after P031.",
