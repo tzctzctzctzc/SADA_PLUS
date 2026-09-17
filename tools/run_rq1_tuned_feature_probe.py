@@ -143,7 +143,10 @@ def parse_args():
     parser.add_argument("--feature-prefix", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--model-name", required=True)
-    parser.add_argument("--alphas", default="1e-6,1e-5,1e-4,1e-3,1e-2")
+    parser.add_argument(
+        "--alphas",
+        default="1e-8,1e-7,1e-6,1e-5,1e-4,1e-3,1e-2,1e-1",
+    )
     parser.add_argument("--seeds", default="0,1,2,3,4")
     parser.add_argument(
         "--selection-seeds", default=None,
@@ -278,6 +281,9 @@ def main():
                 ), sort_keys=True) + "\n")
             report["shifts"][shift] = {
                 "selected_alpha": selected_alpha,
+                "selection_at_grid_boundary": selected_alpha in (
+                    min(alphas), max(alphas)
+                ),
                 "train_count": len(train_indices),
                 "source_train_video_count": len(unique_groups),
                 "source_val_count": len(source_val_indices),
