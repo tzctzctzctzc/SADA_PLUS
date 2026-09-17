@@ -611,7 +611,7 @@
       }
     },
     "P037": {
-      "status": "prepared_waiting_for_gpu_lock",
+      "status": "queued_waiting_for_gpu_lock",
       "config": "configs/P037_position_controlled_source_intervention.json",
       "config_sha256": "0419a7ded240fc3635e3061004170a458aabe2f59c00926454af3763cfe60164",
       "runner": "src/run_P037.py",
@@ -635,7 +635,11 @@
         "pcsi_minus_original_ap10": "strictly > 0",
         "pcsi_minus_original_explicit_negative_precision_at10": "less than or equal to 0",
         "meaning": "Eligibility to design a larger component-disjoint held-out test. This exploratory gate is not significance, novelty, or SOTA evidence."
-      }
+      },
+      "driver_pid": 540432,
+      "lock_wait_pid": 540434,
+      "preregister_commit": "bc3c6ac",
+      "score_records": 0
     }
   },
   "monitor": {
