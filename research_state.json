@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T02:10:20.177048+00:00",
+  "as_of": "2026-09-17T02:12:21.014842+00:00",
   "goal_status": "active",
-  "phase": "P035 source-bound predicate reranking protocol is frozen and CPU-preflighted before GPU scores.",
+  "phase": "P035 source-bound predicate reranking is running on physical GPU3.",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -501,7 +501,7 @@
       "gate_all_pass": false
     },
     "P035": {
-      "status": "protocol_frozen_ready_to_run",
+      "status": "running",
       "config": "configs/P035_source_bound_predicates.json",
       "config_sha256": "e95aa343050b730ae0e2dc63cb07e4d50e3cc9753642e958950779222e0231cc",
       "runner": "src/run_source_bound_predicates.py",
@@ -515,7 +515,20 @@
       ],
       "gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
       "cpu_preflight": "passed: two images, literal full instruction, source label, and image token/grid counts",
-      "heldout_access": false
+      "heldout_access": false,
+      "driver_pid": 523629,
+      "child_pid": 523631,
+      "actual_gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
+      "protocol_smoke": {
+        "full_vs_last_head_max_error": 0.0,
+        "single_vs_batch_max_error_first_example": 0.125,
+        "image_counts": [
+          2,
+          2,
+          2,
+          2
+        ]
+      }
     }
   },
   "monitor": {
