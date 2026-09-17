@@ -1,7 +1,7 @@
 {
   "as_of": "2026-09-17T08:00:00+00:00",
   "goal_status": "active",
-  "phase": "P001-P038 evidence re-audited; P039 Shadow Binding Bridges is frozen as a bounded mechanism screen on the same ten observed development queries. No full-scale or held-out execution is authorized.",
+  "phase": "P001-P039 evidence re-audited; P039 Shadow Binding Bridges completed its bounded mechanism screen and failed the frozen continuation gates. No full-scale, P040, or held-out execution is authorized.",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 1,
@@ -14,7 +14,7 @@
     ],
     "submission_year_assumption": 2027
   },
-  "direction": "Test Shadow Binding Bridges: form source-private role anchors in an isolated shadow path, inject only those high-dimensional anchor states into selected layer windows of the intact joint path, and select a window only with matched wrong-binding evidence. All future experiments use physical GPU1 after an occupancy check.",
+  "direction": "Do not enlarge SBB. The next innovation search must change the learning or inference object itself, preserve joint evidence, and include matched wrong-binding supervision; all future experiments still use physical GPU1 after an occupancy check.",
   "known_evidence": [
     "SoFA 使用跨图双向 attention 插值；Delimiter Scaling 加强图像边界，两者报告收益，但实验设置不同，不能直接声称矛盾。",
     "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
@@ -752,7 +752,7 @@
       "stop_reason": "Primary AP@10 gate failed despite four diagnostic/safety gates passing; enlarging the same method is forbidden by the preregistered pilot policy."
     },
     "P039": {
-      "status": "preregistered_not_started",
+      "status": "completed_pilot_gate_failed",
       "config": "configs/P039_shadow_binding_bridges.json",
       "config_sha256": "479a796902a32d5de976aeb6a1478067c4d79792e1c5e4c5fb1bc6fbd7c41e7f",
       "runner": "src/run_P039.py",
@@ -768,10 +768,46 @@
         "equivalent_ba",
         "wrong_binding_ba"
       ],
+      "interventions": [
+        "soft",
+        "bridge_layers_01_07",
+        "bridge_layers_08_14",
+        "bridge_layers_15_21",
+        "bridge_layers_22_28",
+        "bridge_all_layers"
+      ],
       "gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
+      "actual_gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
       "heldout_accessed": false,
       "full_scale_authorized": false,
-      "scope": "Mechanism screen only; a pass may select one layer window for a separate component-disjoint P040 pilot."
+      "exitcode": 0,
+      "score_records": 612,
+      "score_file": "runs/P039_shadow_binding_bridges/predictions.jsonl",
+      "score_file_sha256": "b0d6d11e44690581e75e5cb9eccc4e78fdaa8e29c19a508b0cf9ed39917edba3e",
+      "protocol_smoke": {
+        "identity_replay_max_logit_error": 0.0,
+        "shadow_bridge_mean_absolute_state_delta": 0.5518285632133484,
+        "shadow_states_finite": true,
+        "bridge_tokens_per_example": 18,
+        "image_count_per_example": 3
+      },
+      "gate_all_pass": false,
+      "key_result": {
+        "soft_correct_score_macro_auc": 0.6833333333333333,
+        "best_narrow_window": "bridge_layers_22_28",
+        "best_narrow_binding_macro_auc": 0.6983333333333334,
+        "all_layer_binding_macro_auc": 0.7016666666666667,
+        "best_narrow_positive_binding_mean": -0.11805555555555555,
+        "soft_positive_binding_mean": -0.1527777777777778,
+        "best_narrow_equivalent_gap": 1.1176470588235294,
+        "soft_equivalent_gap": 1.099264705882353
+      },
+      "gate_checks": {
+        "any_narrow_window_eligible": false,
+        "binding_macro_auc_at_least_soft_plus_0_05": false,
+        "all_layer_control_beaten": false
+      },
+      "stop_reason": "No narrow layer window passed all frozen gates; the all-layer control had the highest binding AUC and was explicitly ineligible. Do not run P040 or enlarge SBB."
     }
   },
   "monitor": {
@@ -785,7 +821,7 @@
       "utilization_percent": 0
     }
   },
-  "next": "Run only the frozen P039 mechanism screen on physical GPU1 after a live occupancy check. P039 may at most select one layer window for a separate component-disjoint P040 pilot; it cannot authorize full scale or held-out access.",
+  "next": "Do not run P040 or enlarge SBB. First design and preregister a materially different pilot whose objective is learned source-role discrimination under matched swaps; keep all confirmation and held-out components untouched.",
   "results": {
     "P001": {
       "n": 4,
@@ -1577,9 +1613,20 @@
       "positive_mean_correct_minus_wrong_binding": 0.1388888888888889,
       "binding_contrast_macro_auc": 0.5000000000000001,
       "decision": "Stop full-scale SIRC. Keep it as diagnostic evidence that semantic interleaving reduces relabeling sensitivity but does not improve ranking on this pilot."
+    },
+    "P039": {
+      "analysis": "results/P039_shadow_binding_bridges.json",
+      "n_queries": 10,
+      "n_score_records": 612,
+      "gate_all_pass": false,
+      "soft_binding_macro_auc": 0.6583333333333333,
+      "best_narrow_binding_macro_auc": 0.6983333333333334,
+      "all_layer_binding_macro_auc": 0.7016666666666667,
+      "best_narrow_score_macro_auc": 0.6833333333333333,
+      "decision": "Stop SBB expansion. No narrow bridge window met the required soft-plus-0.05 binding gain; the all-layer control was highest and is ineligible."
     }
   },
-  "novelty_status": "Candidate, not established: bridge tokens, masked attention, causal activation intervention, and multi-vector evidence are prior art. The potentially new transfer is training-free source-private role-anchor injection into an intact joint multi-reference retrieval forward pass, evaluated with joint-role permutation and matched wrong-binding controls.",
+  "novelty_status": "No effective method is established. P039 showed that source-private bridge-state injection is technically causal but not sufficiently discriminative: the best narrow window binding AUC was 0.698 versus soft 0.658, below the required +0.05, and all-layer control was highest at 0.702. Any next claim needs a materially different learned or task-native binding objective and new prospective evidence.",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
