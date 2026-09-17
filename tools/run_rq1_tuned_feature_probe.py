@@ -2,6 +2,7 @@
 
 import argparse
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -154,6 +155,7 @@ def parse_args():
     )
     parser.add_argument("--cv-folds", type=int, default=3)
     parser.add_argument("--cv-seed", type=int, default=20260917)
+    parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--max-iter", type=int, default=500)
     parser.add_argument("--write-seed-predictions", action="store_true")
     return parser.parse_args()
@@ -161,8 +163,10 @@ def parse_args():
 
 def main():
     args = parse_args()
-    if args.max_iter <= 0 or args.cv_folds < 2:
-        raise ValueError("max_iter must be positive and cv_folds must be at least two")
+    if args.max_iter <= 0 or args.cv_folds < 2 or args.jobs <= 0:
+        raise ValueError(
+            "max_iter and jobs must be positive and cv_folds must be at least two"
+        )
     from sklearn.metrics import accuracy_score, f1_score
 
     alphas = parse_csv_values(args.alphas, float)
@@ -222,31 +226,41 @@ def main():
             except ValueError as error:
                 raise ValueError("{}: {}".format(shift, error)) from error
             grid = {}
+            tasks = [
+                (alpha, fold, seed, fit_indices, validation_indices)
+                for alpha in alphas
+                for fold, (fit_indices, validation_indices) in enumerate(cv_splits)
+                for seed in selection_seeds
+            ]
+
+            def score_task(task):
+                alpha, fold, seed, fit_indices, validation_indices = task
+                classifier = fit_classifier(
+                    train_x[fit_indices], train_y[fit_indices],
+                    alpha, seed, args.max_iter,
+                )
+                prediction = classifier.predict(train_x[validation_indices])
+                return alpha, {
+                    "fold": fold,
+                    "seed": seed,
+                    "validation_videos": int(len(np.unique(
+                        train_groups[validation_indices]
+                    ))),
+                    "macro_f1": float(f1_score(
+                        train_y[validation_indices], prediction,
+                        labels=list(range(len(LABELS))),
+                        average="macro", zero_division=0,
+                    )),
+                    "accuracy": float(accuracy_score(
+                        train_y[validation_indices], prediction
+                    )),
+                }
+
             for alpha in alphas:
-                scores = []
-                for fold, (fit_indices, validation_indices) in enumerate(cv_splits):
-                    for seed in selection_seeds:
-                        classifier = fit_classifier(
-                            train_x[fit_indices], train_y[fit_indices],
-                            alpha, seed, args.max_iter,
-                        )
-                        prediction = classifier.predict(train_x[validation_indices])
-                        scores.append({
-                            "fold": fold,
-                            "seed": seed,
-                            "validation_videos": int(len(np.unique(
-                                train_groups[validation_indices]
-                            ))),
-                            "macro_f1": float(f1_score(
-                                train_y[validation_indices], prediction,
-                                labels=list(range(len(LABELS))),
-                                average="macro", zero_division=0,
-                            )),
-                            "accuracy": float(accuracy_score(
-                                train_y[validation_indices], prediction
-                            )),
-                        })
-                grid[str(alpha)] = scores
+                grid[str(alpha)] = []
+            with ThreadPoolExecutor(max_workers=args.jobs) as executor:
+                for alpha, score in executor.map(score_task, tasks):
+                    grid[str(alpha)].append(score)
             selected_alpha = max(
                 alphas,
                 key=lambda alpha: (
@@ -261,12 +275,16 @@ def main():
             ]
             eval_indices = [row_index[row["candidate_id"]] for row in shift_rows]
             eval_x = normalize_rows(features[eval_indices])
-            seed_probabilities = []
-            for seed in seeds:
+            def fit_seed(seed):
                 classifier = fit_classifier(
                     train_x, train_y, selected_alpha, seed, args.max_iter
                 )
-                probabilities = classifier.predict_proba(eval_x)
+                return seed, classifier.predict_proba(eval_x)
+
+            seed_probabilities = []
+            with ThreadPoolExecutor(max_workers=min(args.jobs, len(seeds))) as executor:
+                fitted = list(executor.map(fit_seed, seeds))
+            for seed, probabilities in fitted:
                 seed_probabilities.append(probabilities)
                 if seed in seed_streams:
                     for row, probs in zip(shift_rows, probabilities):
@@ -315,6 +333,7 @@ def main():
         "selection_seeds": selection_seeds,
         "cv_folds": args.cv_folds,
         "cv_seed": args.cv_seed,
+        "parallel_jobs": args.jobs,
         "prediction_aggregation": "mean class probabilities across seeds",
         "selection_report": report,
     }
