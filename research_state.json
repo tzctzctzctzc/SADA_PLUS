@@ -123,6 +123,26 @@
       ],
       "full_scale_authorization": "Prepare or run full scale only when every frozen pilot gate passes and the estimated evidence gain justifies the compute.",
       "failed_pilot_action": "Stop the implementation or redesign a materially different mechanism; do not enlarge the same failed method."
+    },
+    "pretrial_evidence_review": {
+      "required": true,
+      "trigger": "Before designing or launching every new experimental idea",
+      "must_state": [
+        "Observed prior results and their scope; separate observations from causal hypotheses",
+        "Which demonstrated failure the proposed mechanism could address, and which failures it cannot address",
+        "Theoretical argument, explicit assumptions, relevant published support, and nearest standard baseline",
+        "Cheapest falsifiers with fixed data/compute budget, mechanism and task metrics, and pass/fail/inconclusive rules"
+      ],
+      "controls": [
+        "Validate swapped-query relevance labels; a swapped positive is not automatically negative",
+        "Separate semantic-preserving source-role block permutation from semantic-changing role rebinding",
+        "Measure first-stage labelled-positive coverage and fixed-candidate oracle before attributing low retrieval AP to reranking",
+        "Compare to same-model, same-data, matched-trainable-parameter ordinary relevance training and generic hard negatives",
+        "Use reference/image/template-separated validation; repeated observed cases provide exploratory evidence only",
+        "Bind full-scale progression to task ranking, binding discrimination, and non-degradation evidence; proxy gains alone cannot pass",
+        "A noisy interval crossing the preregistered gate is inconclusive and does not authorize full scale; it is not proof that the topic is false"
+      ],
+      "current_learned_binding_status": "Plausible training hypothesis; valid swap labels, benefit beyond ordinary hard-negative training, and real-retrieval transfer are not established. No new training launched."
     }
   },
   "jobs": {
@@ -821,7 +841,7 @@
       "utilization_percent": 0
     }
   },
-  "next": "Do not run P040 or enlarge SBB. First design and preregister a materially different pilot whose objective is learned source-role discrimination under matched swaps; keep all confirmation and held-out components untouched.",
+  "next": "First audit the learned source-role training idea against prior failures, swapped-label validity, fixed-candidate oracle and matched ordinary-training baselines; preregister a bounded falsification package before any new GPU1 training. Do not restart P036 or enlarge SBB; keep confirmation and held-out components untouched.",
   "results": {
     "P001": {
       "n": 4,
