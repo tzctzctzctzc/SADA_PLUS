@@ -1,0 +1,250 @@
+{
+  "complete": true,
+  "evidence_status": "prospective_exploratory_probe_on_observed_P030_cohort",
+  "n_queries": 48,
+  "n_reference_components": 48,
+  "summaries": {
+    "original_dual": {
+      "ap@10": 0.0317201278659612,
+      "precision@1": 0.08333333333333333,
+      "precision@10": 0.041666666666666664,
+      "negative_precision@10": 0.09375
+    },
+    "equivalent_reindexed": {
+      "ap@10": 0.028939318783068785,
+      "precision@1": 0.0625,
+      "precision@10": 0.03958333333333334,
+      "negative_precision@10": 0.08541666666666665
+    },
+    "binding_swapped": {
+      "ap@10": 0.026599702380952384,
+      "precision@1": 0.020833333333333332,
+      "precision@10": 0.03958333333333334,
+      "negative_precision@10": 0.08333333333333333
+    },
+    "binding_contrast": {
+      "ap@10": 0.008287863756613757,
+      "precision@1": 0.0,
+      "precision@10": 0.018750000000000003,
+      "negative_precision@10": 0.075
+    },
+    "pcsi": {
+      "ap@10": 0.03072089947089947,
+      "precision@1": 0.10416666666666667,
+      "precision@10": 0.03958333333333334,
+      "negative_precision@10": 0.08958333333333333
+    }
+  },
+  "paired": {
+    "equivalent_reindexed minus original_dual": {
+      "ap@10": {
+        "difference_pp": -0.27808090828924154,
+        "component_cluster_95ci_pp": [
+          -0.9403935185185185,
+          0.32467137896825365
+        ],
+        "query_gains": 3,
+        "query_losses": 4
+      },
+      "precision@1": {
+        "difference_pp": -2.083333333333333,
+        "component_cluster_95ci_pp": [
+          -8.333333333333332,
+          4.166666666666666
+        ],
+        "query_gains": 1,
+        "query_losses": 2
+      },
+      "precision@10": {
+        "difference_pp": -0.20833333333333334,
+        "component_cluster_95ci_pp": [
+          -0.6250000000000001,
+          0.0
+        ],
+        "query_gains": 0,
+        "query_losses": 1
+      },
+      "negative_precision@10": {
+        "difference_pp": -0.8333333333333334,
+        "component_cluster_95ci_pp": [
+          -2.083333333333333,
+          0.2083333333333336
+        ],
+        "query_gains": 2,
+        "query_losses": 6
+      }
+    },
+    "binding_swapped minus original_dual": {
+      "ap@10": {
+        "difference_pp": -0.5120425485008818,
+        "component_cluster_95ci_pp": [
+          -1.1487482087742502,
+          -0.008680555555555568
+        ],
+        "query_gains": 3,
+        "query_losses": 5
+      },
+      "precision@1": {
+        "difference_pp": -6.25,
+        "component_cluster_95ci_pp": [
+          -14.583333333333334,
+          0.0
+        ],
+        "query_gains": 0,
+        "query_losses": 3
+      },
+      "precision@10": {
+        "difference_pp": -0.20833333333333334,
+        "component_cluster_95ci_pp": [
+          -0.6250000000000001,
+          0.0
+        ],
+        "query_gains": 0,
+        "query_losses": 1
+      },
+      "negative_precision@10": {
+        "difference_pp": -1.0416666666666665,
+        "component_cluster_95ci_pp": [
+          -2.291666666666667,
+          0.20833333333333334
+        ],
+        "query_gains": 2,
+        "query_losses": 7
+      }
+    },
+    "binding_contrast minus original_dual": {
+      "ap@10": {
+        "difference_pp": -2.343226410934744,
+        "component_cluster_95ci_pp": [
+          -4.0458595127865955,
+          -0.9071649029982375
+        ],
+        "query_gains": 1,
+        "query_losses": 11
+      },
+      "precision@1": {
+        "difference_pp": -8.333333333333332,
+        "component_cluster_95ci_pp": [
+          -16.666666666666664,
+          -2.083333333333333
+        ],
+        "query_gains": 0,
+        "query_losses": 4
+      },
+      "precision@10": {
+        "difference_pp": -2.291666666666667,
+        "component_cluster_95ci_pp": [
+          -3.958333333333333,
+          -1.0416666666666665
+        ],
+        "query_gains": 0,
+        "query_losses": 9
+      },
+      "negative_precision@10": {
+        "difference_pp": -1.8750000000000002,
+        "component_cluster_95ci_pp": [
+          -4.791666666666667,
+          1.25
+        ],
+        "query_gains": 6,
+        "query_losses": 11
+      }
+    },
+    "pcsi minus original_dual": {
+      "ap@10": {
+        "difference_pp": -0.0999228395061728,
+        "component_cluster_95ci_pp": [
+          -0.46181520061728387,
+          0.2479855599647263
+        ],
+        "query_gains": 4,
+        "query_losses": 4
+      },
+      "precision@1": {
+        "difference_pp": 2.083333333333333,
+        "component_cluster_95ci_pp": [
+          0.0,
+          6.25
+        ],
+        "query_gains": 1,
+        "query_losses": 0
+      },
+      "precision@10": {
+        "difference_pp": -0.20833333333333343,
+        "component_cluster_95ci_pp": [
+          -0.6250000000000002,
+          0.0
+        ],
+        "query_gains": 0,
+        "query_losses": 1
+      },
+      "negative_precision@10": {
+        "difference_pp": -0.4166666666666667,
+        "component_cluster_95ci_pp": [
+          -1.6666666666666667,
+          0.6250000000000001
+        ],
+        "query_gains": 2,
+        "query_losses": 3
+      }
+    }
+  },
+  "mechanism": {
+    "positive_candidates": 21,
+    "positive_mean_binding_contrast": -0.03571428571428571,
+    "positive_mean_component_95ci": [
+      -0.2625,
+      0.13970588235294118
+    ],
+    "positive_correct_binding_win_rate": 0.3333333333333333,
+    "explicit_negative_candidates": 68,
+    "explicit_negative_mean_binding_contrast": -0.051470588235294115,
+    "explicit_negative_mean_component_95ci": [
+      -0.2057698170731707,
+      0.10086329349529764
+    ],
+    "micro_binding_contrast_positive_vs_explicit_negative_auc": 0.49369747899159666,
+    "macro_auc": {
+      "original_dual": {
+        "n_eligible_queries": 10,
+        "macro_positive_vs_explicit_negative_auc": 0.8083333333333332
+      },
+      "equivalent_reindexed": {
+        "n_eligible_queries": 10,
+        "macro_positive_vs_explicit_negative_auc": 0.9416666666666667
+      },
+      "binding_swapped": {
+        "n_eligible_queries": 10,
+        "macro_positive_vs_explicit_negative_auc": 0.95
+      },
+      "binding_contrast": {
+        "n_eligible_queries": 10,
+        "macro_positive_vs_explicit_negative_auc": 0.4625
+      },
+      "pcsi": {
+        "n_eligible_queries": 10,
+        "macro_positive_vs_explicit_negative_auc": 0.7833333333333333
+      }
+    },
+    "mean_absolute_original_minus_equivalent_margin": 1.0760416666666666,
+    "median_absolute_original_minus_equivalent_margin": 0.875
+  },
+  "continuation_gate_evaluation": {
+    "checks": {
+      "positive_candidate_mean_binding_contrast_gt_0": false,
+      "binding_contrast_macro_auc_gt_0_5": false,
+      "pcsi_minus_original_ap10_gt_0": false,
+      "pcsi_minus_original_negative_precision_at10_le_0": true
+    },
+    "all_pass": false,
+    "meaning": "Eligibility to design a larger component-disjoint held-out test. This exploratory gate is not significance, novelty, or SOTA evidence."
+  },
+  "score_file_sha256": "45ec459cba56d0a82bfd8233a54940655fc30cada15054708b5773f22340a86c",
+  "config_sha256": "0419a7ded240fc3635e3061004170a458aabe2f59c00926454af3763cfe60164",
+  "limits": [
+    "P030 was previously observed and contains only 21 positive and 68 explicit-negative top20 candidates.",
+    "The probe uses one query per reference component and is exploratory.",
+    "Swapping source roles can leave semantics unchanged when the two referenced attributes overlap.",
+    "Only a prospectively frozen component-disjoint follow-up can support a general method claim."
+  ]
+}

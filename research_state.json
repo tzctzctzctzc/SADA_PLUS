@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T06:01:16.093719+00:00",
+  "as_of": "2026-09-17T06:31:24.586029+00:00",
   "goal_status": "active",
-  "phase": "P037 pilot completed and failed its continuation gate; no full-scale follow-up is authorized.",
+  "phase": "P038 bounded SIRC pilot preregistered on ten observed development queries; no P038 scores yet and no held-out access.",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -14,7 +14,7 @@
     ],
     "submission_year_assumption": 2027
   },
-  "direction": "Do not enlarge PCSI. The pilot indicates strong position/index sensitivity and no reliable source-binding contrast. The topic remains open only through a materially different, pilot-first mechanism or a diagnostic benchmark claim.",
+  "direction": "Test semantic reference-role interleaving as a materially different transfer mechanism. Run only the frozen 600-score P038 pilot; design no larger experiment unless all five gates pass.",
   "known_evidence": [
     "SoFA 使用跨图双向 attention 插值；Delimiter Scaling 加强图像边界，两者报告收益，但实验设置不同，不能直接声称矛盾。",
     "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
@@ -46,7 +46,12 @@
     "UniCVR (arXiv:2604.20318) establishes adaptive MLLM scoring of top candidates and dual-level reranking across composed visual retrieval; generic candidate-subset MLLM reranking is therefore not a P036 novelty claim.",
     "RCIR (AAAI 2025) already provides coverage-risk-controlled adaptive sets for image retrieval; image-retrieval risk control is occupied prior art.",
     "Two-stage Risk Control for Ranked Retrieval (IJCAI 2025) already controls separate retrieval and ranking risks with LTT/CRC and data splitting; staged risk-controlled reranking is occupied cross-domain prior art.",
-    "SoFT sweeps a continuous interpolation weight and reports that penalty-only reranking can sharply degrade results; its inspected method does not use a calibrated hard veto, but this alone does not make P036 novel."
+    "SoFT sweeps a continuous interpolation weight and reports that penalty-only reranking can sharply degrade results; its inspected method does not use a calibrated hard veto, but this alone does not make P036 novel.",
+    "SoFA (CVPR 2025) and DOCD (CVPR Findings 2026) occupy generic multi-image/modality order-bias diagnosis and dual-order correction; order averaging alone is not novel.",
+    "TAPR (arXiv:2608.25305v2) already factorizes single-reference CIR into Target/Add/Preserve/Remove and applies factor-specific local matching; constraint factorization alone is not novel.",
+    "ReBind (arXiv:2607.14681) validates explicit reference tokens at semantic positions for multi-reference video editing; this is the main adjacent-domain transfer primitive for P038.",
+    "MultiBind (arXiv:2603.21937) separates self-degradation from cross-subject confusion in generation; P038 adapts that separation to equivalence gap versus wrong-binding contrast in retrieval.",
+    "Janossy Pooling, Set Transformer, and Multi-Set Transformer establish permutation/set operators; P038 must distinguish joint role-reference relabeling from unconditional image exchangeability."
   ],
   "hypotheses": [
     {
@@ -84,8 +89,15 @@
     {
       "id": "H5",
       "statement": "在保持图片、顺序、布局和长度一致时，正确来源绑定相对错误绑定的margin差可区分正例与显式负例，并改善联合重排。",
-      "status": "P037协议已冻结，等待GPU3；尚无新分数。",
+      "status": "P037 failed 3/4 gates: positive binding contrast was negative, macro AUC was 0.4625, and fused AP@10 decreased. Full-scale PCSI is stopped.",
       "risk": "P030仅有21个top20正例且已观察；P037只能作探索性kill gate，不能建立泛化或创新。"
+    },
+    {
+      "id": "H6",
+      "statement": "Placing each reference directly beside a source-local semantic role will reduce joint-relabeling sensitivity and recover correct source binding in multi-image composed retrieval.",
+      "status": "P038 protocol frozen before scores; bounded pilot pending.",
+      "transfer_origin": "ReBind explicit semantic reference placement, Janossy permutation orbits, and MultiBind confusion-aware diagnosis.",
+      "risk": "TAPR already covers constraint factorization in single-reference CIR; generic interleaving, permutation averaging, and VLM reranking are not novel. The claim requires retrieval-specific joint-role equivariance and wrong-binding controls."
     }
   ],
   "evaluation_policy": {
@@ -687,6 +699,15 @@
       },
       "full_scale_authorized": false,
       "stop_reason": "Three of four frozen pilot gates failed; source-interventional contrast did not separate positive candidates or improve AP@10."
+    },
+    "P038": {
+      "status": "preregistered_not_started",
+      "config": "configs/P038_semantically_interleaved_role_cards.json",
+      "script": "scripts/run_P038.sh",
+      "expected_records": 600,
+      "n_queries": 10,
+      "n_reference_components": 10,
+      "heldout_accessed": false
     }
   },
   "monitor": {
@@ -695,7 +716,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "本轮读取本地gpu3 heartbeat：ACTIVE，每20分钟；读取research_state并核验真实PID，保持原有监控。"
   },
-  "next": "Do not run P036 continuation or any PCSI full scale. If continuing the topic, first design a new bounded pilot that explicitly controls position/index effects and has a different mechanism; require the same pilot-before-full gate.",
+  "next": "Commit the frozen P038 protocol, verify GPU3 is free, then run exactly the 600-score pilot. Stop the route unless every mechanism and task gate passes.",
   "results": {
     "P001": {
       "n": 4,
@@ -1473,7 +1494,7 @@
       "decision": "Reject this source-isolated predicate judging plus fixed probabilistic AND implementation; do not access P033 or any reserved component. This does not reject cross-domain transfer in general."
     }
   },
-  "novelty_status": "PCSI source-role contrast is not supported on the observed P030 pilot: the positive contrast mean is negative, contrast AUC is near chance, and the fused score loses AP@10. The useful finding is diagnostic—reindexing alone changes ranking substantially—while generic position-bias correction is already crowded. No full-scale claim is justified.",
+  "novelty_status": "A credible transfer hypothesis exists but is unvalidated: source-local semantic interleaving plus a joint-relabeling/wrong-binding diagnostic may be new for multi-image composed retrieval. Direct CIR factorization, generic order correction, and permutation pooling are excluded from the claim.",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
@@ -1502,7 +1523,10 @@
       "P037 froze a position-controlled source intervention before new scores: equivalent reindexing and wrong binding share identical images/order/layout/length; 48 observed P030 queries, 1920 new scores, four directional gates, no held-out access.",
       "P036/P037 analysis AP cutoff corrected from 100 to 10 before either analysis ran and before any P037 score; this aligns code with the frozen AP@10 gate.",
       "P036 was terminated at 2592/13980 records with exit 143 before analysis; confirmation stayed untouched. A mandatory preregistered pilot-before-full policy was added, and P037 began as the first compliant pilot.",
-      "P037 pilot completed 1920 unique finite scores and failed 3/4 frozen gates: PCSI AP@10 -0.100pp, positive binding contrast mean -0.0357, contrast macro AUC 0.4625; explicit-negative precision improved -0.417pp. Full-scale PCSI is stopped."
+      "P037 pilot completed 1920 unique finite scores and failed 3/4 frozen gates: PCSI AP@10 -0.100pp, positive binding contrast mean -0.0357, contrast macro AUC 0.4625; explicit-negative precision improved -0.417pp. Full-scale PCSI is stopped.",
+      "Screened nine additional primary sources spanning direct CIR, multi-image position bias, adjacent multi-reference binding, and set invariance.",
+      "P038 SIRC freezes ten observed development queries, 600 new scores, three matched conditions, and five all-required gates before any score.",
+      "P038 confirmation and all new components remain untouched."
     ]
   },
   "idea_audits": {

@@ -1,6 +1,6 @@
 {
-  "as_of": "2026-09-17T03:38:34.263688+00:00",
-  "status": "Novelty not established. SoFT and UniCVR occupy constraint/candidate reranking in CIR; RCIR and IJCAI 2025 occupy risk-controlled image and two-stage ranked retrieval. P036 is only a risk-inspired candidate for source-bound multi-reference extreme veto with joint-order preservation and explicit-negative component-disjoint validation.",
+  "as_of": "2026-09-17T06:30:41.466379+00:00",
+  "status": "Updated with primary sources for P038: direct CIR boundaries, multi-image order bias, adjacent multi-reference binding, and set-invariance transfer primitives.",
   "records": [
     {
       "id": "DTS_ICLR2026",
@@ -477,6 +477,69 @@
       "evidence": "Read the primary IJCAI 2025 paper. It develops learn-then-test and conformal-risk-control procedures for sequential retrieval and ranking, defines distinct retrieval and ranking risks, and gives finite-sample control through data splitting under stated assumptions.",
       "overlap": "Two-stage risk control for ranked retrieval is established cross-domain; risk-controlled reranking or staged calibration is not itself novel.",
       "limits": "The application is document ranking on MSLR-Web and Yahoo LTRC, not source-bound multi-image composed retrieval. P036 also lacks the independent calibration structure required for these formal guarantees and therefore uses only risk-inspired language."
+    },
+    {
+      "id": "SoFA_CVPR2025",
+      "url": "https://openaccess.thecvf.com/content/CVPR2025/html/Tian_Identifying_and_Mitigating_Position_Bias_of_Multi-image_Vision-Language_Models_CVPR_2025_paper.html",
+      "evidence": "Primary CVPR 2025 paper. It introduces position-wise QA and SoFt Attention, interpolating inter-image causal attention with a bidirectional counterpart to reduce multi-image position bias.",
+      "overlap": "Directly occupies generic diagnosis and attention-level mitigation of multi-image position bias.",
+      "limits": "It studies multi-image reasoning/QA rather than source-role binding in composed retrieval, and does not separate semantic-preserving joint relabeling from a wrong source-role assignment."
+    },
+    {
+      "id": "DOCD_CVPRFindings2026",
+      "url": "https://openaccess.thecvf.com/content/CVPR2026F/html/Gan_Mitigating_Vision-Text_Order_Bias_in_Vision-Language_Model_CVPRF_2026_paper.html",
+      "evidence": "Primary CVPR Findings 2026 paper. Dual-Order Contrastive Decoding infers prefix and suffix modality orders in parallel and compensates suffix logits with prefix-order evidence.",
+      "overlap": "Dual-order inference and contrastive correction for VLM order bias are prior art.",
+      "limits": "The group action is modality order, not joint permutation of multiple reference-role pairs; it does not measure or repair source-role misbinding in retrieval."
+    },
+    {
+      "id": "ReBind_arXiv2607.14681",
+      "url": "https://arxiv.org/html/2607.14681",
+      "evidence": "Primary 2026 preprint. ReBind places explicit visual reference tokens directly at their corresponding semantic positions and trains structured instruction plus reference-attribution stages for multi-reference video editing.",
+      "overlap": "Explicit reference-semantic binding is established in an adjacent multi-reference generation/editing task.",
+      "limits": "It is not a retrieval method and does not evaluate candidate ranking, explicit hard negatives, or permutation-equivariant reference-role scoring. SIRC transfers the primitive and adds retrieval-specific paired controls."
+    },
+    {
+      "id": "MultiBind_arXiv2603.21937",
+      "url": "https://arxiv.org/html/2603.21937",
+      "evidence": "Primary 2026 preprint. MultiBind uses baseline-corrected slot similarity matrices to separate self-degradation from off-diagonal cross-subject confusion and diagnose swaps, dominance, and blending.",
+      "overlap": "Confusion-aware multi-reference binding diagnosis is established for image generation.",
+      "limits": "It requires deterministic generated-subject correspondences and specialist features; it does not diagnose ranking invariance or source-role binding in composed retrieval."
+    },
+    {
+      "id": "TAPR_arXiv2608.25305v2",
+      "url": "https://arxiv.org/html/2608.25305",
+      "evidence": "Primary 2026 preprint (v2 title Atomic Edit Factorization). TAPR factorizes a single-reference CIR request into Target, Add, Preserve, and Remove atoms, then applies factor-specific global/local matching operators.",
+      "overlap": "Constraint factorization, preserve/add/remove roles, local multi-vector evidence, and signed aggregation are directly occupied in CIR.",
+      "limits": "TAPR assumes one visual reference and does not address multiple source identities, joint relabeling invariance, or wrong-source binding controls."
+    },
+    {
+      "id": "JanossyPooling_ICLR2019",
+      "url": "https://openreview.net/forum?id=BJluy2RcFm",
+      "evidence": "Primary ICLR 2019 paper. Janossy pooling represents a permutation-invariant set function by averaging a permutation-sensitive sequence function over element reorderings, with tractable approximations.",
+      "overlap": "Permutation averaging itself is established and cannot be claimed as a new operator.",
+      "limits": "It does not define the task-specific symmetry where reference images and their semantic roles must be permuted jointly while incorrect role-image swaps must remain distinguishable."
+    },
+    {
+      "id": "SetTransformer_ICML2019",
+      "url": "https://proceedings.mlr.press/v97/lee19d.html",
+      "evidence": "Primary ICML 2019 paper. Set Transformer provides attention-based permutation-invariant set modeling while preserving interactions among elements.",
+      "overlap": "Attention-based set invariance and interaction modeling are established.",
+      "limits": "Raw reference images in multi-reference CIR are not simply exchangeable because each carries a named semantic role; the needed property is joint role-reference equivariance, not unconditional image-order invariance."
+    },
+    {
+      "id": "MultiSetTransformer_UAI2022",
+      "url": "https://proceedings.mlr.press/v180/selby22a.html",
+      "evidence": "Primary UAI 2022 paper. Multi-Set Transformer learns functions on multiple sets with partial permutation invariance and cross-set interactions.",
+      "overlap": "Architectures for multiple partially permutation-invariant sets are prior art.",
+      "limits": "It does not cover composed retrieval instructions with explicit source-role links or a training-free MLLM verifier."
+    },
+    {
+      "id": "DreamRenderer_ICCV2025",
+      "url": "https://openaccess.thecvf.com/content/ICCV2025/html/Zhou_DreamRenderer_Taming_Multi-Instance_Attribute_Control_in_Large-Scale_Text-to-Image_Models_ICCV_2025_paper.html",
+      "evidence": "Primary ICCV 2025 paper. DreamRenderer restricts cross-instance attention and uses bridge image tokens so each instance text embedding binds to the intended visual attributes.",
+      "overlap": "Architectural masking for instance-attribute binding is established in text-to-image generation.",
+      "limits": "It requires access to and training of a diffusion generator; SIRC instead tests input-level semantic placement in a frozen retrieval verifier."
     }
   ]
 }
