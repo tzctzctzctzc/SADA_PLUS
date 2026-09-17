@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-18T01:16:54.455765+08:00",
+  "as_of": "2026-09-18T02:21:36.445650+08:00",
   "goal_status": "active",
-  "phase": "P043_stage0_data_contract",
+  "phase": "P046_design_after_judge_failure",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 1,
@@ -878,7 +878,7 @@
     "automation_display_name": "GPU1 独立研究进展",
     "rules_first": "Read /vepfs/vlms/1/研究规则.md before continuing; the automation was updated to GPU1 and evidence-first/pilot-first execution on 2026-09-17."
   },
-  "next": "Wait for physical GPU1 to become suitable, recheck occupancy immediately before launch, then run the frozen 500-check P043 visual audit. Do not train before it passes.",
+  "next": "Design and preregister a product-disjoint role-corruption data pilot that uses shared-target paired differences and calibrated negative controls. Do not train until that data pilot and a full implementation audit pass.",
   "results": {
     "P001": {
       "n": 4,
@@ -1744,9 +1744,84 @@
         "rerun_result": "unchanged at 62/320"
       },
       "conclusion": "P042 is stopped. Full-image MAE confounded masked manipulation strength with background area, and the frozen pool did not yield 100 eligible bundles. No visual judge or training was run."
+    },
+    "P043_visual_data_gate": {
+      "status": "failed_stop_no_training",
+      "gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
+      "bundles": 100,
+      "checks": 500,
+      "bundle_passed": 0,
+      "bundle_pass_rate": 0.0,
+      "required": 0.95,
+      "per_check_pass_rate": {
+        "base_alignment_positive": 0.02,
+        "active_equivariance_positive": 0.05,
+        "null_invariance_positive": 0.65,
+        "cross_effect_negative": 0.98,
+        "identity_change_negative": 1.0
+      },
+      "negative_controls_pass": true,
+      "max_gpu_allocated_bytes": 20483692032,
+      "conclusion": "Official MERIT positives are not usable as strict role-conditioned visual-equivalence groups under the frozen judge. Strong negative controls argue against lowering the gate. No training was run."
+    },
+    "P044_reference_subset_screen": {
+      "status": "fail",
+      "checks": 600,
+      "route_counts": {
+        "neither": 47,
+        "other_only": 39,
+        "color_only": 5,
+        "clean_both": 9
+      },
+      "routeable_rate": 0.53,
+      "partial_rate": 0.44,
+      "clean_rate": 0.09,
+      "per_check_pass_rate": {
+        "color_relation_positive": 0.14,
+        "other_relation_positive": 0.48,
+        "color_identity_positive": 0.97,
+        "other_identity_positive": 0.92,
+        "color_cross_negative": 0.97,
+        "identity_change_negative": 1.0
+      },
+      "failed_gates": [
+        "calibration",
+        "clean_rate"
+      ],
+      "max_gpu_allocated_bytes": 18771011072,
+      "decision": "P044 remains failed; no training. Manual review of the eight other-identity failures suggests judge false negatives, motivating a separately frozen independent-judge pilot rather than changing P044."
+    },
+    "P045_independent_judge_screen": {
+      "status": "fail",
+      "checks": 600,
+      "route_counts": {
+        "neither": 22,
+        "clean_both": 34,
+        "color_only": 21,
+        "other_only": 23
+      },
+      "routeable_rate": 0.78,
+      "partial_rate": 0.44,
+      "clean_rate": 0.34,
+      "cross_judge_relation_agreement": 0.65,
+      "cross_judge_route_agreement": 0.42,
+      "per_check_pass_rate": {
+        "color_relation_positive": 0.55,
+        "other_relation_positive": 0.57,
+        "color_identity_positive": 0.97,
+        "other_identity_positive": 1.0,
+        "color_cross_negative": 0.9,
+        "identity_change_negative": 0.85
+      },
+      "failed_gates": [
+        "calibration",
+        "cross_judge_relation_agreement"
+      ],
+      "max_gpu_allocated_bytes": 9679515136,
+      "decision": "Stop automatic-judge role routing. Judge-dependent pseudo labels are not solid enough for training or claims."
     }
   },
-  "novelty_status": "No effective method is established. P042 failed before visual audit or training. P043 is a product-disjoint confirmation of a corrected mask-local data measurement and can only validate the data contract, not SOTA or novelty.",
+  "novelty_status": "No effective method is established. P044/P045 show that per-role pseudo labels from automatic judges are not stable enough (65% relation agreement, 42% route agreement). Generic noise routing is already prior art. The next candidate is shared-target self-normalized role corruption, whose novelty and data validity remain unverified.",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
@@ -1978,7 +2053,7 @@
     },
     {
       "id": "role_conditioned_transform_equivariance_maskaware_confirm_v2",
-      "status": "stage0_pixel_gate_passed_waiting_for_gpu1_visual_audit",
+      "status": "stage0_failed_visual_gate_no_training",
       "title": "Mask-aware product-disjoint confirmation of role-conditioned transform equivariance",
       "predecessor_evidence": [
         "P042 failed its frozen pixel gate at 62/320 and remains failed; no visual audit or training was run.",
@@ -2032,7 +2107,167 @@
           "utilization_percent": 100,
           "decision": "wait; do not launch or fallback"
         }
+      },
+      "stage0_result": {
+        "status": "failed_stop_no_training",
+        "gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
+        "bundles": 100,
+        "checks": 500,
+        "bundle_passed": 0,
+        "bundle_pass_rate": 0.0,
+        "required": 0.95,
+        "per_check_pass_rate": {
+          "base_alignment_positive": 0.02,
+          "active_equivariance_positive": 0.05,
+          "null_invariance_positive": 0.65,
+          "cross_effect_negative": 0.98,
+          "identity_change_negative": 1.0
+        },
+        "negative_controls_pass": true,
+        "max_gpu_allocated_bytes": 20483692032,
+        "conclusion": "Official MERIT positives are not usable as strict role-conditioned visual-equivalence groups under the frozen judge. Strong negative controls argue against lowering the gate. No training was run."
       }
+    },
+    {
+      "id": "reference_subset_noise_decomposition_screen_v1",
+      "status": "failed_frozen_mechanism_gates_no_training",
+      "title": "Reference-subset reliability lattice for noisy multi-reference CIR",
+      "predecessor_evidence": [
+        "P041 metadata substitution passed only 37/100 complete visual contracts.",
+        "P043 official-positive construction passed 0/100 complete contracts, while negative controls passed 98% and 100%.",
+        "The P043 joint base check cannot tell whether both instructed relations are invalid or only one is invalid."
+      ],
+      "theory": "Let z_r indicate whether reference role r has a valid relation to the labeled target. A multi-reference query has a subset state z in {0,1}^R; valid subsets may provide partial likelihood terms while invalid roles must not supervise the joint positive. This is a latent partial-label model, not a causal guarantee.",
+      "literature_boundary": [
+        "MPCIR 2026 already provides noise decomposition and multi-path routing for single-reference CIR.",
+        "HUG AAAI 2026 already provides fine-grained heterogeneous uncertainty for CIR."
+      ],
+      "candidate_increment": "A reliability lattice over separately instructed visual-reference roles in multi-image CIR, with subset-specific supervision and later transfer to PinPoint multi-image full-gallery retrieval. A first/novel claim remains unverified.",
+      "pilot": {
+        "development_bundles": 100,
+        "checks": 600,
+        "relations": [
+          "color_relation_positive",
+          "other_relation_positive"
+        ],
+        "calibration": [
+          "color_identity_positive",
+          "other_identity_positive",
+          "color_cross_negative",
+          "identity_change_negative"
+        ],
+        "all_required_gates": {
+          "each_calibration_pass_rate_min": 0.95,
+          "routeable_rate_min": 0.5,
+          "partial_rate_min": 0.2,
+          "clean_rate_min": 0.1,
+          "each_partial_branch_rate_min": 0.05
+        },
+        "interpretation": "Only screens whether partial-role routing has enough support; no training or effectiveness claim."
+      },
+      "implementation_audit": "runs/P044_reference_subset_noise_decomposition_screen/implementation_audit.json",
+      "gpu": "Only physical GPU1 UUID GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f after live check; no fallback.",
+      "created_at": "2026-09-18T01:49:42.192187+08:00",
+      "implementation_classification": "faithful full implementation of the frozen P044 mechanism screen",
+      "pilot_result": {
+        "status": "fail",
+        "checks": 600,
+        "route_counts": {
+          "neither": 47,
+          "other_only": 39,
+          "color_only": 5,
+          "clean_both": 9
+        },
+        "routeable_rate": 0.53,
+        "partial_rate": 0.44,
+        "clean_rate": 0.09,
+        "per_check_pass_rate": {
+          "color_relation_positive": 0.14,
+          "other_relation_positive": 0.48,
+          "color_identity_positive": 0.97,
+          "other_identity_positive": 0.92,
+          "color_cross_negative": 0.97,
+          "identity_change_negative": 1.0
+        },
+        "failed_gates": [
+          "calibration",
+          "clean_rate"
+        ],
+        "max_gpu_allocated_bytes": 18771011072,
+        "decision": "P044 remains failed; no training. Manual review of the eight other-identity failures suggests judge false negatives, motivating a separately frozen independent-judge pilot rather than changing P044."
+      }
+    },
+    {
+      "id": "independent_judge_reference_subset_screen_v1",
+      "status": "failed_independent_judge_gates_no_training",
+      "title": "Independent-judge falsification of reference-subset reliability",
+      "predecessor_evidence": [
+        "P044 showed 44% one-sided-valid bundles and 53% routeability but failed calibration at 92% and clean-both at 9%.",
+        "Manual contact-sheet review found the eight same-image other-attribute failures mostly visibly show the requested property, so judge false negatives are plausible; this review does not change P044."
+      ],
+      "design": {
+        "judge": "Qwen2.5-VL-3B-Instruct",
+        "revision": "66285546d2b821cf421d4f5eb2576359d3770cd3",
+        "same_frozen_bundles": 100,
+        "checks": 600,
+        "unchanged_P044_gates": true,
+        "added_cross_judge_relation_agreement_min": 0.7
+      },
+      "interpretation": "A pass supports judge-robust development viability only. Training remains forbidden until a later product-disjoint confirmation passes.",
+      "gpu": "Only physical GPU1 UUID GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f after live check; no fallback.",
+      "created_at": "2026-09-18T02:07:42.962814+08:00",
+      "implementation_audit": "runs/P045_independent_judge_reference_subset_screen/implementation_audit.json",
+      "implementation_classification": "faithful full implementation of the frozen P045 independent-judge screen",
+      "pilot_result": {
+        "status": "fail",
+        "checks": 600,
+        "route_counts": {
+          "neither": 22,
+          "clean_both": 34,
+          "color_only": 21,
+          "other_only": 23
+        },
+        "routeable_rate": 0.78,
+        "partial_rate": 0.44,
+        "clean_rate": 0.34,
+        "cross_judge_relation_agreement": 0.65,
+        "cross_judge_route_agreement": 0.42,
+        "per_check_pass_rate": {
+          "color_relation_positive": 0.55,
+          "other_relation_positive": 0.57,
+          "color_identity_positive": 0.97,
+          "other_identity_positive": 1.0,
+          "color_cross_negative": 0.9,
+          "identity_change_negative": 0.85
+        },
+        "failed_gates": [
+          "calibration",
+          "cross_judge_relation_agreement"
+        ],
+        "max_gpu_allocated_bytes": 9679515136,
+        "decision": "Stop automatic-judge role routing. Judge-dependent pseudo labels are not solid enough for training or claims."
+      }
+    },
+    {
+      "id": "self_normalized_role_corruption_v1",
+      "status": "design_only_requires_new_preregistered_pilot",
+      "title": "Self-normalized role-corruption learning with a shared target",
+      "evidence_chain": [
+        "P037 showed the frozen model does not reliably discriminate wrong bindings, so a training signal is needed rather than another inference correction.",
+        "P041 source-swapped negative controls passed 97% and P043 color-cross negatives passed 98%, supporting role corruption as a reliable negative operation.",
+        "P041/P043 absolute positive contracts failed, and P044/P045 role labels were judge-dependent, so the next objective must not require absolute role-validity pseudo labels."
+      ],
+      "mechanism": "For each official multi-reference query-target pair, keep the target fixed and compare the original joint query with a query where exactly one instructed reference role is corrupted. Optimize a paired margin on the score difference while preserving the full joint stream. Target quality and instance difficulty are shared within the pair rather than converted into an absolute clean/noisy label.",
+      "theory": "If target-label quality and target difficulty contribute an additive pair-shared nuisance term, subtracting corrupted-query score from original-query score cancels that term. This is a limited invariance argument, not a causal-identification theorem; interaction-dependent label noise may remain.",
+      "novelty_boundary": "Counterfactual negatives, robust contrastive learning, MPCIR noise routing, and multi-reference binding are prior art. The candidate increment is role-indexed within-query corruption with a shared target as self-normalized weak supervision for multi-image CIR, evaluated against same-data ordinary fine-tuning and generic corruption controls. A first-use claim is unverified.",
+      "required_falsification_before_training": [
+        "Freeze a product-disjoint corruption-confirmation set and donor policy before scoring.",
+        "Require role corruption to break the intended relation under calibrated controls without requiring the original pair to pass an absolute visual contract.",
+        "Audit that only the selected reference changes, target and other reference hashes stay identical, role tokens remain aligned, and no candidate labels leak.",
+        "Pre-register a small training pilot with ordinary fine-tuning, generic image augmentation, and role-corruption arms under identical data, trainable parameters, steps, seeds, and full-gallery evaluation."
+      ],
+      "gpu": "Only physical GPU1 UUID GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f after live check; no fallback.",
+      "created_at": "2026-09-18T02:21:36.445650+08:00"
     }
   ]
 }

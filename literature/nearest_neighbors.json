@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-18T00:25:00+08:00",
+  "as_of": "2026-09-18T01:49:42.192187+08:00",
   "status": "Updated for the P001-P038 audit and P039: direct CIR boundaries, multi-image binding, private bridge paths, and causal intervention primitives.",
   "records": [
     {
@@ -697,6 +697,29 @@
       "overlap": "显式区分应保留与应修改属性已有直接CIR先例。",
       "limits": "P042不能把preserve/change分解本身作为创新，只能检验多参考角色条件的同变换响应。",
       "checked_at": "2026-09-18T00:25:00+08:00"
+    },
+    {
+      "id": "MPCIR_ESWA2026",
+      "title": "Noisy correspondence decomposition for robust composed image retrieval",
+      "year": 2026,
+      "venue_status": "Expert Systems with Applications 2026",
+      "url": "https://doi.org/10.1016/j.eswa.2026.133200",
+      "evidence": "Decomposes single-reference CIR triplets into text, reference, target, and full noise and routes usable partial correspondences through text-only, reference-only, and dual paths.",
+      "overlap": "Noise-type decomposition and partial-supervision multi-path routing in CIR are direct prior art.",
+      "limits": "The formulation has one visual reference and does not model a reliability lattice over separately instructed roles in a multi-image query.",
+      "checked_at": "2026-09-18T01:49:42.192187+08:00"
+    },
+    {
+      "id": "HUG_AAAI2026",
+      "title": "Heterogeneous Uncertainty-Guided Composed Image Retrieval with Fine-Grained Probabilistic Learning",
+      "year": 2026,
+      "venue_status": "AAAI 2026",
+      "url": "https://ojs.aaai.org/index.php/AAAI/article/view/37898",
+      "arxiv": "https://arxiv.org/abs/2601.11393",
+      "evidence": "Uses fine-grained Gaussian embeddings, heterogeneous query/target uncertainty, and uncertainty-guided holistic and fine-grained contrastive objectives.",
+      "overlap": "Fine-grained heterogeneous uncertainty and noise-aware contrastive CIR are direct prior art.",
+      "limits": "It does not separately route subsets of multiple visual references tied to distinct instruction roles.",
+      "checked_at": "2026-09-18T01:49:42.192187+08:00"
     }
   ]
 }

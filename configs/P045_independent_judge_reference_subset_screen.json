@@ -1,0 +1,57 @@
+{
+  "id": "P045",
+  "name": "independent_judge_reference_subset_screen",
+  "status": "frozen_independent_judge_pilot_only",
+  "predecessor": "P044 failed frozen gates because other-attribute identity calibration was 92% and clean-both was 9%; no training",
+  "hypothesis": "If the reference-subset signal is not an artifact of the 7B judge, an independently parameterized 3B judge should satisfy the same controls and routing gates and agree on at least 70% of the 200 true relation decisions.",
+  "novelty_boundary": "MPCIR 2026 already decomposes and routes text/reference/target noise in single-reference CIR, and HUG 2026 models fine-grained heterogeneous CIR uncertainty. The only candidate increment is a reliability lattice over separately instructed visual-reference roles in multi-image CIR, with subset-specific supervision and real PinPoint transfer.",
+  "source": {
+    "run_dir": "runs/P043_role_conditioned_equivariance_maskaware_confirm",
+    "bundles": "audit_bundles.jsonl",
+    "raw_manifest": "image_manifest_raw.json",
+    "bundles_count": 100,
+    "development_only": true
+  },
+  "gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
+  "visual_audit": {
+    "judge_model": "models/Qwen2.5-VL-3B-Instruct",
+    "judge_revision": "66285546d2b821cf421d4f5eb2576359d3770cd3",
+    "min_pixels": 3136,
+    "max_pixels": 451584,
+    "batch_size": 4,
+    "positive_margin_min": 0,
+    "negative_margin_max": 0,
+    "required_checks": [
+      "color_relation_positive",
+      "other_relation_positive",
+      "color_identity_positive",
+      "other_identity_positive",
+      "color_cross_negative",
+      "identity_change_negative"
+    ],
+    "calibration_checks": [
+      "color_identity_positive",
+      "other_identity_positive",
+      "color_cross_negative",
+      "identity_change_negative"
+    ],
+    "calibration_pass_rate_min": 0.95,
+    "routeable_rate_min": 0.5,
+    "partial_rate_min": 0.2,
+    "clean_rate_min": 0.1,
+    "each_partial_branch_rate_min": 0.05,
+    "cross_judge_relation_agreement_min": 0.7
+  },
+  "go_rule": "All four calibration checks must pass >=95%; at least 50% of bundles must have one or both valid role relations, at least 20% must have exactly one valid role, at least 10% must have both, and each one-sided branch must contain >=5%. All gates are required. In addition, the 3B judge must agree with the frozen 7B judge on at least 70% of the 200 role-relation decisions.",
+  "interpretation": "A pass supports judge-robust development viability only. It still cannot authorize training; a product-disjoint data confirmation is required next.",
+  "forbidden": [
+    "train_from_P045",
+    "change_gates_after_scores",
+    "combine_judges_after_results",
+    "treat_cross_judge_agreement_as_ground_truth",
+    "restart_P036",
+    "expand_P039_SBB",
+    "run_original_P040"
+  ],
+  "prior_judge_results": "runs/P044_reference_subset_noise_decomposition_screen/visual_audit_results.jsonl"
+}
