@@ -20,6 +20,7 @@ from tools.merge_and_shard_rq1 import merge_rows, write_jsonl_atomic
 from tools import prepare_rq1_frames
 from tools.run_rq1_slowfast_probe import segment_feature
 from tools.rq1_feature_store import FeatureStore, normalize, summarize_frame_features
+from tools.extract_rq1_qwen_features import select_shard
 from tools.run_rq1_frozen_feature_probe import source_train_indices
 
 
@@ -154,6 +155,13 @@ def test_feature_store_resumes_completed_rows(tmp_path):
     resumed = FeatureStore(prefix, manifest, rows, "clip", 2, 8, "static")
     assert resumed.pending_indices() == [1]
     assert np.allclose(resumed.features[0], [1.0, 2.0])
+
+
+def test_qwen_feature_shards_are_disjoint_and_complete():
+    indices = list(range(11))
+    shards = [select_shard(indices, 3, shard) for shard in range(3)]
+    assert sorted(index for shard in shards for index in shard) == indices
+    assert not set(shards[0]) & set(shards[1])
 
 
 def test_grouped_probe_selection_never_splits_one_video_across_folds():

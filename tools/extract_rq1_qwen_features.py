@@ -43,6 +43,8 @@ def parse_args():
         default="multimodal_last_token",
     )
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--shard-count", type=int, default=1)
+    parser.add_argument("--shard-index", type=int, default=0)
     return parser.parse_args()
 
 
@@ -84,30 +86,35 @@ def encode_batch(runtime, rows, indices, args):
     ])
 
 
-def encode_multimodal(runtime, rows, index, args):
-    paths = frame_paths(
-        args.frame_cache,
-        args.cache_namespace,
-        rows[index]["candidate_id"],
-        frame_count=args.frame_count,
-    )
-    messages = build_messages(
-        paths,
-        MULTIMODAL_PROBE_PROMPT,
-        args.min_pixels,
-        args.max_pixels,
-    )
-    text = runtime["processor"].apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True,
-    )
+def encode_multimodal_batch(runtime, rows, indices, args):
+    messages = []
+    for index in indices:
+        paths = frame_paths(
+            args.frame_cache,
+            args.cache_namespace,
+            rows[index]["candidate_id"],
+            frame_count=args.frame_count,
+        )
+        messages.append(build_messages(
+            paths,
+            MULTIMODAL_PROBE_PROMPT,
+            args.min_pixels,
+            args.max_pixels,
+        ))
+    texts = [
+        runtime["processor"].apply_chat_template(
+            item,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        for item in messages
+    ]
     image_inputs, video_inputs = runtime["process_vision_info"](
         messages,
         image_patch_size=16,
     )
     inputs = runtime["processor"](
-        text=[text],
+        text=texts,
         images=image_inputs,
         videos=video_inputs,
         padding=True,
@@ -123,15 +130,30 @@ def encode_multimodal(runtime, rows, index, args):
         )
     if not output.hidden_states:
         raise RuntimeError("Qwen did not return multimodal hidden states")
-    feature = output.hidden_states[-1][0, -1].detach().float()
-    feature = feature / feature.norm().clamp_min(1e-12)
-    return feature.cpu().numpy()
+    hidden = output.hidden_states[-1]
+    attention_mask = inputs["attention_mask"].bool()
+    positions = runtime["torch"].arange(
+        attention_mask.shape[1], device=attention_mask.device
+    ).unsqueeze(0).expand_as(attention_mask)
+    last_positions = positions.masked_fill(~attention_mask, -1).max(dim=1).values
+    batch_indices = runtime["torch"].arange(
+        len(indices), device=hidden.device
+    )
+    features = hidden[batch_indices, last_positions].detach().float()
+    features = features / features.norm(dim=1, keepdim=True).clamp_min(1e-12)
+    return features.cpu().numpy()
+
+
+def select_shard(indices, shard_count, shard_index):
+    return [index for index in indices if index % shard_count == shard_index]
 
 
 def main():
     args = parse_args()
     if args.frame_count <= 1 or args.segment_batch_size <= 0:
         raise ValueError("frame_count must exceed one and batch size must be positive")
+    if args.shard_count <= 0 or not 0 <= args.shard_index < args.shard_count:
+        raise ValueError("shard index must be within a positive shard count")
     rows = read_jsonl(args.manifest)
     runtime = load_qwen3(args)
     dimensions = int(runtime["model"].config.text_config.hidden_size)
@@ -153,21 +175,20 @@ def main():
         args.output_prefix, args.manifest, rows, model_identity, dimensions,
         args.frame_count, pooling,
     )
-    pending = store.pending_indices()
+    pending = select_shard(
+        store.pending_indices(), args.shard_count, args.shard_index
+    )
     if args.limit > 0:
         pending = pending[:args.limit]
     started = time.time()
     processed = 0
-    step = args.segment_batch_size if args.feature_interface == "vision_tower" else 1
+    step = args.segment_batch_size
     for offset in range(0, len(pending), step):
         indices = pending[offset:offset + step]
         if args.feature_interface == "vision_tower":
             features = encode_batch(runtime, rows, indices, args)
         else:
-            features = np.stack([
-                encode_multimodal(runtime, rows, index, args)
-                for index in indices
-            ])
+            features = encode_multimodal_batch(runtime, rows, indices, args)
         store.write(indices, features)
         processed += len(indices)
         elapsed = max(time.time() - started, 1e-9)
