@@ -1,0 +1,13 @@
+{
+  "name": "RMCD",
+  "url": "https://github.com/mlvlab/RMCD",
+  "revision": "a5fe67597638a629e0b9b6ffa0fe2531982923ae",
+  "retrieved_at": "2026-09-17T00:00:00Z",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "26860824fd7f40e99f1c48adbb8a7c4cf11938370953a5ff834888e38decf4dc"
+    }
+  ],
+  "audit": "Pinned official repository contains only a release-soon README at this revision; method details were audited from the WACV 2026/arXiv primary paper."
+}

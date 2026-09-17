@@ -388,6 +388,23 @@
       "evidence": "Read Sections 3.1-3.3 and ablations. INTENT constructs an FFT amplitude-mixed counterfactual reference while preserving phase, enforces CKA consistency between factual and intervened composed features, and combines negative-dominated and correspondence-dominated robust objectives for noisy CIR training.",
       "overlap": "Counterfactual reference intervention, visual-invariance language, causal framing, and negative-aware CIR objectives are established. A reference perturbation plus causal terminology is not a sufficient novelty delta.",
       "limits": "INTENT studies single-reference noisy-correspondence training on CIRR/FashionIQ; its FFT intervention is intended to preserve reference semantics, unlike P032's semantically mismatched second reference."
+    },
+    {
+      "id": "RMCD_WACV2026",
+      "url": "https://arxiv.org/abs/2602.06050",
+      "code": "https://github.com/mlvlab/RMCD",
+      "evidence": "Read Sections 3.2-3.3 and analyses. RMCD runs one LVLM prediction per retrieved context and forms a relevance-weighted signed sum of logits, explicitly reflecting relevant contexts and deflecting irrelevant ones; it evaluates seven LVLMs on three knowledge-intensive VQA benchmarks.",
+      "overlap": "Training-free multi-context logit contrast, multiple irrelevant controls, and signed aggregation are established. P033 multi-sham averaging or generic multi-context subtraction is not a sufficient novelty delta.",
+      "limits": "RMCD conditions on retrieved text contexts for VQA and weights them by retriever relevance; it does not estimate source-specific conjunction evidence for two visual references in retrieval. The pinned official repository has no released implementation at revision a5fe675.",
+      "source_manifest": "literature/RMCD_source_manifest.json"
+    },
+    {
+      "id": "MultiSHAP_2508_00576",
+      "url": "https://arxiv.org/abs/2508.00576",
+      "code": "https://github.com/WGLab/MultiSHAP",
+      "evidence": "Read the primary abstract and method claim. MultiSHAP is model-agnostic and uses the Shapley Interaction Index to quantify synergistic and suppressive interactions between fine-grained visual and textual elements at instance and dataset levels.",
+      "overlap": "Generic factorial or Shapley-style multimodal interaction attribution is established; P033 cannot claim novelty from a two-reference difference-in-differences quantity alone.",
+      "limits": "MultiSHAP is an interpretability framework evaluated on multimodal prediction, not a source-bound multi-reference retrieval reranker or an explicit-negative ranking method."
     }
   ]
 }

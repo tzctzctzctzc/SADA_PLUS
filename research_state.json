@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T00:19:57.900808+00:00",
+  "as_of": "2026-09-17T00:44:25.059188+00:00",
   "goal_status": "active",
-  "phase": "P030四条件在GPU3运行；P031 Coral与同底座3B的迁移对照已排队",
+  "phase": "P030 is running on GPU3; P031/P032 are waiting; the untouched P033 metadata protocol was frozen before results.",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -28,7 +28,10 @@
     "WISER（CVPR 2026）已使用二分类VLM verifier、分支置信阈值、候选级融合和迭代自反思；通用verifier校准或不确定性融合不是本项目的新颖点。",
     "TIIR（ACL 2025）已建立多图文交错查询/文档的密集检索与多粒度视觉token压缩；通用多图交错embedding不是新颖点。",
     "CoPE（ACL 2025）已用高斯概率embedding建模CIR的实例级与特征级不确定性；通用不确定性加权也不是新颖点。",
-    "INTENT（AAAI 2026）已在CIR中使用FFT反事实参考干预、CKA视觉不变性和负例感知判别目标；参考扰动与因果措辞本身已有直接近邻，P032不得作因果宣称。"
+    "INTENT（AAAI 2026）已在CIR中使用FFT反事实参考干预、CKA视觉不变性和负例感知判别目标；参考扰动与因果措辞本身已有直接近邻，P032不得作因果宣称。",
+    "P033 freezes one clean query from each of 54 eligible reserved reference components before P030/P032 results; 53 are Composition and 1 is Context Fit.",
+    "The 102 clean non-Composition reserved rows occupy only two reference components, so they are a descriptive sensitivity pool and cannot support independent category generalization.",
+    "RMCD (WACV 2026) already performs relevance-weighted signed multi-context logit aggregation; MultiSHAP already attributes generic multimodal interactions. Multi-sham averaging or ordinary interaction contrasts are not novel by themselves."
   ],
   "hypotheses": [
     {
@@ -425,6 +428,27 @@
         "macro per-query AUC of reference lift for positive vs explicit negative > 0.5",
         "mean positive reference lift > mean explicit-negative reference lift"
       ]
+    },
+    "P033": {
+      "status": "prospectively_frozen_metadata_only_waiting_for_P032_gate",
+      "config": "configs/P033_heldout_reference_contrast.json",
+      "prepare_script": "scripts/prepare_P033.py",
+      "config_sha256": "c0250b2e69128f4c2694363211a56ca8b5a2f70c646564e5f7036de3296386da",
+      "n_reserved_components_total": 60,
+      "n_eligible_components": 54,
+      "n_queries": 54,
+      "category_counts": {
+        "Composition": 53,
+        "Context Fit": 1
+      },
+      "noncomposition_descriptive_pool": {
+        "rows": 102,
+        "reference_components": 2
+      },
+      "expected_score_records_if_authorized": 16200,
+      "execution_gate": "results/P032_reference_contrast.json confirmatory_gate_evaluation.all_pass == true",
+      "scores_seen": false,
+      "images_fetched": false
     }
   },
   "monitor": {
@@ -433,7 +457,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "本轮读取本地gpu3 heartbeat：ACTIVE，每20分钟；读取research_state并核验真实PID，保持原有监控。"
   },
-  "next": "Wait for frozen P030/P032 and P031. Only if their gates justify continuation, preregister held-out category-stratified controls and add a pinned MMRet baseline; selected top-20 pilot results are not comparable to PinPoint full-corpus SOTA.",
+  "next": "Wait for frozen P030/P032. If any P032 gate check fails, stop P033 without fetching or scoring held-out data. If all pass, implement the already frozen P033 scorer, verify exact-RGB grouping, run only on GPU3, then require interval-level replication before interpreting multi-sham secondary scores. P031 remains a transfer baseline; full-corpus SOTA still requires pinned MMRet and official-comparable evaluation.",
   "results": {
     "P001": {
       "n": 4,
@@ -1139,7 +1163,7 @@
       "official_metrics_retained": true
     }
   },
-  "novelty_status": "Current main-track readiness remains low. CoCI/VCD, WISER, and ReCALL occupy contrast-image decoding, verifier-based adaptive reranking, and generative-to-retrieval recalibration. A surviving direction must isolate multi-reference source-specific evidence with held-out structured controls and stronger baselines.",
+  "novelty_status": "Current main-track readiness remains low. VCD, CoCI, and RMCD occupy visual or multi-context contrastive logit aggregation; MultiSHAP occupies generic interaction attribution; WISER and ReCALL occupy verifier calibration and retrieval adaptation. A surviving claim must isolate source-bound evidence unique to multi-reference retrieval and replicate on untouched components and another model.",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
@@ -1153,7 +1177,11 @@
       "P032 qualitative pilot gate operationalized at 73bced9 before P030 completion; all three directional checks are required",
       "ReCALL and WISER primary methods audited; P031 reframed as transfer evidence and generic verifier/calibration novelty ruled out",
       "TIIR and CoPE screened as direct boundaries for generic multi-image embedding and uncertainty claims",
-      "INTENT primary method audited; counterfactual-reference and causal-invariance claims added to the novelty exclusion boundary"
+      "INTENT primary method audited; counterfactual-reference and causal-invariance claims added to the novelty exclusion boundary",
+      "P033 held-out query selection, donor permutations, fixed estimators, and strict execution gate frozen before P030/P032 results",
+      "Reserved metadata audit found only 54 eligible components and severe category concentration; non-Composition sensitivity is limited to two components",
+      "Annotation nulls verified as negative-list padding only; conflict counts are unchanged after excluding nulls",
+      "RMCD and MultiSHAP primary sources audited and added as novelty boundaries"
     ]
   },
   "idea_audits": {
@@ -1174,6 +1202,20 @@
         "A multi-negative or structured negative-control estimator must be derived and shown to isolate source-specific evidence better than random noise, missing-image, and generic VCD controls."
       ],
       "recommendation": "revise; use P032 as a kill gate, not as a claimed method."
+    },
+    "P033_quick": {
+      "mode": "quick",
+      "target": "CVPR/ICML/ACL main track",
+      "current_conference_readiness": "low",
+      "development_potential": "medium_if_P032_and_P033_replicate",
+      "strongest_point": "A result-independent held-out component split with balanced bilateral reference substitutions can test source-bound evidence rather than a single arbitrary sham.",
+      "top_rejection_risks": [
+        "RMCD already covers signed multi-context logit aggregation and MultiSHAP covers generic interaction attribution.",
+        "The held-out cohort is almost entirely Composition, while non-Composition rows provide only two independent reference components.",
+        "P033 remains a selected top-20 reranking diagnostic and is not a full-corpus SOTA evaluation."
+      ],
+      "decision_rule": "Do not execute unless all locked P032 directional gates pass; after execution, the primary replication interval must exclude zero and the mechanism intervals must pass before secondary scores are interpreted.",
+      "recommendation": "keep only as a gated confirmation/diagnostic protocol; novelty is not established"
     }
   }
 }
