@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-17T03:30:55.293375+00:00",
+  "as_of": "2026-09-17T03:36:12.453100+00:00",
   "goal_status": "active",
   "phase": "P036 development scoring is running on physical GPU3; confirmation remains inaccessible.",
   "scope": {
@@ -41,7 +41,9 @@
     "P035 completed with 1920 unique finite source scores. Fixed probabilistic AND reduced AP@10 by 1.043 pp (95% component CI [-2.301, -0.007]) and macro positive-vs-explicit-negative AUC from 0.808 to 0.533; only explicit-negative precision@10 improved, so 2/3 locked gates failed and held-out execution is forbidden.",
     "Direct 2026 prior art already uses LLM-parsed absolute/relative constraints and Qwen2.5-VL verification to rerank single-reference fashion CIR; explicit constraint verification alone is occupied.",
     "Conformal candidate sets and uncertainty calibration already exist in single-reference CIR, while Any2Any calibrates heterogeneous multimodal retrieval scores; P036 therefore limits its candidate delta to source-bound multi-reference vetoing with joint-order preservation and explicit-negative evaluation.",
-    "Expanding all clean reserved-component rows yields 518 queries, 262 positive and 518 explicit-negative top20 candidate instances; a metadata-only staged split balances 16 positive-bearing components across development and confirmation."
+    "Expanding all clean reserved-component rows yields 518 queries, 262 positive and 518 explicit-negative top20 candidate instances; a metadata-only staged split balances 16 positive-bearing components across development and confirmation.",
+    "SoFT (arXiv:2512.20781) directly establishes training-free CIR reranking with MLLM-extracted prescriptive/proscriptive constraints and CLIP reward/penalty score modulation; positive/negative constraint reranking is therefore not a P036 novelty claim.",
+    "UniCVR (arXiv:2604.20318) establishes adaptive MLLM scoring of top candidates and dual-level reranking across composed visual retrieval; generic candidate-subset MLLM reranking is therefore not a P036 novelty claim."
   ],
   "hypotheses": [
     {
@@ -580,7 +582,10 @@
         "joint_image_count": 3,
         "source_image_count": 2,
         "source_logits_finite": true
-      }
+      },
+      "last_progress_check": "2026-09-17T03:36:12.453100+00:00",
+      "development_completed_records": 240,
+      "development_result_accessed": false
     }
   },
   "monitor": {
@@ -589,7 +594,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "本轮读取本地gpu3 heartbeat：ACTIVE，每20分钟；读取research_state并核验真实PID，保持原有监控。"
   },
-  "next": "Acquire only P036 development images, then score labelled_dual/source1/source2 on physical GPU3. Do not access confirmation images unless every frozen development gate passes.",
+  "next": "Let P036 development scoring finish on physical GPU3. Inspect only the completed development analysis; access confirmation images and scores only if all four frozen development gates pass.",
   "results": {
     "P001": {
       "n": 4,
@@ -1367,7 +1372,7 @@
       "decision": "Reject this source-isolated predicate judging plus fixed probabilistic AND implementation; do not access P033 or any reserved component. This does not reject cross-domain transfer in general."
     }
   },
-  "novelty_status": "Constraint verification and conformal calibration are direct prior art in CIR. P036 is a narrower candidate transfer: source-bound multi-reference vetoing that preserves the joint interaction ranking, calibrates only extreme source failures, and tests explicit negatives with component-disjoint staged validation. It is not established until both stages pass.",
+  "novelty_status": "Novelty is not established. SoFT directly covers MLLM-derived prescriptive/proscriptive constraint reranking in CIR, and UniCVR covers adaptive MLLM candidate reranking. P036 is now only a narrower candidate transfer: separately source-bound evidence from multiple visual references, a positive-risk-calibrated extreme veto that preserves the joint ranking for all non-vetoed candidates, and explicit-negative component-disjoint staged validation. This delta still requires development and confirmation evidence.",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [

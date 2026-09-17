@@ -1,6 +1,6 @@
 {
-  "as_of": "2026-09-17T03:08:32.299858+00:00",
-  "status": "Novelty not established. CoCI/VCD cover contrast-image decoding, WISER covers verifier-driven adaptive fusion/refinement, and ReCALL covers generative-versus-retrieval capability degradation and corrective training.",
+  "as_of": "2026-09-17T03:35:58.594306+00:00",
+  "status": "Novelty not established. SoFT directly occupies MLLM-extracted positive/negative constraints and soft CIR reranking, while UniCVR occupies adaptive MLLM candidate reranking. P036 is only a narrower candidate: source-bound multi-reference extreme veto with positive-risk calibration, joint-order preservation, and explicit-negative component-disjoint validation.",
   "records": [
     {
       "id": "DTS_ICLR2026",
@@ -447,6 +447,21 @@
       "evidence": "Read the primary method statement. Conformal Risk Control extends split conformal calibration to bounded monotone losses and selects a threshold to control expected risk.",
       "overlap": "This is the cross-domain origin for risk-controlled source vetoing, not a novel contribution by itself.",
       "limits": "P036 has only 21 dependent candidate-level calibration positives, so it explicitly avoids a formal distribution-free guarantee and treats the threshold as risk-inspired calibration."
+    },
+    {
+      "id": "SoFT_arXiv2512.20781",
+      "url": "https://arxiv.org/abs/2512.20781",
+      "code": "https://github.com/jjungyujin/SoFT",
+      "evidence": "Read the primary paper method. SoFT is a training-free CIR reranker that prompts an MLLM to derive prescriptive keep/add and proscriptive remove constraints from one reference image plus modification text, then uses CLIP reward and penalty similarities to continuously reweight every candidate score.",
+      "overlap": "Positive/negative semantic constraints, MLLM constraint extraction, and score-level constraint reranking are already established directly in composed image retrieval.",
+      "limits": "SoFT uses one reference image plus text and continuously modulates all candidates. It does not establish separately source-bound evidence from multiple visual references, a positive-risk-calibrated extreme veto that otherwise preserves joint order, or PinPoint explicit-negative component-disjoint staged validation."
+    },
+    {
+      "id": "UniCVR_arXiv2604.20318",
+      "url": "https://arxiv.org/abs/2604.20318",
+      "evidence": "Read the primary arXiv abstract. UniCVR trains a unified composed-visual-retrieval embedder on about 3.5M samples, then uses MLLM-guided adaptive budgeted subset scoring and dual-level reranking across composed image, multi-turn image, and video retrieval.",
+      "overlap": "MLLM scoring of a selected candidate subset and dual-level reranking are already established in composed visual retrieval.",
+      "limits": "The primary abstract does not establish separately source-bound multi-reference veto evidence, positive-risk calibration, joint-order preservation outside vetoed candidates, or the P036 explicit-negative staged protocol."
     }
   ]
 }
