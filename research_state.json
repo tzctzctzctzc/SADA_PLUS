@@ -151,6 +151,30 @@
       ],
       "policy": "Prioritize recent primary papers and official implementations addressing similar mechanisms, including cross-domain work; earlier foundational sources remain eligible. Verify venue/status and novelty; recent year alone is not evidence of innovation.",
       "cross_domain_transfer": "Identify mechanism correspondence, assumptions, task-specific adaptation, and a direct-transfer comparison. First-in-field claims require explicit literature verification."
+    },
+    "postimplementation_audit": {
+      "required": true,
+      "trigger": "Automatically after each new method implementation or substantive mechanism/training/computation change, before the efficacy pilot; bounded debugging is separate.",
+      "checks": [
+        "Faithfulness to the specified mechanism and assumptions",
+        "Unintended conservative degradation that prevents the mechanism from acting or learning",
+        "Incomplete prototype substituted for the full method",
+        "Implementation errors in data/roles/labels, formulas/losses/masks, gradients/optimizer, checkpoint loading and metrics"
+      ],
+      "evidence": "Map design to executable code and actual configuration; add only necessary mechanism-specific runtime evidence. Code running, decreasing loss or improved metrics alone do not establish correctness.",
+      "pilot_rule": "Reduce data and compute while retaining all mechanisms and training freedoms required to test the hypothesis. Insufficient optimization is inconclusive, not falsification.",
+      "decision": "Repair unintended degradation, incompleteness or errors before a valid pilot. Preserve invalid runs and document causes; freeze revised versions before rerunning. Do not relax result gates after observation.",
+      "record_in": [
+        "existing experiment config or research_state.json",
+        "daily log"
+      ],
+      "verdicts": [
+        "faithful_complete",
+        "unintended_conservative_degradation",
+        "prototype_only",
+        "incorrect",
+        "insufficient_evidence"
+      ]
     }
   },
   "jobs": {
