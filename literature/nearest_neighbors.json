@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-17T00:18:54.388764+00:00",
+  "as_of": "2026-09-17T00:19:57.892005+00:00",
   "status": "Novelty not established. CoCI/VCD cover contrast-image decoding, WISER covers verifier-driven adaptive fusion/refinement, and ReCALL covers generative-versus-retrieval capability degradation and corrective training.",
   "records": [
     {
@@ -380,6 +380,14 @@
       "evidence": "Primary ACL paper framing read. CoPE represents composed queries and targets as Gaussian distributions and trains hierarchical objectives for instance-level and feature-level quality/semantic uncertainty.",
       "overlap": "Generic uncertainty modeling for CIR is established; uncertainty estimates or adaptive confidence weighting alone are insufficient novelty.",
       "limits": "Single-reference mainstream CIR benchmarks; no multi-reference source-control study."
+    },
+    {
+      "id": "INTENT_AAAI2026",
+      "url": "https://ojs.aaai.org/index.php/AAAI/article/view/39181",
+      "code": "https://github.com/iLearn-Lab/AAAI26-INTENT",
+      "evidence": "Read Sections 3.1-3.3 and ablations. INTENT constructs an FFT amplitude-mixed counterfactual reference while preserving phase, enforces CKA consistency between factual and intervened composed features, and combines negative-dominated and correspondence-dominated robust objectives for noisy CIR training.",
+      "overlap": "Counterfactual reference intervention, visual-invariance language, causal framing, and negative-aware CIR objectives are established. A reference perturbation plus causal terminology is not a sufficient novelty delta.",
+      "limits": "INTENT studies single-reference noisy-correspondence training on CIRR/FashionIQ; its FFT intervention is intended to preserve reference semantics, unlike P032's semantically mismatched second reference."
     }
   ]
 }
