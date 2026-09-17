@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T04:16:05.537213+00:00",
+  "as_of": "2026-09-17T04:52:12.672923+00:00",
   "goal_status": "active",
-  "phase": "P036 development scoring is running on physical GPU3; confirmation remains inaccessible.",
+  "phase": "P036 development scoring is running on physical GPU3; P037 is frozen and queued behind the same GPU lock.",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -14,7 +14,7 @@
     ],
     "submission_year_assumption": 2027
   },
-  "direction": "Preserve joint multi-reference interaction ranking and use calibrated source scores only to veto extreme violations; confirmation remains untouched until all development gates pass.",
+  "direction": "Test source-role binding with matched reference interventions that preserve image count, image order, layout, and prompt length; use P036 as a risk-veto diagnostic and P037 as a distinct source-interventional diagnostic.",
   "known_evidence": [
     "SoFA 使用跨图双向 attention 插值；Delimiter Scaling 加强图像边界，两者报告收益，但实验设置不同，不能直接声称矛盾。",
     "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
@@ -80,6 +80,12 @@
         "P023：独立256题patch92、原始100；差值区间跨0，未复现优势。"
       ],
       "scope": "该否定针对本次固定方法与协议，不声称所有视觉注意力方法无效。"
+    },
+    {
+      "id": "H5",
+      "statement": "在保持图片、顺序、布局和长度一致时，正确来源绑定相对错误绑定的margin差可区分正例与显式负例，并改善联合重排。",
+      "status": "P037协议已冻结，等待GPU3；尚无新分数。",
+      "risk": "P030仅有21个top20正例且已观察；P037只能作探索性kill gate，不能建立泛化或创新。"
     }
   ],
   "evaluation_policy": {
@@ -586,8 +592,8 @@
         "source_image_count": 2,
         "source_logits_finite": true
       },
-      "last_progress_check": "2026-09-17T04:16:05.537213+00:00",
-      "development_completed_records": 840,
+      "last_progress_check": "2026-09-17T04:52:12.672923+00:00",
+      "development_completed_records": 2336,
       "development_result_accessed": false,
       "acceleration": {
         "method": "single-worker CPU preprocessing prefetch overlapped with unchanged GPU forward",
@@ -603,6 +609,33 @@
           "per-query visual cache: five threshold flips on 120 records"
         ]
       }
+    },
+    "P037": {
+      "status": "prepared_waiting_for_gpu_lock",
+      "config": "configs/P037_position_controlled_source_intervention.json",
+      "config_sha256": "0419a7ded240fc3635e3061004170a458aabe2f59c00926454af3763cfe60164",
+      "runner": "src/run_P037.py",
+      "script": "scripts/run_P037.sh",
+      "analysis": "results/P037_position_controlled_source_intervention.json",
+      "exitcode_file": "runs/P037.exitcode",
+      "expected_records": 1920,
+      "n_queries": 48,
+      "n_components": 48,
+      "conditions": [
+        "equivalent_reindexed",
+        "binding_swapped"
+      ],
+      "uses_observed_P030_cohort": true,
+      "heldout_access": false,
+      "gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
+      "development_gate": {
+        "all_required": true,
+        "positive_candidate_mean_binding_contrast": "strictly > 0",
+        "binding_contrast_macro_positive_vs_explicit_negative_auc": "strictly > 0.5",
+        "pcsi_minus_original_ap10": "strictly > 0",
+        "pcsi_minus_original_explicit_negative_precision_at10": "less than or equal to 0",
+        "meaning": "Eligibility to design a larger component-disjoint held-out test. This exploratory gate is not significance, novelty, or SOTA evidence."
+      }
     }
   },
   "monitor": {
@@ -611,7 +644,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "本轮读取本地gpu3 heartbeat：ACTIVE，每20分钟；读取research_state并核验真实PID，保持原有监控。"
   },
-  "next": "Let P036 development scoring finish on physical GPU3. Inspect only the completed development analysis; access confirmation images and scores only if all four frozen development gates pass.",
+  "next": "Let P036 development finish and inspect only its completed analysis. P037 then runs on the already observed P030 cohort; design a larger component-disjoint source-interventional test only if all four P037 gates pass.",
   "results": {
     "P001": {
       "n": 4,
@@ -1389,7 +1422,7 @@
       "decision": "Reject this source-isolated predicate judging plus fixed probabilistic AND implementation; do not access P033 or any reserved component. This does not reject cross-domain transfer in general."
     }
   },
-  "novelty_status": "Novelty is not established. SoFT/UniCVR cover constraint-aware and adaptive MLLM reranking in CIR, while RCIR and IJCAI 2025 cover risk-controlled image retrieval and two-stage ranked retrieval. P036 must be described only as a risk-inspired source-bound multi-reference veto because its 21 dependent calibration positives do not support a formal guarantee. Its remaining candidate delta is source-specific visual evidence, extreme-only veto with joint-order preservation, and PinPoint explicit-negative component-disjoint validation.",
+  "novelty_status": "Novelty is not established. Generic MLLM reranking, constraint verification, counterfactual reference perturbation, calibration, and risk control are occupied. The strongest remaining candidate is a matched source-role intervention for multi-reference CIR: equivalent reindexing and wrong binding use identical images, order, layout, and prompt length. P037 is only an exploratory probe on observed P030 data.",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
@@ -1414,7 +1447,8 @@
       "P031 failure was localized to versioned config parsing after base3b completion; compatibility adapter passed CPU preflight",
       "P034 fixed-alpha missing-reference transfer failed ranking and Qwen7B mechanism gates; direct subtraction was rejected without touching held-out data",
       "P035 completed with exit 0 and integrity checks; it failed AP@10 and macro-AUC gates, so held-out execution remains blocked by the preregistered rule.",
-      "P036 froze a materially different joint-preserving source-veto protocol and a 27-component development/27-component untouched confirmation split before reserved model scores."
+      "P036 froze a materially different joint-preserving source-veto protocol and a 27-component development/27-component untouched confirmation split before reserved model scores.",
+      "P037 froze a position-controlled source intervention before new scores: equivalent reindexing and wrong binding share identical images/order/layout/length; 48 observed P030 queries, 1920 new scores, four directional gates, no held-out access."
     ]
   },
   "idea_audits": {
