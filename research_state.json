@@ -31,7 +31,8 @@
     "INTENT（AAAI 2026）已在CIR中使用FFT反事实参考干预、CKA视觉不变性和负例感知判别目标；参考扰动与因果措辞本身已有直接近邻，P032不得作因果宣称。",
     "P033 freezes one clean query from each of 54 eligible reserved reference components before P030/P032 results; 53 are Composition and 1 is Context Fit.",
     "The 102 clean non-Composition reserved rows occupy only two reference components, so they are a descriptive sensitivity pool and cannot support independent category generalization.",
-    "RMCD (WACV 2026) already performs relevance-weighted signed multi-context logit aggregation; MultiSHAP already attributes generic multimodal interactions. Multi-sham averaging or ordinary interaction contrasts are not novel by themselves."
+    "RMCD (WACV 2026) already performs relevance-weighted signed multi-context logit aggregation; MultiSHAP already attributes generic multimodal interactions. Multi-sham averaging or ordinary interaction contrasts are not novel by themselves.",
+    "ARS-MMT (CMES 2026) already contrasts zeroed and batch-shuffled visual features to separate modality presence from image-specific content; reference shuffling is a control, not standalone novelty."
   ],
   "hypotheses": [
     {
@@ -1182,7 +1183,8 @@
       "P033 held-out query selection, donor permutations, fixed estimators, and strict execution gate frozen before P030/P032 results",
       "Reserved metadata audit found only 54 eligible components and severe category concentration; non-Composition sensitivity is limited to two components",
       "Annotation nulls verified as negative-list padding only; conflict counts are unchanged after excluding nulls",
-      "RMCD and MultiSHAP primary sources audited and added as novelty boundaries"
+      "RMCD and MultiSHAP primary sources audited and added as novelty boundaries",
+      "ARS-MMT added as a direct boundary for shuffled-visual specificity controls"
     ]
   },
   "idea_audits": {

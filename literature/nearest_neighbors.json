@@ -405,6 +405,13 @@
       "evidence": "Read the primary abstract and method claim. MultiSHAP is model-agnostic and uses the Shapley Interaction Index to quantify synergistic and suppressive interactions between fine-grained visual and textual elements at instance and dataset levels.",
       "overlap": "Generic factorial or Shapley-style multimodal interaction attribution is established; P033 cannot claim novelty from a two-reference difference-in-differences quantity alone.",
       "limits": "MultiSHAP is an interpretability framework evaluated on multimodal prediction, not a source-bound multi-reference retrieval reranker or an explicit-negative ranking method."
+    },
+    {
+      "id": "ARS_MMT_CMES2026",
+      "url": "https://www.techscience.com/CMES/v148n1/68198",
+      "evidence": "The primary 2026 article reports both zeroed and batch-shuffled visual-feature controls: zeroing reduced BLEU by 0.81 while shuffling changed BLEU by +0.01, which the authors use to distinguish modality presence from image-specific content.",
+      "overlap": "Shuffled visual inputs as a direct test of content-specific use are established outside retrieval. P033 reference shuffling is a necessary specificity control, not a standalone methodological novelty.",
+      "limits": "The task is multimodal machine translation with learned visual features, not multi-reference composed image retrieval or explicit-negative reranking."
     }
   ]
 }
