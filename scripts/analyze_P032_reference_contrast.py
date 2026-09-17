@@ -96,8 +96,18 @@ mechanism={"reference_lift_by_label":{k:{"n":len(v),"mean":float(np.mean(v)) if 
  "macro_query_auc_positive_vs_explicit_negative":{"n_eligible_queries":len(auc_values),
    "mean":float(auc_values.mean()) if len(auc_values) else None,
    "reference_cluster_95ci":np.nanpercentile(auc_boot,[2.5,97.5]).tolist()}}
+primary_pp=paired["rcr_alpha1 minus labelled_dual"]["ap@10"]["difference_pp"]
+pos_mean=mechanism["reference_lift_by_label"]["positive"]["mean"]
+neg_mean=mechanism["reference_lift_by_label"]["explicit_negative"]["mean"]
+macro_auc_mean=mechanism["macro_query_auc_positive_vs_explicit_negative"]["mean"]
+gate_checks={"primary_ap10_difference_pp_gt_0":bool(primary_pp>0),
+ "mechanism_macro_auc_gt_0_5":bool(macro_auc_mean is not None and macro_auc_mean>0.5),
+ "mechanism_positive_mean_lift_gt_explicit_negative":bool(pos_mean is not None and neg_mean is not None and pos_mean>neg_mean)}
+gate={"checks":gate_checks,"all_pass":all(gate_checks.values()),
+      "meaning":cfg["confirmatory_gate_operational"]["meaning"]}
 report={"complete":True,"evidence_status":cfg["evidence_status"],"n_queries":len(details),
  "n_reference_rgb_components":len(blocks),"conditions":summary,"paired":paired,"mechanism":mechanism,
+ "confirmatory_gate_evaluation":gate,
  "ties_anywhere_in_top20_scores":dict(ties),"score_file_sha256":hashlib.sha256(raw.read_bytes()).hexdigest(),
  "config_sha256":hashlib.sha256(Path("configs/P032_reference_contrast.json").read_bytes()).hexdigest(),
  "confirmatory_gate":cfg["confirmatory_gate"],"novelty_boundary":cfg["novelty_boundary"],"limits":cfg["limits"]}

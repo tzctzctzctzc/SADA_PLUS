@@ -28,5 +28,12 @@
     "The PinPoint pilot contains 48 selected reference components and is not a full benchmark evaluation."
   ],
   "source_config": "configs/P030_pinpoint_references.json",
-  "source_config_sha256": "ea6c0191464a12dcbb5c6b634554f55cb4d0a1633f9ad0027b373be8312eab44"
+  "source_config_sha256": "ea6c0191464a12dcbb5c6b634554f55cb4d0a1633f9ad0027b373be8312eab44",
+  "confirmatory_gate_operational": {
+    "all_required": true,
+    "primary_ap10_difference_pp": "strictly > 0",
+    "mechanism_macro_auc_positive_vs_explicit_negative": "strictly > 0.5",
+    "mechanism_mean_reference_lift": "positive strictly > explicit_negative",
+    "meaning": "Eligibility to preregister a held-out confirmation only; not evidence of novelty, significance, causality, or SOTA."
+  }
 }
