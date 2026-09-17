@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T04:52:12.672923+00:00",
+  "as_of": "2026-09-17T05:01:19.883655+00:00",
   "goal_status": "active",
-  "phase": "P036 development scoring is running on physical GPU3; P037 is frozen and queued behind the same GPU lock.",
+  "phase": "P036 stopped at user request; P037 small pilot is running on physical GPU3.",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -99,7 +99,18 @@
       "grouping": "counterpart and exact image byte connected components",
       "heldout_predictions_seen": false
     },
-    "novelty_transfer": "A method proven in another field can still be a valid contribution if this is its first use in the target task, the transfer requires task-specific technical adaptation, and experiments isolate the adaptation from a direct copy."
+    "novelty_transfer": "A method proven in another field can still be a valid contribution if this is its first use in the target task, the transfer requires task-specific technical adaptation, and experiments isolate the adaptation from a direct copy.",
+    "pilot_before_full": {
+      "required": true,
+      "rule": "Every proposed full-scale experiment must first run a bounded, preregistered pilot.",
+      "pilot_must_define": [
+        "fixed sample and compute budget",
+        "frozen mechanism and task-level success gates",
+        "integrity checks and explicit stop rule"
+      ],
+      "full_scale_authorization": "Prepare or run full scale only when every frozen pilot gate passes and the estimated evidence gain justifies the compute.",
+      "failed_pilot_action": "Stop the implementation or redesign a materially different mechanism; do not enlarge the same failed method."
+    }
   },
   "jobs": {
     "P002": {
@@ -557,7 +568,7 @@
       }
     },
     "P036": {
-      "status": "running",
+      "status": "stopped_by_user_before_completion",
       "config": "configs/P036_risk_controlled_source_veto.json",
       "config_sha256": "d58a0a0d601335a9b3cd0b5ce98c1241624c1df1d2510207677efab8b0d24be3",
       "runner": "src/run_P036.py",
@@ -593,7 +604,7 @@
         "source_logits_finite": true
       },
       "last_progress_check": "2026-09-17T04:52:12.672923+00:00",
-      "development_completed_records": 2336,
+      "development_completed_records": 2592,
       "development_result_accessed": false,
       "acceleration": {
         "method": "single-worker CPU preprocessing prefetch overlapped with unchanged GPU forward",
@@ -609,10 +620,12 @@
           "per-query visual cache: five threshold flips on 120 records"
         ]
       },
-      "analysis_metric_fix_commit": "cc27ed2"
+      "analysis_metric_fix_commit": "cc27ed2",
+      "exitcode": 143,
+      "stop_reason": "User requires a pilot gate before every full-scale experiment."
     },
     "P037": {
-      "status": "queued_waiting_for_gpu_lock",
+      "status": "running_pilot",
       "config": "configs/P037_position_controlled_source_intervention.json",
       "config_sha256": "0419a7ded240fc3635e3061004170a458aabe2f59c00926454af3763cfe60164",
       "runner": "src/run_P037.py",
@@ -640,8 +653,18 @@
       "driver_pid": 540432,
       "lock_wait_pid": 540434,
       "preregister_commit": "bc3c6ac",
-      "score_records": 0,
-      "analysis_metric_fix_commit": "cc27ed2"
+      "score_records": 16,
+      "analysis_metric_fix_commit": "cc27ed2",
+      "child_pid": 540573,
+      "actual_gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
+      "protocol_smoke": {
+        "full_vs_last_head_max_error": 0.0,
+        "single_vs_batch_max_error_first_example": 0.0,
+        "matched_image_signatures_equal": true,
+        "matched_image_grids_equal": true,
+        "matched_input_tokens_equal": true,
+        "matched_logits_finite": true
+      }
     }
   },
   "monitor": {
@@ -650,7 +673,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "本轮读取本地gpu3 heartbeat：ACTIVE，每20分钟；读取research_state并核验真实PID，保持原有监控。"
   },
-  "next": "Let P036 development finish and inspect only its completed analysis. P037 then runs on the already observed P030 cohort; design a larger component-disjoint source-interventional test only if all four P037 gates pass.",
+  "next": "Complete the 48-query P037 pilot. Run no full-scale source-interventional experiment unless all four frozen P037 gates pass; apply the same pilot-first rule to every later experiment.",
   "results": {
     "P001": {
       "n": 4,
@@ -1455,7 +1478,8 @@
       "P035 completed with exit 0 and integrity checks; it failed AP@10 and macro-AUC gates, so held-out execution remains blocked by the preregistered rule.",
       "P036 froze a materially different joint-preserving source-veto protocol and a 27-component development/27-component untouched confirmation split before reserved model scores.",
       "P037 froze a position-controlled source intervention before new scores: equivalent reindexing and wrong binding share identical images/order/layout/length; 48 observed P030 queries, 1920 new scores, four directional gates, no held-out access.",
-      "P036/P037 analysis AP cutoff corrected from 100 to 10 before either analysis ran and before any P037 score; this aligns code with the frozen AP@10 gate."
+      "P036/P037 analysis AP cutoff corrected from 100 to 10 before either analysis ran and before any P037 score; this aligns code with the frozen AP@10 gate.",
+      "P036 was terminated at 2592/13980 records with exit 143 before analysis; confirmation stayed untouched. A mandatory preregistered pilot-before-full policy was added, and P037 began as the first compliant pilot."
     ]
   },
   "idea_audits": {
