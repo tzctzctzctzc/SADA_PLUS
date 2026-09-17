@@ -23,7 +23,7 @@ if stage == 'confirmation':
     assert json.loads(result_path.read_text())['continuation_gate_evaluation']['all_pass']
 records = config['stages'][stage]
 signatures = records['image_signatures']
-directory = Path('data/PinPoint/images')
+directory = ROOT / 'data/PinPoint/images'
 directory.mkdir(parents=True, exist_ok=True)
 
 def inspect(signature, data):
