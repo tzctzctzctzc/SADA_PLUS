@@ -150,22 +150,21 @@ def encode_segment(runtime, rows, index, args):
         prepared["inputs_cpu"]
     )
     with runtime["torch"].inference_mode():
-        output = runtime["model"](
+        output = runtime["model"].model(
             **inputs,
             use_cache=False,
-            logits_to_keep=1,
             vision_chunked_length=args.vision_chunked_length,
-            output_hidden_states=True,
             return_dict=True,
         )
-    if not output.hidden_states:
-        raise RuntimeError("MOSS-VL did not return multimodal hidden states")
+    hidden = output.last_hidden_state
+    if hidden is None:
+        raise RuntimeError("MOSS-VL did not return its final multimodal hidden state")
     attention_mask = inputs["attention_mask"].bool()
     positions = runtime["torch"].arange(
         attention_mask.shape[1], device=attention_mask.device
     ).unsqueeze(0).expand_as(attention_mask)
     last_position = positions.masked_fill(~attention_mask, -1).max(dim=1).values
-    feature = output.hidden_states[-1][0, last_position[0]].detach().float()
+    feature = hidden[0, last_position[0]].detach().float()
     feature = feature / feature.norm().clamp_min(1e-12)
     return feature.cpu().numpy()[None, :]
 
