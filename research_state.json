@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-17T03:36:12.453100+00:00",
+  "as_of": "2026-09-17T03:38:49.858031+00:00",
   "goal_status": "active",
   "phase": "P036 development scoring is running on physical GPU3; confirmation remains inaccessible.",
   "scope": {
@@ -43,7 +43,10 @@
     "Conformal candidate sets and uncertainty calibration already exist in single-reference CIR, while Any2Any calibrates heterogeneous multimodal retrieval scores; P036 therefore limits its candidate delta to source-bound multi-reference vetoing with joint-order preservation and explicit-negative evaluation.",
     "Expanding all clean reserved-component rows yields 518 queries, 262 positive and 518 explicit-negative top20 candidate instances; a metadata-only staged split balances 16 positive-bearing components across development and confirmation.",
     "SoFT (arXiv:2512.20781) directly establishes training-free CIR reranking with MLLM-extracted prescriptive/proscriptive constraints and CLIP reward/penalty score modulation; positive/negative constraint reranking is therefore not a P036 novelty claim.",
-    "UniCVR (arXiv:2604.20318) establishes adaptive MLLM scoring of top candidates and dual-level reranking across composed visual retrieval; generic candidate-subset MLLM reranking is therefore not a P036 novelty claim."
+    "UniCVR (arXiv:2604.20318) establishes adaptive MLLM scoring of top candidates and dual-level reranking across composed visual retrieval; generic candidate-subset MLLM reranking is therefore not a P036 novelty claim.",
+    "RCIR (AAAI 2025) already provides coverage-risk-controlled adaptive sets for image retrieval; image-retrieval risk control is occupied prior art.",
+    "Two-stage Risk Control for Ranked Retrieval (IJCAI 2025) already controls separate retrieval and ranking risks with LTT/CRC and data splitting; staged risk-controlled reranking is occupied cross-domain prior art.",
+    "SoFT sweeps a continuous interpolation weight and reports that penalty-only reranking can sharply degrade results; its inspected method does not use a calibrated hard veto, but this alone does not make P036 novel."
   ],
   "hypotheses": [
     {
@@ -1372,7 +1375,7 @@
       "decision": "Reject this source-isolated predicate judging plus fixed probabilistic AND implementation; do not access P033 or any reserved component. This does not reject cross-domain transfer in general."
     }
   },
-  "novelty_status": "Novelty is not established. SoFT directly covers MLLM-derived prescriptive/proscriptive constraint reranking in CIR, and UniCVR covers adaptive MLLM candidate reranking. P036 is now only a narrower candidate transfer: separately source-bound evidence from multiple visual references, a positive-risk-calibrated extreme veto that preserves the joint ranking for all non-vetoed candidates, and explicit-negative component-disjoint staged validation. This delta still requires development and confirmation evidence.",
+  "novelty_status": "Novelty is not established. SoFT/UniCVR cover constraint-aware and adaptive MLLM reranking in CIR, while RCIR and IJCAI 2025 cover risk-controlled image retrieval and two-stage ranked retrieval. P036 must be described only as a risk-inspired source-bound multi-reference veto because its 21 dependent calibration positives do not support a formal guarantee. Its remaining candidate delta is source-specific visual evidence, extreme-only veto with joint-order preservation, and PinPoint explicit-negative component-disjoint validation.",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
