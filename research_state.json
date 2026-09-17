@@ -608,7 +608,8 @@
           "batch_size_8: slower and one threshold flip on 24 records",
           "per-query visual cache: five threshold flips on 120 records"
         ]
-      }
+      },
+      "analysis_metric_fix_commit": "cc27ed2"
     },
     "P037": {
       "status": "queued_waiting_for_gpu_lock",
@@ -639,7 +640,8 @@
       "driver_pid": 540432,
       "lock_wait_pid": 540434,
       "preregister_commit": "bc3c6ac",
-      "score_records": 0
+      "score_records": 0,
+      "analysis_metric_fix_commit": "cc27ed2"
     }
   },
   "monitor": {
@@ -1452,7 +1454,8 @@
       "P034 fixed-alpha missing-reference transfer failed ranking and Qwen7B mechanism gates; direct subtraction was rejected without touching held-out data",
       "P035 completed with exit 0 and integrity checks; it failed AP@10 and macro-AUC gates, so held-out execution remains blocked by the preregistered rule.",
       "P036 froze a materially different joint-preserving source-veto protocol and a 27-component development/27-component untouched confirmation split before reserved model scores.",
-      "P037 froze a position-controlled source intervention before new scores: equivalent reindexing and wrong binding share identical images/order/layout/length; 48 observed P030 queries, 1920 new scores, four directional gates, no held-out access."
+      "P037 froze a position-controlled source intervention before new scores: equivalent reindexing and wrong binding share identical images/order/layout/length; 48 observed P030 queries, 1920 new scores, four directional gates, no held-out access.",
+      "P036/P037 analysis AP cutoff corrected from 100 to 10 before either analysis ran and before any P037 score; this aligns code with the frozen AP@10 gate."
     ]
   },
   "idea_audits": {
