@@ -11,7 +11,10 @@ from tools.evaluate_rq1_semantics import (
     jensen_shannon,
 )
 from tools.build_rq1_semantic_manifest import SHIFT_CONFIGS
-from tools.run_rq1_tuned_feature_probe import grouped_cv_splits
+from tools.run_rq1_tuned_feature_probe import (
+    grouped_cv_splits,
+    select_alpha_one_standard_error,
+)
 from tools.audit_rq1_feature_protocol import audit_splits
 from tools.merge_and_shard_rq1 import merge_rows, write_jsonl_atomic
 from tools import prepare_rq1_frames
@@ -162,6 +165,32 @@ def test_grouped_probe_selection_never_splits_one_video_across_folds():
         labels, groups, folds=3, seed=7
     ):
         assert set(groups[fit_indices]).isdisjoint(groups[validation_indices])
+
+
+def test_one_standard_error_rule_prefers_stronger_regularization():
+    grid = {
+        "1e-06": [
+            {"macro_f1": 0.71, "accuracy": 0.72},
+            {"macro_f1": 0.68, "accuracy": 0.70},
+            {"macro_f1": 0.71, "accuracy": 0.73},
+        ],
+        "1e-05": [
+            {"macro_f1": 0.695, "accuracy": 0.71},
+            {"macro_f1": 0.695, "accuracy": 0.71},
+            {"macro_f1": 0.695, "accuracy": 0.71},
+        ],
+        "0.0001": [
+            {"macro_f1": 0.60, "accuracy": 0.65},
+            {"macro_f1": 0.60, "accuracy": 0.65},
+            {"macro_f1": 0.60, "accuracy": 0.65},
+        ],
+    }
+    selected, summary = select_alpha_one_standard_error(
+        grid, [1e-6, 1e-5, 1e-4]
+    )
+    assert selected == 1e-5
+    assert summary["best_alpha_by_mean_macro_f1"] == 1e-6
+    assert summary["rule"] == "one_standard_error_then_strongest_regularization"
 
 
 def test_rq1_aggregate_reports_retention_and_worst_shift():

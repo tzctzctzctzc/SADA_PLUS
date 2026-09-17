@@ -1,4 +1,4 @@
-"""Tune a source-only frozen-feature probe on source validation labels."""
+"""Tune a source-only frozen-feature probe with grouped source-train CV."""
 
 import argparse
 import json
@@ -32,6 +32,51 @@ def parse_csv_values(value, cast):
     if not values:
         raise ValueError("value list must not be empty")
     return values
+
+
+def select_alpha_one_standard_error(grid, alphas):
+    """Prefer the strongest regularization statistically tied with the CV best."""
+    macro_f1_means = {
+        alpha: float(np.mean([
+            item["macro_f1"] for item in grid[str(alpha)]
+        ]))
+        for alpha in alphas
+    }
+    accuracy_means = {
+        alpha: float(np.mean([
+            item["accuracy"] for item in grid[str(alpha)]
+        ]))
+        for alpha in alphas
+    }
+    best_alpha = max(
+        alphas,
+        key=lambda alpha: (
+            macro_f1_means[alpha], accuracy_means[alpha], -alpha,
+        ),
+    )
+    best_scores = np.asarray([
+        item["macro_f1"] for item in grid[str(best_alpha)]
+    ], dtype=np.float64)
+    standard_error = (
+        float(best_scores.std(ddof=1) / np.sqrt(len(best_scores)))
+        if len(best_scores) > 1 else 0.0
+    )
+    threshold = macro_f1_means[best_alpha] - standard_error
+    eligible = [
+        alpha for alpha in alphas
+        if macro_f1_means[alpha] >= threshold
+    ]
+    selected_alpha = max(eligible)
+    return selected_alpha, {
+        "rule": "one_standard_error_then_strongest_regularization",
+        "best_alpha_by_mean_macro_f1": best_alpha,
+        "best_mean_macro_f1": macro_f1_means[best_alpha],
+        "best_macro_f1_standard_error": standard_error,
+        "macro_f1_threshold": threshold,
+        "eligible_alphas": eligible,
+        "selected_mean_macro_f1": macro_f1_means[selected_alpha],
+        "selected_mean_accuracy": accuracy_means[selected_alpha],
+    }
 
 
 def fit_classifier(features, labels, alpha, seed, max_iter):
@@ -261,13 +306,8 @@ def main():
             with ThreadPoolExecutor(max_workers=args.jobs) as executor:
                 for alpha, score in executor.map(score_task, tasks):
                     grid[str(alpha)].append(score)
-            selected_alpha = max(
-                alphas,
-                key=lambda alpha: (
-                    np.mean([item["macro_f1"] for item in grid[str(alpha)]]),
-                    np.mean([item["accuracy"] for item in grid[str(alpha)]]),
-                    -alpha,
-                ),
+            selected_alpha, selection_summary = select_alpha_one_standard_error(
+                grid, alphas
             )
             shift_rows = [
                 row for row in eval_rows
@@ -306,6 +346,7 @@ def main():
                 "source_train_video_count": len(unique_groups),
                 "source_val_count": len(source_val_indices),
                 "cv_folds": args.cv_folds,
+                "selection_summary": selection_summary,
                 "grid": grid,
             }
             print(
@@ -335,6 +376,7 @@ def main():
         "cv_seed": args.cv_seed,
         "parallel_jobs": args.jobs,
         "prediction_aggregation": "mean class probabilities across seeds",
+        "selection_rule": "one_standard_error_then_strongest_regularization",
         "selection_report": report,
     }
     Path(str(output) + ".protocol.json").write_text(
