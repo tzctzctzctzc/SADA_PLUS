@@ -55,7 +55,7 @@ exec(
 
 
 def metrics(rank, row):
-    official = namespace['calculate_metrics_at_k'](rank, row['positive_set'], 100)
+    official = namespace['calculate_metrics_at_k'](rank, row['positive_set'], 10)
     return {
         'ap@10': float(official['ap']),
         'precision@1': float(rank[0] in row['positive_set']),
