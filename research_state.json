@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T01:31:55.148758+00:00",
+  "as_of": "2026-09-17T01:36:08.948411+00:00",
   "goal_status": "active",
-  "phase": "P030/P032 rejected the negative-control branch; P033 is stopped; P031 Coral retry is running on physical GPU3.",
+  "phase": "P030/P032 rejected the negative-control branch; P033 is stopped; P031 retry 2 exposed a tied-embedding flag omission and retry 3 is ready.",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -401,7 +401,7 @@
       "uses_gpu": false
     },
     "P031": {
-      "status": "running_retry_2",
+      "status": "retry_3_ready",
       "driver_pid": 513690,
       "preregister_commit": "c741d79",
       "config": "configs/P031_coral_transfer.json",
@@ -425,7 +425,12 @@
       "retry_child_pid": 519354,
       "actual_gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
       "base3b_embeddings_reused": 1104,
-      "coral_embeddings_before_retry": 0
+      "coral_embeddings_before_retry": 0,
+      "attempt_2_exitcode": 1,
+      "attempt_2_failure": "After config parsing succeeded, Coral correctly exposed no lm_head tensor; nested text_config contained tie_word_embeddings=true, which must be copied into the flat compatible config.",
+      "attempt_2_coral_embeddings": 0,
+      "fix_2": "Copy tie_word_embeddings=true from nested text_config before model construction; checkpoint contains model.embed_tokens.weight and intentionally no separate lm_head.",
+      "runner_sha256_retry_3": "1690857219501886c2bf7037b78541ea4d2c980bb3e9338ea782628ad9dcd4b6"
     },
     "P032": {
       "status": "completed",

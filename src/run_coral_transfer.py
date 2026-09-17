@@ -96,10 +96,12 @@ def verify_weights(model_cfg):
 def compatible_model_config(model_cfg):
     raw=json.loads((ROOT/model_cfg["path"]/"config.json").read_text())
     if isinstance(raw.get("text_config"),dict):
-        raw.pop("text_config")
+        nested=raw.pop("text_config")
+        if "tie_word_embeddings" not in raw:
+            raw["tie_word_embeddings"]=nested["tie_word_embeddings"]
         compat=Qwen2_5_VLConfig.from_dict(raw)
         GenerationConfig.from_model_config(compat)
-        return compat,"Removed redundant nested text_config emitted by a newer transformers version; flat Qwen2.5-VL fields and all weights are unchanged."
+        return compat,"Flattened the redundant nested text_config emitted by a newer transformers version; copied its tie_word_embeddings flag and kept the same Qwen2.5-VL fields and weights."
     return None,None
 metadata={"config_sha256":hashlib.sha256(CFG_PATH.read_bytes()).hexdigest(),
           "runner_sha256":hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
