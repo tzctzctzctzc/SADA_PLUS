@@ -18,6 +18,36 @@ from tools.run_clip_target_adapter import (
 from tools.run_clip_then_llava import frame_paths
 
 
+class SegmentFrameDataset:
+    def __init__(self, rows, indices, frame_cache, cache_namespace,
+                 frame_count, preprocess):
+        self.rows = rows
+        self.indices = list(indices)
+        self.frame_cache = frame_cache
+        self.cache_namespace = cache_namespace
+        self.frame_count = int(frame_count)
+        self.preprocess = preprocess
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, item):
+        import torch
+        from PIL import Image
+
+        index = self.indices[item]
+        images = []
+        for path in frame_paths(
+            self.frame_cache,
+            self.cache_namespace,
+            self.rows[index]["candidate_id"],
+            frame_count=self.frame_count,
+        ):
+            with Image.open(path) as image:
+                images.append(self.preprocess(image.convert("RGB")))
+        return index, torch.stack(images)
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", required=True)
@@ -30,6 +60,7 @@ def parse_args():
     parser.add_argument("--frame-count", type=int, default=8)
     parser.add_argument("--segment-batch-size", type=int, default=64)
     parser.add_argument("--image-batch-size", type=int, default=256)
+    parser.add_argument("--workers", type=int, default=0)
     parser.add_argument("--pooling", choices=("static", "static_transition"), default="static")
     parser.add_argument("--text-features-output", default=None)
     parser.add_argument("--limit", type=int, default=0)
@@ -40,9 +71,11 @@ def main():
     args = parse_args()
     if min(args.frame_count, args.segment_batch_size, args.image_batch_size) <= 0:
         raise ValueError("frame and batch sizes must be positive")
+    if args.workers < 0:
+        raise ValueError("workers must be non-negative")
     import clip
     import torch
-    from PIL import Image
+    from torch.utils.data import DataLoader
 
     rows = read_jsonl(args.manifest)
     model, preprocess = clip.load(
@@ -71,23 +104,34 @@ def main():
     pending = store.pending_indices()
     if args.limit > 0:
         pending = pending[:args.limit]
+    dataset = SegmentFrameDataset(
+        rows, pending, args.frame_cache, args.cache_namespace,
+        args.frame_count, preprocess,
+    )
+    loader_kwargs = {
+        "batch_size": args.segment_batch_size,
+        "shuffle": False,
+        "num_workers": args.workers,
+        "pin_memory": True,
+    }
+    if args.workers > 0:
+        loader_kwargs.update({
+            "persistent_workers": True,
+            "prefetch_factor": 2,
+            "multiprocessing_context": "spawn",
+        })
+    loader = DataLoader(dataset, **loader_kwargs)
     started = time.time()
     processed = 0
-    for offset in range(0, len(pending), args.segment_batch_size):
-        indices = pending[offset:offset + args.segment_batch_size]
-        images = []
-        for index in indices:
-            paths = frame_paths(
-                args.frame_cache, args.cache_namespace, rows[index]["candidate_id"],
-                frame_count=args.frame_count,
-            )
-            for path in paths:
-                with Image.open(path) as image:
-                    images.append(preprocess(image.convert("RGB")))
+    for indices, videos in loader:
+        indices = indices.tolist()
+        images = videos.flatten(0, 1)
         encoded = []
         with torch.inference_mode():
             for start in range(0, len(images), args.image_batch_size):
-                batch = torch.stack(images[start:start + args.image_batch_size]).to(args.device)
+                batch = images[start:start + args.image_batch_size].to(
+                    args.device, non_blocking=True
+                )
                 values = model.encode_image(batch).float()
                 values = values / values.norm(dim=-1, keepdim=True)
                 encoded.append(values.cpu().numpy())

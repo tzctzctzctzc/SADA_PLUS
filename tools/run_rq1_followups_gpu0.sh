@@ -56,7 +56,7 @@ CUDA_VISIBLE_DEVICES=$gpu0 "$python" tools/extract_rq1_clip_features.py \
     --cache-namespace rq1_8f --frame-count 8 \
     --output-prefix "$clip_prefix" --model 'ViT-L/14@336px' \
     --model-cache /vepfs/vlms/cache/clip --pooling static \
-    --segment-batch-size 16 --image-batch-size 64 \
+    --segment-batch-size 32 --image-batch-size 256 --workers 8 \
     --text-features-output "$artifact/features/clip_vit_l14_336_text.npy" \
     >"$artifact/logs/clip_l14_336_features.log" 2>&1
 
