@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-17T00:16:13.880700+00:00",
+  "as_of": "2026-09-17T00:17:51.023247+00:00",
   "goal_status": "active",
   "phase": "P030四条件在GPU3运行；P031 Coral与同底座3B的迁移对照已排队",
   "scope": {
@@ -23,7 +23,9 @@
     "PinPoint全部发布排名指标复算完成：官方mAP10为13.1418%/16.9785%，仅去重后13.2530%/17.1452%，影响有限。results/PinPoint_metric_replay.json。",
     "P030 cohort scope audit: all 48 selected queries are Composition; 909 clean dual-reference rows contain 105 non-Composition rows, mostly 94 Context Fit. results/P030_scope_audit.json.",
     "CoCI（MAGMaR 2025）已显示对比图选择是核心变量：自然配对可改善，而随机或仅最相似对比图在Qwen2-VL上低于基线；P032的单一错配sham因此只能作开发集淘汰门槛。",
-    "PinPoint Table 4 full-corpus multi-image mAP@10 peaks at 0.074 for GPT-5 text premerge plus reranking; specialized MMRet-MLLM-S1 is 0.067. P030/P031 are selected top-20 diagnostics and cannot be called SOTA comparisons."
+    "PinPoint Table 4 full-corpus multi-image mAP@10 peaks at 0.074 for GPT-5 text premerge plus reranking; specialized MMRet-MLLM-S1 is 0.067. P030/P031 are selected top-20 diagnostics and cannot be called SOTA comparisons.",
+    "ReCALL（CVPR 2026）已比较同一生成式MLLM与检索适配版本，并通过失败样本挖掘、基础模型纠正指令、VQA一致性过滤和分组对比学习恢复能力；P031只能作为多参考迁移复核。",
+    "WISER（CVPR 2026）已使用二分类VLM verifier、分支置信阈值、候选级融合和迭代自反思；通用verifier校准或不确定性融合不是本项目的新颖点。"
   ],
   "hypotheses": [
     {
@@ -1134,7 +1136,7 @@
       "official_metrics_retained": true
     }
   },
-  "novelty_status": "P032 current main-track readiness remains low. CoCI 2025 directly studies contrast-image decoding and shows arbitrary contrast selection can degrade; formula transfer plus one cyclic sham is not a contribution. Continue only if the locked pilot passes, then preregister held-out structured controls and multi-model validation.",
+  "novelty_status": "Current main-track readiness remains low. CoCI/VCD, WISER, and ReCALL occupy contrast-image decoding, verifier-based adaptive reranking, and generative-to-retrieval recalibration. A surviving direction must isolate multi-reference source-specific evidence with held-out structured controls and stronger baselines.",
   "last_progress_audit": {
     "previous_goal_turn": "progress",
     "evidence": [
@@ -1145,7 +1147,8 @@
       "P030 live scoring verified on physical GPU3 with no exit/result yet",
       "P031/P032 queue scripts statically audited against frozen dependencies",
       "CoCI 2025 full method/results/control ablation read; it materially tightens P032 novelty and control requirements",
-      "P032 qualitative pilot gate operationalized at 73bced9 before P030 completion; all three directional checks are required"
+      "P032 qualitative pilot gate operationalized at 73bced9 before P030 completion; all three directional checks are required",
+      "ReCALL and WISER primary methods audited; P031 reframed as transfer evidence and generic verifier/calibration novelty ruled out"
     ]
   },
   "idea_audits": {
