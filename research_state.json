@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-17T00:14:43.833270+00:00",
+  "as_of": "2026-09-17T00:16:13.880700+00:00",
   "goal_status": "active",
   "phase": "P030四条件在GPU3运行；P031 Coral与同底座3B的迁移对照已排队",
   "scope": {
@@ -412,7 +412,14 @@
       "protocol_commit": "558af2e",
       "protocol_fix_commit": "562165d",
       "uses_gpu": false,
-      "evidence_status": "exploratory_on_development_cohort"
+      "evidence_status": "exploratory_on_development_cohort",
+      "gate_amendment_commit": "73bced9",
+      "gate_locked_before_P030_result": true,
+      "gate_all_required": [
+        "rcr_alpha1 minus labelled_dual canonical AP@10 point estimate > 0",
+        "macro per-query AUC of reference lift for positive vs explicit negative > 0.5",
+        "mean positive reference lift > mean explicit-negative reference lift"
+      ]
     }
   },
   "monitor": {
@@ -1137,7 +1144,8 @@
     "new_evidence": [
       "P030 live scoring verified on physical GPU3 with no exit/result yet",
       "P031/P032 queue scripts statically audited against frozen dependencies",
-      "CoCI 2025 full method/results/control ablation read; it materially tightens P032 novelty and control requirements"
+      "CoCI 2025 full method/results/control ablation read; it materially tightens P032 novelty and control requirements",
+      "P032 qualitative pilot gate operationalized at 73bced9 before P030 completion; all three directional checks are required"
     ]
   },
   "idea_audits": {
