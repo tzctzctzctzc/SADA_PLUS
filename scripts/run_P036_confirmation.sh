@@ -2,6 +2,7 @@
 set -euo pipefail
 cd /vepfs/vlms/1
 source env.sh
+rm -f runs/P036_confirmation.exitcode
 trap 'rc=$?; printf "%s\n" "$rc" > runs/P036_confirmation.exitcode' EXIT
 envs/main/bin/python - <<'PY'
 import json

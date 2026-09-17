@@ -1,5 +1,6 @@
 """Score the frozen joint and source views for one P036 stage on physical GPU 3."""
 import ast
+import concurrent.futures
 import copy
 import functools
 import hashlib
@@ -23,6 +24,8 @@ assert len(sys.argv) == 2 and sys.argv[1] in {'development', 'confirmation'}
 stage = sys.argv[1]
 config_path = Path('configs/P036_risk_controlled_source_veto.json')
 config = json.loads(config_path.read_text())
+benchmark_only = os.environ.get('P036_BENCHMARK_ONLY') == '1'
+benchmark_records = int(os.environ.get('P036_BENCHMARK_RECORDS', '120'))
 if stage == 'confirmation':
     development_result = Path('results/P036_development.json')
     assert development_result.exists()
@@ -175,7 +178,7 @@ def payload(item):
     signatures = [row['references'][source_index], candidate]
     return messages, messages, signatures
 
-def prepare(items):
+def prepare_cpu(items):
     texts = []
     flat_images = []
     counts = []
@@ -204,10 +207,29 @@ def prepare(items):
             image_tokens=image_tokens,
             input_tokens=int(batch['attention_mask'][index].sum()),
         )
+    return dict(batch), details
+
+def to_device(batch):
     return {
         key: value.to('cuda:0', dtype=model.dtype if value.is_floating_point() else None)
         for key, value in batch.items()
-    }, details
+    }
+
+def prepare(items):
+    batch, details = prepare_cpu(items)
+    return to_device(batch), details
+
+def prepared_batches(item_batches):
+    if not item_batches:
+        return
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(prepare_cpu, item_batches[0])
+        for index, items in enumerate(item_batches):
+            tick = time.monotonic()
+            cpu_batch, details = future.result()
+            if index + 1 < len(item_batches):
+                future = pool.submit(prepare_cpu, item_batches[index + 1])
+            yield items, to_device(cpu_batch), details, tick
 
 def logits_for(batch):
     return model(**batch, use_cache=False).logits[:, -1, token_ids].float().cpu()
@@ -239,11 +261,14 @@ metadata = {
 }
 metadata_path = out / 'metadata.json'
 if metadata_path.exists():
-    assert json.loads(metadata_path.read_text()) == metadata
+    existing_metadata = json.loads(metadata_path.read_text())
+    for key in ['stage', 'config_sha256', 'torch', 'transformers', 'model_revision', 'token_ids', 'batch_size']:
+        assert existing_metadata[key] == metadata[key]
 else:
     metadata_path.write_text(json.dumps(metadata, indent=2) + '\n')
 predictions_path = out / 'predictions.jsonl'
-done = {row['key'] for row in map(json.loads, predictions_path.read_text().splitlines())} if predictions_path.exists() else set()
+existing_predictions = [json.loads(line) for line in predictions_path.read_text().splitlines()] if predictions_path.exists() else []
+done = {row['key'] for row in existing_predictions}
 assert done <= {task['key'] for task in tasks}
 
 with torch.inference_mode():
@@ -269,13 +294,33 @@ with torch.inference_mode():
     (out / 'protocol_smoke.json').write_text(json.dumps(smoke, indent=2) + '\n')
     print('protocol smoke', smoke, flush=True)
     del single, batch, source_batch, full_logits, short_logits, batch_logits, source_logits
+    if benchmark_only:
+        prior = {row['key']: row for row in existing_predictions}
+        sample = [task for task in tasks if task['key'] in prior][:benchmark_records]
+        assert len(sample) == benchmark_records and benchmark_records % config['batch_size'] == 0
+        item_batches = [sample[start:start + config['batch_size']] for start in range(0, len(sample), config['batch_size'])]
+        observed = {}
+        tick = time.monotonic()
+        for items, batch, _, _ in prepared_batches(item_batches):
+            values = logits_for(batch)
+            for item, value in zip(items, values.tolist()):
+                observed[item['key']] = value
+            del batch, values
+        elapsed = time.monotonic() - tick
+        logit_error = max(abs(a-b) for key, value in observed.items() for a,b in zip(value, prior[key]['true_false_logits']))
+        margin_error = max(abs((value[0]-value[1])-prior[key]['margin']) for key, value in observed.items())
+        threshold = float(config['method']['calibration']['threshold'])
+        flips = sum(((value[0]-value[1]) < threshold) != (prior[key]['margin'] < threshold) for key, value in observed.items())
+        print('PREFETCH_BENCHMARK', json.dumps({'batch_size': config['batch_size'], 'n': len(sample), 'seconds_per_item': elapsed / len(sample), 'max_logit_error': logit_error, 'max_margin_error': margin_error, 'threshold_side_flips': flips}), flush=True)
+        sys.exit(0)
+    runner_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    item_batches = []
+    for start in range(0, len(tasks), config['batch_size']):
+        items = [task for task in tasks[start:start + config['batch_size']] if task['key'] not in done]
+        if items:
+            item_batches.append(items)
     with predictions_path.open('a', buffering=1) as handle:
-        for start in range(0, len(tasks), config['batch_size']):
-            items = [task for task in tasks[start:start + config['batch_size']] if task['key'] not in done]
-            if not items:
-                continue
-            tick = time.monotonic()
-            batch, details = prepare(items)
+        for items, batch, details, tick in prepared_batches(item_batches):
             values = logits_for(batch)
             elapsed = time.monotonic() - tick
             for item, detail, value in zip(items, details, values.tolist()):
@@ -288,6 +333,8 @@ with torch.inference_mode():
                     'true_false_logits': value,
                     'margin': value[0] - value[1],
                     'pipeline_seconds_per_item': elapsed / len(items),
+                    'runner_sha256': runner_sha256,
+                    'execution_pipeline': 'cpu_prefetch_v1',
                     **detail,
                 }
                 handle.write(json.dumps(record) + '\n')
