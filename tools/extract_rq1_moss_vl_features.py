@@ -45,10 +45,28 @@ def select_shard(indices, shard_count, shard_index):
     return [index for index in indices if index % shard_count == shard_index]
 
 
+def ensure_torchcodec_metadata_compat():
+    """Bridge the renamed TorchCodec 0.1 metadata fields used by MOSS-VL."""
+    from torchcodec.decoders._core import VideoStreamMetadata
+
+    aliases = {
+        "begin_stream_seconds_from_content": "begin_stream_seconds",
+        "end_stream_seconds_from_content": "end_stream_seconds",
+    }
+    for new_name, old_name in aliases.items():
+        if not hasattr(VideoStreamMetadata, new_name):
+            setattr(
+                VideoStreamMetadata,
+                new_name,
+                property(lambda self, name=old_name: getattr(self, name)),
+            )
+
+
 def load_moss_vl(args):
     import torch
     from transformers import AutoModelForCausalLM, AutoProcessor
 
+    ensure_torchcodec_metadata_compat()
     local_only = bool(args.offline)
     processor = AutoProcessor.from_pretrained(
         args.model_path,
