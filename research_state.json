@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-17T03:38:49.858031+00:00",
+  "as_of": "2026-09-17T04:16:05.537213+00:00",
   "goal_status": "active",
   "phase": "P036 development scoring is running on physical GPU3; confirmation remains inaccessible.",
   "scope": {
@@ -574,8 +574,8 @@
         "explicit_negative_veto_rate_minus_positive_veto_rate": "strictly > 0",
         "meaning": "Eligibility to access confirmation images; not significance, novelty, or SOTA."
       },
-      "driver_pid": 533041,
-      "child_pid": 533052,
+      "driver_pid": 539203,
+      "child_pid": 539215,
       "development_manifest": "data/PinPoint/P036_development_image_manifest.json",
       "development_images_verified": 2450,
       "actual_gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
@@ -586,9 +586,23 @@
         "source_image_count": 2,
         "source_logits_finite": true
       },
-      "last_progress_check": "2026-09-17T03:36:12.453100+00:00",
-      "development_completed_records": 240,
-      "development_result_accessed": false
+      "last_progress_check": "2026-09-17T04:16:05.537213+00:00",
+      "development_completed_records": 840,
+      "development_result_accessed": false,
+      "acceleration": {
+        "method": "single-worker CPU preprocessing prefetch overlapped with unchanged GPU forward",
+        "reference_records": 120,
+        "max_logit_error": 0.0,
+        "max_margin_error": 0.0,
+        "threshold_side_flips": 0,
+        "seconds_per_item_before": 0.9790728125721216,
+        "seconds_per_item_after": 0.899111010444078,
+        "speedup_percent": 8.2,
+        "rejected_alternatives": [
+          "batch_size_8: slower and one threshold flip on 24 records",
+          "per-query visual cache: five threshold flips on 120 records"
+        ]
+      }
     }
   },
   "monitor": {
