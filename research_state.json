@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-17T02:04:36.788379+00:00",
+  "as_of": "2026-09-17T02:10:20.177048+00:00",
   "goal_status": "active",
-  "phase": "P034 rejected simple missing-reference score subtraction; designing source-bound predicate decomposition for multi-reference retrieval.",
+  "phase": "P035 source-bound predicate reranking protocol is frozen and CPU-preflighted before GPU scores.",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 3,
@@ -499,6 +499,23 @@
       "exitcode": 0,
       "analysis": "results/P034_reference_necessity.json",
       "gate_all_pass": false
+    },
+    "P035": {
+      "status": "protocol_frozen_ready_to_run",
+      "config": "configs/P035_source_bound_predicates.json",
+      "config_sha256": "e95aa343050b730ae0e2dc63cb07e4d50e3cc9753642e958950779222e0231cc",
+      "runner": "src/run_source_bound_predicates.py",
+      "analysis": "results/P035_source_bound_predicates.json",
+      "exitcode_file": "runs/P035.exitcode",
+      "expected_records": 1920,
+      "n_queries": 48,
+      "conditions": [
+        "source1",
+        "source2"
+      ],
+      "gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
+      "cpu_preflight": "passed: two images, literal full instruction, source label, and image token/grid counts",
+      "heldout_access": false
     }
   },
   "monitor": {
@@ -507,7 +524,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "本轮读取本地gpu3 heartbeat：ACTIVE，每20分钟；读取research_state并核验真实PID，保持原有监控。"
   },
-  "next": "Design a source-bound predicate reranker on the 48-query development cohort: score the candidate separately against requirements attributed to img1 and img2, then use a fixed probabilistic AND aggregation. Compare against direct dual scoring and validate each predicate with explicit negatives. Preserve the untouched reserved components.",
+  "next": "Run P035 on physical GPU3. Continue only if the fixed probabilistic AND improves AP@10, improves positive-vs-explicit-negative macro AUC, and does not increase explicit-negative precision@10. If it passes, freeze a new untouched confirmation before any reserved image access.",
   "results": {
     "P001": {
       "n": 4,

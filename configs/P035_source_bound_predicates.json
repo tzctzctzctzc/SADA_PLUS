@@ -1,0 +1,66 @@
+{
+  "id": "P035",
+  "created_at": "2026-09-17T02:07:17.280145+00:00",
+  "evidence_status": "prospective_development_experiment_after_P034",
+  "purpose": "Score source-bound visual predicates for img1 and img2 separately, then rerank candidates with a fixed probabilistic conjunction.",
+  "candidate_method_name": "Source-Bound Predicate Reranking (SBPR)",
+  "transfer_origin": "Probabilistic predicate decomposition and conjunction from logical retrieval/reasoning.",
+  "task_specific_delta": [
+    "Each predicate is explicitly bound to one referenced image in a multi-reference composed query.",
+    "The VLM sees only that source image and the candidate while retaining the full tagged instruction, preventing visual leakage from the other source.",
+    "The two source predicates are combined as a fixed probabilistic AND and validated against explicit hard negatives."
+  ],
+  "source_sha256": {
+    "configs/P030_pinpoint_references.json": "ea6c0191464a12dcbb5c6b634554f55cb4d0a1633f9ad0027b373be8312eab44",
+    "runs/P030_pinpoint_references/predictions.jsonl": "2a3c5fb55b4931f96f9c336d8ed788f72a9a3e99b11ecc433dcb6c21a061b973",
+    "data/PinPoint/P030_image_manifest.json": "818c24ae586534d1d6ea5e92e456b23b5c51e31941d65261d74d399a6bc84b3d"
+  },
+  "cohort_config": "configs/P030_pinpoint_references.json",
+  "model": "Qwen2.5-VL-7B-Instruct",
+  "model_revision": "cc594898137f460bfe9f0759e9844b3ce807cfb5",
+  "gpu_uuid": "GPU-7ce1c8eb-f665-99cf-2541-3c905a3f98f1",
+  "backend": "sdpa",
+  "dtype": "bfloat16",
+  "min_pixels": 3136,
+  "max_pixels": 1048576,
+  "batch_size": 4,
+  "conditions": [
+    "source1",
+    "source2"
+  ],
+  "expected_records": 1920,
+  "prompt_protocol": "For source j, show only reference image j and the candidate. Retain the full original instruction with literal img1/img2 tags. Ask for True only when the candidate satisfies the visual requirement contributed by source j, and explicitly say not to require the other source.",
+  "primary_score": "log_prob_and = log_sigmoid(m_source1) + log_sigmoid(m_source2)",
+  "secondary_scores": [
+    "min_margin=min(m_source1,m_source2)",
+    "sum_margin=m_source1+m_source2"
+  ],
+  "baseline": "raw labelled_dual True-minus-False margin from P030 on the identical top20 candidates",
+  "ranking": "Stable descending sort over the frozen top20; ranks 21-50 unchanged.",
+  "metrics": [
+    "canonical-set AP@10",
+    "precision@1",
+    "precision@10",
+    "explicit-negative precision@10"
+  ],
+  "mechanism": "Macro per-query AUC for positive versus explicit-negative candidates, compared with direct dual scoring.",
+  "bootstrap": {
+    "unit": "exact-RGB-connected reference component",
+    "replicates": 5000,
+    "seed": 17035
+  },
+  "continuation_gate": {
+    "all_required": true,
+    "and_minus_dual_ap10": "strictly > 0",
+    "and_macro_auc_minus_dual_macro_auc": "strictly > 0",
+    "and_explicit_negative_precision_at10_minus_dual": "less than or equal to 0",
+    "meaning": "Eligibility to freeze an untouched confirmation and broader baselines; not significance, novelty, or SOTA."
+  },
+  "limits": [
+    "Development experiment on 48 Composition-only queries.",
+    "The VLM is instructed to infer source-specific requirements from tags; no human clause labels are available.",
+    "Conditional independence of source predicates is a scoring approximation, not a factual claim.",
+    "The selected top20 diagnostic is not a full PinPoint or SOTA evaluation.",
+    "The untouched reserved reference components remain unscored."
+  ]
+}
