@@ -29,7 +29,11 @@ def parse_args():
     parser.add_argument("--model-path", default="MCG-NJU/VideoChat3-4B")
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--dtype", choices=("bfloat16", "float16"), default="bfloat16")
-    parser.add_argument("--vision-attention", choices=("sdpa", "eager"), default="sdpa")
+    parser.add_argument(
+        "--vision-attention",
+        choices=("flash_attention_2", "sdpa", "eager"),
+        default="flash_attention_2",
+    )
     parser.add_argument("--frame-count", type=int, default=8)
     parser.add_argument("--min-pixels", type=int, default=224 * 224)
     parser.add_argument("--max-pixels", type=int, default=448 * 448)
@@ -59,9 +63,8 @@ def load_videochat3(args):
         trust_remote_code=True,
         local_files_only=local_only,
     )
-    # The published config hard-codes FlashAttention-2 for the vision tower.
-    # Selecting the official SDPA implementation is necessary on environments
-    # without flash-attn and does not alter model weights or inputs.
+    # Keep the published FlashAttention-2 path when available while retaining
+    # the model's official SDPA/eager implementations as explicit fallbacks.
     config.vision_config.attn_impl = args.vision_attention
     dtype = getattr(torch, args.dtype)
     model = AutoModelForCausalLM.from_pretrained(
