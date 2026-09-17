@@ -52,6 +52,70 @@ def fit_classifier(features, labels, alpha, seed, max_iter):
     return classifier
 
 
+def grouped_cv_splits(labels, groups, folds, seed):
+    labels = np.asarray(labels, dtype=np.int64)
+    groups = np.asarray(groups)
+    unique_groups = np.unique(groups)
+    if len(unique_groups) < folds:
+        raise ValueError(
+            "only {} source-train videos for {} CV folds".format(
+                len(unique_groups), folds
+            )
+        )
+    class_count = int(labels.max()) + 1
+    total = np.bincount(labels, minlength=class_count).astype(np.float64)
+    group_counts = {
+        group: np.bincount(
+            labels[groups == group], minlength=class_count
+        ).astype(np.float64)
+        for group in unique_groups
+    }
+    rng = np.random.default_rng(seed)
+    shuffled = list(unique_groups)
+    rng.shuffle(shuffled)
+    shuffled.sort(
+        key=lambda group: (
+            -float(group_counts[group].std()),
+            -float(group_counts[group].sum()),
+        )
+    )
+    fold_counts = np.zeros((folds, class_count), dtype=np.float64)
+    fold_groups = [set() for _ in range(folds)]
+    for group in shuffled:
+        counts = group_counts[group]
+        best_fold = None
+        best_score = None
+        for fold in range(folds):
+            fold_counts[fold] += counts
+            proportions = np.divide(
+                fold_counts,
+                total[None, :],
+                out=np.zeros_like(fold_counts),
+                where=total[None, :] > 0,
+            )
+            balance = float(np.std(proportions, axis=0).mean())
+            size_balance = float(np.std(fold_counts.sum(axis=1))) / max(
+                float(total.sum()), 1.0
+            )
+            score = (balance, size_balance, len(fold_groups[fold]), fold)
+            fold_counts[fold] -= counts
+            if best_score is None or score < best_score:
+                best_score = score
+                best_fold = fold
+        fold_counts[best_fold] += counts
+        fold_groups[best_fold].add(group)
+    splits = []
+    all_indices = np.arange(len(labels))
+    for validation_groups in fold_groups:
+        validation_mask = np.isin(groups, list(validation_groups))
+        validation_indices = all_indices[validation_mask]
+        fit_indices = all_indices[~validation_mask]
+        if not len(validation_indices) or not len(fit_indices):
+            raise ValueError("grouped CV produced an empty fold")
+        splits.append((fit_indices, validation_indices))
+    return splits
+
+
 def prediction_row(row, shift, model_name, probabilities, alpha, seed):
     order = np.argsort(probabilities)[::-1]
     top1, top2 = map(int, order[:2])
@@ -83,8 +147,10 @@ def parse_args():
     parser.add_argument("--seeds", default="0,1,2,3,4")
     parser.add_argument(
         "--selection-seeds", default=None,
-        help="seeds used only for source-val alpha selection; defaults to --seeds",
+        help="seeds used only for source-train grouped-CV alpha selection; defaults to --seeds",
     )
+    parser.add_argument("--cv-folds", type=int, default=3)
+    parser.add_argument("--cv-seed", type=int, default=20260917)
     parser.add_argument("--max-iter", type=int, default=500)
     parser.add_argument("--write-seed-predictions", action="store_true")
     return parser.parse_args()
@@ -92,8 +158,8 @@ def parse_args():
 
 def main():
     args = parse_args()
-    if args.max_iter <= 0:
-        raise ValueError("max_iter must be positive")
+    if args.max_iter <= 0 or args.cv_folds < 2:
+        raise ValueError("max_iter must be positive and cv_folds must be at least two")
     from sklearn.metrics import accuracy_score, f1_score
 
     alphas = parse_csv_values(args.alphas, float)
@@ -128,37 +194,55 @@ def main():
             path = output.with_name(output.stem + ".seed{}".format(seed) + output.suffix)
             seed_streams[seed] = path.open("w", encoding="utf-8")
 
-    report = {"selection_metric": "source_val_macro_f1", "shifts": {}}
+    report = {
+        "selection_metric": "source_train_grouped_cv_macro_f1",
+        "selection_unit": "video_id",
+        "shifts": {},
+    }
     try:
         for shift in SHIFT_CONFIGS:
             train_indices = membership_indices(feature_rows, shift, "source_train")
-            val_indices = membership_indices(feature_rows, shift, "source_val")
+            source_val_indices = membership_indices(feature_rows, shift, "source_val")
             train_x = normalize_rows(features[train_indices])
             train_y = np.asarray(
                 [feature_rows[index]["gt_label_id"] for index in train_indices],
                 dtype=np.int64,
             )
-            val_x = normalize_rows(features[val_indices])
-            val_y = np.asarray(
-                [feature_rows[index]["gt_label_id"] for index in val_indices],
-                dtype=np.int64,
-            )
+            train_groups = np.asarray([
+                feature_rows[index]["video_id"] for index in train_indices
+            ])
+            unique_groups = np.unique(train_groups)
+            try:
+                cv_splits = grouped_cv_splits(
+                    train_y, train_groups, args.cv_folds, args.cv_seed
+                )
+            except ValueError as error:
+                raise ValueError("{}: {}".format(shift, error)) from error
             grid = {}
             for alpha in alphas:
                 scores = []
-                for seed in selection_seeds:
-                    classifier = fit_classifier(
-                        train_x, train_y, alpha, seed, args.max_iter
-                    )
-                    prediction = classifier.predict(val_x)
-                    scores.append({
-                        "seed": seed,
-                        "macro_f1": float(f1_score(
-                            val_y, prediction, labels=list(range(len(LABELS))),
-                            average="macro", zero_division=0,
-                        )),
-                        "accuracy": float(accuracy_score(val_y, prediction)),
-                    })
+                for fold, (fit_indices, validation_indices) in enumerate(cv_splits):
+                    for seed in selection_seeds:
+                        classifier = fit_classifier(
+                            train_x[fit_indices], train_y[fit_indices],
+                            alpha, seed, args.max_iter,
+                        )
+                        prediction = classifier.predict(train_x[validation_indices])
+                        scores.append({
+                            "fold": fold,
+                            "seed": seed,
+                            "validation_videos": int(len(np.unique(
+                                train_groups[validation_indices]
+                            ))),
+                            "macro_f1": float(f1_score(
+                                train_y[validation_indices], prediction,
+                                labels=list(range(len(LABELS))),
+                                average="macro", zero_division=0,
+                            )),
+                            "accuracy": float(accuracy_score(
+                                train_y[validation_indices], prediction
+                            )),
+                        })
                 grid[str(alpha)] = scores
             selected_alpha = max(
                 alphas,
@@ -195,13 +279,15 @@ def main():
             report["shifts"][shift] = {
                 "selected_alpha": selected_alpha,
                 "train_count": len(train_indices),
-                "source_val_count": len(val_indices),
+                "source_train_video_count": len(unique_groups),
+                "source_val_count": len(source_val_indices),
+                "cv_folds": args.cv_folds,
                 "grid": grid,
             }
             print(
-                "{} alpha={} train={} val={} evaluate={}".format(
-                    shift, selected_alpha, len(train_indices), len(val_indices),
-                    len(shift_rows),
+                "{} alpha={} train={} videos={} source_val={} evaluate={}".format(
+                    shift, selected_alpha, len(train_indices), len(unique_groups),
+                    len(source_val_indices), len(shift_rows),
                 ), flush=True,
             )
     finally:
@@ -215,11 +301,14 @@ def main():
         "feature_pooling": meta["pooling"],
         "frame_count": meta["frame_count"],
         "source_train_labels_used_for_training": True,
-        "source_val_labels_used_for_selection": True,
+        "source_train_grouped_cv_used_for_selection": True,
+        "source_val_labels_used_for_selection": False,
         "target_labels_used_for_training_or_selection": False,
         "alphas": alphas,
         "seeds": seeds,
         "selection_seeds": selection_seeds,
+        "cv_folds": args.cv_folds,
+        "cv_seed": args.cv_seed,
         "prediction_aggregation": "mean class probabilities across seeds",
         "selection_report": report,
     }

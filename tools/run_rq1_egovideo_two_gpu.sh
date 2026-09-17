@@ -58,6 +58,12 @@ printf '%s\n' "$gpu1_pid" >"$artifact/gpu1.pid"
 wait "$gpu0_pid"
 wait "$gpu1_pid"
 
+"$python" tools/audit_rq1_feature_protocol.py \
+    --manifest "$manifest" --expected-frame-count 8 \
+    --feature "EgoVideo-HOD=$feature_prefix" \
+    --output "$artifact/rq1_feature_protocol_audit.json" \
+    >"$artifact/logs/audit_feature_protocol.log" 2>&1
+
 "$python" tools/run_rq1_embedding_zero_shot.py \
     --feature-manifest "$manifest" --eval-manifest "$eval_manifest" \
     --feature-prefix "$feature_prefix" --text-features "$text_features" \
@@ -65,16 +71,17 @@ wait "$gpu1_pid"
     --output "$artifact/egovideo_l_zero_shot.jsonl" \
     >"$artifact/logs/zero_shot.log" 2>&1
 
-"$python" tools/run_rq1_frozen_feature_probe.py \
+"$python" tools/run_rq1_tuned_feature_probe.py \
     --feature-manifest "$manifest" --eval-manifest "$eval_manifest" \
     --feature-prefix "$feature_prefix" \
     --model-name EgoVideo-L-source-linear \
     --output "$artifact/egovideo_l_source_linear.jsonl" \
+    --write-seed-predictions \
     >"$artifact/logs/source_linear.log" 2>&1
 
 "$python" tools/evaluate_rq1_semantics.py \
     --manifest "$eval_manifest" \
-    --prediction "SlowFast-source-linear=$base_artifact/slowfast_source_linear.jsonl" \
+    --prediction "SlowFast-dense-source-linear=$probe_artifact/slowfast_dense_source_linear.jsonl" \
     --prediction "CLIP-ViT-B16-zero-shot=$base_artifact/clip_vit_b16.jsonl" \
     --prediction "CLIP-ViT-B16-source-linear=$probe_artifact/clip_vit_b16_source_linear.jsonl" \
     --prediction "Qwen3-VL-8B-zero-shot=$base_artifact/qwen3_vl_8b.jsonl" \

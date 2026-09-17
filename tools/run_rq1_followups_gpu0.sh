@@ -22,6 +22,12 @@ manifest=$probe_artifact/rq1_source_probe_segments.jsonl
 eval_manifest=$base_artifact/rq1_val_gt_segments.jsonl
 egovideo_prefix=$egovideo_artifact/features/egovideo_l_joint_8f
 
+"$python" tools/audit_rq1_feature_protocol.py \
+    --manifest "$manifest" --expected-frame-count 8 \
+    --feature "EgoVideo-HOD=$egovideo_prefix" \
+    --output "$artifact/egovideo_feature_protocol_audit.json" \
+    >"$artifact/logs/audit_egovideo_feature_protocol.log" 2>&1
+
 # This CPU process uses existing features and never reads target labels for selection.
 "$python" tools/run_rq1_tuned_feature_probe.py \
     --feature-manifest "$manifest" --eval-manifest "$eval_manifest" \
@@ -60,6 +66,12 @@ CUDA_VISIBLE_DEVICES=$gpu0 "$python" tools/extract_rq1_clip_features.py \
     --segment-batch-size 32 --image-batch-size 256 --workers 8 \
     --text-features-output "$artifact/features/clip_vit_l14_336_text.npy" \
     >"$artifact/logs/clip_l14_336_features.log" 2>&1
+
+"$python" tools/audit_rq1_feature_protocol.py \
+    --manifest "$manifest" --expected-frame-count 8 \
+    --feature "CLIP-L14-336=$clip_prefix" \
+    --output "$artifact/clip_l14_336_feature_protocol_audit.json" \
+    >"$artifact/logs/audit_clip_l14_336_feature_protocol.log" 2>&1
 
 "$python" tools/run_rq1_embedding_zero_shot.py \
     --feature-manifest "$manifest" --eval-manifest "$eval_manifest" \

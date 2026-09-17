@@ -170,6 +170,42 @@ def prediction_drift(source, target):
     }
 
 
+def safe_ratio(numerator, denominator):
+    return float(numerator / denominator) if denominator > 0 else None
+
+
+def aggregate_shifts(shifts):
+    metric_names = ("accuracy", "macro_recall", "macro_f1")
+    aggregate = {}
+    for metric in metric_names:
+        source = np.asarray([
+            shifts[shift]["source"][metric] for shift in SHIFT_CONFIGS
+        ], dtype=np.float64)
+        target = np.asarray([
+            shifts[shift]["target"][metric] for shift in SHIFT_CONFIGS
+        ], dtype=np.float64)
+        source_mean = float(source.mean())
+        target_mean = float(target.mean())
+        aggregate[metric] = {
+            "source_mean": source_mean,
+            "target_mean": target_mean,
+            "target_minus_source": target_mean - source_mean,
+            "retention": safe_ratio(target_mean, source_mean),
+            "target_worst_shift": float(target.min()),
+            "target_shift_std": float(target.std()),
+        }
+    success_rates = [
+        shifts[shift][domain]["success_rate"]
+        for shift in SHIFT_CONFIGS
+        for domain in ("source", "target")
+    ]
+    aggregate["validity"] = {
+        "all_predictions_present": all(value == 1.0 for value in success_rates),
+        "minimum_success_rate": float(min(success_rates)),
+    }
+    return aggregate
+
+
 def parse_prediction_spec(spec):
     if "=" not in spec:
         raise ValueError("prediction must be NAME=PATH")
@@ -247,10 +283,15 @@ def main():
                 key: domains["target"][key] - domains["source"][key]
                 for key in ("accuracy", "macro_recall", "macro_f1")
             }
+            domains["target_over_source"] = {
+                key: safe_ratio(domains["target"][key], domains["source"][key])
+                for key in ("accuracy", "macro_recall", "macro_f1")
+            }
             domains["class_conditional_prediction_drift"] = prediction_drift(
                 domains["source"], domains["target"]
             )
             model_result["shifts"][shift] = domains
+        model_result["aggregate"] = aggregate_shifts(model_result["shifts"])
         results["models"][model_name] = model_result
 
     output_json = Path(args.output_json)

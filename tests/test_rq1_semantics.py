@@ -5,7 +5,14 @@ import numpy as np
 from PIL import Image
 
 from tools.build_rq1_semantic_manifest import midpoint_labels
-from tools.evaluate_rq1_semantics import confusion_metrics, jensen_shannon
+from tools.evaluate_rq1_semantics import (
+    aggregate_shifts,
+    confusion_metrics,
+    jensen_shannon,
+)
+from tools.build_rq1_semantic_manifest import SHIFT_CONFIGS
+from tools.run_rq1_tuned_feature_probe import grouped_cv_splits
+from tools.audit_rq1_feature_protocol import audit_splits
 from tools.merge_and_shard_rq1 import merge_rows, write_jsonl_atomic
 from tools import prepare_rq1_frames
 from tools.run_rq1_slowfast_probe import segment_feature
@@ -144,3 +151,62 @@ def test_feature_store_resumes_completed_rows(tmp_path):
     resumed = FeatureStore(prefix, manifest, rows, "clip", 2, 8, "static")
     assert resumed.pending_indices() == [1]
     assert np.allclose(resumed.features[0], [1.0, 2.0])
+
+
+def test_grouped_probe_selection_never_splits_one_video_across_folds():
+    labels = np.asarray([index % 2 for index in range(12)])
+    groups = np.asarray([
+        "video_{}".format(index // 2) for index in range(12)
+    ])
+    for fit_indices, validation_indices in grouped_cv_splits(
+        labels, groups, folds=3, seed=7
+    ):
+        assert set(groups[fit_indices]).isdisjoint(groups[validation_indices])
+
+
+def test_rq1_aggregate_reports_retention_and_worst_shift():
+    shifts = {}
+    for index, shift in enumerate(SHIFT_CONFIGS):
+        source = 0.8
+        target = 0.4 + 0.01 * index
+        shifts[shift] = {
+            "source": {
+                "accuracy": source,
+                "macro_recall": source,
+                "macro_f1": source,
+                "success_rate": 1.0,
+            },
+            "target": {
+                "accuracy": target,
+                "macro_recall": target,
+                "macro_f1": target,
+                "success_rate": 1.0,
+            },
+        }
+    aggregate = aggregate_shifts(shifts)
+    assert np.isclose(aggregate["macro_f1"]["source_mean"], 0.8)
+    assert np.isclose(aggregate["macro_f1"]["target_worst_shift"], 0.4)
+    assert np.isclose(
+        aggregate["macro_f1"]["retention"],
+        aggregate["macro_f1"]["target_mean"] / 0.8,
+    )
+    assert aggregate["validity"]["all_predictions_present"]
+
+
+def test_rq1_split_audit_rejects_video_overlap():
+    rows = []
+    for shift in SHIFT_CONFIGS:
+        for role, video_id in (
+            ("source_train", "shared"),
+            ("source_val", "shared"),
+            ("target_val", "target"),
+        ):
+            for class_id in range(10):
+                rows.append({
+                    "video_id": "{}_{}".format(video_id, class_id),
+                    "gt_label_id": class_id,
+                    "memberships": [{"shift": shift, "role": role}],
+                })
+    valid, findings = audit_splits(rows)
+    assert not valid
+    assert findings["S1"]["video_overlaps"]["source_train_vs_source_val"]

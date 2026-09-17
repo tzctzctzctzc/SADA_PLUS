@@ -44,6 +44,12 @@ eval_manifest=$base_artifact/rq1_val_gt_segments.jsonl
     --frame-count 8 --workers 48 \
     >"$artifact/logs/prepare_frames.log" 2>&1
 
+"$python" tools/extract_rq1_slowfast_features.py \
+    --manifest "$manifest" \
+    --feature-root "$root/data/ek100_slowfast/features" \
+    --output-prefix "$artifact/features/slowfast_dense" \
+    >"$artifact/logs/extract_slowfast.log" 2>&1
+
 (
     CUDA_VISIBLE_DEVICES=$gpu0 "$python" tools/extract_rq1_clip_features.py \
         --manifest "$manifest" --frame-cache "$frame_cache" \
@@ -55,8 +61,9 @@ eval_manifest=$base_artifact/rq1_val_gt_segments.jsonl
     CUDA_VISIBLE_DEVICES=$gpu0 "$python" tools/extract_rq1_qwen_features.py \
         --manifest "$manifest" --frame-cache "$frame_cache" \
         --cache-namespace rq1_8f --frame-count 8 \
-        --output-prefix "$artifact/features/qwen3_vl_8b_static" \
+        --output-prefix "$artifact/features/qwen3_vl_8b_multimodal_last_token" \
         --model-path Qwen/Qwen3-VL-8B-Instruct --offline \
+        --feature-interface multimodal_last_token \
         --segment-batch-size 16
 ) >"$artifact/logs/gpu0_clip_then_qwen8.log" 2>&1 &
 gpu0_pid=$!
@@ -65,8 +72,9 @@ gpu0_pid=$!
     CUDA_VISIBLE_DEVICES=$gpu1 "$python" tools/extract_rq1_qwen_features.py \
         --manifest "$manifest" --frame-cache "$frame_cache" \
         --cache-namespace rq1_8f --frame-count 8 \
-        --output-prefix "$artifact/features/qwen3_vl_32b_static" \
+        --output-prefix "$artifact/features/qwen3_vl_32b_multimodal_last_token" \
         --model-path Qwen/Qwen3-VL-32B-Instruct --offline \
+        --feature-interface multimodal_last_token \
         --segment-batch-size 16
 ) >"$artifact/logs/gpu1_qwen32.log" 2>&1 &
 gpu1_pid=$!
@@ -76,30 +84,50 @@ printf '%s\n' "$gpu1_pid" >"$artifact/gpu1.pid"
 wait "$gpu0_pid"
 wait "$gpu1_pid"
 
-"$python" tools/run_rq1_frozen_feature_probe.py \
+"$python" tools/audit_rq1_feature_protocol.py \
+    --manifest "$manifest" --expected-frame-count 8 \
+    --feature "SlowFast-dense=$artifact/features/slowfast_dense" \
+    --feature "CLIP-ViT-B16=$artifact/features/clip_vit_b16_static" \
+    --feature "Qwen3-VL-8B=$artifact/features/qwen3_vl_8b_multimodal_last_token" \
+    --feature "Qwen3-VL-32B=$artifact/features/qwen3_vl_32b_multimodal_last_token" \
+    --output "$artifact/rq1_feature_protocol_audit.json" \
+    >"$artifact/logs/audit_feature_protocol.log" 2>&1
+
+"$python" tools/run_rq1_tuned_feature_probe.py \
+    --feature-manifest "$manifest" --eval-manifest "$eval_manifest" \
+    --feature-prefix "$artifact/features/slowfast_dense" \
+    --model-name SlowFast-dense-source-linear \
+    --output "$artifact/slowfast_dense_source_linear.jsonl" \
+    --write-seed-predictions \
+    >"$artifact/logs/probe_slowfast.log" 2>&1
+
+"$python" tools/run_rq1_tuned_feature_probe.py \
     --feature-manifest "$manifest" --eval-manifest "$eval_manifest" \
     --feature-prefix "$artifact/features/clip_vit_b16_static" \
     --model-name CLIP-ViT-B16-source-linear \
     --output "$artifact/clip_vit_b16_source_linear.jsonl" \
+    --write-seed-predictions \
     >"$artifact/logs/probe_clip.log" 2>&1
 
-"$python" tools/run_rq1_frozen_feature_probe.py \
+"$python" tools/run_rq1_tuned_feature_probe.py \
     --feature-manifest "$manifest" --eval-manifest "$eval_manifest" \
-    --feature-prefix "$artifact/features/qwen3_vl_8b_static" \
+    --feature-prefix "$artifact/features/qwen3_vl_8b_multimodal_last_token" \
     --model-name Qwen3-VL-8B-source-linear \
     --output "$artifact/qwen3_vl_8b_source_linear.jsonl" \
+    --write-seed-predictions \
     >"$artifact/logs/probe_qwen8.log" 2>&1
 
-"$python" tools/run_rq1_frozen_feature_probe.py \
+"$python" tools/run_rq1_tuned_feature_probe.py \
     --feature-manifest "$manifest" --eval-manifest "$eval_manifest" \
-    --feature-prefix "$artifact/features/qwen3_vl_32b_static" \
+    --feature-prefix "$artifact/features/qwen3_vl_32b_multimodal_last_token" \
     --model-name Qwen3-VL-32B-source-linear \
     --output "$artifact/qwen3_vl_32b_source_linear.jsonl" \
+    --write-seed-predictions \
     >"$artifact/logs/probe_qwen32.log" 2>&1
 
 "$python" tools/evaluate_rq1_semantics.py \
     --manifest "$eval_manifest" \
-    --prediction "SlowFast-source-linear=$base_artifact/slowfast_source_linear.jsonl" \
+    --prediction "SlowFast-dense-source-linear=$artifact/slowfast_dense_source_linear.jsonl" \
     --prediction "CLIP-ViT-B16-zero-shot=$base_artifact/clip_vit_b16.jsonl" \
     --prediction "CLIP-ViT-B16-source-linear=$artifact/clip_vit_b16_source_linear.jsonl" \
     --prediction "Qwen3-VL-8B-zero-shot=$base_artifact/qwen3_vl_8b.jsonl" \
