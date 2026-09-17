@@ -1,0 +1,27 @@
+{
+  "repository": "https://github.com/VectorSpaceLab/MegaPairs",
+  "revision": "00a74a776e935b58fa95015b2aff48119c43df30",
+  "retrieved_at": "2026-09-17T00:14:43.826220+00:00",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "53954b99ac7a815a8d0e20615491d87e114a96c9f8f169d5f98581bbca54e456",
+      "size": 11491
+    },
+    {
+      "path": "modeling_MMRet_CLIP.py",
+      "sha256": "19a630f89e381dcc0febad3c3d1c392fac7a241819432f08dee9a56a5b2d0689",
+      "size": 73695
+    },
+    {
+      "path": "eval/flag_mmret.py",
+      "sha256": "acf44131ea0872466b2dde7dbe89c3d8da637af800307a02ff56d23872af4e51",
+      "size": 8141
+    },
+    {
+      "path": "eval/eval_Circo.py",
+      "sha256": "70cdb195085daf442867306d6944e1191bc6f41d7fabb1ec8afc1eb5b0ffd42b",
+      "size": 7024
+    }
+  ]
+}

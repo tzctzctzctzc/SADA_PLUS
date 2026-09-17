@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-17T00:07:30.215024+00:00",
+  "as_of": "2026-09-17T00:14:43.828331+00:00",
   "status": "Novelty not established; CoCI and VCD directly cover contrast-image decoding, so P032 remains only a development kill gate pending held-out structured controls.",
   "records": [
     {
@@ -216,7 +216,8 @@
         "path": "literature/PinPoint_source_manifest.json",
         "result": "results/PinPoint_reference_audit.json",
         "finding": "1006条真实双参考查询，所有请求仅含第一参考图与候选图；删除第二参考图列后全部payload不变。仅限固定公开脚本。"
-      }
+      },
+      "strong_baseline_boundary": "Paper Table 4 reports multi-image mAP@10: MMRet-MLLM-S1 0.067, MMRet-MLLM-S2 0.051, MMRet-CLIP-L 0.063, MagicLens-L 0.062, LinCIR 0.042, and GPT-5 text premerge plus reranking 0.074. P030/P031 use a selected top-20 pilot and are not directly comparable to these full-corpus numbers."
     },
     {
       "id": "Qwen3_VL_Reranker_2026",
@@ -334,6 +335,19 @@
       "evidence": "已读§2、主结果与附录A.3：以对比图概率惩罚目标图输出；Qwen2-VL上自然配对对比图明显改善，但top-5随机图、输入最相似图均低于基线。论文固定VQA alpha=0.5，明确指出对比图选择决定效果。",
       "overlap": "P032同属视觉对比输入的推理时校准；错配第二参考若只是任意sham，已有最近邻证据表明可能退化，公式迁移和单一随机控制均不足以构成创新。",
       "limits": "CoCI是单图VQA/生成，P032是多参考候选相关性二分类；其自然对比图与P032错配参考语义不同，不能直接推断本地结果。"
+    },
+    {
+      "id": "MegaPairs_MMRet_ACL2025",
+      "url": "https://aclanthology.org/2025.acl-long.935/",
+      "code": "https://github.com/VectorSpaceLab/MegaPairs",
+      "models": [
+        "https://huggingface.co/JUNJIE99/MMRet-large",
+        "https://huggingface.co/JUNJIE99/MMRet-MLLM-S1"
+      ],
+      "evidence": "Read method, evaluation, and limitations; pinned source revision 00a74a776e935b58fa95015b2aff48119c43df30. CLIP MMRet sums image/text embeddings; MLLM MMRet uses interleaved image-text tokens and normalized EOS hidden state. Training examples use one query image plus instruction, with mined image hard negatives.",
+      "overlap": "A strong publicly weighted CIR baseline. PinPoint reports MMRet-MLLM-S1 as its strongest specialized retriever overall, but its multi-image handling is an evaluation adaptation rather than native multi-reference training.",
+      "limits": "The pinned GitHub repository exposes CLIP evaluation code; the MLLM implementation is supplied as Hugging Face remote code. A local run must pin and hash model code and weights before use.",
+      "source_manifest": "literature/MegaPairs_source_manifest.json"
     }
   ]
 }

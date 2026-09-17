@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-17T00:07:30.219893+00:00",
+  "as_of": "2026-09-17T00:14:43.833270+00:00",
   "goal_status": "active",
   "phase": "P030四条件在GPU3运行；P031 Coral与同底座3B的迁移对照已排队",
   "scope": {
@@ -22,7 +22,8 @@
     "P008所有7B固定DTS条件各退化3至5/32；3B各变化正负1/32。相同P006协议生成全文64/64一致；P007 eager与P008 SDPA BF16的32个baseline候选argmax有3个差异，不能跨后端解读微小增益。",
     "PinPoint全部发布排名指标复算完成：官方mAP10为13.1418%/16.9785%，仅去重后13.2530%/17.1452%，影响有限。results/PinPoint_metric_replay.json。",
     "P030 cohort scope audit: all 48 selected queries are Composition; 909 clean dual-reference rows contain 105 non-Composition rows, mostly 94 Context Fit. results/P030_scope_audit.json.",
-    "CoCI（MAGMaR 2025）已显示对比图选择是核心变量：自然配对可改善，而随机或仅最相似对比图在Qwen2-VL上低于基线；P032的单一错配sham因此只能作开发集淘汰门槛。"
+    "CoCI（MAGMaR 2025）已显示对比图选择是核心变量：自然配对可改善，而随机或仅最相似对比图在Qwen2-VL上低于基线；P032的单一错配sham因此只能作开发集淘汰门槛。",
+    "PinPoint Table 4 full-corpus multi-image mAP@10 peaks at 0.074 for GPT-5 text premerge plus reranking; specialized MMRet-MLLM-S1 is 0.067. P030/P031 are selected top-20 diagnostics and cannot be called SOTA comparisons."
   ],
   "hypotheses": [
     {
@@ -420,7 +421,7 @@
     "gpu_queue": "Drivers serialize with flock on /vepfs/vlms/1/runs/gpu3.lock",
     "verified_active": "本轮读取本地gpu3 heartbeat：ACTIVE，每20分钟；读取research_state并核验真实PID，保持原有监控。"
   },
-  "next": "P030/P032 conclusions are limited to Composition. If a held-out confirmation is justified, choose within reserved components with explicit category reporting and add a separate non-Composition sensitivity cohort; do not claim category-wide independence.",
+  "next": "Wait for frozen P030/P032 and P031. Only if their gates justify continuation, preregister held-out category-stratified controls and add a pinned MMRet baseline; selected top-20 pilot results are not comparable to PinPoint full-corpus SOTA.",
   "results": {
     "P001": {
       "n": 4,
