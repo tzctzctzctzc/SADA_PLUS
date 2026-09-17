@@ -21,6 +21,7 @@ from tools import prepare_rq1_frames
 from tools.run_rq1_slowfast_probe import segment_feature
 from tools.rq1_feature_store import FeatureStore, normalize, summarize_frame_features
 from tools.extract_rq1_qwen_features import select_shard
+from tools.extract_rq1_videochat3_features import video_metadata
 from tools.run_rq1_frozen_feature_probe import source_train_indices
 
 
@@ -162,6 +163,17 @@ def test_qwen_feature_shards_are_disjoint_and_complete():
     shards = [select_shard(indices, 3, shard) for shard in range(3)]
     assert sorted(index for shard in shards for index in shard) == indices
     assert not set(shards[0]) & set(shards[1])
+
+
+def test_videochat3_metadata_preserves_exact_eight_frames():
+    video = np.zeros((8, 12, 16, 3), dtype=np.uint8)
+    assert video_metadata(video) == {
+        "total_num_frames": 8,
+        "fps": 1.0,
+        "duration": 8.0,
+        "width": 16,
+        "height": 12,
+    }
 
 
 def test_grouped_probe_selection_never_splits_one_video_across_folds():
