@@ -12,12 +12,16 @@ import numpy as np
 from tools.run_clip_target_adapter import LABELS, read_jsonl
 
 
-def load_features(manifest, index_path, feature_root):
-    index = {
-        row["candidate_id"]: row
-        for row in read_jsonl(index_path)
-        if row.get("status") == "ok"
-    }
+def load_features(manifest, index_paths, feature_root):
+    index = {}
+    for index_path in index_paths:
+        for row in read_jsonl(index_path):
+            if row.get("status") != "ok":
+                continue
+            candidate_id = row["candidate_id"]
+            if candidate_id in index:
+                raise ValueError("duplicate feature index row: {}".format(candidate_id))
+            index[candidate_id] = row
     samples = []
     for row in manifest:
         feature_row = index.get(row["candidate_id"])
@@ -204,7 +208,7 @@ def train_one(train_samples, dev_samples, args, seed, donor=None):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", required=True)
-    parser.add_argument("--feature-index", required=True)
+    parser.add_argument("--feature-index", action="append", required=True)
     parser.add_argument("--feature-root", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--folds", type=int, default=3)

@@ -24,6 +24,11 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
+def shard_for_video(video_id, shard_count):
+    value = hashlib.sha256(str(video_id).encode("utf-8")).digest()
+    return int.from_bytes(value[:8], "big") % shard_count
+
+
 def atomic_savez(path, **arrays):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -95,13 +100,20 @@ def parse_args():
     parser.add_argument("--min-pixels", type=int, default=224 * 224)
     parser.add_argument("--max-pixels", type=int, default=448 * 448)
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--shard-count", type=int, default=1)
+    parser.add_argument("--shard-index", type=int, default=0)
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    if args.shard_count <= 0 or not 0 <= args.shard_index < args.shard_count:
+        raise ValueError("shard index must be within a positive shard count")
     manifest_path = Path(args.manifest)
-    rows = read_jsonl(manifest_path)
+    rows = [
+        row for row in read_jsonl(manifest_path)
+        if shard_for_video(row["video_id"], args.shard_count) == args.shard_index
+    ]
     if not rows:
         raise ValueError("manifest is empty")
     manifest_hash = sha256_file(manifest_path)
