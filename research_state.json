@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-18T02:21:36.445650+08:00",
+  "as_of": "2026-09-19T17:51:49.263186+08:00",
   "goal_status": "active",
-  "phase": "P046_design_after_judge_failure",
+  "phase": "P046_pilot_failed_margin_only_signal",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 1,
@@ -143,7 +143,7 @@
         "Bind full-scale progression to task ranking, binding discrimination, and non-degradation evidence; proxy gains alone cannot pass",
         "A noisy interval crossing the preregistered gate is inconclusive and does not authorize full scale; it is not proof that the topic is false"
       ],
-      "current_learned_binding_status": "Plausible training hypothesis; valid swap labels, benefit beyond ordinary hard-negative training, and real-retrieval transfer are not established. No new training launched."
+      "current_learned_binding_status": "P046 passed data and implementation audits, but its single-seed mechanism pilot failed the all-required gate: role margin improved while pair accuracy did not beat generic augmentation. No full-scale run is authorized."
     },
     "literature_priority": {
       "preferred_years": [
@@ -861,6 +861,22 @@
         "all_layer_control_beaten": false
       },
       "stop_reason": "No narrow layer window passed all frozen gates; the all-layer control had the highest binding AUC and was explicitly ineligible. Do not run P040 or enlarge SBB."
+    },
+    "P046": {
+      "status": "pilot_failed_stop_no_full",
+      "gpu_uuid": "GPU-6fc32588-9464-5f67-98bc-d436aec84f4a",
+      "config": "configs/P046_self_normalized_role_corruption.json",
+      "analysis": "runs/P046_self_normalized_role_corruption/pilot_summary.json",
+      "static_audit": "runs/P046_self_normalized_role_corruption/implementation_audit_static.json",
+      "runtime_audit": "runs/P046_self_normalized_role_corruption/runtime_gradient_audit.json",
+      "corruption_audit": "runs/P046_self_normalized_role_corruption/corruption_audit_summary.json",
+      "arms": [
+        "ordinary_retrieval",
+        "generic_augmentation",
+        "role_corruption"
+      ],
+      "steps_per_arm": 24,
+      "seed": 20260919
     }
   },
   "monitor": {
@@ -878,7 +894,7 @@
     "automation_display_name": "GPU1 独立研究进展",
     "rules_first": "Read /vepfs/vlms/1/研究规则.md before continuing; the automation was updated to GPU1 and evidence-first/pilot-first execution on 2026-09-17."
   },
-  "next": "Design and preregister a product-disjoint role-corruption data pilot that uses shared-target paired differences and calibrated negative controls. Do not train until that data pilot and a full implementation audit pass.",
+  "next": "P046 is stopped before full scale. Preserve the margin-only signal as evidence, audit why pair accuracy saturated, and require a materially different preregistered pilot before further training.",
   "results": {
     "P001": {
       "n": 4,
@@ -1819,6 +1835,49 @@
       ],
       "max_gpu_allocated_bytes": 9679515136,
       "decision": "Stop automatic-judge role routing. Judge-dependent pseudo labels are not solid enough for training or claims."
+    },
+    "P046": {
+      "status": "fail_stop_no_full",
+      "audit_status": {
+        "static": "faithful",
+        "runtime": "faithful",
+        "corruption_data": "pass"
+      },
+      "arms": {
+        "ordinary_retrieval": {
+          "rows": 16,
+          "role_pair_accuracy": 0.8125,
+          "mean_role_margin": 0.13582479092292488,
+          "retrieval_accuracy": 0.9375,
+          "mean_retrieval_margin": 0.3873250115138944
+        },
+        "generic_augmentation": {
+          "rows": 16,
+          "role_pair_accuracy": 0.875,
+          "mean_role_margin": 0.1328690650407225,
+          "retrieval_accuracy": 0.9375,
+          "mean_retrieval_margin": 0.39303780332556926
+        },
+        "role_corruption": {
+          "rows": 16,
+          "role_pair_accuracy": 0.875,
+          "mean_role_margin": 0.17934495053486899,
+          "retrieval_accuracy": 0.9375,
+          "mean_retrieval_margin": 0.4228258985604043
+        }
+      },
+      "gains_over_best_control": {
+        "role_pair_accuracy": 0.0,
+        "mean_role_margin": 0.04352015961194411,
+        "retrieval_accuracy_vs_best_control": 0.0
+      },
+      "gates": {
+        "role_pair_accuracy_gain": false,
+        "role_margin_gain": true,
+        "retrieval_noninferiority": true
+      },
+      "all_gates_pass": false,
+      "decision": "Do not scale. The margin signal is encouraging, but the role arm did not improve held-out pair accuracy over generic augmentation."
     }
   },
   "novelty_status": "No effective method is established. P044/P045 show that per-role pseudo labels from automatic judges are not stable enough (65% relation agreement, 42% route agreement). Generic noise routing is already prior art. The next candidate is shared-target self-normalized role corruption, whose novelty and data validity remain unverified.",
@@ -1858,7 +1917,11 @@
       "P038 passed four diagnostic/safety gates but failed the primary AP@10 gate: SIRC AB was -1.568pp versus original dual, so full-scale execution is stopped.",
       "The user changed the resource policy: all future experiments must use physical GPU1 (GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f) after an immediate occupancy check.",
       "P001-P038 were re-audited by mechanism family; prompt/position correction, scalar source fusion, raw subtraction, attention readout, and full-stream isolation repeatedly improved diagnostics without stable ranking gains.",
-      "Six additional primary sources were screened for causal visual paths and private instance binding. P039 freezes Shadow Binding Bridges as a 612-score GPU1 mechanism screen with four narrow layer windows, a soft baseline, an all-layer control, and five all-required gates."
+      "Six additional primary sources were screened for causal visual paths and private instance binding. P039 freezes Shadow Binding Bridges as a 612-score GPU1 mechanism screen with four narrow layer windows, a soft baseline, an all-layer control, and five all-required gates.",
+      "P046 froze 64 product-disjoint MERIT bundles across pants, cloth, and shoes; 256 base products had zero overlap with 5,770 P041-P043 products.",
+      "P046 static and runtime implementation audits both classified the implementation as faithful: 36/36 language layers received LoRA gradients, the visual merger and candidate branch received gradients, and 127,412,992 parameters were trainable.",
+      "The P046 corruption confirmation passed: identity calibration and donor-relation negatives were each 23/24 (95.8%).",
+      "The three-arm single-seed pilot failed its all-required gate. Role corruption tied generic augmentation at 87.5% pair accuracy, improved mean role margin by 0.0435 over the strongest control, and tied retrieval accuracy at 93.75%; no full-scale run is authorized."
     ]
   },
   "idea_audits": {
@@ -2250,7 +2313,7 @@
     },
     {
       "id": "self_normalized_role_corruption_v1",
-      "status": "design_only_requires_new_preregistered_pilot",
+      "status": "pilot_failed_stop_no_full",
       "title": "Self-normalized role-corruption learning with a shared target",
       "evidence_chain": [
         "P037 showed the frozen model does not reliably discriminate wrong bindings, so a training signal is needed rather than another inference correction.",
@@ -2266,8 +2329,60 @@
         "Audit that only the selected reference changes, target and other reference hashes stay identical, role tokens remain aligned, and no candidate labels leak.",
         "Pre-register a small training pilot with ordinary fine-tuning, generic image augmentation, and role-corruption arms under identical data, trainable parameters, steps, seeds, and full-gallery evaluation."
       ],
-      "gpu": "Only physical GPU1 UUID GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f after live check; no fallback.",
-      "created_at": "2026-09-18T02:21:36.445650+08:00"
+      "gpu": "P046 executed only on physical GPU2 UUID GPU-6fc32588-9464-5f67-98bc-d436aec84f4a per the latest user instruction.",
+      "created_at": "2026-09-18T02:21:36.445650+08:00",
+      "implementation_audit": {
+        "static": "faithful",
+        "runtime": "faithful",
+        "trainable_parameters": 127412992,
+        "language_lora_layers": "36/36",
+        "visual_merger_trainable": true,
+        "candidate_branch_gradient": true,
+        "peak_allocated_bytes": 17495149056
+      },
+      "pilot_result": {
+        "status": "fail_stop_no_full",
+        "audit_status": {
+          "static": "faithful",
+          "runtime": "faithful",
+          "corruption_data": "pass"
+        },
+        "arms": {
+          "ordinary_retrieval": {
+            "rows": 16,
+            "role_pair_accuracy": 0.8125,
+            "mean_role_margin": 0.13582479092292488,
+            "retrieval_accuracy": 0.9375,
+            "mean_retrieval_margin": 0.3873250115138944
+          },
+          "generic_augmentation": {
+            "rows": 16,
+            "role_pair_accuracy": 0.875,
+            "mean_role_margin": 0.1328690650407225,
+            "retrieval_accuracy": 0.9375,
+            "mean_retrieval_margin": 0.39303780332556926
+          },
+          "role_corruption": {
+            "rows": 16,
+            "role_pair_accuracy": 0.875,
+            "mean_role_margin": 0.17934495053486899,
+            "retrieval_accuracy": 0.9375,
+            "mean_retrieval_margin": 0.4228258985604043
+          }
+        },
+        "gains_over_best_control": {
+          "role_pair_accuracy": 0.0,
+          "mean_role_margin": 0.04352015961194411,
+          "retrieval_accuracy_vs_best_control": 0.0
+        },
+        "gates": {
+          "role_pair_accuracy_gain": false,
+          "role_margin_gain": true,
+          "retrieval_noninferiority": true
+        },
+        "all_gates_pass": false,
+        "decision": "Do not scale. The margin signal is encouraging, but the role arm did not improve held-out pair accuracy over generic augmentation."
+      }
     }
   ]
 }

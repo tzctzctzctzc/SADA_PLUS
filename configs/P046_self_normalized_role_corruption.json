@@ -1,0 +1,143 @@
+{
+  "id": "P046",
+  "name": "self_normalized_role_corruption",
+  "status": "pilot_failed_stop_no_full",
+  "claim": "固定同一目标，仅破坏一个由指令索引的参考角色，利用原查询与破坏查询的相对分数学习多参考角色绑定。",
+  "gpu_uuid": "GPU-6fc32588-9464-5f67-98bc-d436aec84f4a",
+  "model": {
+    "id": "Qwen/Qwen3-VL-Embedding-8B",
+    "revision": "2c4565515e0f265c6511776e7193b22c0968ddc7",
+    "path": "models/Qwen3-VL-Embedding-8B",
+    "dtype": "bfloat16",
+    "attn_implementation": "sdpa",
+    "max_length": 768,
+    "min_pixels": 50176,
+    "max_pixels": 100352
+  },
+  "data": {
+    "dataset": "WeiChow/merit",
+    "dataset_revision": "fd1c52c3ce3f1d53f7781afa64f350564cece6e8",
+    "query_path": "data/MERIT/queries-train.json",
+    "query_sha256": "34d9c785433b08ca5c1936161005969bcd76da3a06c0d1d8f78259b9e83bc241",
+    "metadata_path": "runs/P041_selective_dependence/products_metadata.jsonl",
+    "metadata_manifest": "runs/P041_selective_dependence/metadata_manifest.json",
+    "total_shards": 281,
+    "counts": {
+      "train": 24,
+      "validation": 16,
+      "confirmation": 24
+    },
+    "selection_seed": "P046-v1",
+    "product_disjoint_from": [
+      "P041",
+      "P042",
+      "P043"
+    ],
+    "donor_policy": "both roles are from the frozen visible-attribute allowlist; donor has the same product class; selected role key is present and its metadata value differs from the official target; deterministic hash selection; all products globally disjoint",
+    "negative_policy": "another official target of the same class and split with at least one requested attribute mismatch",
+    "role_allowlist": [
+      "color",
+      "pattern/print",
+      "pattern",
+      "shape",
+      "closure type",
+      "closure",
+      "shoe type",
+      "toe style",
+      "sleeve length",
+      "sleeve type",
+      "collar type",
+      "neckline",
+      "waist line",
+      "pockets",
+      "strap type",
+      "bag type",
+      "chair type",
+      "table type",
+      "arm type",
+      "back type",
+      "hem shape",
+      "form factor",
+      "boot height",
+      "heel type",
+      "handle type",
+      "table base",
+      "movement type",
+      "number of drawers",
+      "number of cameras"
+    ],
+    "max_bundles_per_class_per_split": 8
+  },
+  "visual_confirmation": {
+    "judge_model": "models/Qwen2.5-VL-7B-Instruct",
+    "judge_revision": "cc594898137f460bfe9f0759e9844b3ce807cfb5",
+    "min_pixels": 3136,
+    "max_pixels": 451584,
+    "batch_size": 4,
+    "checks": [
+      "identity_positive",
+      "donor_relation_negative"
+    ],
+    "identity_pass_rate_min": 0.95,
+    "donor_negative_pass_rate_min": 0.9
+  },
+  "training": {
+    "arms": [
+      "ordinary_retrieval",
+      "generic_augmentation",
+      "role_corruption"
+    ],
+    "seed": 20260919,
+    "steps": 24,
+    "learning_rate_lora": 0.0001,
+    "learning_rate_visual_merger": 2e-05,
+    "weight_decay": 0.0,
+    "temperature": 0.07,
+    "rank_margin": 0.1,
+    "role_margin": 0.08,
+    "aux_weight": 1.0,
+    "lora_rank": 32,
+    "lora_alpha": 64,
+    "lora_dropout": 0.0,
+    "gradient_checkpointing": true,
+    "train_visual_merger": true,
+    "max_gpu_hours_per_arm": 1.0,
+    "save_checkpoint": false
+  },
+  "pilot_gates": {
+    "role_pair_accuracy_gain_over_best_control_min": 0.05,
+    "role_margin_gain_over_best_control_min": 0.02,
+    "retrieval_accuracy_noninferiority_tolerance": 0.05,
+    "all_required": true,
+    "interpretation": "single-seed mechanism falsification only; passing does not authorize full training and must be followed by a frozen multi-seed confirmation"
+  },
+  "implementation_audit": {
+    "required": [
+      "config_and_hashes",
+      "global_product_disjointness",
+      "single_role_mutation",
+      "target_and_other_reference_identity",
+      "role_text_alignment",
+      "no_attribute_value_leak",
+      "loss_direction_unit_test",
+      "all_language_layers_lora",
+      "visual_merger_trainable",
+      "candidate_branch_gradient",
+      "physical_gpu_assertion"
+    ],
+    "classifications": [
+      "faithful",
+      "conservative",
+      "minimal",
+      "incorrect",
+      "insufficient_evidence"
+    ]
+  },
+  "stop_rules": [
+    "implementation audit is not faithful",
+    "visual corruption confirmation fails",
+    "role arm does not beat both matched controls on held-out role metrics",
+    "retrieval accuracy violates non-inferiority",
+    "CUDA OOM under the frozen memory configuration; do not silently shrink the method"
+  ]
+}
