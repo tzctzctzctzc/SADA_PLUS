@@ -35,6 +35,8 @@ def atomic_savez(path, **arrays):
 
 def completed_ids(index_path, feature_root, args, manifest_hash):
     completed = set()
+    if not Path(index_path).is_file():
+        return completed
     for row in read_jsonl(index_path):
         feature_file = feature_root / row.get("feature_file", "")
         if (
