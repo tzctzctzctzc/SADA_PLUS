@@ -1,0 +1,105 @@
+{
+  "id": "P049",
+  "name": "counterfactual_role_verifier",
+  "status": "preregistered_after_P048_geometry_failure",
+  "claim": "冻结高召回语义检索器，只在其 Top-10 内使用候选感知的角色干预差分进行重排；共享候选的 difference-in-differences 应把角色敏感性转化为真实排名收益，同时从结构上避免全局 embedding 几何漂移。",
+  "gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
+  "model": {
+    "id": "Qwen/Qwen3-VL-Embedding-8B",
+    "revision": "2c4565515e0f265c6511776e7193b22c0968ddc7",
+    "path": "models/Qwen3-VL-Embedding-8B",
+    "dtype": "bfloat16",
+    "attn_implementation": "sdpa",
+    "max_length": 1024,
+    "min_pixels": 50176,
+    "max_pixels": 100352
+  },
+  "data": {
+    "dataset": "WeiChow/merit",
+    "dataset_revision": "fd1c52c3ce3f1d53f7781afa64f350564cece6e8",
+    "query_path": "data/MERIT/queries-train.json",
+    "query_sha256": "34d9c785433b08ca5c1936161005969bcd76da3a06c0d1d8f78259b9e83bc241",
+    "metadata_path": "runs/P041_selective_dependence/products_metadata.jsonl",
+    "metadata_manifest": "runs/P041_selective_dependence/metadata_manifest.json",
+    "total_shards": 281,
+    "p048_bundles": "runs/P048_visible_role_contrast/bundles.jsonl",
+    "p048_bundles_sha256": "bd03e42ca13f8d3d5be521c6a475f5101b0111f33b0baabd930691fe3792aa7e",
+    "p048_visual_audit": "runs/P048_visible_role_contrast/corruption_audit_summary.json",
+    "counts": {
+      "train": 144,
+      "validation": 128,
+      "confirmation": 64
+    },
+    "max_train_bundles_per_class": 64,
+    "role_allowlist": [
+      "color", "pattern/print", "pattern", "shape", "closure type", "closure",
+      "shoe type", "toe style", "sleeve length", "sleeve type", "collar type",
+      "neckline", "waist line", "pockets", "strap type", "bag type", "chair type",
+      "table type", "arm type", "back type", "hem shape", "form factor", "boot height",
+      "heel type", "handle type", "table base", "movement type", "number of drawers",
+      "number of cameras"
+    ],
+    "active_role_allowlist": ["color", "pattern/print"],
+    "excluded_confirmation_source": "runs/P047_position_controlled_role_contrast/bundles.jsonl",
+    "selection_seed": "P049-v1",
+    "split_policy": "P048 validation and confirmation are reused exactly for paired diagnosis. New training products are disjoint from every held-out product and globally disjoint within P049 training. Historical train overlap is allowed because every arm starts from the same pretrained checkpoint.",
+    "negative_policy": "official MERIT hard negative plus other positive and hard-negative targets in the same training batch"
+  },
+  "training": {
+    "arms": ["ordinary_verifier", "positive_counterfactual", "dod_counterfactual"],
+    "seed": 20260919,
+    "epochs": 3,
+    "batch_size": 2,
+    "learning_rate_lora": 0.0001,
+    "learning_rate_visual_merger": 0.00002,
+    "learning_rate_head": 0.001,
+    "weight_decay": 0.0,
+    "temperature": 0.07,
+    "rank_margin": 0.10,
+    "counterfactual_margin": 0.08,
+    "dod_margin": 0.05,
+    "counterfactual_weight": 1.0,
+    "dod_weight": 1.0,
+    "paraphrase_weight": 0.25,
+    "lora_rank": 32,
+    "lora_alpha": 64,
+    "lora_dropout": 0.0,
+    "gradient_checkpointing": true,
+    "train_visual_merger": true,
+    "eval_top_k": 10,
+    "eval_batch_size": 4,
+    "fusion": "per_query_zscore_base_plus_auxiliary_equal_weight",
+    "max_gpu_hours_per_arm": 5.0,
+    "save_checkpoint": false
+  },
+  "pilot_gates": {
+    "map_at_10_gain_vs_frozen_ci_lower_min": 0.0,
+    "map_at_10_gain_vs_ordinary_ci_lower_min": 0.0,
+    "paraphrase_map_noninferiority_tolerance": 0.005,
+    "dod_margin_gain_vs_ordinary_ci_lower_min": 0.0,
+    "hard_negative_violation_reduction_ci_upper_max": 0.0,
+    "bootstrap_resamples": 2000,
+    "bootstrap_seed": 20260949,
+    "bootstrap_ci": 0.95,
+    "all_required": true,
+    "interpretation": "Passing authorizes only a multi-seed confirmation and broader-role data construction; it does not authorize a full benchmark run."
+  },
+  "implementation_audit": {
+    "required": [
+      "frozen_config_and_hashes", "heldout_identical_to_P048", "train_heldout_product_disjointness",
+      "same_images_same_order_for_text_swap", "candidate_joint_cross_encoder_input",
+      "difference_in_differences_loss_direction", "base_retriever_has_no_optimizer_path",
+      "matched_arm_initialization_and_budget", "all_language_layers_lora", "visual_merger_trainable",
+      "scalar_head_gradient", "positive_negative_swap_and_paraphrase_branches_have_gradient",
+      "physical_gpu_assertion"
+    ],
+    "classifications": ["faithful", "conservative", "minimal", "incorrect", "insufficient_evidence"]
+  },
+  "stop_rules": [
+    "static implementation audit is not faithful",
+    "inherited P048 visual confirmation is not hash-identical and passing",
+    "runtime gradient audit is not faithful",
+    "dod arm does not pass every frozen pilot gate",
+    "CUDA OOM under the frozen method configuration; do not silently shrink the verifier"
+  ]
+}
