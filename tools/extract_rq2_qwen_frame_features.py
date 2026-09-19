@@ -68,6 +68,18 @@ def frame_key(row, timestamp):
     return row["video_id"], round(float(timestamp), 6)
 
 
+def frames_ready(row, args):
+    return all(
+        path.is_file()
+        for path in frame_paths(
+            args.frame_cache,
+            args.cache_namespace,
+            row["candidate_id"],
+            int(row["frame_count"]),
+        )
+    )
+
+
 def pack_rows(rows, max_batch_frames):
     batch = []
     keys = set()
@@ -154,6 +166,11 @@ def parse_args():
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--max-batch-frames", type=int, default=64)
     parser.add_argument("--loader-workers", type=int, default=8)
+    parser.add_argument(
+        "--available-only",
+        action="store_true",
+        help="process only windows whose complete frame cache already exists",
+    )
     return parser.parse_args()
 
 
@@ -177,8 +194,20 @@ def main():
     feature_root.mkdir(parents=True, exist_ok=True)
     completed = completed_ids(index_path, feature_root, args, manifest_hash)
     pending = [row for row in rows if row["candidate_id"] not in completed]
+    if args.available_only:
+        before = len(pending)
+        pending = [row for row in pending if frames_ready(row, args)]
+        print(
+            "available_only selected={}/{} shard={}/{}".format(
+                len(pending), before, args.shard_index, args.shard_count
+            ),
+            flush=True,
+        )
     if args.limit > 0:
         pending = pending[: args.limit]
+    if not pending:
+        print("no pending windows", flush=True)
+        return 0
     runtime = load_qwen3(args)
     runtime["torch"].set_float32_matmul_precision("high")
     runtime["torch"].backends.cudnn.benchmark = True
