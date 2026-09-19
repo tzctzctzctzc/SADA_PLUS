@@ -139,7 +139,7 @@ def main() -> None:
                 {"type": "text", "text": "\n"},
             ])
         content.append({"type": "text", "text": row["instructions"][variant]})
-        return [{"role": "system", "content": [{"type": "text", "text": "Represent the multi-reference product retrieval query. Respect which numbered product supplies each requested attribute."}]}, {"role": "user", "content": content}]
+        return [{"role": "system", "content": [{"type": "text", "text": "Represent the multi-reference product retrieval query. Respect the attribute assigned to each numbered product."}]}, {"role": "user", "content": content}]
 
     def candidate_conversation(product_id: str) -> list[dict[str, Any]]:
         return [{"role": "system", "content": [{"type": "text", "text": "Represent the candidate product image for retrieval."}]}, {"role": "user", "content": [{"type": "image", "image": image_content(product_id), "min_pixels": config["model"]["min_pixels"], "max_pixels": config["model"]["max_pixels"]}]}]
