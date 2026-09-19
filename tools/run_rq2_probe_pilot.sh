@@ -38,6 +38,7 @@ fi
 "$video_python" tools/prepare_rq2_probe_frames.py \
     --manifest "$pilot" --video-root "$video_root" \
     --frame-cache "$frame_cache" --cache-namespace "$namespace" --workers 8 \
+    --decode-mode seek \
     >"$artifact/logs/${shift}_prepare_frames.log" 2>&1
 
 CUDA_VISIBLE_DEVICES=$gpu "$python" tools/extract_rq2_qwen_frame_features.py \
@@ -45,6 +46,7 @@ CUDA_VISIBLE_DEVICES=$gpu "$python" tools/extract_rq2_qwen_frame_features.py \
     --cache-namespace "$namespace" --output-index "$feature_index" \
     --feature-root "$feature_root" --model-path Qwen/Qwen3-VL-8B-Instruct \
     --offline --min-pixels $((224 * 224)) --max-pixels $((224 * 224)) \
+    --max-batch-frames 256 --loader-workers 8 \
     >"$artifact/logs/${shift}_qwen3_vl_8b_extract.log" 2>&1
 
 "$python" tools/run_rq2_temporal_probe_pilot.py \

@@ -4,6 +4,8 @@ import argparse
 import hashlib
 import json
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -55,32 +57,80 @@ def completed_ids(index_path, feature_root, args, manifest_hash):
     return completed
 
 
-def encode_window(runtime, paths, args):
+def load_rgb(path):
     from PIL import Image
 
-    images = []
-    for path in paths:
-        with Image.open(path) as image:
-            images.append(image.convert("RGB").copy())
+    with Image.open(path) as image:
+        return image.convert("RGB").copy()
+
+
+def frame_key(row, timestamp):
+    return row["video_id"], round(float(timestamp), 6)
+
+
+def pack_rows(rows, max_batch_frames):
+    batch = []
+    keys = set()
+    for row in rows:
+        row_keys = {
+            frame_key(row, timestamp) for timestamp in row["frame_timestamps_sec"]
+        }
+        added = len(row_keys.difference(keys))
+        if batch and len(keys) + added > max_batch_frames:
+            yield batch
+            batch = []
+            keys = set()
+        batch.append(row)
+        keys.update(row_keys)
+    if batch:
+        yield batch
+
+
+def encode_rows(runtime, rows, args, executor):
+    unique_paths = []
+    key_to_index = {}
+    row_indices = []
+    for row in rows:
+        paths = frame_paths(
+            args.frame_cache,
+            args.cache_namespace,
+            row["candidate_id"],
+            int(row["frame_count"]),
+        )
+        indices = []
+        for timestamp, path in zip(row["frame_timestamps_sec"], paths):
+            key = frame_key(row, timestamp)
+            if key not in key_to_index:
+                key_to_index[key] = len(unique_paths)
+                unique_paths.append(path)
+            indices.append(key_to_index[key])
+        row_indices.append(indices)
+    images = list(executor.map(load_rgb, unique_paths))
     inputs = runtime["processor"].image_processor(
         images=images,
         min_pixels=int(args.min_pixels),
         max_pixels=int(args.max_pixels),
         return_tensors="pt",
     )
-    pixel_values = inputs["pixel_values"].to(runtime["device"])
-    image_grid_thw = inputs["image_grid_thw"].to(runtime["device"])
+    pixel_values = inputs["pixel_values"]
+    image_grid_thw = inputs["image_grid_thw"]
+    if str(runtime["device"]).startswith("cuda"):
+        pixel_values = pixel_values.pin_memory()
+        image_grid_thw = image_grid_thw.pin_memory()
+    pixel_values = pixel_values.to(runtime["device"], non_blocking=True)
+    image_grid_thw = image_grid_thw.to(runtime["device"], non_blocking=True)
     with runtime["torch"].inference_mode():
         image_embeds, _ = runtime["model"].get_image_features(
             pixel_values, image_grid_thw
         )
-    if len(image_embeds) != len(paths):
+    if len(image_embeds) != len(unique_paths):
         raise ValueError("Qwen feature count differs from frame count")
     features = runtime["torch"].stack(
         [embedding.float().mean(dim=0) for embedding in image_embeds]
     )
     features = features / features.norm(dim=1, keepdim=True).clamp_min(1e-12)
-    return features.cpu().numpy().astype(np.float16)
+    features = features.cpu().numpy().astype(np.float16)
+    return [features[np.asarray(indices)] for indices in row_indices], len(unique_paths)
 
 
 def parse_args():
@@ -102,6 +152,8 @@ def parse_args():
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--shard-count", type=int, default=1)
     parser.add_argument("--shard-index", type=int, default=0)
+    parser.add_argument("--max-batch-frames", type=int, default=64)
+    parser.add_argument("--loader-workers", type=int, default=8)
     return parser.parse_args()
 
 
@@ -109,6 +161,8 @@ def main():
     args = parse_args()
     if args.shard_count <= 0 or not 0 <= args.shard_index < args.shard_count:
         raise ValueError("shard index must be within a positive shard count")
+    if args.max_batch_frames < 64 or args.loader_workers <= 0:
+        raise ValueError("max-batch-frames must be at least 64 and loader-workers positive")
     manifest_path = Path(args.manifest)
     rows = [
         row for row in read_jsonl(manifest_path)
@@ -126,53 +180,73 @@ def main():
     if args.limit > 0:
         pending = pending[: args.limit]
     runtime = load_qwen3(args)
-    for number, row in enumerate(pending, 1):
-        candidate_id = row["candidate_id"]
-        try:
-            count = int(row["frame_count"])
-            paths = frame_paths(
-                args.frame_cache, args.cache_namespace, candidate_id, count
+    runtime["torch"].set_float32_matmul_precision("high")
+    runtime["torch"].backends.cudnn.benchmark = True
+    started = time.time()
+    processed = 0
+    encoded_frames = 0
+    batches = list(pack_rows(pending, args.max_batch_frames))
+    with ThreadPoolExecutor(max_workers=args.loader_workers) as executor:
+        for batch_number, batch in enumerate(batches, 1):
+            try:
+                batch_features, unique_frames = encode_rows(
+                    runtime, batch, args, executor
+                )
+                results = []
+                for row, features in zip(batch, batch_features):
+                    timestamps = np.asarray(
+                        row["frame_timestamps_sec"], dtype=np.float32
+                    )
+                    if features.shape[0] != timestamps.shape[0]:
+                        raise ValueError("feature/timestamp length mismatch")
+                    feature_name = row["candidate_id"] + ".npz"
+                    atomic_savez(
+                        feature_root / feature_name,
+                        features=features,
+                        timestamps_sec=timestamps,
+                    )
+                    results.append({
+                        "candidate_id": row["candidate_id"],
+                        "instance_id": row["instance_id"],
+                        "video_id": row["video_id"],
+                        "status": "ok",
+                        "schema_version": SCHEMA,
+                        "model": args.model_path,
+                        "model_revision": runtime["model_revision"],
+                        "manifest_sha256": manifest_hash,
+                        "feature_file": feature_name,
+                        "frame_count": int(features.shape[0]),
+                        "feature_dim": int(features.shape[1]),
+                        "time_mapping": "one pooled vision embedding per sampled frame",
+                        "extractor": "deduplicated-batched-v1",
+                    })
+            except Exception as error:
+                unique_frames = 0
+                results = [{
+                    "candidate_id": row["candidate_id"],
+                    "video_id": row.get("video_id"),
+                    "status": "error",
+                    "schema_version": SCHEMA,
+                    "error": "{}: {}".format(type(error).__name__, error),
+                } for row in batch]
+            with index_path.open("a", encoding="utf-8") as stream:
+                for result in results:
+                    stream.write(json.dumps(result, sort_keys=True) + "\n")
+            processed += len(batch)
+            encoded_frames += unique_frames
+            elapsed = max(time.time() - started, 1e-9)
+            print(
+                "batch={}/{} windows={}/{} unique_frames={} windows_s={:.3f} frames_s={:.1f}".format(
+                    batch_number,
+                    len(batches),
+                    processed,
+                    len(pending),
+                    unique_frames,
+                    processed / elapsed,
+                    encoded_frames / elapsed,
+                ),
+                flush=True,
             )
-            features = encode_window(runtime, paths, args)
-            timestamps = np.asarray(row["frame_timestamps_sec"], dtype=np.float32)
-            if features.shape[0] != timestamps.shape[0]:
-                raise ValueError("feature/timestamp length mismatch")
-            feature_name = candidate_id + ".npz"
-            atomic_savez(
-                feature_root / feature_name,
-                features=features,
-                timestamps_sec=timestamps,
-            )
-            result = {
-                "candidate_id": candidate_id,
-                "instance_id": row["instance_id"],
-                "video_id": row["video_id"],
-                "status": "ok",
-                "schema_version": SCHEMA,
-                "model": args.model_path,
-                "model_revision": runtime["model_revision"],
-                "manifest_sha256": manifest_hash,
-                "feature_file": feature_name,
-                "frame_count": int(features.shape[0]),
-                "feature_dim": int(features.shape[1]),
-                "time_mapping": "one pooled vision embedding per sampled frame",
-            }
-        except Exception as error:
-            result = {
-                "candidate_id": candidate_id,
-                "video_id": row.get("video_id"),
-                "status": "error",
-                "schema_version": SCHEMA,
-                "error": "{}: {}".format(type(error).__name__, error),
-            }
-        with index_path.open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps(result, sort_keys=True) + "\n")
-        print(
-            "{}/{} {} {}".format(
-                number, len(pending), candidate_id, result["status"]
-            ),
-            flush=True,
-        )
     return 0
 
 

@@ -41,6 +41,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 "$video_python" tools/prepare_rq2_probe_frames.py \
     --manifest "$pilot" --video-root "$video_root" \
     --frame-cache "$frame_cache" --cache-namespace "$namespace" --workers 8 \
+    --decode-mode seek \
     >"$artifact/logs/${tag}_prepare_frames.log" 2>&1
 
 pids=()
@@ -54,6 +55,7 @@ for shard in 0 1; do
         --cache-namespace "$namespace" --output-index "$index" \
         --feature-root "$feature_root" --model-path Qwen/Qwen3-VL-8B-Instruct \
         --offline --min-pixels $((224 * 224)) --max-pixels $((224 * 224)) \
+        --max-batch-frames 256 --loader-workers 8 \
         --shard-count 2 --shard-index "$shard" \
         >"$artifact/logs/${tag}_qwen3_vl_8b_shard${shard}.log" 2>&1 &
     pids+=("$!")
