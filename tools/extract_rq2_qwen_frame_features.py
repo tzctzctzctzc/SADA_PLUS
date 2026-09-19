@@ -69,15 +69,16 @@ def frame_key(row, timestamp):
 
 
 def frames_ready(row, args):
-    return all(
-        path.is_file()
-        for path in frame_paths(
+    try:
+        paths = frame_paths(
             args.frame_cache,
             args.cache_namespace,
             row["candidate_id"],
             int(row["frame_count"]),
         )
-    )
+    except FileNotFoundError:
+        return False
+    return all(path.is_file() for path in paths)
 
 
 def pack_rows(rows, max_batch_frames):
