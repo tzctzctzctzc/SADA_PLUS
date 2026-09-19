@@ -10,7 +10,8 @@
     "path": "models/Qwen3-VL-Embedding-8B",
     "dtype": "bfloat16",
     "attn_implementation": "sdpa",
-    "max_length": 1024,
+    "base_max_length": 768,
+    "verifier_max_length": 1024,
     "min_pixels": 50176,
     "max_pixels": 100352
   },

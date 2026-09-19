@@ -92,12 +92,13 @@ checks["candidate_joint_cross_encoder_input"] = all(token in source for token in
 checks["base_retriever_has_no_optimizer_path"] = source.index("if args.prepare_base:") < source.index("get_peft_model(core, lora)") < source.index("optimizer = torch.optim.AdamW")
 checks["full_counterfactual_method_present"] = all(token in source for token in ["positive_delta = original[0] - swapped[0]", "negative_delta = original[1] - swapped[1]", "dod_loss = pairwise_margin_loss", "para_loss = F.smooth_l1_loss", "zscore(base_scores)"])
 checks["matched_arm_initialization_and_budget"] = config["training"]["arms"] == ["ordinary_verifier", "positive_counterfactual", "dod_counterfactual"] and config["training"]["epochs"] == 3 and config["training"]["batch_size"] == 2
+checks["base_length_matches_P048"] = config["model"]["base_max_length"] == 768 and config["model"]["verifier_max_length"] >= config["model"]["base_max_length"]
 
 critical = [
     "frozen_config_and_hashes", "split_counts", "heldout_identical_to_P048", "train_heldout_product_disjointness",
     "same_images_same_order_for_text_swap", "paraphrase_counterfactual_present", "inherited_visual_gate_passing",
     "difference_in_differences_loss_direction", "candidate_joint_cross_encoder_input", "base_retriever_has_no_optimizer_path",
-    "full_counterfactual_method_present", "matched_arm_initialization_and_budget",
+    "full_counterfactual_method_present", "matched_arm_initialization_and_budget", "base_length_matches_P048",
 ]
 if all(checks[key] for key in critical):
     classification = "faithful"

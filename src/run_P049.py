@@ -165,7 +165,7 @@ def main() -> None:
     model_class, processor_class, source_sha = load_official_classes(model_path)
     processor = processor_class.from_pretrained(model_path, padding_side="right", local_files_only=True)
 
-    def prepare(conversations: list[list[dict[str, Any]]]) -> dict[str, torch.Tensor]:
+    def prepare(conversations: list[list[dict[str, Any]]], max_length: int) -> dict[str, torch.Tensor]:
         texts = processor.apply_chat_template(conversations, add_generation_prompt=True, tokenize=False)
         images, video_inputs, video_kwargs = process_vision_info(conversations, image_patch_size=16, return_video_metadata=True, return_video_kwargs=True)
         if video_inputs is not None:
@@ -173,7 +173,7 @@ def main() -> None:
             videos, video_metadata = list(videos), list(video_metadata)
         else:
             videos, video_metadata = None, None
-        inputs = processor(text=texts, images=images, videos=videos, video_metadata=video_metadata, truncation=True, max_length=config["model"]["max_length"], padding=True, do_resize=False, return_tensors="pt", **video_kwargs)
+        inputs = processor(text=texts, images=images, videos=videos, video_metadata=video_metadata, truncation=True, max_length=max_length, padding=True, do_resize=False, return_tensors="pt", **video_kwargs)
         return {key: value.to("cuda") for key, value in inputs.items()}
 
     def new_core_model():
@@ -184,7 +184,7 @@ def main() -> None:
         model.config.use_cache = False
 
         def embed(conversations: list[list[dict[str, Any]]]) -> torch.Tensor:
-            inputs = prepare(conversations)
+            inputs = prepare(conversations, config["model"]["base_max_length"])
             with torch.inference_mode():
                 outputs = model(**inputs, use_cache=False)
             return pool_last(outputs.last_hidden_state, inputs["attention_mask"])
@@ -268,7 +268,7 @@ def main() -> None:
     ], weight_decay=train_cfg["weight_decay"])
 
     def score_conversations(conversations: list[list[dict[str, Any]]]) -> torch.Tensor:
-        inputs = prepare(conversations)
+        inputs = prepare(conversations, config["model"]["verifier_max_length"])
         outputs = model(**inputs, use_cache=False)
         return head(pool_last(outputs.last_hidden_state, inputs["attention_mask"])).squeeze(-1)
 
