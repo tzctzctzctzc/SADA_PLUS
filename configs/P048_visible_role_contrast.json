@@ -1,0 +1,110 @@
+{
+  "id": "P048",
+  "name": "visible_role_contrast",
+  "status": "preregistered_after_P047_data_gate_failure",
+  "claim": "在视觉可稳定证伪的角色上，保持参考图、图像顺序与目标不变，仅置换指令中的参考角色绑定，以共享目标分数差学习多参考组合关系。",
+  "gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
+  "model": {
+    "id": "Qwen/Qwen3-VL-Embedding-8B",
+    "revision": "2c4565515e0f265c6511776e7193b22c0968ddc7",
+    "path": "models/Qwen3-VL-Embedding-8B",
+    "dtype": "bfloat16",
+    "attn_implementation": "sdpa",
+    "max_length": 768,
+    "min_pixels": 50176,
+    "max_pixels": 100352
+  },
+  "data": {
+    "dataset": "WeiChow/merit",
+    "dataset_revision": "fd1c52c3ce3f1d53f7781afa64f350564cece6e8",
+    "query_path": "data/MERIT/queries-train.json",
+    "query_sha256": "34d9c785433b08ca5c1936161005969bcd76da3a06c0d1d8f78259b9e83bc241",
+    "metadata_path": "runs/P041_selective_dependence/products_metadata.jsonl",
+    "metadata_manifest": "runs/P041_selective_dependence/metadata_manifest.json",
+    "total_shards": 281,
+    "counts": {
+      "train": 128,
+      "validation": 128,
+      "confirmation": 64
+    },
+    "max_bundles_per_class_per_split": {
+      "train": 64,
+      "validation": 48,
+      "confirmation": 24
+    },
+    "role_allowlist": [
+      "color", "pattern/print", "pattern", "shape", "closure type", "closure",
+      "shoe type", "toe style", "sleeve length", "sleeve type", "collar type",
+      "neckline", "waist line", "pockets", "strap type", "bag type", "chair type",
+      "table type", "arm type", "back type", "hem shape", "form factor", "boot height",
+      "heel type", "handle type", "table base", "movement type", "number of drawers",
+      "number of cameras"
+    ],
+    "active_role_allowlist": ["color", "pattern/print"],
+    "excluded_confirmation_source": "runs/P047_position_controlled_role_contrast/bundles.jsonl",
+    "selection_seed": "P048-v1",
+    "split_policy": "all source, positive, and official hard-negative products are globally disjoint inside P048; historical overlap is allowed because every arm restarts from the same frozen base model",
+    "role_swap_policy": "both official source-role relations match the target metadata; the actively falsified cross-bound role is color or pattern/print and has a different target value; Product pointers are swapped while image identity and order remain fixed",
+    "repair_rationale": "P047 held-out confirmation found 49/52 visually valid negatives for color or pattern/print but only 4/12 for other attributes; all P047 confirmation products are excluded from P048",
+    "negative_policy": "use the official MERIT hard negative"
+  },
+  "visual_confirmation": {
+    "judge_model": "models/Qwen2.5-VL-7B-Instruct",
+    "judge_revision": "cc594898137f460bfe9f0759e9844b3ce807cfb5",
+    "min_pixels": 3136,
+    "max_pixels": 451584,
+    "batch_size": 4,
+    "checks": ["identity_positive", "cross_role_negative"],
+    "identity_pass_rate_min": 0.95,
+    "cross_role_negative_pass_rate_min": 0.90
+  },
+  "training": {
+    "arms": ["ordinary_retrieval", "paraphrase_invariance", "image_role_swap", "text_role_swap"],
+    "seed": 20260919,
+    "steps": 128,
+    "learning_rate_lora": 0.0001,
+    "learning_rate_visual_merger": 0.00002,
+    "weight_decay": 0.0,
+    "temperature": 0.07,
+    "rank_margin": 0.10,
+    "role_margin": 0.08,
+    "aux_weight": 1.0,
+    "lora_rank": 32,
+    "lora_alpha": 64,
+    "lora_dropout": 0.0,
+    "gradient_checkpointing": true,
+    "train_visual_merger": true,
+    "candidate_eval_batch_size": 8,
+    "max_gpu_hours_per_arm": 2.0,
+    "save_checkpoint": false
+  },
+  "pilot_gates": {
+    "binding_accuracy_gain_over_best_control_min": 0.03,
+    "binding_margin_gain_over_best_control_min": 0.02,
+    "map_at_10_gain_over_best_control_min": 0.005,
+    "recall_at_10_noninferiority_tolerance": 0.01,
+    "paraphrase_map_at_10_noninferiority_tolerance": 0.005,
+    "bootstrap_resamples": 2000,
+    "bootstrap_seed": 20260947,
+    "bootstrap_ci": 0.95,
+    "all_required": true,
+    "interpretation": "single-seed large pilot with paired query bootstrap; passing authorizes only a frozen multi-seed confirmation, not a full experiment"
+  },
+  "implementation_audit": {
+    "required": [
+      "frozen_config_and_hashes", "within_pilot_global_product_disjointness",
+      "same_images_same_order_for_text_swap", "balanced_product_pointer_swap",
+      "metadata_verified_cross_role_mismatch", "paraphrase_role_preservation",
+      "loss_direction_unit_test", "all_language_layers_lora", "visual_merger_trainable",
+      "candidate_branch_gradient", "text_swap_branch_gradient", "physical_gpu_assertion"
+    ],
+    "classifications": ["faithful", "conservative", "minimal", "incorrect", "insufficient_evidence"]
+  },
+  "stop_rules": [
+    "static implementation audit is not faithful",
+    "visual cross-role confirmation fails",
+    "runtime gradient audit is not faithful",
+    "text-role arm does not pass every frozen pilot gate",
+    "CUDA OOM under the frozen memory configuration; do not silently shrink the method"
+  ]
+}

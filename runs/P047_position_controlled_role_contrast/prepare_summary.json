@@ -1,0 +1,59 @@
+{
+  "status": "pass",
+  "dataset_revision": "fd1c52c3ce3f1d53f7781afa64f350564cece6e8",
+  "query_sha256": "34d9c785433b08ca5c1936161005969bcd76da3a06c0d1d8f78259b9e83bc241",
+  "official_role_matches": 799,
+  "cross_role_candidates": 797,
+  "globally_disjoint_pool": 435,
+  "bundles": 352,
+  "split_counts": {
+    "confirmation": 64,
+    "validation": 128,
+    "train": 160
+  },
+  "class_counts": {
+    "train": {
+      "shoes": 64,
+      "cloth": 40,
+      "chair": 7,
+      "phone": 9,
+      "handbag": 2,
+      "pants": 32,
+      "backpack": 3,
+      "table": 2,
+      "headphone": 1
+    },
+    "validation": {
+      "cloth": 32,
+      "pants": 25,
+      "shoes": 48,
+      "chair": 8,
+      "suitcase": 1,
+      "handbag": 4,
+      "phone": 7,
+      "table": 1,
+      "headphone": 2
+    },
+    "confirmation": {
+      "chair": 6,
+      "cloth": 17,
+      "phone": 3,
+      "pants": 9,
+      "shoes": 24,
+      "table": 2,
+      "handbag": 3
+    }
+  },
+  "active_role_counts": {
+    "0": 176,
+    "1": 176
+  },
+  "verified_roles_per_bundle": {
+    "1": 306,
+    "2": 46
+  },
+  "unique_products": 1408,
+  "historical_overlap_products": 650,
+  "within_pilot_product_overlap": 0,
+  "bundles_sha256": "0128c64843a8365a35b9d20f54b993769d75c463999659fb38d61cb9e38f26d2"
+}

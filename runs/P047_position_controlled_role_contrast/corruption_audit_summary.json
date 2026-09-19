@@ -1,0 +1,36 @@
+{
+  "status": "fail",
+  "gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
+  "judge_model": "models/Qwen2.5-VL-7B-Instruct",
+  "bundles": 64,
+  "checks": 128,
+  "role_counts": {
+    "color": 49,
+    "pattern/print": 3,
+    "table base": 2,
+    "pattern": 2,
+    "pockets": 1,
+    "chair type": 1,
+    "closure type": 3,
+    "collar type": 1,
+    "strap type": 1,
+    "shoe type": 1
+  },
+  "per_check": {
+    "identity_positive": {
+      "passed": 63,
+      "total": 64,
+      "pass_rate": 0.984375
+    },
+    "cross_role_negative": {
+      "passed": 53,
+      "total": 64,
+      "pass_rate": 0.828125
+    }
+  },
+  "gates": {
+    "identity_calibration": true,
+    "cross_role_negative": false
+  },
+  "max_gpu_allocated_bytes": 18213019136
+}

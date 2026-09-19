@@ -1,0 +1,141 @@
+{
+  "status": "fail_stop_no_full",
+  "audit_status": {
+    "static": "faithful",
+    "runtime": "faithful",
+    "corruption_data": "pass"
+  },
+  "arms": {
+    "ordinary_retrieval": {
+      "rows": 128,
+      "binding_pair_accuracy": 0.8671875,
+      "mean_binding_margin": 0.2434479826479219,
+      "image_swap_pair_accuracy": 0.8359375,
+      "mean_image_swap_margin": 0.24668824614491314,
+      "mean_paraphrase_cosine": 0.9350744434632361,
+      "map_at_10": 0.21241629464285713,
+      "mrr": 0.23027636271282761,
+      "recall_at_1": 0.09375,
+      "recall_at_5": 0.3828125,
+      "recall_at_10": 0.5390625,
+      "hard_negative_violation_rate": 0.078125,
+      "paraphrase_map_at_10": 0.2021639384920635,
+      "paraphrase_mrr": 0.2203631143410021,
+      "paraphrase_recall_at_1": 0.1015625,
+      "paraphrase_recall_at_5": 0.3359375,
+      "paraphrase_recall_at_10": 0.484375,
+      "paraphrase_top1_agreement": 0.6484375
+    },
+    "paraphrase_invariance": {
+      "rows": 128,
+      "binding_pair_accuracy": 0.8203125,
+      "mean_binding_margin": 0.12398454314097762,
+      "image_swap_pair_accuracy": 0.828125,
+      "mean_image_swap_margin": 0.12883203895762563,
+      "mean_paraphrase_cosine": 0.9971875729970634,
+      "map_at_10": 0.29013206845238093,
+      "mrr": 0.30601488653442527,
+      "recall_at_1": 0.1796875,
+      "recall_at_5": 0.4375,
+      "recall_at_10": 0.609375,
+      "hard_negative_violation_rate": 0.078125,
+      "paraphrase_map_at_10": 0.2773406498015873,
+      "paraphrase_mrr": 0.2920670797751918,
+      "paraphrase_recall_at_1": 0.15625,
+      "paraphrase_recall_at_5": 0.4296875,
+      "paraphrase_recall_at_10": 0.625,
+      "paraphrase_top1_agreement": 0.8828125
+    },
+    "image_role_swap": {
+      "rows": 128,
+      "binding_pair_accuracy": 0.9140625,
+      "mean_binding_margin": 0.3013459638459608,
+      "image_swap_pair_accuracy": 0.921875,
+      "mean_image_swap_margin": 0.30420846736524254,
+      "mean_paraphrase_cosine": 0.9089641636237502,
+      "map_at_10": 0.5125527033730158,
+      "mrr": 0.5226338593545363,
+      "recall_at_1": 0.3828125,
+      "recall_at_5": 0.6640625,
+      "recall_at_10": 0.8046875,
+      "hard_negative_violation_rate": 0.0703125,
+      "paraphrase_map_at_10": 0.5304935515873016,
+      "paraphrase_mrr": 0.5400168865123396,
+      "paraphrase_recall_at_1": 0.40625,
+      "paraphrase_recall_at_5": 0.6953125,
+      "paraphrase_recall_at_10": 0.8125,
+      "paraphrase_top1_agreement": 0.734375
+    },
+    "text_role_swap": {
+      "rows": 128,
+      "binding_pair_accuracy": 0.953125,
+      "mean_binding_margin": 0.37096913787536323,
+      "image_swap_pair_accuracy": 0.953125,
+      "mean_image_swap_margin": 0.34297424159012735,
+      "mean_paraphrase_cosine": 0.9147340655326843,
+      "map_at_10": 0.6151661706349206,
+      "mrr": 0.6204999804056632,
+      "recall_at_1": 0.4765625,
+      "recall_at_5": 0.75,
+      "recall_at_10": 0.890625,
+      "hard_negative_violation_rate": 0.0546875,
+      "paraphrase_map_at_10": 0.5364676339285714,
+      "paraphrase_mrr": 0.5450279909717575,
+      "paraphrase_recall_at_1": 0.40625,
+      "paraphrase_recall_at_5": 0.75,
+      "paraphrase_recall_at_10": 0.828125,
+      "paraphrase_top1_agreement": 0.6953125
+    }
+  },
+  "paired_bootstrap_comparisons": {
+    "binding_accuracy": {
+      "difference": 0.0390625,
+      "ci_lower": 0.0,
+      "ci_upper": 0.0859375,
+      "strongest_control": "image_role_swap",
+      "method_value": 0.953125,
+      "control_value": 0.9140625
+    },
+    "binding_margin": {
+      "difference": 0.06962317402940243,
+      "ci_lower": 0.04732127597380895,
+      "ci_upper": 0.09471074117755048,
+      "strongest_control": "image_role_swap",
+      "method_value": 0.37096913787536323,
+      "control_value": 0.3013459638459608
+    },
+    "map_at_10": {
+      "difference": 0.10261346726190476,
+      "ci_lower": 0.04524080791170636,
+      "ci_upper": 0.1641939484126984,
+      "strongest_control": "image_role_swap",
+      "method_value": 0.6151661706349206,
+      "control_value": 0.5125527033730158
+    },
+    "recall_at_10": {
+      "difference": 0.0859375,
+      "ci_lower": 0.03125,
+      "ci_upper": 0.1484375,
+      "strongest_control": "image_role_swap",
+      "method_value": 0.890625,
+      "control_value": 0.8046875
+    },
+    "paraphrase_map_at_10": {
+      "difference": 0.00597408234126984,
+      "ci_lower": -0.05261796254960315,
+      "ci_upper": 0.06917542472718254,
+      "strongest_control": "image_role_swap",
+      "method_value": 0.5364676339285714,
+      "control_value": 0.5304935515873016
+    }
+  },
+  "gates": {
+    "binding_accuracy_gain": false,
+    "binding_margin_gain": true,
+    "map_at_10_gain": true,
+    "recall_at_10_noninferiority": true,
+    "paraphrase_map_at_10_noninferiority": false
+  },
+  "all_gates_pass": false,
+  "decision": "Do not scale. Use the per-query rows to identify whether the failure comes from role sensitivity, gallery ranking, or paraphrase robustness."
+}

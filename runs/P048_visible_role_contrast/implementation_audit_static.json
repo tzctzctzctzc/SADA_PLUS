@@ -1,0 +1,40 @@
+{
+  "status": "pass",
+  "classification": "faithful",
+  "scope": "static code, frozen data, loss semantics, and method completeness; visual validity and runtime gradient coverage are separate required gates",
+  "checks": {
+    "frozen_config_and_hashes": true,
+    "split_counts": true,
+    "within_pilot_global_product_disjointness": true,
+    "independent_from_P047_confirmation": true,
+    "high_confidence_active_roles_only": true,
+    "balanced_role_positions": true,
+    "same_images_same_order_for_text_swap": true,
+    "balanced_product_pointer_swap": true,
+    "metadata_verified_cross_role_mismatch": true,
+    "paraphrase_role_preservation": true,
+    "no_attribute_value_leak": true,
+    "loss_direction_unit_test": true,
+    "full_method_not_head_only": true,
+    "matched_arms_and_budget": true
+  },
+  "details": {
+    "loss_good": 4.157015064265579e-05,
+    "loss_bad": 0.6800042390823364,
+    "positive_score_gradient": -0.04137364774942398
+  },
+  "split_counts": {
+    "confirmation": 64,
+    "validation": 128,
+    "train": 128
+  },
+  "files": {
+    "scripts/prepare_P048.py": "2e5906a92f8acd6efc38bac2ecfe637e3b997f80dc17b9e1242eed985f963dc7",
+    "scripts/extract_P048_images.py": "99a2f09c5af1ad6852998816ff3935b24f48e438634f7f53c41161f0d9b113f0",
+    "scripts/audit_P048_corruptions.py": "ea097949ee9a9ce363117caf4d39539c11b332cec732e74f650ff2cf1e409b92",
+    "scripts/audit_P048_implementation.py": "86a8fb1c15d4940ca6c9a82c604cbd4e0d3729d930d82ca9b75fb5a5d7735bb2",
+    "scripts/analyze_P048.py": "2099b4dc4481e0569aaf54d253681ec10f0b8a1e75aa8e036a77b93c39cfc25b",
+    "src/run_P048.py": "1c0bec3cb31cbd43ccd69eabeb7bfd80fdc113069217fa87b24c822f6169c103",
+    "configs/P048_visible_role_contrast.json": "6558eb9a5b42d0691b73e35eb2f0e38f99b0f628d39afbf279c9d871eea2d6d8"
+  }
+}

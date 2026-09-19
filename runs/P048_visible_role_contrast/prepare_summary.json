@@ -1,0 +1,61 @@
+{
+  "status": "pass",
+  "dataset_revision": "fd1c52c3ce3f1d53f7781afa64f350564cece6e8",
+  "query_sha256": "34d9c785433b08ca5c1936161005969bcd76da3a06c0d1d8f78259b9e83bc241",
+  "official_role_matches": 642,
+  "cross_role_candidates": 550,
+  "globally_disjoint_pool": 338,
+  "bundles": 320,
+  "split_counts": {
+    "confirmation": 64,
+    "validation": 128,
+    "train": 128
+  },
+  "class_counts": {
+    "train": {
+      "shoes": 55,
+      "cloth": 26,
+      "chair": 7,
+      "phone": 9,
+      "pants": 22,
+      "handbag": 4,
+      "table": 3,
+      "backpack": 1,
+      "headphone": 1
+    },
+    "validation": {
+      "shoes": 45,
+      "pants": 29,
+      "cloth": 31,
+      "phone": 12,
+      "backpack": 2,
+      "chair": 5,
+      "headphone": 1,
+      "handbag": 2,
+      "table": 1
+    },
+    "confirmation": {
+      "cloth": 20,
+      "shoes": 24,
+      "pants": 14,
+      "handbag": 2,
+      "suitcase": 1,
+      "headphone": 1,
+      "phone": 2
+    }
+  },
+  "active_role_counts": {
+    "0": 160,
+    "1": 160
+  },
+  "verified_roles_per_bundle": {
+    "1": 319,
+    "2": 1
+  },
+  "unique_products": 1280,
+  "excluded_P047_confirmation_products": 256,
+  "overlap_with_P047_confirmation": 0,
+  "historical_overlap_products": 1055,
+  "within_pilot_product_overlap": 0,
+  "bundles_sha256": "bd03e42ca13f8d3d5be521c6a475f5101b0111f33b0baabd930691fe3792aa7e"
+}

@@ -1,0 +1,27 @@
+{
+  "status": "pass",
+  "gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
+  "judge_model": "models/Qwen2.5-VL-7B-Instruct",
+  "bundles": 64,
+  "checks": 128,
+  "role_counts": {
+    "color": 64
+  },
+  "per_check": {
+    "identity_positive": {
+      "passed": 64,
+      "total": 64,
+      "pass_rate": 1.0
+    },
+    "cross_role_negative": {
+      "passed": 60,
+      "total": 64,
+      "pass_rate": 0.9375
+    }
+  },
+  "gates": {
+    "identity_calibration": true,
+    "cross_role_negative": true
+  },
+  "max_gpu_allocated_bytes": 18210704896
+}

@@ -1,0 +1,32 @@
+{
+  "status": "pass",
+  "classification": "faithful",
+  "checks": {
+    "physical_gpu_assertion": true,
+    "all_language_layers_lora": true,
+    "visual_merger_trainable": true,
+    "candidate_branch_gradient": true,
+    "text_swap_branch_gradient": true,
+    "finite_loss": true,
+    "positive_and_negative_are_distinct": true
+  },
+  "gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
+  "model_revision": "2c4565515e0f265c6511776e7193b22c0968ddc7",
+  "official_source_sha256": "8ffa74a1a6bb759610c57865ea416fd4daf9936cb787520e1112a3e1d547f36a",
+  "parameter_summary": {
+    "total": 8232087792,
+    "trainable": 127412992,
+    "lora": 87293952,
+    "visual_merger": 40119040
+  },
+  "language_layers": 36,
+  "language_layers_with_nonzero_lora_grad": 36,
+  "loss": 0.18989905714988708,
+  "rank_loss": 0.1096649169921875,
+  "role_loss": 0.08023414015769958,
+  "positive_score": 0.5851739645004272,
+  "negative_score": 0.5784494280815125,
+  "candidate_embedding_grad_norm": 1.1662410497665405,
+  "text_swap_embedding_grad_norm": 0.682158350944519,
+  "max_gpu_allocated_bytes": 17841828352
+}

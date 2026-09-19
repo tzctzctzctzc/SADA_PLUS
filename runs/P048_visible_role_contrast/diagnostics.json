@@ -1,0 +1,133 @@
+{
+  "status": "complete",
+  "pilot_decision": "fail_stop_no_full",
+  "validation_rows": 128,
+  "active_role_counts": {
+    "color": 126,
+    "pattern/print": 2
+  },
+  "text_vs_image_control": {
+    "binding_flips_gained": 6,
+    "binding_flips_lost": 1,
+    "rank_improved": 56,
+    "rank_equal": 48,
+    "rank_worsened": 24,
+    "binding_margin_gain_to_reciprocal_rank_gain_correlation": 0.1675486527235767
+  },
+  "text_vs_frozen": {
+    "rank_improved": 19,
+    "rank_equal": 54,
+    "rank_worsened": 55
+  },
+  "geometry_deltas_from_frozen": {
+    "ordinary_retrieval": {
+      "map_at_10_delta_from_frozen": -0.5859654017857142,
+      "recall_at_10_delta_from_frozen": -0.421875,
+      "hard_negative_violation_delta_from_frozen": -0.0546875
+    },
+    "paraphrase_invariance": {
+      "map_at_10_delta_from_frozen": -0.5082496279761904,
+      "recall_at_10_delta_from_frozen": -0.3515625,
+      "hard_negative_violation_delta_from_frozen": -0.0546875
+    },
+    "image_role_swap": {
+      "map_at_10_delta_from_frozen": -0.28582899305555554,
+      "recall_at_10_delta_from_frozen": -0.15625,
+      "hard_negative_violation_delta_from_frozen": -0.0625
+    },
+    "text_role_swap": {
+      "map_at_10_delta_from_frozen": -0.18321552579365075,
+      "recall_at_10_delta_from_frozen": -0.0703125,
+      "hard_negative_violation_delta_from_frozen": -0.078125
+    }
+  },
+  "by_class": {
+    "backpack": {
+      "rows": 2,
+      "text_binding_accuracy": 1.0,
+      "image_binding_accuracy": 1.0,
+      "text_map_at_10": 1.0,
+      "image_map_at_10": 1.0,
+      "text_paraphrase_map_at_10": 1.0,
+      "image_paraphrase_map_at_10": 1.0
+    },
+    "chair": {
+      "rows": 5,
+      "text_binding_accuracy": 1.0,
+      "image_binding_accuracy": 1.0,
+      "text_map_at_10": 0.8,
+      "image_map_at_10": 0.65,
+      "text_paraphrase_map_at_10": 0.8,
+      "image_paraphrase_map_at_10": 0.5507936507936508
+    },
+    "cloth": {
+      "rows": 31,
+      "text_binding_accuracy": 0.9354838709677419,
+      "image_binding_accuracy": 0.8709677419354839,
+      "text_map_at_10": 0.5826548899129544,
+      "image_map_at_10": 0.5121351766513057,
+      "text_paraphrase_map_at_10": 0.5013440860215054,
+      "image_paraphrase_map_at_10": 0.5536226318484383
+    },
+    "handbag": {
+      "rows": 2,
+      "text_binding_accuracy": 1.0,
+      "image_binding_accuracy": 1.0,
+      "text_map_at_10": 0.5,
+      "image_map_at_10": 0.5,
+      "text_paraphrase_map_at_10": 0.5,
+      "image_paraphrase_map_at_10": 0.5
+    },
+    "headphone": {
+      "rows": 1,
+      "text_binding_accuracy": 1.0,
+      "image_binding_accuracy": 1.0,
+      "text_map_at_10": 1.0,
+      "image_map_at_10": 1.0,
+      "text_paraphrase_map_at_10": 1.0,
+      "image_paraphrase_map_at_10": 1.0
+    },
+    "pants": {
+      "rows": 29,
+      "text_binding_accuracy": 0.9310344827586207,
+      "image_binding_accuracy": 0.896551724137931,
+      "text_map_at_10": 0.5336206896551724,
+      "image_map_at_10": 0.435632183908046,
+      "text_paraphrase_map_at_10": 0.47040229885057466,
+      "image_paraphrase_map_at_10": 0.4827586206896552
+    },
+    "phone": {
+      "rows": 12,
+      "text_binding_accuracy": 1.0,
+      "image_binding_accuracy": 1.0,
+      "text_map_at_10": 0.6527777777777778,
+      "image_map_at_10": 0.6347222222222222,
+      "text_paraphrase_map_at_10": 0.7569444444444445,
+      "image_paraphrase_map_at_10": 0.6416666666666667
+    },
+    "shoes": {
+      "rows": 45,
+      "text_binding_accuracy": 0.9555555555555556,
+      "image_binding_accuracy": 0.9111111111111111,
+      "text_map_at_10": 0.6304585537918871,
+      "image_map_at_10": 0.4717901234567901,
+      "text_paraphrase_map_at_10": 0.47558201058201055,
+      "image_paraphrase_map_at_10": 0.47304232804232804
+    },
+    "table": {
+      "rows": 1,
+      "text_binding_accuracy": 1.0,
+      "image_binding_accuracy": 1.0,
+      "text_map_at_10": 1.0,
+      "image_map_at_10": 1.0,
+      "text_paraphrase_map_at_10": 1.0,
+      "image_paraphrase_map_at_10": 1.0
+    }
+  },
+  "mechanistic_readout": {
+    "role_signal_supported": true,
+    "current_training_objective_preserves_frozen_geometry": false,
+    "failure_localization": "The text-controlled role signal is stronger than image swapping, but one-positive/one-hard-negative fine-tuning over-specializes the embedding geometry.",
+    "next_falsifier": "Compare role-only training, in-batch multi-negative training, and frozen-reference geometry anchoring before any full experiment."
+  }
+}

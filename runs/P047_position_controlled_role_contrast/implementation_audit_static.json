@@ -1,0 +1,38 @@
+{
+  "status": "pass",
+  "classification": "faithful",
+  "scope": "static code, frozen data, loss semantics, and method completeness; visual validity and runtime gradient coverage are separate required gates",
+  "checks": {
+    "frozen_config_and_hashes": true,
+    "split_counts": true,
+    "within_pilot_global_product_disjointness": true,
+    "balanced_role_positions": true,
+    "same_images_same_order_for_text_swap": true,
+    "balanced_product_pointer_swap": true,
+    "metadata_verified_cross_role_mismatch": true,
+    "paraphrase_role_preservation": true,
+    "no_attribute_value_leak": true,
+    "loss_direction_unit_test": true,
+    "full_method_not_head_only": true,
+    "matched_arms_and_budget": true
+  },
+  "details": {
+    "loss_good": 4.157015064265579e-05,
+    "loss_bad": 0.6800042390823364,
+    "positive_score_gradient": -0.04137364774942398
+  },
+  "split_counts": {
+    "confirmation": 64,
+    "validation": 128,
+    "train": 160
+  },
+  "files": {
+    "scripts/prepare_P047.py": "fb757df378d61e65beb64e953f210e65ad262fdaae99a90a633979f520bfa083",
+    "scripts/extract_P047_images.py": "3e2ddb5e833ac2c00dfaed127d83ed0e06ea94c063c905872092c140d19200d1",
+    "scripts/audit_P047_corruptions.py": "470b1d91dd24936b8199a2cf87fa9b4a6aa28ecafed5e33f074ed6e6859eee54",
+    "scripts/audit_P047_implementation.py": "46a4294316a4d51d996928ac35c21094e9c98305a726816756059ae90f4f6f2f",
+    "scripts/analyze_P047.py": "e541965e0051b83ae32e950841f2a1ca8b3e2ecf2508a0224ad1ecf27193800b",
+    "src/run_P047.py": "d9f119d462d388cc0542198df3c4b881ec5d6e8fc6fc7cb16724a0d6415a5bb9",
+    "configs/P047_position_controlled_role_contrast.json": "51a8ec48024a26092f6eb82d9419b8fa22b1ccfee74445fde1d62135d976e05b"
+  }
+}

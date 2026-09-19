@@ -1,0 +1,1211 @@
+{
+  "status": "complete",
+  "arm": "text_role_swap",
+  "gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
+  "seed": 20260919,
+  "steps": 128,
+  "model_revision": "2c4565515e0f265c6511776e7193b22c0968ddc7",
+  "official_source_sha256": "8ffa74a1a6bb759610c57865ea416fd4daf9936cb787520e1112a3e1d547f36a",
+  "parameter_summary": {
+    "total": 8232087792,
+    "trainable": 127412992,
+    "lora": 87293952,
+    "visual_merger": 40119040
+  },
+  "before": {
+    "rows": 128,
+    "binding_pair_accuracy": 0.7890625,
+    "mean_binding_margin": 0.05538670998066664,
+    "image_swap_pair_accuracy": 0.734375,
+    "mean_image_swap_margin": 0.044639473548159,
+    "mean_paraphrase_cosine": 0.9355226014740765,
+    "map_at_10": 0.7983816964285714,
+    "mrr": 0.8002492097023347,
+    "recall_at_1": 0.6953125,
+    "recall_at_5": 0.9296875,
+    "recall_at_10": 0.9609375,
+    "hard_negative_violation_rate": 0.1328125,
+    "paraphrase_map_at_10": 0.7319227430555556,
+    "paraphrase_mrr": 0.7357638547590387,
+    "paraphrase_recall_at_1": 0.6328125,
+    "paraphrase_recall_at_5": 0.8671875,
+    "paraphrase_recall_at_10": 0.9296875,
+    "paraphrase_top1_agreement": 0.8203125
+  },
+  "after": {
+    "rows": 128,
+    "binding_pair_accuracy": 0.953125,
+    "mean_binding_margin": 0.37096913787536323,
+    "image_swap_pair_accuracy": 0.953125,
+    "mean_image_swap_margin": 0.34297424159012735,
+    "mean_paraphrase_cosine": 0.9147340655326843,
+    "map_at_10": 0.6151661706349206,
+    "mrr": 0.6204999804056632,
+    "recall_at_1": 0.4765625,
+    "recall_at_5": 0.75,
+    "recall_at_10": 0.890625,
+    "hard_negative_violation_rate": 0.0546875,
+    "paraphrase_map_at_10": 0.5364676339285714,
+    "paraphrase_mrr": 0.5450279909717575,
+    "paraphrase_recall_at_1": 0.40625,
+    "paraphrase_recall_at_5": 0.75,
+    "paraphrase_recall_at_10": 0.828125,
+    "paraphrase_top1_agreement": 0.6953125
+  },
+  "history": [
+    {
+      "step": 1,
+      "bundle_id": "merit-124441-role-swap",
+      "loss": 0.18989905714988708,
+      "rank_loss": 0.1096649169921875,
+      "auxiliary_loss": 0.08023414015769958,
+      "positive_score": 0.5851739645004272,
+      "negative_score": 0.5784494280815125
+    },
+    {
+      "step": 2,
+      "bundle_id": "merit-24876-role-swap",
+      "loss": 0.05871713161468506,
+      "rank_loss": 0.0487954318523407,
+      "auxiliary_loss": 0.009921698831021786,
+      "positive_score": 0.5955142974853516,
+      "negative_score": 0.4960634708404541
+    },
+    {
+      "step": 3,
+      "bundle_id": "merit-270715-role-swap",
+      "loss": 0.12550896406173706,
+      "rank_loss": 0.022472592070698738,
+      "auxiliary_loss": 0.10303637385368347,
+      "positive_score": 0.5619140267372131,
+      "negative_score": 0.3939167559146881
+    },
+    {
+      "step": 4,
+      "bundle_id": "merit-184683-role-swap",
+      "loss": 0.020572083070874214,
+      "rank_loss": 0.008373516611754894,
+      "auxiliary_loss": 0.01219856645911932,
+      "positive_score": 0.5020043849945068,
+      "negative_score": 0.25759339332580566
+    },
+    {
+      "step": 5,
+      "bundle_id": "merit-44543-role-swap",
+      "loss": 0.027970677241683006,
+      "rank_loss": 0.02371424064040184,
+      "auxiliary_loss": 0.004256436601281166,
+      "positive_score": 0.5855751633644104,
+      "negative_score": 0.4219973385334015
+    },
+    {
+      "step": 6,
+      "bundle_id": "merit-247031-role-swap",
+      "loss": 0.0425032414495945,
+      "rank_loss": 0.0021669804118573666,
+      "auxiliary_loss": 0.04033626243472099,
+      "positive_score": 0.5370761156082153,
+      "negative_score": 0.19490116834640503
+    },
+    {
+      "step": 7,
+      "bundle_id": "merit-107384-role-swap",
+      "loss": 0.0011014582123607397,
+      "rank_loss": 0.0005400551599450409,
+      "auxiliary_loss": 0.0005614029942080379,
+      "positive_score": 0.5479475855827332,
+      "negative_score": 0.1076972484588623
+    },
+    {
+      "step": 8,
+      "bundle_id": "merit-22768-role-swap",
+      "loss": 0.2500137686729431,
+      "rank_loss": 0.22001485526561737,
+      "auxiliary_loss": 0.029998915269970894,
+      "positive_score": 0.28526633977890015,
+      "negative_score": 0.4021935760974884
+    },
+    {
+      "step": 9,
+      "bundle_id": "merit-167465-role-swap",
+      "loss": 0.12795309722423553,
+      "rank_loss": 0.12792155146598816,
+      "auxiliary_loss": 3.153843499603681e-05,
+      "positive_score": 0.747370183467865,
+      "negative_score": 0.7630183696746826
+    },
+    {
+      "step": 10,
+      "bundle_id": "merit-102411-role-swap",
+      "loss": 0.018854452297091484,
+      "rank_loss": 0.002627304056659341,
+      "auxiliary_loss": 0.016227148473262787,
+      "positive_score": 0.3151577413082123,
+      "negative_score": -0.013302076607942581
+    },
+    {
+      "step": 11,
+      "bundle_id": "merit-49863-role-swap",
+      "loss": 0.008228350430727005,
+      "rank_loss": 0.004803915042430162,
+      "auxiliary_loss": 0.003424435155466199,
+      "positive_score": 0.6841896772384644,
+      "negative_score": 0.3990708887577057
+    },
+    {
+      "step": 12,
+      "bundle_id": "merit-264277-role-swap",
+      "loss": 0.00011705086217261851,
+      "rank_loss": 4.95961430715397e-05,
+      "auxiliary_loss": 6.745471910107881e-05,
+      "positive_score": 0.6997691988945007,
+      "negative_score": 0.09213033318519592
+    },
+    {
+      "step": 13,
+      "bundle_id": "merit-212029-role-swap",
+      "loss": 0.06654942035675049,
+      "rank_loss": 2.736820761128911e-06,
+      "auxiliary_loss": 0.06654668599367142,
+      "positive_score": 0.8138903379440308,
+      "negative_score": 0.003429972566664219
+    },
+    {
+      "step": 14,
+      "bundle_id": "merit-239272-role-swap",
+      "loss": 0.013455554842948914,
+      "rank_loss": 0.00038105883868411183,
+      "auxiliary_loss": 0.013074495829641819,
+      "positive_score": 0.6894705295562744,
+      "negative_score": 0.22473038733005524
+    },
+    {
+      "step": 15,
+      "bundle_id": "merit-251386-role-swap",
+      "loss": 0.0001167076698038727,
+      "rank_loss": 8.160414290614426e-05,
+      "auxiliary_loss": 3.5103523259749636e-05,
+      "positive_score": 0.6142039895057678,
+      "negative_score": 0.041438885033130646
+    },
+    {
+      "step": 16,
+      "bundle_id": "merit-258474-role-swap",
+      "loss": 0.0033104359172284603,
+      "rank_loss": 0.00010392849071649835,
+      "auxiliary_loss": 0.003206507535651326,
+      "positive_score": 0.6742173433303833,
+      "negative_score": 0.11839095503091812
+    },
+    {
+      "step": 17,
+      "bundle_id": "merit-145435-role-swap",
+      "loss": 0.02410750649869442,
+      "rank_loss": 0.02282579615712166,
+      "auxiliary_loss": 0.0012817097594961524,
+      "positive_score": 0.4031234681606293,
+      "negative_score": 0.2364039421081543
+    },
+    {
+      "step": 18,
+      "bundle_id": "merit-32831-role-swap",
+      "loss": 1.6501608115504496e-05,
+      "rank_loss": 8.728821399017761e-07,
+      "auxiliary_loss": 1.562872603244614e-05,
+      "positive_score": 0.7698260545730591,
+      "negative_score": -0.12062795460224152
+    },
+    {
+      "step": 19,
+      "bundle_id": "merit-15629-role-swap",
+      "loss": 1.3394712368608452e-05,
+      "rank_loss": 3.378333985892823e-06,
+      "auxiliary_loss": 1.001637883746298e-05,
+      "positive_score": 0.8241809606552124,
+      "negative_score": 0.028461899608373642
+    },
+    {
+      "step": 20,
+      "bundle_id": "merit-218120-role-swap",
+      "loss": 0.16376468539237976,
+      "rank_loss": 0.08147028833627701,
+      "auxiliary_loss": 0.08229440450668335,
+      "positive_score": 0.6311595439910889,
+      "negative_score": 0.5864238739013672
+    },
+    {
+      "step": 21,
+      "bundle_id": "merit-26070-role-swap",
+      "loss": 0.027020229026675224,
+      "rank_loss": 0.026203041896224022,
+      "auxiliary_loss": 0.0008171880035661161,
+      "positive_score": 0.4986288249492645,
+      "negative_score": 0.3433551788330078
+    },
+    {
+      "step": 22,
+      "bundle_id": "merit-221242-role-swap",
+      "loss": 0.11582407355308533,
+      "rank_loss": 0.10401570796966553,
+      "auxiliary_loss": 0.0118083655834198,
+      "positive_score": 0.3078818917274475,
+      "negative_score": 0.293938547372818
+    },
+    {
+      "step": 23,
+      "bundle_id": "merit-287685-role-swap",
+      "loss": 0.002648542635142803,
+      "rank_loss": 0.00011382041702745482,
+      "auxiliary_loss": 0.0025347222108393908,
+      "positive_score": 0.5578272342681885,
+      "negative_score": 0.008370165713131428
+    },
+    {
+      "step": 24,
+      "bundle_id": "merit-187589-role-swap",
+      "loss": 0.03270392864942551,
+      "rank_loss": 0.00922449678182602,
+      "auxiliary_loss": 0.023479431867599487,
+      "positive_score": 0.2940605878829956,
+      "negative_score": 0.05685918405652046
+    },
+    {
+      "step": 25,
+      "bundle_id": "merit-270891-role-swap",
+      "loss": 0.0010649217292666435,
+      "rank_loss": 2.1745620415458689e-07,
+      "auxiliary_loss": 0.0010647042654454708,
+      "positive_score": 0.8605697154998779,
+      "negative_score": -0.12717083096504211
+    },
+    {
+      "step": 26,
+      "bundle_id": "merit-36979-role-swap",
+      "loss": 0.00029483268735930324,
+      "rank_loss": 0.00015416854876093566,
+      "auxiliary_loss": 0.0001406641531502828,
+      "positive_score": 0.6363441348075867,
+      "negative_score": 0.10814696550369263
+    },
+    {
+      "step": 27,
+      "bundle_id": "merit-52290-role-swap",
+      "loss": 0.05969769507646561,
+      "rank_loss": 0.042230941355228424,
+      "auxiliary_loss": 0.017466751858592033,
+      "positive_score": 0.3127049207687378,
+      "negative_score": 0.1995048224925995
+    },
+    {
+      "step": 28,
+      "bundle_id": "merit-21057-role-swap",
+      "loss": 0.00012644194066524506,
+      "rank_loss": 4.287840783945285e-05,
+      "auxiliary_loss": 8.356353646377102e-05,
+      "positive_score": 0.7787473201751709,
+      "negative_score": 0.1609169840812683
+    },
+    {
+      "step": 29,
+      "bundle_id": "merit-198106-role-swap",
+      "loss": 0.03981360048055649,
+      "rank_loss": 0.0027153620030730963,
+      "auxiliary_loss": 0.0370982401072979,
+      "positive_score": 0.42914897203445435,
+      "negative_score": 0.1030411496758461
+    },
+    {
+      "step": 30,
+      "bundle_id": "merit-65715-role-swap",
+      "loss": 0.026097988709807396,
+      "rank_loss": 0.02598373219370842,
+      "auxiliary_loss": 0.00011425638513173908,
+      "positive_score": 0.47232285141944885,
+      "negative_score": 0.31634441018104553
+    },
+    {
+      "step": 31,
+      "bundle_id": "merit-90681-role-swap",
+      "loss": 0.0001496112090535462,
+      "rank_loss": 2.1706830466428073e-06,
+      "auxiliary_loss": 0.00014744052896276116,
+      "positive_score": 0.8263602256774902,
+      "negative_score": -0.00032336125150322914
+    },
+    {
+      "step": 32,
+      "bundle_id": "merit-128553-role-swap",
+      "loss": 0.5276133418083191,
+      "rank_loss": 0.07977254688739777,
+      "auxiliary_loss": 0.44784078001976013,
+      "positive_score": 0.28643903136253357,
+      "negative_score": 0.23922091722488403
+    },
+    {
+      "step": 33,
+      "bundle_id": "merit-240202-role-swap",
+      "loss": 0.2025069147348404,
+      "rank_loss": 0.1614922136068344,
+      "auxiliary_loss": 0.04101470485329628,
+      "positive_score": 0.8309962153434753,
+      "negative_score": 0.8851476907730103
+    },
+    {
+      "step": 34,
+      "bundle_id": "merit-23969-role-swap",
+      "loss": 0.0002668630622792989,
+      "rank_loss": 5.6724096793914214e-05,
+      "auxiliary_loss": 0.00021013895457144827,
+      "positive_score": 0.6291463375091553,
+      "negative_score": 0.030911076813936234
+    },
+    {
+      "step": 35,
+      "bundle_id": "merit-259992-role-swap",
+      "loss": 0.020903602242469788,
+      "rank_loss": 0.0001364754280075431,
+      "auxiliary_loss": 0.020767126232385635,
+      "positive_score": 0.424776554107666,
+      "negative_score": -0.11196263134479523
+    },
+    {
+      "step": 36,
+      "bundle_id": "merit-210118-role-swap",
+      "loss": 0.00022219042875804007,
+      "rank_loss": 0.00011087994062108919,
+      "auxiliary_loss": 0.00011131048086099327,
+      "positive_score": 0.6925897598266602,
+      "negative_score": 0.14129899442195892
+    },
+    {
+      "step": 37,
+      "bundle_id": "merit-124933-role-swap",
+      "loss": 1.4303984244179446e-05,
+      "rank_loss": 2.4732564725127304e-06,
+      "auxiliary_loss": 1.1830727999040391e-05,
+      "positive_score": 0.8870090842247009,
+      "negative_score": 0.06946026533842087
+    },
+    {
+      "step": 38,
+      "bundle_id": "merit-163017-role-swap",
+      "loss": 6.1744567574351095e-06,
+      "rank_loss": 2.237803983007325e-06,
+      "auxiliary_loss": 3.936652774427785e-06,
+      "positive_score": 0.8805404305458069,
+      "negative_score": 0.05598869174718857
+    },
+    {
+      "step": 39,
+      "bundle_id": "merit-171224-role-swap",
+      "loss": 0.0575559139251709,
+      "rank_loss": 0.057510193437337875,
+      "auxiliary_loss": 4.5720644266111776e-05,
+      "positive_score": 0.756320595741272,
+      "negative_score": 0.6732761263847351
+    },
+    {
+      "step": 40,
+      "bundle_id": "merit-236654-role-swap",
+      "loss": 0.06612774729728699,
+      "rank_loss": 0.061230115592479706,
+      "auxiliary_loss": 0.004897634964436293,
+      "positive_score": 0.44676515460014343,
+      "negative_score": 0.3702278435230255
+    },
+    {
+      "step": 41,
+      "bundle_id": "merit-239497-role-swap",
+      "loss": 0.3395048677921295,
+      "rank_loss": 0.3340390920639038,
+      "auxiliary_loss": 0.0054657650180161,
+      "positive_score": 0.3099011480808258,
+      "negative_score": 0.5433452725410461
+    },
+    {
+      "step": 42,
+      "bundle_id": "merit-242576-role-swap",
+      "loss": 1.5535955753875896e-05,
+      "rank_loss": 8.095408702502027e-06,
+      "auxiliary_loss": 7.440547960868571e-06,
+      "positive_score": 0.8454748392105103,
+      "negative_score": 0.11093208938837051
+    },
+    {
+      "step": 43,
+      "bundle_id": "merit-269018-role-swap",
+      "loss": 1.4060402463655919e-05,
+      "rank_loss": 4.242229806550313e-06,
+      "auxiliary_loss": 9.818172657105606e-06,
+      "positive_score": 0.6416933536529541,
+      "negative_score": -0.13808585703372955
+    },
+    {
+      "step": 44,
+      "bundle_id": "merit-255648-role-swap",
+      "loss": 0.01584451273083687,
+      "rank_loss": 0.00145048089325428,
+      "auxiliary_loss": 0.014394032768905163,
+      "positive_score": 0.8022390604019165,
+      "negative_score": 0.4316035509109497
+    },
+    {
+      "step": 45,
+      "bundle_id": "merit-243085-role-swap",
+      "loss": 0.0030370501335710287,
+      "rank_loss": 5.776632315246388e-05,
+      "auxiliary_loss": 0.002979283919557929,
+      "positive_score": 0.6847812533378601,
+      "negative_score": 0.08782102167606354
+    },
+    {
+      "step": 46,
+      "bundle_id": "merit-60373-role-swap",
+      "loss": 0.1755673587322235,
+      "rank_loss": 0.17334724962711334,
+      "auxiliary_loss": 0.0022201049141585827,
+      "positive_score": 0.2685406506061554,
+      "negative_score": 0.33574265241622925
+    },
+    {
+      "step": 47,
+      "bundle_id": "merit-103564-role-swap",
+      "loss": 1.4292872947407886e-05,
+      "rank_loss": 2.5235037810489303e-06,
+      "auxiliary_loss": 1.176936893898528e-05,
+      "positive_score": 0.8221246004104614,
+      "negative_score": 0.005983716808259487
+    },
+    {
+      "step": 48,
+      "bundle_id": "merit-153237-role-swap",
+      "loss": 0.003439592197537422,
+      "rank_loss": 0.0021830322220921516,
+      "auxiliary_loss": 0.0012565600918605924,
+      "positive_score": 0.46725398302078247,
+      "negative_score": 0.12560370564460754
+    },
+    {
+      "step": 49,
+      "bundle_id": "merit-125122-role-swap",
+      "loss": 3.619447670644149e-05,
+      "rank_loss": 1.8494509276933968e-05,
+      "auxiliary_loss": 1.7699967429507524e-05,
+      "positive_score": 0.8257919549942017,
+      "negative_score": 0.1490868330001831
+    },
+    {
+      "step": 50,
+      "bundle_id": "merit-166258-role-swap",
+      "loss": 0.02430974319577217,
+      "rank_loss": 0.02337002195417881,
+      "auxiliary_loss": 0.0009397204266861081,
+      "positive_score": 0.4488524794578552,
+      "negative_score": 0.28406938910484314
+    },
+    {
+      "step": 51,
+      "bundle_id": "merit-118304-role-swap",
+      "loss": 2.025588855758542e-06,
+      "rank_loss": 1.9909738568912871e-07,
+      "auxiliary_loss": 1.8264913705934305e-06,
+      "positive_score": 0.8062676191329956,
+      "negative_score": -0.18764708936214447
+    },
+    {
+      "step": 52,
+      "bundle_id": "merit-206514-role-swap",
+      "loss": 0.6711381673812866,
+      "rank_loss": 0.3054809272289276,
+      "auxiliary_loss": 0.3656572699546814,
+      "positive_score": 0.07218985259532928,
+      "negative_score": 0.276774138212204
+    },
+    {
+      "step": 53,
+      "bundle_id": "merit-53012-role-swap",
+      "loss": 5.051469997852109e-06,
+      "rank_loss": 1.3574231161328498e-06,
+      "auxiliary_loss": 3.694046654345584e-06,
+      "positive_score": 0.8554904460906982,
+      "negative_score": -0.0040552373975515366
+    },
+    {
+      "step": 54,
+      "bundle_id": "merit-194657-role-swap",
+      "loss": 0.0014418604550883174,
+      "rank_loss": 0.0002673632407095283,
+      "auxiliary_loss": 0.0011744971852749586,
+      "positive_score": 0.5889897346496582,
+      "negative_score": 0.09938850998878479
+    },
+    {
+      "step": 55,
+      "bundle_id": "merit-37960-role-swap",
+      "loss": 2.317845974175725e-05,
+      "rank_loss": 8.919610650082177e-08,
+      "auxiliary_loss": 2.3089263777364977e-05,
+      "positive_score": 0.9097932577133179,
+      "negative_score": -0.14032849669456482
+    },
+    {
+      "step": 56,
+      "bundle_id": "merit-303594-role-swap",
+      "loss": 0.00010024716902989894,
+      "rank_loss": 9.735288040246814e-05,
+      "auxiliary_loss": 2.8942911285412265e-06,
+      "positive_score": 0.7075329422950745,
+      "negative_score": 0.14712804555892944
+    },
+    {
+      "step": 57,
+      "bundle_id": "merit-291735-role-swap",
+      "loss": 0.0498589351773262,
+      "rank_loss": 0.008616012521088123,
+      "auxiliary_loss": 0.041242923587560654,
+      "positive_score": 0.2256315052509308,
+      "negative_score": -0.016657408326864243
+    },
+    {
+      "step": 58,
+      "bundle_id": "merit-259566-role-swap",
+      "loss": 0.003024214180186391,
+      "rank_loss": 1.2761099696945166e-06,
+      "auxiliary_loss": 0.003022938035428524,
+      "positive_score": 0.8156917691230774,
+      "negative_score": -0.04817803204059601
+    },
+    {
+      "step": 59,
+      "bundle_id": "merit-181272-role-swap",
+      "loss": 0.17078964412212372,
+      "rank_loss": 0.16888739168643951,
+      "auxiliary_loss": 0.0019022513879463077,
+      "positive_score": 0.580474853515625,
+      "negative_score": 0.6427931785583496
+    },
+    {
+      "step": 60,
+      "bundle_id": "merit-204617-role-swap",
+      "loss": 9.407950710738078e-05,
+      "rank_loss": 6.436866442527389e-06,
+      "auxiliary_loss": 8.764264202909544e-05,
+      "positive_score": 0.7828453779220581,
+      "negative_score": 0.03225395455956459
+    },
+    {
+      "step": 61,
+      "bundle_id": "merit-94-role-swap",
+      "loss": 0.08329324424266815,
+      "rank_loss": 0.08289959281682968,
+      "auxiliary_loss": 0.00039365151314996183,
+      "positive_score": 0.7223191857337952,
+      "negative_score": 0.6796523332595825
+    },
+    {
+      "step": 62,
+      "bundle_id": "merit-13367-role-swap",
+      "loss": 2.685877370822709e-05,
+      "rank_loss": 3.3092981084337225e-06,
+      "auxiliary_loss": 2.3549475372419693e-05,
+      "positive_score": 0.8735353946685791,
+      "negative_score": 0.07637099921703339
+    },
+    {
+      "step": 63,
+      "bundle_id": "merit-43646-role-swap",
+      "loss": 3.812551949522458e-05,
+      "rank_loss": 3.431920413277112e-05,
+      "auxiliary_loss": 3.8063146803324344e-06,
+      "positive_score": 0.8586936593055725,
+      "negative_score": 0.22527261078357697
+    },
+    {
+      "step": 64,
+      "bundle_id": "merit-55082-role-swap",
+      "loss": 0.24877429008483887,
+      "rank_loss": 0.21016159653663635,
+      "auxiliary_loss": 0.03861270099878311,
+      "positive_score": 0.7233497500419617,
+      "negative_score": 0.8299449682235718
+    },
+    {
+      "step": 65,
+      "bundle_id": "merit-304165-role-swap",
+      "loss": 0.6008756160736084,
+      "rank_loss": 0.5853184461593628,
+      "auxiliary_loss": 0.015557185746729374,
+      "positive_score": 0.127323716878891,
+      "negative_score": 0.6126258373260498
+    },
+    {
+      "step": 66,
+      "bundle_id": "merit-181672-role-swap",
+      "loss": 9.51072433963418e-05,
+      "rank_loss": 3.138555257464759e-05,
+      "auxiliary_loss": 6.372169445967302e-05,
+      "positive_score": 0.6108046770095825,
+      "negative_score": -0.028872821480035782
+    },
+    {
+      "step": 67,
+      "bundle_id": "merit-83361-role-swap",
+      "loss": 0.0002975068346131593,
+      "rank_loss": 3.9687063690507784e-05,
+      "auxiliary_loss": 0.0002578197745606303,
+      "positive_score": 0.673966109752655,
+      "negative_score": 0.05072017014026642
+    },
+    {
+      "step": 68,
+      "bundle_id": "merit-194319-role-swap",
+      "loss": 3.9347920392174274e-05,
+      "rank_loss": 2.5093377189477906e-06,
+      "auxiliary_loss": 3.683858085423708e-05,
+      "positive_score": 0.832342267036438,
+      "negative_score": 0.015807241201400757
+    },
+    {
+      "step": 69,
+      "bundle_id": "merit-308918-role-swap",
+      "loss": 1.3654960639541969e-05,
+      "rank_loss": 5.845975465490483e-06,
+      "auxiliary_loss": 7.808985174051486e-06,
+      "positive_score": 0.7847988605499268,
+      "negative_score": 0.02746693417429924
+    },
+    {
+      "step": 70,
+      "bundle_id": "merit-160383-role-swap",
+      "loss": 0.6838477849960327,
+      "rank_loss": 0.0018671808065846562,
+      "auxiliary_loss": 0.6819806098937988,
+      "positive_score": 0.2505126893520355,
+      "negative_score": -0.10223623365163803
+    },
+    {
+      "step": 71,
+      "bundle_id": "merit-58423-role-swap",
+      "loss": 0.29323840141296387,
+      "rank_loss": 0.11605525016784668,
+      "auxiliary_loss": 0.17718316614627838,
+      "positive_score": 0.7986721396446228,
+      "negative_score": 0.7999308705329895
+    },
+    {
+      "step": 72,
+      "bundle_id": "merit-210800-role-swap",
+      "loss": 2.5722647478687577e-05,
+      "rank_loss": 4.2875994950009044e-06,
+      "auxiliary_loss": 2.143504752893932e-05,
+      "positive_score": 0.8890232443809509,
+      "negative_score": 0.10998867452144623
+    },
+    {
+      "step": 73,
+      "bundle_id": "merit-7675-role-swap",
+      "loss": 0.0017798119224607944,
+      "rank_loss": 3.885888872900978e-06,
+      "auxiliary_loss": 0.0017759259790182114,
+      "positive_score": 0.8235093355178833,
+      "negative_score": 0.03758837282657623
+    },
+    {
+      "step": 74,
+      "bundle_id": "merit-147805-role-swap",
+      "loss": 0.018346667289733887,
+      "rank_loss": 0.00012452263035811484,
+      "auxiliary_loss": 0.01822214387357235,
+      "positive_score": 0.7926411628723145,
+      "negative_score": 0.24948003888130188
+    },
+    {
+      "step": 75,
+      "bundle_id": "merit-283635-role-swap",
+      "loss": 0.06620951741933823,
+      "rank_loss": 0.0028897698502987623,
+      "auxiliary_loss": 0.06331975013017654,
+      "positive_score": 0.7551912069320679,
+      "negative_score": 0.4335287809371948
+    },
+    {
+      "step": 76,
+      "bundle_id": "merit-199970-role-swap",
+      "loss": 0.0014042865950614214,
+      "rank_loss": 0.00013928214320912957,
+      "auxiliary_loss": 0.0012650045100599527,
+      "positive_score": 0.6327101588249207,
+      "negative_score": 0.09739738702774048
+    },
+    {
+      "step": 77,
+      "bundle_id": "merit-58333-role-swap",
+      "loss": 0.001898374524898827,
+      "rank_loss": 9.883035090751946e-06,
+      "auxiliary_loss": 0.0018884914461523294,
+      "positive_score": 0.7925845980644226,
+      "negative_score": 0.07200932502746582
+    },
+    {
+      "step": 78,
+      "bundle_id": "merit-762-role-swap",
+      "loss": 0.03149376064538956,
+      "rank_loss": 3.058583752135746e-05,
+      "auxiliary_loss": 0.031463176012039185,
+      "positive_score": 0.6999046802520752,
+      "negative_score": 0.05842002481222153
+    },
+    {
+      "step": 79,
+      "bundle_id": "merit-32246-role-swap",
+      "loss": 0.0012814414221793413,
+      "rank_loss": 0.0010282935108989477,
+      "auxiliary_loss": 0.0002531479694880545,
+      "positive_score": 0.8044208884239197,
+      "negative_score": 0.4094940423965454
+    },
+    {
+      "step": 80,
+      "bundle_id": "merit-43908-role-swap",
+      "loss": 0.0002400050580035895,
+      "rank_loss": 4.808301309822127e-05,
+      "auxiliary_loss": 0.00019192205218132585,
+      "positive_score": 0.6624886989593506,
+      "negative_score": 0.05268021300435066
+    },
+    {
+      "step": 81,
+      "bundle_id": "merit-71231-role-swap",
+      "loss": 0.00010902737994911149,
+      "rank_loss": 4.732411616714671e-05,
+      "auxiliary_loss": 6.170326378196478e-05,
+      "positive_score": 0.8082629442214966,
+      "negative_score": 0.19734041392803192
+    },
+    {
+      "step": 82,
+      "bundle_id": "merit-155243-role-swap",
+      "loss": 0.00013576984929386526,
+      "rank_loss": 3.896194539265707e-05,
+      "auxiliary_loss": 9.680790390120819e-05,
+      "positive_score": 0.8158143758773804,
+      "negative_score": 0.19127729535102844
+    },
+    {
+      "step": 83,
+      "bundle_id": "merit-193794-role-swap",
+      "loss": 0.005214367993175983,
+      "rank_loss": 0.0046302638947963715,
+      "auxiliary_loss": 0.000584104098379612,
+      "positive_score": 0.5249184370040894,
+      "negative_score": 0.2371346354484558
+    },
+    {
+      "step": 84,
+      "bundle_id": "merit-14010-role-swap",
+      "loss": 0.0031622748356312513,
+      "rank_loss": 0.0021604495123028755,
+      "auxiliary_loss": 0.0010018253233283758,
+      "positive_score": 0.6939671635627747,
+      "negative_score": 0.35157763957977295
+    },
+    {
+      "step": 85,
+      "bundle_id": "merit-57899-role-swap",
+      "loss": 0.0035236766561865807,
+      "rank_loss": 3.861316872644238e-05,
+      "auxiliary_loss": 0.0034850635565817356,
+      "positive_score": 0.7676464915275574,
+      "negative_score": 0.1424797773361206
+    },
+    {
+      "step": 86,
+      "bundle_id": "merit-266268-role-swap",
+      "loss": 0.2591839134693146,
+      "rank_loss": 0.10477975755929947,
+      "auxiliary_loss": 0.1544041484594345,
+      "positive_score": 0.4847680628299713,
+      "negative_score": 0.4718106687068939
+    },
+    {
+      "step": 87,
+      "bundle_id": "merit-191319-role-swap",
+      "loss": 0.00024119738372974098,
+      "rank_loss": 0.0001334953703917563,
+      "auxiliary_loss": 0.00010770200606202707,
+      "positive_score": 0.6711457371711731,
+      "negative_score": 0.13285966217517853
+    },
+    {
+      "step": 88,
+      "bundle_id": "merit-72486-role-swap",
+      "loss": 0.02020961232483387,
+      "rank_loss": 0.012233380228281021,
+      "auxiliary_loss": 0.007976232096552849,
+      "positive_score": 0.5330840349197388,
+      "negative_score": 0.3171868920326233
+    },
+    {
+      "step": 89,
+      "bundle_id": "merit-184161-role-swap",
+      "loss": 0.0003161426284350455,
+      "rank_loss": 0.00017666470375843346,
+      "auxiliary_loss": 0.00013947792467661202,
+      "positive_score": 0.9073062539100647,
+      "negative_score": 0.38865482807159424
+    },
+    {
+      "step": 90,
+      "bundle_id": "merit-154189-role-swap",
+      "loss": 0.0006453722598962486,
+      "rank_loss": 5.1045553846051916e-05,
+      "auxiliary_loss": 0.0005943267024122179,
+      "positive_score": 0.564104437828064,
+      "negative_score": -0.04151730239391327
+    },
+    {
+      "step": 91,
+      "bundle_id": "merit-102987-role-swap",
+      "loss": 0.0003609724808484316,
+      "rank_loss": 0.0002994149981532246,
+      "auxiliary_loss": 6.155746814329177e-05,
+      "positive_score": 0.8174784183502197,
+      "negative_score": 0.3358187675476074
+    },
+    {
+      "step": 92,
+      "bundle_id": "merit-9662-role-swap",
+      "loss": 0.005203909240663052,
+      "rank_loss": 0.0012270784936845303,
+      "auxiliary_loss": 0.003976830746978521,
+      "positive_score": 0.8561179637908936,
+      "negative_score": 0.47366225719451904
+    },
+    {
+      "step": 93,
+      "bundle_id": "merit-269996-role-swap",
+      "loss": 0.00030885590240359306,
+      "rank_loss": 6.213318556547165e-05,
+      "auxiliary_loss": 0.0002467227168381214,
+      "positive_score": 0.8256947994232178,
+      "negative_score": 0.23383794724941254
+    },
+    {
+      "step": 94,
+      "bundle_id": "merit-293011-role-swap",
+      "loss": 0.10105269402265549,
+      "rank_loss": 0.029989123344421387,
+      "auxiliary_loss": 0.0710635706782341,
+      "positive_score": 0.196316659450531,
+      "negative_score": 0.05250949412584305
+    },
+    {
+      "step": 95,
+      "bundle_id": "merit-223577-role-swap",
+      "loss": 0.17751796543598175,
+      "rank_loss": 0.17424863576889038,
+      "auxiliary_loss": 0.0032693336252123117,
+      "positive_score": 0.7116137742996216,
+      "negative_score": 0.7797992825508118
+    },
+    {
+      "step": 96,
+      "bundle_id": "merit-93677-role-swap",
+      "loss": 0.00023520851391367614,
+      "rank_loss": 0.00018518690194468945,
+      "auxiliary_loss": 5.002160833100788e-05,
+      "positive_score": 0.7939848899841309,
+      "negative_score": 0.27863556146621704
+    },
+    {
+      "step": 97,
+      "bundle_id": "merit-113129-role-swap",
+      "loss": 0.06454691290855408,
+      "rank_loss": 0.004056683741509914,
+      "auxiliary_loss": 0.06049022823572159,
+      "positive_score": 0.3210185766220093,
+      "negative_score": 0.02368765138089657
+    },
+    {
+      "step": 98,
+      "bundle_id": "merit-81647-role-swap",
+      "loss": 0.12282304465770721,
+      "rank_loss": 0.12061003595590591,
+      "auxiliary_loss": 0.002213008003309369,
+      "positive_score": 0.6236961483955383,
+      "negative_score": 0.6305400133132935
+    },
+    {
+      "step": 99,
+      "bundle_id": "merit-44880-role-swap",
+      "loss": 0.07386402040719986,
+      "rank_loss": 0.06331246346235275,
+      "auxiliary_loss": 0.010551556944847107,
+      "positive_score": 0.384449303150177,
+      "negative_score": 0.31144654750823975
+    },
+    {
+      "step": 100,
+      "bundle_id": "merit-51309-role-swap",
+      "loss": 0.030536437407135963,
+      "rank_loss": 0.009912924841046333,
+      "auxiliary_loss": 0.02062351256608963,
+      "positive_score": 0.3929749131202698,
+      "negative_score": 0.16116394102573395
+    },
+    {
+      "step": 101,
+      "bundle_id": "merit-24110-role-swap",
+      "loss": 0.08967023342847824,
+      "rank_loss": 0.08544158935546875,
+      "auxiliary_loss": 0.00422864081338048,
+      "positive_score": 0.8226543068885803,
+      "negative_score": 0.7836214303970337
+    },
+    {
+      "step": 102,
+      "bundle_id": "merit-116505-role-swap",
+      "loss": 4.595603240886703e-05,
+      "rank_loss": 1.1902504411409609e-05,
+      "auxiliary_loss": 3.405352617846802e-05,
+      "positive_score": 0.8280320167541504,
+      "negative_score": 0.12047282606363297
+    },
+    {
+      "step": 103,
+      "bundle_id": "merit-29033-role-swap",
+      "loss": 0.010784334503114223,
+      "rank_loss": 6.0951715568080544e-06,
+      "auxiliary_loss": 0.010778238996863365,
+      "positive_score": 0.8640318512916565,
+      "negative_score": 0.10962210595607758
+    },
+    {
+      "step": 104,
+      "bundle_id": "merit-232134-role-swap",
+      "loss": 0.0028614168986678123,
+      "rank_loss": 0.00013122065865900367,
+      "auxiliary_loss": 0.0027301963418722153,
+      "positive_score": 0.7854021191596985,
+      "negative_score": 0.2459118366241455
+    },
+    {
+      "step": 105,
+      "bundle_id": "merit-1761-role-swap",
+      "loss": 8.562643779441714e-05,
+      "rank_loss": 6.33209901934606e-06,
+      "auxiliary_loss": 7.929433922981843e-05,
+      "positive_score": 0.7825177311897278,
+      "negative_score": 0.030777566134929657
+    },
+    {
+      "step": 106,
+      "bundle_id": "merit-36156-role-swap",
+      "loss": 4.751804954139516e-05,
+      "rank_loss": 1.2809714462491684e-05,
+      "auxiliary_loss": 3.470833689789288e-05,
+      "positive_score": 0.793315052986145,
+      "negative_score": 0.09089814871549606
+    },
+    {
+      "step": 107,
+      "bundle_id": "merit-223785-role-swap",
+      "loss": 0.00024380141985602677,
+      "rank_loss": 1.4898099607307813e-06,
+      "auxiliary_loss": 0.0002423116093268618,
+      "positive_score": 0.8619280457496643,
+      "negative_score": 0.008896661922335625
+    },
+    {
+      "step": 108,
+      "bundle_id": "merit-203634-role-swap",
+      "loss": 3.625149838626385e-05,
+      "rank_loss": 2.2507094399770722e-05,
+      "auxiliary_loss": 1.3744404895987827e-05,
+      "positive_score": 0.6892991065979004,
+      "negative_score": 0.026340946555137634
+    },
+    {
+      "step": 109,
+      "bundle_id": "merit-265089-role-swap",
+      "loss": 0.013554240576922894,
+      "rank_loss": 0.01240443903952837,
+      "auxiliary_loss": 0.0011498015373945236,
+      "positive_score": 0.6160672903060913,
+      "negative_score": 0.40123021602630615
+    },
+    {
+      "step": 110,
+      "bundle_id": "merit-285372-role-swap",
+      "loss": 0.019657326862215996,
+      "rank_loss": 4.826133590540849e-07,
+      "auxiliary_loss": 0.019656844437122345,
+      "positive_score": 0.8417154550552368,
+      "negative_score": -0.09021959453821182
+    },
+    {
+      "step": 111,
+      "bundle_id": "merit-118130-role-swap",
+      "loss": 3.2418804039480165e-05,
+      "rank_loss": 5.31598334418959e-06,
+      "auxiliary_loss": 2.7102822059532627e-05,
+      "positive_score": 0.8078869581222534,
+      "negative_score": 0.04390227794647217
+    },
+    {
+      "step": 112,
+      "bundle_id": "merit-16150-role-swap",
+      "loss": 0.20394375920295715,
+      "rank_loss": 0.19246356189250946,
+      "auxiliary_loss": 0.011480199173092842,
+      "positive_score": 0.7214397192001343,
+      "negative_score": 0.8092764019966125
+    },
+    {
+      "step": 113,
+      "bundle_id": "merit-276173-role-swap",
+      "loss": 0.04125579446554184,
+      "rank_loss": 0.022416014224290848,
+      "auxiliary_loss": 0.018839780241250992,
+      "positive_score": 0.6138676404953003,
+      "negative_score": 0.44566410779953003
+    },
+    {
+      "step": 114,
+      "bundle_id": "merit-177736-role-swap",
+      "loss": 0.0005930329789407551,
+      "rank_loss": 3.870627188007347e-05,
+      "auxiliary_loss": 0.0005543266888707876,
+      "positive_score": 0.7975345849990845,
+      "negative_score": 0.17253652215003967
+    },
+    {
+      "step": 115,
+      "bundle_id": "merit-125666-role-swap",
+      "loss": 0.08379406481981277,
+      "rank_loss": 4.784791940437572e-07,
+      "auxiliary_loss": 0.08379358798265457,
+      "positive_score": 0.7598703503608704,
+      "negative_score": -0.172666996717453
+    },
+    {
+      "step": 116,
+      "bundle_id": "merit-160616-role-swap",
+      "loss": 0.010881719179451466,
+      "rank_loss": 4.905955938738771e-05,
+      "auxiliary_loss": 0.010832659900188446,
+      "positive_score": 0.8215179443359375,
+      "negative_score": 0.21311737596988678
+    },
+    {
+      "step": 117,
+      "bundle_id": "merit-48-role-swap",
+      "loss": 0.20519176125526428,
+      "rank_loss": 0.20431308448314667,
+      "auxiliary_loss": 0.0008786763646639884,
+      "positive_score": 0.6541112661361694,
+      "negative_score": 0.7545384168624878
+    },
+    {
+      "step": 118,
+      "bundle_id": "merit-240151-role-swap",
+      "loss": 0.0061739771626889706,
+      "rank_loss": 0.0001773391995811835,
+      "auxiliary_loss": 0.005996637977659702,
+      "positive_score": 0.7818046808242798,
+      "negative_score": 0.26342037320137024
+    },
+    {
+      "step": 119,
+      "bundle_id": "merit-181552-role-swap",
+      "loss": 0.18550774455070496,
+      "rank_loss": 0.10869386792182922,
+      "auxiliary_loss": 0.07681386917829514,
+      "positive_score": 0.3919154703617096,
+      "negative_score": 0.38396143913269043
+    },
+    {
+      "step": 120,
+      "bundle_id": "merit-243433-role-swap",
+      "loss": 0.0013618720695376396,
+      "rank_loss": 0.0012977404985576868,
+      "auxiliary_loss": 6.413152732420713e-05,
+      "positive_score": 0.792156457901001,
+      "negative_score": 0.4136554002761841
+    },
+    {
+      "step": 121,
+      "bundle_id": "merit-22397-role-swap",
+      "loss": 0.015675149857997894,
+      "rank_loss": 0.00011678400915116072,
+      "auxiliary_loss": 0.015558365732431412,
+      "positive_score": 0.6031675338745117,
+      "negative_score": 0.055511243641376495
+    },
+    {
+      "step": 122,
+      "bundle_id": "merit-281049-role-swap",
+      "loss": 0.0019235729705542326,
+      "rank_loss": 0.001896285219117999,
+      "auxiliary_loss": 2.7287716875434853e-05,
+      "positive_score": 0.6696926951408386,
+      "negative_score": 0.3180410861968994
+    },
+    {
+      "step": 123,
+      "bundle_id": "merit-164912-role-swap",
+      "loss": 8.618196443421766e-05,
+      "rank_loss": 2.359434984100517e-05,
+      "auxiliary_loss": 6.258761277422309e-05,
+      "positive_score": 0.5648655295372009,
+      "negative_score": -0.09478972107172012
+    },
+    {
+      "step": 124,
+      "bundle_id": "merit-155135-role-swap",
+      "loss": 0.021226253360509872,
+      "rank_loss": 0.021205533295869827,
+      "auxiliary_loss": 2.0719433450722136e-05,
+      "positive_score": 0.6576632261276245,
+      "negative_score": 0.4849371314048767
+    },
+    {
+      "step": 125,
+      "bundle_id": "merit-10656-role-swap",
+      "loss": 0.09094779193401337,
+      "rank_loss": 0.0905744805932045,
+      "auxiliary_loss": 0.0003733128833118826,
+      "positive_score": 0.8409942388534546,
+      "negative_score": 0.8091356754302979
+    },
+    {
+      "step": 126,
+      "bundle_id": "merit-262437-role-swap",
+      "loss": 0.009000272490084171,
+      "rank_loss": 0.008741280995309353,
+      "auxiliary_loss": 0.0002589915238786489,
+      "positive_score": 0.5983692407608032,
+      "negative_score": 0.3571546673774719
+    },
+    {
+      "step": 127,
+      "bundle_id": "merit-260389-role-swap",
+      "loss": 0.001969899283722043,
+      "rank_loss": 0.0019652359187602997,
+      "auxiliary_loss": 4.663409526983742e-06,
+      "positive_score": 0.8408518433570862,
+      "negative_score": 0.49173495173454285
+    },
+    {
+      "step": 128,
+      "bundle_id": "merit-142740-role-swap",
+      "loss": 0.05444794520735741,
+      "rank_loss": 0.05188024044036865,
+      "auxiliary_loss": 0.0025677033700048923,
+      "positive_score": 0.7232833504676819,
+      "negative_score": 0.6298493146896362
+    }
+  ],
+  "elapsed_seconds": 433.1527352333069,
+  "max_gpu_allocated_bytes": 18727224832
+}

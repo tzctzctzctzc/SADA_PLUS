@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-19T17:51:49.263186+08:00",
+  "as_of": "2026-09-19T19:10:00+08:00",
   "goal_status": "active",
-  "phase": "P046_pilot_failed_margin_only_signal",
+  "phase": "P048_role_signal_supported_geometry_not_preserved",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 1,
@@ -14,7 +14,7 @@
     ],
     "submission_year_assumption": 2027
   },
-  "direction": "Do not enlarge SBB. The next innovation search must change the learning or inference object itself, preserve joint evidence, and include matched wrong-binding supervision; all future experiments still use physical GPU1 after an occupancy check.",
+  "direction": "Keep position-controlled text role contrast as the mechanism lead, but do not scale. The next pilot must preserve frozen full-gallery geometry with role-only, in-batch multi-negative, or frozen-reference anchoring controls on physical GPU1.",
   "known_evidence": [
     "SoFA 使用跨图双向 attention 插值；Delimiter Scaling 加强图像边界，两者报告收益，但实验设置不同，不能直接声称矛盾。",
     "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
@@ -894,7 +894,7 @@
     "automation_display_name": "GPU1 独立研究进展",
     "rules_first": "Read /vepfs/vlms/1/研究规则.md before continuing; the automation was updated to GPU1 and evidence-first/pilot-first execution on 2026-09-17."
   },
-  "next": "P046 is stopped before full scale. Preserve the margin-only signal as evidence, audit why pair accuracy saturated, and require a materially different preregistered pilot before further training.",
+  "next": "Preregister a geometry-preserving P049 pilot. Include the frozen model as an explicit non-inferiority baseline and do not run full scale unless role metrics improve while mAP@10 and paraphrase retrieval preserve or exceed the frozen geometry.",
   "results": {
     "P001": {
       "n": 4,
@@ -1921,7 +1921,14 @@
       "P046 froze 64 product-disjoint MERIT bundles across pants, cloth, and shoes; 256 base products had zero overlap with 5,770 P041-P043 products.",
       "P046 static and runtime implementation audits both classified the implementation as faithful: 36/36 language layers received LoRA gradients, the visual merger and candidate branch received gradients, and 127,412,992 parameters were trainable.",
       "The P046 corruption confirmation passed: identity calibration and donor-relation negatives were each 23/24 (95.8%).",
-      "The three-arm single-seed pilot failed its all-required gate. Role corruption tied generic augmentation at 87.5% pair accuracy, improved mean role margin by 0.0435 over the strongest control, and tied retrieval accuracy at 93.75%; no full-scale run is authorized."
+      "The three-arm single-seed pilot failed its all-required gate. Role corruption tied generic augmentation at 87.5% pair accuracy, improved mean role margin by 0.0435 over the strongest control, and tied retrieval accuracy at 93.75%; no full-scale run is authorized.",
+      "P047 froze 352 bundles and 1,408 within-pilot-disjoint products with balanced reference positions; its static implementation audit was faithful.",
+      "P047 stopped before training because independent visual confirmation passed only 53/64 cross-role negatives (82.8% below the 90% gate), despite 63/64 identity calibration.",
+      "P047 failure decomposition found color or pattern/print passed 49/52 cross-role checks while other attributes passed 4/12, localizing metadata-to-visual supervision noise.",
+      "P048 used 320 bundles (128/128/64), 1,280 within-pilot-disjoint products, balanced role positions, and zero overlap with P047 confirmation products.",
+      "P048 static/runtime audits were faithful; 36/36 language layers, visual merger, candidate branch, and text-role branch received gradients. The independent visual data gate passed 60/64 negatives and 64/64 identities.",
+      "P048 text role swapping beat the strongest image-swap control by +3.91pp binding accuracy, +0.0696 binding margin, +0.1026 mAP@10, and +8.59pp R@10; margin, mAP, and R@10 paired intervals supported the gain.",
+      "P048 failed two preregistered gates and remained below the frozen model mAP@10 (0.615 vs 0.798), so no full-scale run is authorized. The next falsifier must preserve frozen global geometry."
     ]
   },
   "idea_audits": {
@@ -2382,6 +2389,91 @@
         },
         "all_gates_pass": false,
         "decision": "Do not scale. The margin signal is encouraging, but the role arm did not improve held-out pair accuracy over generic augmentation."
+      }
+    },
+    {
+      "id": "position_controlled_role_contrast_v1",
+      "status": "data_gate_failed_before_training",
+      "title": "Position-controlled text role contrast",
+      "mechanism": "Keep both reference images, their order, and the target fixed; swap only the Product pointers in the instruction. Compare this text-only intervention against image-position swapping, paraphrase invariance, and ordinary pairwise retrieval.",
+      "gpu": "P047 data confirmation used physical GPU1 UUID GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f after a live occupancy check.",
+      "implementation_audit": {
+        "static": "faithful",
+        "bundles": 352,
+        "unique_products": 1408,
+        "role_position_balance": "176/176"
+      },
+      "pilot_result": {
+        "status": "fail_stop_before_training",
+        "identity_positive": "63/64",
+        "cross_role_negative": "53/64",
+        "cross_role_negative_rate": 0.828125,
+        "gate_min": 0.9,
+        "failure_localization": "metadata inequality was not a sufficiently reliable visible negative outside color and pattern/print"
+      }
+    },
+    {
+      "id": "visible_role_contrast_v1",
+      "status": "pilot_failed_stop_no_full_but_mechanism_supported",
+      "title": "Visible position-controlled role contrast",
+      "evidence_chain": [
+        "P047 localized unreliable supervision to fine-grained attributes.",
+        "A new confirmation set excluded every P047 confirmation product.",
+        "P048 restricted the actively falsified role to color or pattern/print and retained product-disjoint train/validation/confirmation splits."
+      ],
+      "gpu": "P048 executed only on physical GPU1 UUID GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f after a live occupancy check.",
+      "implementation_audit": {
+        "static": "faithful",
+        "runtime": "faithful",
+        "trainable_parameters": 127412992,
+        "language_lora_layers": "36/36",
+        "visual_merger_trainable": true,
+        "candidate_branch_gradient": true,
+        "text_swap_branch_gradient": true,
+        "peak_allocated_bytes": 18728027648
+      },
+      "data_gate": {
+        "status": "pass",
+        "bundles": 64,
+        "identity_positive": "64/64",
+        "cross_role_negative": "60/64",
+        "cross_role_negative_rate": 0.9375,
+        "overlap_with_P047_confirmation": 0
+      },
+      "pilot_result": {
+        "status": "fail_stop_no_full",
+        "validation_rows": 128,
+        "text_role_swap": {
+          "binding_pair_accuracy": 0.953125,
+          "mean_binding_margin": 0.37096913787536323,
+          "map_at_10": 0.6151661706349206,
+          "recall_at_10": 0.890625,
+          "paraphrase_map_at_10": 0.5364676339285714
+        },
+        "strongest_image_control": {
+          "binding_pair_accuracy": 0.9140625,
+          "mean_binding_margin": 0.3013459638459608,
+          "map_at_10": 0.5125527033730158,
+          "recall_at_10": 0.8046875,
+          "paraphrase_map_at_10": 0.5304935515873016
+        },
+        "frozen_baseline": {
+          "map_at_10": 0.7983816964285714,
+          "recall_at_10": 0.9609375
+        },
+        "paired_gains": {
+          "binding_accuracy": 0.0390625,
+          "binding_margin": 0.06962317402940243,
+          "map_at_10": 0.10261346726190476,
+          "recall_at_10": 0.0859375,
+          "paraphrase_map_at_10": 0.00597408234126984
+        },
+        "failed_gates": [
+          "binding_accuracy_bootstrap_lower_bound_equals_zero",
+          "paraphrase_map_noninferiority_CI",
+          "frozen_geometry_not_preserved_posthoc"
+        ],
+        "mechanistic_conclusion": "Text-only role binding is stronger than image swapping, but one-positive/one-hard-negative fine-tuning over-specializes the global embedding geometry."
       }
     }
   ]
