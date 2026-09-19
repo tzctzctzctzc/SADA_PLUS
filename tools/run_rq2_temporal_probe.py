@@ -13,6 +13,7 @@ import os
 import random
 import sys
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -82,6 +83,7 @@ def role_indices(rows, shift, role):
 
 def load_feature_index(index_paths, feature_root, manifest_hash):
     feature_root = Path(feature_root)
+    available_files = set(os.listdir(feature_root))
     by_id = {}
     model_identity = None
     feature_schema = None
@@ -94,8 +96,11 @@ def load_feature_index(index_paths, feature_root, manifest_hash):
             if row.get("schema_version") != FEATURE_SCHEMA:
                 raise ValueError("unsupported feature schema")
             candidate_id = row["candidate_id"]
-            feature_path = feature_root / row["feature_file"]
-            if not feature_path.is_file():
+            feature_name = row["feature_file"]
+            if Path(feature_name).name != feature_name:
+                raise ValueError("feature index contains a non-flat path")
+            feature_path = feature_root / feature_name
+            if feature_name not in available_files:
                 raise FileNotFoundError(str(feature_path))
             identity = (row.get("model"), row.get("model_revision"))
             if model_identity is None:
@@ -111,7 +116,13 @@ def load_feature_index(index_paths, feature_root, manifest_hash):
 
 
 def prepare_feature_bank(
-    rows, manifest_path, index_paths, feature_root, cache_dir, rebuild=False
+    rows,
+    manifest_path,
+    index_paths,
+    feature_root,
+    cache_dir,
+    rebuild=False,
+    loader_workers=16,
 ):
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -206,24 +217,45 @@ def prepare_feature_bank(
     )
     timestamps[:] = np.nan
     offsets[:] = expected_offsets
-    for index, candidate_id in enumerate(expected_ids):
+    def load_feature(index):
+        candidate_id = expected_ids[index]
         with np.load(feature_index[candidate_id]) as arrays:
-            row_features = arrays["features"]
-            row_timestamps = arrays["timestamps_sec"]
-        time_steps = int(expected_lengths[index])
-        if row_features.shape != (time_steps, dimension):
-            raise ValueError("inconsistent feature shape for {}".format(candidate_id))
-        if row_timestamps.shape != (time_steps,):
-            raise ValueError("inconsistent timestamp shape for {}".format(candidate_id))
-        if not np.all(np.isfinite(row_features)) or not np.all(np.isfinite(row_timestamps)):
-            raise ValueError("non-finite feature data for {}".format(candidate_id))
-        token_start = int(expected_offsets[index])
-        token_end = int(expected_offsets[index + 1])
-        features[token_start:token_end] = row_features.astype(np.float16, copy=False)
-        timestamps[index, :time_steps] = row_timestamps.astype(np.float32, copy=False)
-        lengths[index] = time_steps
-        if (index + 1) % 1000 == 0 or index + 1 == len(rows):
-            print("feature_bank={}/{}".format(index + 1, len(rows)), flush=True)
+            return (
+                index,
+                candidate_id,
+                arrays["features"].copy(),
+                arrays["timestamps_sec"].copy(),
+            )
+
+    with ThreadPoolExecutor(max_workers=loader_workers) as executor:
+        for batch_start in range(0, len(rows), 256):
+            batch_stop = min(batch_start + 256, len(rows))
+            loaded = executor.map(load_feature, range(batch_start, batch_stop))
+            for index, candidate_id, row_features, row_timestamps in loaded:
+                time_steps = int(expected_lengths[index])
+                if row_features.shape != (time_steps, dimension):
+                    raise ValueError(
+                        "inconsistent feature shape for {}".format(candidate_id)
+                    )
+                if row_timestamps.shape != (time_steps,):
+                    raise ValueError(
+                        "inconsistent timestamp shape for {}".format(candidate_id)
+                    )
+                if not np.all(np.isfinite(row_features)) or not np.all(
+                    np.isfinite(row_timestamps)
+                ):
+                    raise ValueError("non-finite feature data for {}".format(candidate_id))
+                token_start = int(expected_offsets[index])
+                token_end = int(expected_offsets[index + 1])
+                features[token_start:token_end] = row_features.astype(
+                    np.float16, copy=False
+                )
+                timestamps[index, :time_steps] = row_timestamps.astype(
+                    np.float32, copy=False
+                )
+                lengths[index] = time_steps
+            if batch_stop % 1024 == 0 or batch_stop == len(rows):
+                print("feature_bank={}/{}".format(batch_stop, len(rows)), flush=True)
     features.flush()
     timestamps.flush()
     lengths.flush()
@@ -1365,6 +1397,7 @@ def parse_args():
     parser.add_argument("--bootstrap-repeats", type=int, default=1000)
     parser.add_argument("--bootstrap-seed", type=int, default=20260919)
     parser.add_argument("--shortcut-threshold", type=float, default=0.7)
+    parser.add_argument("--feature-bank-workers", type=int, default=16)
     parser.add_argument("--rebuild-feature-cache", action="store_true")
     return parser.parse_args()
 
@@ -1444,6 +1477,8 @@ def main():
         raise ValueError("formal protocol bootstrap configuration is frozen")
     if args.shortcut_threshold != 0.7:
         raise ValueError("formal protocol shortcut threshold is frozen at 0.7")
+    if args.feature_bank_workers <= 0:
+        raise ValueError("feature bank workers must be positive")
 
     rows = read_jsonl(args.manifest)
     features, timestamps, lengths, offsets, feature_metadata = prepare_feature_bank(
@@ -1453,6 +1488,7 @@ def main():
         args.feature_root,
         args.feature_cache_dir,
         rebuild=args.rebuild_feature_cache,
+        loader_workers=args.feature_bank_workers,
     )
     runtime = ProbeRuntime(features, timestamps, lengths, offsets, rows, args)
     output_dir = Path(args.output_dir)
@@ -1476,6 +1512,7 @@ def main():
         "bootstrap_repeats": args.bootstrap_repeats,
         "bootstrap_seed": args.bootstrap_seed,
         "shortcut_threshold": args.shortcut_threshold,
+        "feature_bank_workers": args.feature_bank_workers,
         "runtime_environment": environment,
     }
     write_json_atomic(output_dir / "frozen_protocol_config.json", frozen_config)
