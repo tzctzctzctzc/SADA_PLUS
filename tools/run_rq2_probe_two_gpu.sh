@@ -20,7 +20,7 @@ fi
 manifest=$artifact/rq2_probe_manifest.jsonl
 tag=${shift}_n${instances_per_class}
 pilot=$artifact/rq2_probe_${tag}_source_train.jsonl
-namespace=rq2_probe_${tag}_source_train_2fps
+namespace=${RQ2_CACHE_NAMESPACE:-rq2_probe_${shift}_source_train_pilot_2fps}
 feature_root=$artifact/features/qwen3_vl_8b_${tag}
 index_a=$artifact/qwen3_vl_8b_${tag}_shard0.jsonl
 index_b=$artifact/qwen3_vl_8b_${tag}_shard1.jsonl
