@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-19T19:10:00+08:00",
+  "as_of": "2026-09-19T22:40:00+08:00",
   "goal_status": "active",
-  "phase": "P048_role_signal_supported_geometry_not_preserved",
+  "phase": "P049_counterfactual_verifier_partial_signal_no_full",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 1,
@@ -14,7 +14,7 @@
     ],
     "submission_year_assumption": 2027
   },
-  "direction": "Keep position-controlled text role contrast as the mechanism lead, but do not scale. The next pilot must preserve frozen full-gallery geometry with role-only, in-batch multi-negative, or frozen-reference anchoring controls on physical GPU1.",
+  "direction": "Do not scale P049. Retain the frozen-retriever plus candidate verifier architecture, but treat role-intervention deltas as selective robustness evidence rather than a universal ranking score. The next falsifier must use an independently frozen calibration split, broaden beyond color, and beat the ordinary verifier on paired mAP while preserving the demonstrated paraphrase and hard-negative gains.",
   "known_evidence": [
     "SoFA 使用跨图双向 attention 插值；Delimiter Scaling 加强图像边界，两者报告收益，但实验设置不同，不能直接声称矛盾。",
     "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
@@ -52,7 +52,15 @@
     "ReBind (arXiv:2607.14681) validates explicit reference tokens at semantic positions for multi-reference video editing; this is the main adjacent-domain transfer primitive for P038.",
     "MultiBind (arXiv:2603.21937) separates self-degradation from cross-subject confusion in generation; P038 adapts that separation to equivalence gap versus wrong-binding contrast in retrieval.",
     "Janossy Pooling, Set Transformer, and Multi-Set Transformer establish permutation/set operators; P038 must distinguish joint role-reference relabeling from unconditional image exchangeability.",
-    "P041视觉数据门槛失败：100组中仅37组同时通过，正例源/目标检查为63%/60%，交换负对照为97%/91%；停止元数据替代路线且未启动训练，不能据此否定条件依赖假设。"
+    "P041视觉数据门槛失败：100组中仅37组同时通过，正例源/目标检查为63%/60%，交换负对照为97%/91%；停止元数据替代路线且未启动训练，不能据此否定条件依赖假设。",
+    "P049 exactly reproduced the P048 frozen baseline after the implementation audit caught and corrected a system-prompt mismatch: mAP@10 0.7983817 and R@10 0.9609375.",
+    "P049 used 144/128/64 train/validation/confirmation bundles and 1,344 within-pilot-disjoint products; validation and confirmation were identical to P048, and training products had zero held-out overlap.",
+    "P049 final static and runtime audits were faithful: 36/36 LoRA language layers, the visual merger, scalar head, original/swap positive and negative branches, and paraphrase branches all received gradients; the frozen base had no optimizer path.",
+    "The ordinary verifier was a strong control at mAP@10 0.85677 and paraphrase mAP@10 0.80614. Positive-only counterfactual training raised main mAP to 0.87943 but collapsed paraphrase mAP to 0.68533, exposing a surface-form shortcut.",
+    "The DoD arm achieved mAP@10 0.84979, paraphrase mAP@10 0.83953, binding accuracy 0.94531, DoD pair accuracy 0.90625, and hard-negative violation 0.07031.",
+    "Paired bootstrap supported DoD over frozen on mAP (+0.05141, 95% CI [0.01424, 0.09094]), paraphrase mAP (+0.10760, [0.06437, 0.15396]), DoD margin over ordinary (+0.22271, [0.17048, 0.27544]), and hard-negative violation reduction (-0.0625, [-0.11719, -0.015625]).",
+    "The primary innovation gate failed because DoD did not beat the ordinary verifier on mAP (-0.00698, 95% CI [-0.03639, 0.01942]); full-scale execution is not authorized.",
+    "Failure localization showed DoD raw-score mAP 0.85359 versus delta-score mAP 0.84979, while paraphrase moved in the opposite direction (0.82930 raw to 0.83953 delta). Universal delta use is the current bottleneck; the main evidence is concentrated in color roles and cannot support general-role claims."
   ],
   "hypotheses": [
     {
@@ -877,6 +885,26 @@
       ],
       "steps_per_arm": 24,
       "seed": 20260919
+    },
+    "P049": {
+      "status": "pilot_failed_stop_no_full_partial_mechanism_signal",
+      "gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
+      "config": "configs/P049_counterfactual_role_verifier.json",
+      "analysis": "runs/P049_counterfactual_role_verifier/pilot_summary.json",
+      "static_audit": "runs/P049_counterfactual_role_verifier/implementation_audit_static.json",
+      "runtime_audit": "runs/P049_counterfactual_role_verifier/runtime_gradient_audit.json",
+      "arms": [
+        "ordinary_verifier",
+        "positive_counterfactual",
+        "dod_counterfactual"
+      ],
+      "train_validation_confirmation": [
+        144,
+        128,
+        64
+      ],
+      "steps_per_arm": 216,
+      "seed": 20260919
     }
   },
   "monitor": {
@@ -894,7 +922,7 @@
     "automation_display_name": "GPU1 独立研究进展",
     "rules_first": "Read /vepfs/vlms/1/研究规则.md before continuing; the automation was updated to GPU1 and evidence-first/pilot-first execution on 2026-09-17."
   },
-  "next": "Preregister a geometry-preserving P049 pilot. Include the frozen model as an explicit non-inferiority baseline and do not run full scale unless role metrics improve while mAP@10 and paraphrase retrieval preserve or exceed the frozen geometry.",
+  "next": "Preregister a P050 selective-effect pilot before any new training: start from the ordinary verifier as the utility anchor, apply the role-effect residual only when an independently calibrated reliability rule fires, and compare ordinary, universal-DoD, and selective/constrained variants with matched compute. Require paired mAP superiority over ordinary, paraphrase noninferiority, hard-negative improvement, and non-color role coverage before multi-seed or full-scale work.",
   "results": {
     "P001": {
       "n": 4,
@@ -1878,57 +1906,118 @@
       },
       "all_gates_pass": false,
       "decision": "Do not scale. The margin signal is encouraging, but the role arm did not improve held-out pair accuracy over generic augmentation."
+    },
+    "P049": {
+      "status": "fail_stop_no_full",
+      "audit_status": {
+        "static": "faithful",
+        "runtime": "faithful",
+        "inherited_visual_data": "pass"
+      },
+      "frozen": {
+        "map_at_10": 0.7983816964285714,
+        "paraphrase_map_at_10": 0.7319227430555556,
+        "recall_at_10": 0.9609375,
+        "hard_negative_violation_rate": 0.1328125
+      },
+      "ordinary_verifier": {
+        "map_at_10": 0.8567708333333334,
+        "paraphrase_map_at_10": 0.8061383928571428,
+        "binding_pair_accuracy": 0.828125,
+        "mean_dod_margin": 0.3031556731493765,
+        "hard_negative_violation_rate": 0.0625
+      },
+      "positive_counterfactual": {
+        "map_at_10": 0.8794270833333333,
+        "paraphrase_map_at_10": 0.6853267609126984,
+        "binding_pair_accuracy": 1.0,
+        "mean_dod_margin": 0.6364010591823899,
+        "hard_negative_violation_rate": 0.0859375
+      },
+      "dod_counterfactual": {
+        "map_at_10": 0.8497891865079366,
+        "paraphrase_map_at_10": 0.8395275297619048,
+        "binding_pair_accuracy": 0.9453125,
+        "dod_pair_accuracy": 0.90625,
+        "mean_dod_margin": 0.5258647842638311,
+        "hard_negative_violation_rate": 0.0703125
+      },
+      "paired_bootstrap": {
+        "map_vs_frozen": {
+          "difference": 0.05140749007936508,
+          "ci95": [
+            0.014242311507936508,
+            0.09094122023809524
+          ]
+        },
+        "map_vs_ordinary": {
+          "difference": -0.006981646825396827,
+          "ci95": [
+            -0.03639012896825397,
+            0.019419642857142858
+          ]
+        },
+        "paraphrase_map_vs_frozen": {
+          "difference": 0.10760478670634921,
+          "ci95": [
+            0.06436631944444444,
+            0.15395585317460317
+          ]
+        },
+        "dod_margin_vs_ordinary": {
+          "difference": 0.22270911111445457,
+          "ci95": [
+            0.17048356925988628,
+            0.27544449841661844
+          ]
+        },
+        "hard_negative_violation_vs_frozen": {
+          "difference": -0.0625,
+          "ci95": [
+            -0.1171875,
+            -0.015625
+          ]
+        }
+      },
+      "gates": {
+        "map_gain_vs_frozen": true,
+        "map_gain_vs_ordinary": false,
+        "paraphrase_map_noninferiority": true,
+        "dod_margin_gain_vs_ordinary": true,
+        "hard_negative_violation_reduction": true,
+        "all_pass": false
+      },
+      "diagnosis": {
+        "vs_ordinary_improved_equal_worse": [
+          7,
+          110,
+          11
+        ],
+        "raw_main_map": 0.8535900297619047,
+        "delta_main_map": 0.8497891865079366,
+        "raw_paraphrase_map": 0.829296875,
+        "delta_paraphrase_map": 0.8395275297619048,
+        "scope": "126/128 validation examples use color as the active role; general-role claims are unsupported."
+      },
+      "decision": "Do not scale. Preserve the ordinary verifier utility anchor and test independently calibrated selective role-effect correction on broader roles."
     }
   },
-  "novelty_status": "No effective method is established. P044/P045 show that per-role pseudo labels from automatic judges are not stable enough (65% relation agreement, 42% route agreement). Generic noise routing is already prior art. The next candidate is shared-target self-normalized role corruption, whose novelty and data validity remain unverified.",
+  "novelty_status": "A generic frozen-retriever plus multimodal verifier is occupied prior art and is a strong P049 control (mAP@10 0.8568). P049 establishes a narrower mechanism signal: candidate-level role interventions with difference-in-differences significantly improve role margin, paraphrase retrieval, and hard-negative violations over the frozen baseline, but do not beat the ordinary verifier on primary mAP. Novelty is therefore not established. A defensible next claim would require independently calibrated selective use of role effects and broader-role evidence, rather than universal delta reranking or generic verifier training.",
   "last_progress_audit": {
-    "previous_goal_turn": "progress",
+    "previous_goal_turn": "P048 mechanism supported but frozen geometry not preserved",
     "evidence": [
-      "P030 protocol and queue were locked before scores; P031/P032 waiting without GPU contention"
+      "P048 text role swapping improved role-binding controls but damaged frozen retrieval geometry."
     ],
-    "this_turn": "progress",
+    "this_turn": "P049 completed with strict stop decision",
     "new_evidence": [
-      "P030 live scoring verified on physical GPU3 with no exit/result yet",
-      "P031/P032 queue scripts statically audited against frozen dependencies",
-      "CoCI 2025 full method/results/control ablation read; it materially tightens P032 novelty and control requirements",
-      "P032 qualitative pilot gate operationalized at 73bced9 before P030 completion; all three directional checks are required",
-      "ReCALL and WISER primary methods audited; P031 reframed as transfer evidence and generic verifier/calibration novelty ruled out",
-      "TIIR and CoPE screened as direct boundaries for generic multi-image embedding and uncertainty claims",
-      "INTENT primary method audited; counterfactual-reference and causal-invariance claims added to the novelty exclusion boundary",
-      "P033 held-out query selection, donor permutations, fixed estimators, and strict execution gate frozen before P030/P032 results",
-      "Reserved metadata audit found only 54 eligible components and severe category concentration; non-Composition sensitivity is limited to two components",
-      "Annotation nulls verified as negative-list padding only; conflict counts are unchanged after excluding nulls",
-      "RMCD and MultiSHAP primary sources audited and added as novelty boundaries",
-      "ARS-MMT added as a direct boundary for shuffled-visual specificity controls",
-      "P030 completed with integrity checks passing and a non-significant dual-input gain over single input",
-      "P032 failed two of three locked gates, so P033 was stopped before any held-out access",
-      "P031 failure was localized to versioned config parsing after base3b completion; compatibility adapter passed CPU preflight",
-      "P034 fixed-alpha missing-reference transfer failed ranking and Qwen7B mechanism gates; direct subtraction was rejected without touching held-out data",
-      "P035 completed with exit 0 and integrity checks; it failed AP@10 and macro-AUC gates, so held-out execution remains blocked by the preregistered rule.",
-      "P036 froze a materially different joint-preserving source-veto protocol and a 27-component development/27-component untouched confirmation split before reserved model scores.",
-      "P037 froze a position-controlled source intervention before new scores: equivalent reindexing and wrong binding share identical images/order/layout/length; 48 observed P030 queries, 1920 new scores, four directional gates, no held-out access.",
-      "P036/P037 analysis AP cutoff corrected from 100 to 10 before either analysis ran and before any P037 score; this aligns code with the frozen AP@10 gate.",
-      "P036 was terminated at 2592/13980 records with exit 143 before analysis; confirmation stayed untouched. A mandatory preregistered pilot-before-full policy was added, and P037 began as the first compliant pilot.",
-      "P037 pilot completed 1920 unique finite scores and failed 3/4 frozen gates: PCSI AP@10 -0.100pp, positive binding contrast mean -0.0357, contrast macro AUC 0.4625; explicit-negative precision improved -0.417pp. Full-scale PCSI is stopped.",
-      "Screened nine additional primary sources spanning direct CIR, multi-image position bias, adjacent multi-reference binding, and set invariance.",
-      "P038 SIRC freezes ten observed development queries, 600 new scores, three matched conditions, and five all-required gates before any score.",
-      "P038 confirmation and all new components remain untouched.",
-      "P038 completed 600/600 unique scores with exit 0 and protocol smoke checks passing; no held-out or confirmation data were accessed.",
-      "P038 passed four diagnostic/safety gates but failed the primary AP@10 gate: SIRC AB was -1.568pp versus original dual, so full-scale execution is stopped.",
-      "The user changed the resource policy: all future experiments must use physical GPU1 (GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f) after an immediate occupancy check.",
-      "P001-P038 were re-audited by mechanism family; prompt/position correction, scalar source fusion, raw subtraction, attention readout, and full-stream isolation repeatedly improved diagnostics without stable ranking gains.",
-      "Six additional primary sources were screened for causal visual paths and private instance binding. P039 freezes Shadow Binding Bridges as a 612-score GPU1 mechanism screen with four narrow layer windows, a soft baseline, an all-layer control, and five all-required gates.",
-      "P046 froze 64 product-disjoint MERIT bundles across pants, cloth, and shoes; 256 base products had zero overlap with 5,770 P041-P043 products.",
-      "P046 static and runtime implementation audits both classified the implementation as faithful: 36/36 language layers received LoRA gradients, the visual merger and candidate branch received gradients, and 127,412,992 parameters were trainable.",
-      "The P046 corruption confirmation passed: identity calibration and donor-relation negatives were each 23/24 (95.8%).",
-      "The three-arm single-seed pilot failed its all-required gate. Role corruption tied generic augmentation at 87.5% pair accuracy, improved mean role margin by 0.0435 over the strongest control, and tied retrieval accuracy at 93.75%; no full-scale run is authorized.",
-      "P047 froze 352 bundles and 1,408 within-pilot-disjoint products with balanced reference positions; its static implementation audit was faithful.",
-      "P047 stopped before training because independent visual confirmation passed only 53/64 cross-role negatives (82.8% below the 90% gate), despite 63/64 identity calibration.",
-      "P047 failure decomposition found color or pattern/print passed 49/52 cross-role checks while other attributes passed 4/12, localizing metadata-to-visual supervision noise.",
-      "P048 used 320 bundles (128/128/64), 1,280 within-pilot-disjoint products, balanced role positions, and zero overlap with P047 confirmation products.",
-      "P048 static/runtime audits were faithful; 36/36 language layers, visual merger, candidate branch, and text-role branch received gradients. The independent visual data gate passed 60/64 negatives and 64/64 identities.",
-      "P048 text role swapping beat the strongest image-swap control by +3.91pp binding accuracy, +0.0696 binding margin, +0.1026 mAP@10, and +8.59pp R@10; margin, mAP, and R@10 paired intervals supported the gain.",
-      "P048 failed two preregistered gates and remained below the frozen model mAP@10 (0.615 vs 0.798), so no full-scale run is authorized. The next falsifier must preserve frozen global geometry."
+      "P049 exactly reproduced the P048 frozen baseline after the implementation audit caught and corrected a system-prompt mismatch: mAP@10 0.7983817 and R@10 0.9609375.",
+      "P049 used 144/128/64 train/validation/confirmation bundles and 1,344 within-pilot-disjoint products; validation and confirmation were identical to P048, and training products had zero held-out overlap.",
+      "P049 final static and runtime audits were faithful: 36/36 LoRA language layers, the visual merger, scalar head, original/swap positive and negative branches, and paraphrase branches all received gradients; the frozen base had no optimizer path.",
+      "The ordinary verifier was a strong control at mAP@10 0.85677 and paraphrase mAP@10 0.80614. Positive-only counterfactual training raised main mAP to 0.87943 but collapsed paraphrase mAP to 0.68533, exposing a surface-form shortcut.",
+      "The DoD arm achieved mAP@10 0.84979, paraphrase mAP@10 0.83953, binding accuracy 0.94531, DoD pair accuracy 0.90625, and hard-negative violation 0.07031.",
+      "Paired bootstrap supported DoD over frozen on mAP (+0.05141, 95% CI [0.01424, 0.09094]), paraphrase mAP (+0.10760, [0.06437, 0.15396]), DoD margin over ordinary (+0.22271, [0.17048, 0.27544]), and hard-negative violation reduction (-0.0625, [-0.11719, -0.015625]).",
+      "The primary innovation gate failed because DoD did not beat the ordinary verifier on mAP (-0.00698, 95% CI [-0.03639, 0.01942]); full-scale execution is not authorized.",
+      "Failure localization showed DoD raw-score mAP 0.85359 versus delta-score mAP 0.84979, while paraphrase moved in the opposite direction (0.82930 raw to 0.83953 delta). Universal delta use is the current bottleneck; the main evidence is concentrated in color roles and cannot support general-role claims."
     ]
   },
   "idea_audits": {
@@ -2475,6 +2564,126 @@
         ],
         "mechanistic_conclusion": "Text-only role binding is stronger than image swapping, but one-positive/one-hard-negative fine-tuning over-specializes the global embedding geometry."
       }
+    },
+    {
+      "id": "candidate_level_role_effect_verifier_v1",
+      "status": "pilot_failed_stop_no_full_but_robustness_mechanism_supported",
+      "title": "Frozen retrieval with candidate-level role-intervention difference-in-differences",
+      "mechanism": "A frozen base retriever supplies Top-10 candidates. An 8B candidate-aware cross-encoder compares each candidate under the original query, a single-role text swap, and a paraphrase. The proposed arm learns positive counterfactual ordering, positive-versus-negative difference-in-differences, and paraphrase effect consistency.",
+      "implementation_audit": {
+        "static": "faithful",
+        "runtime": "faithful",
+        "trainable_parameters": 127417089,
+        "language_lora_layers": "36/36",
+        "visual_merger_trainable": true,
+        "all_intervention_branches_have_gradient": true,
+        "base_retriever_in_optimizer": false,
+        "peak_audit_allocated_bytes": 18153964032
+      },
+      "data": {
+        "train": 144,
+        "validation": 128,
+        "confirmation": 64,
+        "unique_products": 1344,
+        "train_heldout_overlap": 0,
+        "validation_confirmation_match_P048": true,
+        "scope_limit": "active validation role is almost entirely color"
+      },
+      "pilot_result": {
+        "status": "fail_stop_no_full",
+        "audit_status": {
+          "static": "faithful",
+          "runtime": "faithful",
+          "inherited_visual_data": "pass"
+        },
+        "frozen": {
+          "map_at_10": 0.7983816964285714,
+          "paraphrase_map_at_10": 0.7319227430555556,
+          "recall_at_10": 0.9609375,
+          "hard_negative_violation_rate": 0.1328125
+        },
+        "ordinary_verifier": {
+          "map_at_10": 0.8567708333333334,
+          "paraphrase_map_at_10": 0.8061383928571428,
+          "binding_pair_accuracy": 0.828125,
+          "mean_dod_margin": 0.3031556731493765,
+          "hard_negative_violation_rate": 0.0625
+        },
+        "positive_counterfactual": {
+          "map_at_10": 0.8794270833333333,
+          "paraphrase_map_at_10": 0.6853267609126984,
+          "binding_pair_accuracy": 1.0,
+          "mean_dod_margin": 0.6364010591823899,
+          "hard_negative_violation_rate": 0.0859375
+        },
+        "dod_counterfactual": {
+          "map_at_10": 0.8497891865079366,
+          "paraphrase_map_at_10": 0.8395275297619048,
+          "binding_pair_accuracy": 0.9453125,
+          "dod_pair_accuracy": 0.90625,
+          "mean_dod_margin": 0.5258647842638311,
+          "hard_negative_violation_rate": 0.0703125
+        },
+        "paired_bootstrap": {
+          "map_vs_frozen": {
+            "difference": 0.05140749007936508,
+            "ci95": [
+              0.014242311507936508,
+              0.09094122023809524
+            ]
+          },
+          "map_vs_ordinary": {
+            "difference": -0.006981646825396827,
+            "ci95": [
+              -0.03639012896825397,
+              0.019419642857142858
+            ]
+          },
+          "paraphrase_map_vs_frozen": {
+            "difference": 0.10760478670634921,
+            "ci95": [
+              0.06436631944444444,
+              0.15395585317460317
+            ]
+          },
+          "dod_margin_vs_ordinary": {
+            "difference": 0.22270911111445457,
+            "ci95": [
+              0.17048356925988628,
+              0.27544449841661844
+            ]
+          },
+          "hard_negative_violation_vs_frozen": {
+            "difference": -0.0625,
+            "ci95": [
+              -0.1171875,
+              -0.015625
+            ]
+          }
+        },
+        "gates": {
+          "map_gain_vs_frozen": true,
+          "map_gain_vs_ordinary": false,
+          "paraphrase_map_noninferiority": true,
+          "dod_margin_gain_vs_ordinary": true,
+          "hard_negative_violation_reduction": true,
+          "all_pass": false
+        },
+        "diagnosis": {
+          "vs_ordinary_improved_equal_worse": [
+            7,
+            110,
+            11
+          ],
+          "raw_main_map": 0.8535900297619047,
+          "delta_main_map": 0.8497891865079366,
+          "raw_paraphrase_map": 0.829296875,
+          "delta_paraphrase_map": 0.8395275297619048,
+          "scope": "126/128 validation examples use color as the active role; general-role claims are unsupported."
+        },
+        "decision": "Do not scale. Preserve the ordinary verifier utility anchor and test independently calibrated selective role-effect correction on broader roles."
+      },
+      "transfer_insight": "The ordinary verifier acts as a utility model, while the DoD objective acts as an invariance/robustness regularizer. Uniformly replacing utility with causal-effect scores creates a Pareto trade-off; the next falsifier should borrow independently calibrated selective routing or constrained multi-objective optimization, without claiming those generic tools as novelty."
     }
   ]
 }
