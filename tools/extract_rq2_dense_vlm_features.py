@@ -40,13 +40,13 @@ class SequentialFrameReader:
         self.capture.release()
 
     def read(self, indices):
-        frames = []
+        requested = np.asarray(indices, dtype=np.int64).reshape(-1)
+        # Adjacent temporal tokens overlap. Decode each source frame once per
+        # batch, then restore the requested order for the model input.
+        unique_indices = np.unique(requested)
         cache = {}
-        for index in np.asarray(indices).reshape(-1).tolist():
+        for index in unique_indices.tolist():
             index = int(index)
-            if index in cache:
-                frames.append(cache[index])
-                continue
             if index < self.position:
                 self.capture.set(cv2.CAP_PROP_POS_FRAMES, index)
                 self.position = index
@@ -60,8 +60,7 @@ class SequentialFrameReader:
             self.position += 1
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             cache[index] = rgb
-            frames.append(rgb)
-        return frames
+        return [cache[int(index)] for index in requested.tolist()]
 
 
 class EgoVideoEncoder:

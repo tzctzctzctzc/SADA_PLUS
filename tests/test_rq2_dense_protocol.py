@@ -4,6 +4,7 @@ from pathlib import Path
 
 from tools.audit_rq2_vlm_benchmark import audit_shift_registry
 from tools.extract_rq2_dense_vlm_features import (
+    SequentialFrameReader,
     required_video_ids_from_registry,
 )
 
@@ -30,6 +31,54 @@ def test_sampling_is_uniform_within_the_shared_receptive_field():
     indices = sampled_source_indices(0, 8, 30.0, 100)
     assert indices.tolist() == [0, 4, 9, 13, 18, 22, 27, 31]
     assert np.all(np.diff(indices) > 0)
+
+
+def test_frame_reader_decodes_overlapping_indices_once(monkeypatch, tmp_path):
+    import tools.extract_rq2_dense_vlm_features as extractor
+
+    class FakeCapture:
+        def __init__(self, _path):
+            self.position = 0
+            self.read_count = 0
+            self.set_count = 0
+
+        def isOpened(self):
+            return True
+
+        def grab(self):
+            self.position += 1
+            return True
+
+        def read(self):
+            value = self.position
+            self.position += 1
+            self.read_count += 1
+            return True, np.asarray([value], dtype=np.uint8)
+
+        def set(self, _property, value):
+            self.position = int(value)
+            self.set_count += 1
+
+        def release(self):
+            pass
+
+    capture = None
+
+    def make_capture(path):
+        nonlocal capture
+        capture = FakeCapture(path)
+        return capture
+
+    monkeypatch.setattr(extractor.cv2, "VideoCapture", make_capture)
+    monkeypatch.setattr(extractor.cv2, "cvtColor", lambda frame, _code: frame)
+    reader = SequentialFrameReader(tmp_path / "dummy.mp4")
+    try:
+        frames = reader.read(np.asarray([[0, 2, 4], [2, 4, 6]]))
+    finally:
+        reader.close()
+    assert [int(frame[0]) for frame in frames] == [0, 2, 4, 2, 4, 6]
+    assert capture.read_count == 4
+    assert capture.set_count == 0
 
 
 def test_centers_match_sada_coordinate_conversion():
