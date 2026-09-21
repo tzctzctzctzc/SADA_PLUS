@@ -113,8 +113,9 @@ class MetricTracker:
         self.reset()
 
     def reset(self):
-        for col in self._data.columns:
-            self._data[col].values[:] = 0
+        # pandas 3 may expose ``Series.values`` as a read-only NumPy view.
+        # Assign through the DataFrame API so reset works across pandas versions.
+        self._data.loc[:, :] = 0
 
     def update(self, key, value, n=1):
         if self.writer is not None:
