@@ -241,20 +241,23 @@ def main(cfg, resume, project_name='domain_adaptation', debug=False):
     
     # Execute the inference
     print("Starting inference...")
-    if args.eval_split == 'val':
-        trainer._test_epoch(
+    domains = ('src', 'tgt') if args.eval_domain == 'both' else (args.eval_domain,)
+    for domain in domains:
+        if domain == 'src':
+            data_loader = (
+                val_loader_src if args.eval_split == 'val' else train_loader_src2
+            )
+        else:
+            data_loader = (
+                val_loader_tgt if args.eval_split == 'val' else train_loader_tgt2
+            )
+        metrics = trainer._test_epoch(
             curr_epoch=None,
-            data_loader=val_loader_tgt,
-            mode='test',
-            domain='tgt',
+            data_loader=data_loader,
+            mode='test' if args.eval_split == 'val' else 'train',
+            domain=domain,
         )
-    else:
-        trainer._test_epoch(
-            curr_epoch=None,
-            data_loader=train_loader_tgt2,
-            mode='train',
-            domain='tgt',
-        )
+        print('{} metrics: {}'.format(domain, metrics))
 
     print("All done!")
     return
@@ -282,6 +285,8 @@ def create_argparser():
                         help='debug flag')
     parser.add_argument('--eval_split', choices=('train', 'val'), default='train',
                         help='target-domain split to evaluate (default: train)')
+    parser.add_argument('--eval_domain', choices=('src', 'tgt', 'both'), default='tgt',
+                        help='domain to evaluate; both reports source then target')
 
     add_dict_to_argparser(parser, ARGS_TYPES)
 
