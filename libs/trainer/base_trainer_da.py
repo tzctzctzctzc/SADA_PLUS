@@ -236,7 +236,8 @@ class BaseTrainerDA:
             'oracle_target_task', 'off'
         )
         select_with_target_loss = (
-            supervised_mode != 'off' or oracle_target_task != 'off'
+            supervised_mode in ('target_only', 'source_target')
+            or oracle_target_task != 'off'
         )
         final_epoch = (
             min(self.epochs, stop_after_epoch)

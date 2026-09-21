@@ -401,7 +401,7 @@ class SADA(nn.Module):
             'supervised_upper_bound', 'off'
         )
         if self.supervised_upper_bound_mode not in (
-            'off', 'target_only', 'source_target'
+            'off', 'source_only', 'target_only', 'source_target'
         ):
             raise ValueError(
                 'unknown supervised upper-bound mode: {}'.format(

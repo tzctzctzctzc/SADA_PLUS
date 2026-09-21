@@ -1212,9 +1212,12 @@ def create_argparser():
     )
     parser.add_argument(
         '--supervised-upper-bound',
-        choices=['off', 'target_only', 'source_target'],
+        choices=['off', 'source_only', 'target_only', 'source_target'],
         default='off',
-        help='diagnostic training with target GT; not an unsupervised method',
+        help=(
+            'controlled training regime: source_only trains only on source GT; '
+            'target_only/source_target use target GT and are diagnostic upper bounds'
+        ),
     )
     parser.add_argument(
         '--vlm-target-adapter-cache', default=None,
@@ -2209,7 +2212,7 @@ if __name__ == '__main__':
         raise ValueError('VLM routing and Stage 1 stability cannot both be enabled')
     target_gt_diagnostic = (
         args.oracle_target_task != 'off'
-        or args.supervised_upper_bound != 'off'
+        or args.supervised_upper_bound in ('target_only', 'source_target')
     )
     if target_gt_diagnostic:
         conflicting_diagnostics = (

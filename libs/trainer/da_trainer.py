@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from .base_trainer_da import BaseTrainerDA
+from .training_regimes import consumes_target_train, training_epoch_length
 from libs.datasets import truncate_feats
 from libs.utils.train_utils import AverageMeter
 from libs.models.SADA.stage1_calibration import (
@@ -326,6 +327,15 @@ class Trainer(BaseTrainerDA):
             for _ in range(len(self.train_loader_tgt)):
                 next(iter_tgt)
             return
+        if supervised_mode == 'source_only':
+            iter_src = itertools.cycle(iter(self.train_loader_src))
+            for _ in range(training_epoch_length(
+                supervised_mode,
+                len(self.train_loader_src),
+                len(self.train_loader_tgt),
+            )):
+                next(iter_src)
+            return
         iter_src = itertools.cycle(iter(self.train_loader_src))
         iter_tgt = itertools.cycle(iter(self.train_loader_tgt))
         for _ in range(max(len(self.train_loader_src), len(self.train_loader_tgt))):
@@ -349,30 +359,44 @@ class Trainer(BaseTrainerDA):
         self.conditional_class_batch_count = 0
         
         # Create iterator for the source and target data loaders
-        iter_src = iter(self.train_loader_src)
-        iter_tgt = iter(self.train_loader_tgt)
-        
-        # Create cyclic iterators
-        iter_src = itertools.cycle(iter_src)
-        iter_tgt = itertools.cycle(iter_tgt)
-        
         supervised_mode = self.cfg.get('diagnostic', {}).get(
             'supervised_upper_bound', 'off'
         )
-        if supervised_mode == 'target_only':
-            num_iters = len(self.train_loader_tgt)
-        else:
-            num_iters = max(len(self.train_loader_src), len(self.train_loader_tgt))
+        iter_src = itertools.cycle(iter(self.train_loader_src))
+        iter_tgt = (
+            None
+            if not consumes_target_train(supervised_mode)
+            else itertools.cycle(iter(self.train_loader_tgt))
+        )
+        num_iters = training_epoch_length(
+            supervised_mode,
+            len(self.train_loader_src),
+            len(self.train_loader_tgt),
+        )
         
         counter = 0
         for iter_idx in tqdm(range(num_iters)):
             self.conditional_class_batch_count += 1
             # Get the video data of each of the datasets and move to device
-            video_list_tgt = next(iter_tgt)
-            video_list_tgt = move_to_device(video_list_tgt, self.model.device)
             if supervised_mode == 'target_only':
+                video_list_tgt = next(iter_tgt)
+                video_list_tgt = move_to_device(
+                    video_list_tgt, self.model.device
+                )
                 video_list_src = video_list_tgt
+            elif supervised_mode == 'source_only':
+                video_list_src = next(iter_src)
+                video_list_src = move_to_device(
+                    video_list_src, self.model.device
+                )
+                # The model API expects both streams. Reuse the source batch so
+                # no target-train sample, feature, or annotation is consumed.
+                video_list_tgt = video_list_src
             else:
+                video_list_tgt = next(iter_tgt)
+                video_list_tgt = move_to_device(
+                    video_list_tgt, self.model.device
+                )
                 video_list_src = next(iter_src)
                 video_list_src = move_to_device(video_list_src, self.model.device)
             
@@ -436,6 +460,9 @@ class Trainer(BaseTrainerDA):
             alignment_loss = losses['downstream_loss'] * 0.0
             alignment_components = []
             if supervised_mode == 'target_only':
+                task_loss = losses['downstream_loss']
+                final_loss = task_loss
+            elif supervised_mode == 'source_only':
                 task_loss = losses['downstream_loss']
                 final_loss = task_loss
             elif supervised_mode == 'source_target':
