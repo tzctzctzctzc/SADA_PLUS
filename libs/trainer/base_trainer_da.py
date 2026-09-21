@@ -313,13 +313,14 @@ class BaseTrainerDA:
                 self.valid_metrics_src.reset()
                 self.valid_metrics_tgt.reset()
                 
-                target_loss_loader = (
-                    self.val_loader_tgt
-                    if select_with_target_loss else self.train_loader_tgt2
-                )
-                metric_tgt = self._valid_epoch(
-                    epoch, target_loss_loader, domain='tgt'
-                )
+                if supervised_mode != 'source_only':
+                    target_loss_loader = (
+                        self.val_loader_tgt
+                        if select_with_target_loss else self.train_loader_tgt2
+                    )
+                    metric_tgt = self._valid_epoch(
+                        epoch, target_loss_loader, domain='tgt'
+                    )
                 metric_src = self._valid_epoch(epoch, self.val_loader_src, domain='src') # Evaluate on the test set of the source domain
 
                 selection_metric = metric_tgt if select_with_target_loss else metric_src
@@ -558,20 +559,23 @@ class BaseTrainerDA:
                     wandb.log(source_metrics_val, step=epoch)
                     benchmark_evaluation.update(source_metrics_val)
 
-                    target_metrics_train = self._test_epoch(
-                        epoch, self.train_loader_tgt2, 'train', domain='tgt'
-                    )
-                    target_metrics_train = {
-                        't_tgt_'+k: v for k, v in target_metrics_train.items()
-                    }
-                    wandb.log(target_metrics_train, step=epoch)
-                    benchmark_evaluation.update(target_metrics_train)
+                    if supervised_mode != 'source_only':
+                        target_metrics_train = self._test_epoch(
+                            epoch, self.train_loader_tgt2, 'train', domain='tgt'
+                        )
+                        target_metrics_train = {
+                            't_tgt_'+k: v for k, v in target_metrics_train.items()
+                        }
+                        wandb.log(target_metrics_train, step=epoch)
+                        benchmark_evaluation.update(target_metrics_train)
                 
-                # Evaluate on the test split of the target domain (Not seen during training)
-                target_metrics_val = self._test_epoch(epoch, self.val_loader_tgt, 'test', domain='tgt')
-                target_metrics_val = {'v_tgt_'+k : v for k, v in list(target_metrics_val.items())}
-                wandb.log(target_metrics_val, step=epoch)
-                benchmark_evaluation.update(target_metrics_val)
+                # Strict source-only training never observes target metrics.
+                # Target-val is evaluated once, offline, after model selection.
+                if supervised_mode != 'source_only':
+                    target_metrics_val = self._test_epoch(epoch, self.val_loader_tgt, 'test', domain='tgt')
+                    target_metrics_val = {'v_tgt_'+k : v for k, v in list(target_metrics_val.items())}
+                    wandb.log(target_metrics_val, step=epoch)
+                    benchmark_evaluation.update(target_metrics_val)
                 self._append_benchmark_jsonl(
                     'benchmark_eval_metrics.jsonl', benchmark_evaluation
                 )

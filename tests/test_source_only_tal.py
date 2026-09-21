@@ -6,6 +6,7 @@ from libs.trainer.training_regimes import (
 
 def test_source_only_uses_only_source_epoch_length():
     assert training_epoch_length("source_only", 4, 7) == 4
+    assert training_epoch_length("source_only", 11, 3) == 11
     assert not consumes_target_train("source_only")
 
 

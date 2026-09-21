@@ -133,17 +133,26 @@ def main(cfg, resume, project_name='sada', debug=False):
         cfg['dataset_name'], False, cfg['src_val_split'], **cfg['dataset']
     )
     
-    train_dataset_tgt = make_dataset(
-        cfg['dataset_name'], True, cfg['tgt_train_split'], **cfg['dataset']
-    ) 
-    
-    train_dataset_tgt2 = make_dataset(
-        cfg['dataset_name'], False, cfg['tgt_train_split'], **cfg['dataset']
-    ) 
-    
-    val_dataset_tgt = make_dataset(
-        cfg['dataset_name'], False, cfg['tgt_val_split'], **cfg['dataset']
-    ) 
+    supervised_mode = cfg.get('diagnostic', {}).get(
+        'supervised_upper_bound', 'off'
+    )
+    if supervised_mode == 'source_only':
+        # A strict source-only run must not open target annotations or features.
+        # The trainer API still expects both streams, so use source aliases; the
+        # source-only training path never iterates the target-named loaders.
+        train_dataset_tgt = train_dataset_src
+        train_dataset_tgt2 = train_dataset_src2
+        val_dataset_tgt = val_dataset_src
+    else:
+        train_dataset_tgt = make_dataset(
+            cfg['dataset_name'], True, cfg['tgt_train_split'], **cfg['dataset']
+        )
+        train_dataset_tgt2 = make_dataset(
+            cfg['dataset_name'], False, cfg['tgt_train_split'], **cfg['dataset']
+        )
+        val_dataset_tgt = make_dataset(
+            cfg['dataset_name'], False, cfg['tgt_val_split'], **cfg['dataset']
+        )
     
     # update cfg based on dataset attributes (fix to epic-kitchens) only if there is a method get_attributes
     if hasattr(train_dataset_src, 'get_attributes'):
@@ -246,13 +255,12 @@ def main(cfg, resume, project_name='sada', debug=False):
     for module in model.disc_dom_conditional_adv:
         disc_params += list(module.parameters())
     
-    supervised_mode = cfg.get('diagnostic', {}).get(
-        'supervised_upper_bound', 'off'
+    from libs.trainer.training_regimes import training_epoch_length
+    num_iters_epoch = training_epoch_length(
+        supervised_mode,
+        len(train_loader_src),
+        len(train_loader_tgt),
     )
-    if supervised_mode == 'target_only':
-        num_iters_epoch = len(train_loader_tgt)
-    else:
-        num_iters_epoch = max(len(train_loader_src), len(train_loader_tgt))
     
     optimizer_gen_source = make_optimizer(model, cfg['opt'], cfg['opt']['learning_rate'], exclude_params = ['disc_dom_adv', 'disc_dom_conditional_adv', 'learnable_embeddings'])
     scheduler_gen_source = make_scheduler(optimizer_gen_source, cfg['opt'], num_iters_epoch)
