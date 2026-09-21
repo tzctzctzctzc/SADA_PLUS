@@ -90,6 +90,11 @@ def temporal_length(frame_count, source_fps):
     return max(1, int(np.floor(duration * FEATURE_FPS / FEAT_STRIDE)))
 
 
+def reference_temporal_length_is_compatible(calculated, reference):
+    """Allow the anchor encoder's single trailing partial-stride token."""
+    return reference in (calculated, calculated + 1)
+
+
 def sampled_source_indices(token_index, input_frames, source_fps, frame_count):
     if token_index < 0 or input_frames <= 0:
         raise ValueError("token index must be non-negative and input frames positive")

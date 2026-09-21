@@ -21,6 +21,7 @@ from tools.rq2_dense_protocol import (
     expected_centers_seconds,
     protocol_payload,
     protocol_sha256,
+    reference_temporal_length_is_compatible,
     sampled_source_indices,
     sha256_file,
     temporal_length,
@@ -417,7 +418,9 @@ def main():
             raise FileNotFoundError("video is missing: {}".format(video_path))
         frame_count, source_fps = video_metadata(video_path)
         calculated = temporal_length(frame_count, source_fps)
-        if calculated != expected_length:
+        if not reference_temporal_length_is_compatible(
+            calculated, expected_length
+        ):
             raise RuntimeError(
                 "{} temporal length mismatch: video={} reference={}".format(
                     video_id, calculated, expected_length

@@ -10,6 +10,7 @@ from tools.extract_rq2_dense_vlm_features import (
 
 from tools.rq2_dense_protocol import (
     expected_centers_seconds,
+    reference_temporal_length_is_compatible,
     sampled_source_indices,
     temporal_length,
     protocol_payload,
@@ -25,6 +26,13 @@ from tools.rq2_dense_protocol import (
 def test_temporal_length_matches_slowfast_grid():
     assert temporal_length(33745, 50.0) == 1265
     assert temporal_length(10689, 50.0) == 400
+
+
+def test_reference_length_allows_only_one_trailing_partial_stride():
+    assert reference_temporal_length_is_compatible(222, 222)
+    assert reference_temporal_length_is_compatible(222, 223)
+    assert not reference_temporal_length_is_compatible(222, 224)
+    assert not reference_temporal_length_is_compatible(223, 222)
 
 
 def test_sampling_is_uniform_within_the_shared_receptive_field():
