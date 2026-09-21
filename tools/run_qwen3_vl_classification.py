@@ -281,7 +281,7 @@ def load_qwen3(args):
         args.model_path, **model_kwargs
     )
     if args.device_map == "none":
-        model.to("cuda")
+        model.to(getattr(args, "device", "cuda"))
     model.eval()
     processor = AutoProcessor.from_pretrained(
         args.model_path, local_files_only=args.offline

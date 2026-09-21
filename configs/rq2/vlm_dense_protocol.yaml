@@ -1,0 +1,50 @@
+schema: rq2-dense-vlm-protocol-v1
+
+common:
+  feature_fps: 30.0
+  feat_stride: 16
+  receptive_field_frames: 32
+  temporal_grid: slowfast-compatible-left-edge-v1
+  sampling: deterministic-uniform-within-receptive-field
+  normalization: l2
+  source_only_seed: 6
+  epochs: 50
+  checkpoint_selection: source_validation_loss
+  target_train_usage: forbidden
+  target_validation_usage: final_reporting_only
+
+models:
+  slowfast:
+    status: anchor_verified
+    output_dim: 2304
+    input_frames: 32
+    spatial_size: null
+    feature_interface: existing_dense_feature
+  egovideo_hod:
+    status: smoke_verified
+    output_dim: 512
+    input_frames: 8
+    spatial_size: 336
+    feature_interface: official_joint_video_cls
+  internvideo2_clip_1b:
+    status: smoke_verified
+    output_dim: 768
+    input_frames: 8
+    spatial_size: 224
+    feature_interface: official_video_clip_projector
+    execution_backend: official_torch_unfused_ops
+  qwen3_vl_8b:
+    status: pending_implementation
+    output_dim: 4096
+    input_frames: 8
+    spatial_size: 448
+    feature_interface: neutral_prompt_multimodal_last_token
+    diagnostic_interface: vision_tower_spatial_pool_then_temporal_mean
+  timelens2_8b:
+    status: pending_interface
+    feature_interface: predeclared_time_corresponding_multimodal_representation
+    note: no verified official temporal-head readout
+  timeple_8b:
+    status: pending_interface
+    feature_interface: predeclared_time_corresponding_representation
+    note: record which temporal-specialization modules the readout actually uses

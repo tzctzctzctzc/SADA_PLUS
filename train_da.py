@@ -62,11 +62,15 @@ ARGS_CONFIGPATH = dict(  # alias for CLI argument: route in config file
     batch_size=("trainer", "batch_size"),
     valid_freq=("train_cfg", "valid_freq"),
     test_freq=("train_cfg", "test_freq"),
+    feature_folder=("dataset", "feat_folder"),
+    input_dim=("dataset", "input_dim"),
 )
 ARGS_TYPES = dict(
     batch_size=int,
     valid_freq=int,
     test_freq=int,
+    feature_folder=str,
+    input_dim=int,
 ) 
 
 
@@ -1038,6 +1042,10 @@ def create_argparser():
                         help='gpu')
     parser.add_argument('-d', '--debug', action='store_true',
                         help='debug flag')
+    parser.add_argument(
+        '--feature-protocol', default=None,
+        help='RQ2 dense-feature protocol.json recorded and checked before training',
+    )
     parser.add_argument(
         '--trident-head', action='store_true',
         help='use the TriDet class-conditioned boundary and offset heads',
@@ -2501,6 +2509,15 @@ if __name__ == '__main__':
     }
 
     update_config_with_arguments(config_dict, args, ARGS_TYPES, ARGS_CONFIGPATH)
+    if args.feature_protocol:
+        from tools.rq2_dense_protocol import validate_training_protocol
+
+        feature_protocol = validate_training_protocol(
+            args.feature_protocol,
+            config_dict['dataset']['feat_folder'],
+            config_dict['dataset']['input_dim'],
+        )
+        config_dict['rq2_feature_protocol'] = feature_protocol
     if args.trident_head and args.actionformer_backbone:
         raise ValueError('TriDet and ActionFormer architecture flags are exclusive')
     if args.trident_head:

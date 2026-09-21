@@ -8,8 +8,10 @@ kept; only missing pieces are fetched and written at their byte offsets.
 
 import argparse
 import csv
+import hashlib
 import json
 import os
+import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -17,6 +19,7 @@ from pathlib import Path
 
 EPIC_55_BASE = "https://data.bris.ac.uk/datasets/3h91syskeag572hl6tvuovwv4d"
 EPIC_100_BASE = "https://data.bris.ac.uk/datasets/2g1n6qdydwa9u22shpxqzp0t8m"
+VIDEO_ID_PATTERN = re.compile(r"^P\d{2}_\d{2,3}$")
 
 
 def read_ids(manifest_root):
@@ -35,6 +38,43 @@ def read_ids(manifest_root):
 def read_splits(path):
     with open(path, newline="", encoding="utf-8") as stream:
         return {row["video_id"]: row["split"] for row in csv.DictReader(stream)}
+
+
+def read_only_ids(path):
+    ids = sorted({line.strip() for line in Path(path).read_text().splitlines() if line.strip()})
+    invalid = [video_id for video_id in ids if not VIDEO_ID_PATTERN.fullmatch(video_id)]
+    if invalid:
+        raise ValueError("invalid video IDs: %s" % invalid)
+    return ids
+
+
+def read_md5s(path):
+    if path is None:
+        return {}
+    with open(path, newline="", encoding="utf-8") as stream:
+        return {
+            Path(row[1]).stem: row[0].lower()
+            for row in csv.reader(stream)
+            if len(row) >= 2 and row[1].lower().endswith(".mp4")
+        }
+
+
+def file_md5(path):
+    digest = hashlib.md5()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def backup_corrupt(path):
+    backup = Path(str(path) + ".corrupt_md5")
+    suffix = 1
+    while backup.exists():
+        backup = Path(str(path) + ".corrupt_md5.%d" % suffix)
+        suffix += 1
+    Path(path).replace(backup)
+    return backup
 
 
 def video_url(video_id, splits):
@@ -73,7 +113,8 @@ def aria_state(path):
 def curl_range(url, start, end, output, timeout):
     command = [
         "curl", "--fail", "--silent", "--show-error", "--location",
-        "--retry", "4", "--retry-delay", "2", "--connect-timeout", "30",
+        "--retry", "8", "--retry-all-errors", "--retry-delay", "2",
+        "--connect-timeout", "30",
         "--max-time", str(timeout), "--range", "%d-%d" % (start, end),
         "--output", str(output), url,
     ]
@@ -110,7 +151,7 @@ def download_piece(url, target, piece, total, index, timeout):
     return index
 
 
-def download_one(video_id, root, splits, workers, timeout):
+def download_one(video_id, root, splits, workers, timeout, expected_md5=None):
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
     target = root / (video_id + ".MP4")
@@ -118,7 +159,15 @@ def download_one(video_id, root, splits, workers, timeout):
     relay_part = Path(str(target) + ".relay.part")
     upload_part = Path(str(target) + ".upload.part")
     if target.exists() and not sidecar.exists():
-        return video_id, "complete", 0, 0
+        if expected_md5 and file_md5(target) != expected_md5:
+            backup_corrupt(target)
+        else:
+            # A completed file may retain progress markers from an interrupted
+            # relay; the official digest is the authoritative completion test.
+            Path(str(target) + ".ranges.json").unlink(missing_ok=True)
+            relay_part.unlink(missing_ok=True)
+            upload_part.unlink(missing_ok=True)
+            return video_id, "complete", target.stat().st_size, target.stat().st_size
     if relay_part.exists() and not sidecar.exists():
         return video_id, "relay_partial_skip", 0, relay_part.stat().st_size
     if upload_part.exists() and not sidecar.exists():
@@ -156,6 +205,9 @@ def download_one(video_id, root, splits, workers, timeout):
     if not missing:
         sidecar.unlink(missing_ok=True)
         progress.unlink(missing_ok=True)
+        if expected_md5 and file_md5(target) != expected_md5:
+            backup = backup_corrupt(target)
+            raise RuntimeError("MD5 mismatch; preserved as %s" % backup)
         return video_id, "completed", total, total
     completed = len(done) * piece
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -171,6 +223,9 @@ def download_one(video_id, root, splits, workers, timeout):
             print("%s piece=%d/%d bytes=%d/%d" % (video_id, len(done), len(pieces), completed, total), flush=True)
     sidecar.unlink(missing_ok=True)
     progress.unlink(missing_ok=True)
+    if expected_md5 and file_md5(target) != expected_md5:
+        backup = backup_corrupt(target)
+        raise RuntimeError("MD5 mismatch; preserved as %s" % backup)
     return video_id, "completed", total, total
 
 
@@ -179,19 +234,39 @@ def main():
     parser.add_argument("--manifest-root", required=True)
     parser.add_argument("--splits", required=True)
     parser.add_argument("--video-root", required=True)
+    parser.add_argument("--md5-csv", default=None)
     parser.add_argument("--workers", type=int, default=24)
     parser.add_argument("--piece-workers", type=int, default=16)
     parser.add_argument("--timeout", type=int, default=3600)
-    parser.add_argument("--only", nargs="*", help="download only the listed video IDs")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--only", nargs="+", help="download only the listed video IDs")
+    selection.add_argument(
+        "--only-file",
+        help="one video ID per line; IDs need not occur in the matrix manifests",
+    )
     args = parser.parse_args()
     splits = read_splits(args.splits)
-    ids = read_ids(args.manifest_root)
-    if args.only:
-        ids = [video_id for video_id in ids if video_id in set(args.only)]
+    expected_md5s = read_md5s(args.md5_csv)
+    if args.only_file:
+        ids = read_only_ids(args.only_file)
+    elif args.only:
+        ids = sorted(set(args.only))
+    else:
+        ids = read_ids(args.manifest_root)
     print("videos=%d workers=%d piece_workers=%d" % (len(ids), args.workers, args.piece_workers), flush=True)
+    counts = {}
+    failures = []
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = {
-            pool.submit(download_one, video_id, args.video_root, splits, args.piece_workers, args.timeout): video_id
+            pool.submit(
+                download_one,
+                video_id,
+                args.video_root,
+                splits,
+                args.piece_workers,
+                args.timeout,
+                expected_md5s.get(video_id),
+            ): video_id
             for video_id in ids
         }
         for future in as_completed(futures):
@@ -199,10 +274,17 @@ def main():
             try:
                 _, status, size, covered = future.result()
             except Exception as exc:
+                counts["failed"] = counts.get("failed", 0) + 1
+                failures.append(video_id)
                 print("%s failed error=%s" % (video_id, exc), flush=True)
                 continue
+            counts[status] = counts.get(status, 0) + 1
+            if status.endswith("_skip"):
+                failures.append(video_id)
             print("%s %s size=%d covered=%d" % (video_id, status, size, covered), flush=True)
+    print("counts=%s failures=%s" % (counts, sorted(failures)), flush=True)
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
