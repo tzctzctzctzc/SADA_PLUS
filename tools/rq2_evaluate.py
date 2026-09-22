@@ -1,5 +1,6 @@
 """Offline, source-selected full-video TAL evaluation for RQ2."""
 
+from copy import deepcopy
 import json
 from pathlib import Path
 
@@ -11,8 +12,43 @@ from libs.datasets import make_data_loader, make_dataset
 from libs.evaluation import ANETdetection
 from tools.rq2_dense_protocol import sha256_file, sha256_normalized_text
 from tools.rq2_formal import (
-    check_formal_features, check_frozen_runtime_values, check_slowfast_features,
+    check_formal_config, check_formal_features, check_frozen_runtime_values,
+    check_slowfast_features,
 )
+
+
+def load_checkpoint(path):
+    try:
+        return torch.load(path, map_location="cpu", weights_only=False)
+    except TypeError as exc:
+        if "weights_only" not in str(exc):
+            raise
+        return torch.load(path, map_location="cpu")
+
+
+def checkpoint_config_for_audit(saved_config, frozen_config):
+    formal = saved_config.get("rq2_formal")
+    if formal:
+        manifest = formal.get("target_manifest")
+        manifest_path = manifest.get("path") if isinstance(manifest, dict) else manifest
+        checked_manifest = check_formal_config(
+            saved_config, formal.get("regime"), manifest_path
+        )
+        if checked_manifest and (
+            not isinstance(manifest, dict)
+            or checked_manifest["sha256"] != manifest.get("sha256")
+            or checked_manifest["videos"] != manifest.get("videos")
+        ):
+            raise ValueError("checkpoint target manifest provenance differs")
+        return saved_config, "formal"
+    check_formal_config(saved_config, "so")
+    if saved_config.get("train_cfg", {}).get("test_freq") != -1:
+        raise ValueError(
+            "legacy source-only checkpoint did not disable periodic target evaluation"
+        )
+    normalized = deepcopy(saved_config)
+    normalized["train_cfg"]["test_freq"] = frozen_config["train_cfg"]["test_freq"]
+    return normalized, "legacy-source-only"
 
 
 def selected_checkpoint_state(checkpoint, config):
@@ -38,7 +74,7 @@ def evaluate(cfg, ckpt_path, config_path, output_dir, device, feature_protocol=N
         feature_hash = None
         check_slowfast_features(cfg["dataset"]["feat_folder"], registry_path)
 
-    checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    checkpoint = load_checkpoint(ckpt_path)
     if Path(ckpt_path).parent.name != "best_ckpt":
         raise ValueError("formal RQ2 evaluates only the source-selected best checkpoint")
     expected_name = "checkpoint-epoch{}.pt".format(int(checkpoint.get("epoch", -1)))
@@ -49,7 +85,10 @@ def evaluate(cfg, ckpt_path, config_path, output_dir, device, feature_protocol=N
         saved_config = getattr(saved_config, "config", saved_config)
         with Path(config_path).open(encoding="utf-8") as stream:
             frozen_config = yaml.safe_load(stream)
-        check_frozen_runtime_values(frozen_config, saved_config)
+        audited_config, checkpoint_schema = checkpoint_config_for_audit(
+            saved_config, frozen_config
+        )
+        check_frozen_runtime_values(frozen_config, audited_config)
         for key in ("src_val_split", "tgt_val_split"):
             if list(saved_config[key]) != list(cfg[key]):
                 raise ValueError("evaluation {} differs from checkpoint".format(key))
@@ -86,6 +125,7 @@ def evaluate(cfg, ckpt_path, config_path, output_dir, device, feature_protocol=N
         "checkpoint_sha256": sha256_file(ckpt_path),
         "checkpoint_epoch": int(checkpoint["epoch"]),
         "checkpoint_state_key": state_key,
+        "checkpoint_schema": checkpoint_schema,
         "seed": seed,
         "shift": shift_id,
         "config_sha256": sha256_normalized_text(config_path),

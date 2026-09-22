@@ -109,6 +109,8 @@ class EpicKitchensDataset(Dataset):
         if self.label_dict is None:
             label_dict = {}
             for key, value in json_db.items():
+                if value['subset'].lower() not in self.split:
+                    continue
                 for act in (() if self.unlabeled else value.get('annotations', ())):
                     label_dict[act['label']] = act['label_id']
 

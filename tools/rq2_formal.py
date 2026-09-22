@@ -49,6 +49,23 @@ def check_target_manifest(path, target_splits, annotation_path=None):
         raise ValueError("target manifest contains labels, unknown fields, or incorrect splits")
     if annotation_path and payload.get("source_annotation_sha256") != sha256_file(annotation_path):
         raise ValueError("target manifest was generated from different annotations")
+    if annotation_path:
+        with Path(annotation_path).open(encoding="utf-8") as stream:
+            annotated = json.load(stream)["database"]
+        splits = set(target_splits)
+        expected = {
+            video_id: {
+                key: video[key]
+                for key in ("subset", "fps", "duration")
+                if key in video
+            }
+            for video_id, video in sorted(annotated.items())
+            if video["subset"].lower() in splits
+        }
+        if database != expected:
+            raise ValueError(
+                "target manifest is incomplete or its unlabeled metadata was changed"
+            )
     return {"path": str(Path(path).resolve()), "sha256": sha256_file(path), "videos": len(database)}
 
 

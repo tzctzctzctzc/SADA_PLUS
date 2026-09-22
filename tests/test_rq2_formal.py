@@ -5,7 +5,10 @@ import pytest
 
 from libs.datasets.epic_kitchens import EpicKitchensDataset
 from tools.audit_rq2_vlm_benchmark import audit_configs, audit_so_uda_pair
-from tools.rq2_evaluate import selected_checkpoint_state
+from tools import rq2_evaluate
+from tools.rq2_evaluate import (
+    checkpoint_config_for_audit, load_checkpoint, selected_checkpoint_state,
+)
 from tools.rq2_formal import (
     FROZEN_VIDEO_SET_SHA256, build_target_manifest, check_formal_config,
     check_formal_features, check_frozen_runtime_values, check_target_manifest,
@@ -52,6 +55,45 @@ def test_manifest_with_gt_is_rejected(tmp_path):
         check_target_manifest(path, ["target_train"])
 
 
+def test_target_manifest_must_match_the_complete_unlabeled_split(tmp_path):
+    annotated = tmp_path / "annotated.json"
+    annotated.write_text(json.dumps({"database": {
+        "P01_01": {"subset": "target_train", "duration": 8, "fps": 30,
+                   "annotations": [{"label": "take", "label_id": 0,
+                                    "segment": [1, 4]}]},
+        "P01_02": {"subset": "target_train", "duration": 9, "fps": 30,
+                   "annotations": []},
+    }}), encoding="utf-8")
+    manifest = tmp_path / "unlabeled.json"
+    build_target_manifest(annotated, ["target_train"], manifest)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["database"].pop("P01_02")
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="incomplete"):
+        check_target_manifest(manifest, ["target_train"], annotated)
+
+
+def test_dataset_label_map_does_not_scan_other_domains(tmp_path):
+    annotated = tmp_path / "annotated.json"
+    annotated.write_text(json.dumps({"database": {
+        "P01_01": {"subset": "source_train", "duration": 8, "fps": 30,
+                   "annotations": [{"label": "take", "label_id": 0,
+                                    "segment": [1, 4]}]},
+        "P01_02": {"subset": "target_train", "duration": 8, "fps": 30,
+                   "annotations": [{"label": "target_only", "label_id": 1,
+                                    "segment": [2, 6]}]},
+    }}), encoding="utf-8")
+    np.savez(tmp_path / "P01_01.npz", feats=np.ones((20, 4), dtype=np.float32))
+    dataset = EpicKitchensDataset(
+        is_training=False, split=["source_train"], feat_folder=str(tmp_path),
+        json_file=str(annotated), feat_stride=16, num_frames=32, default_fps=30,
+        downsample_rate=1, max_seq_len=4, trunc_thresh=0.3,
+        crop_ratio=None, input_dim=4, num_classes=2, file_prefix=None,
+        file_ext=".npz", force_upsampling=False, action_subsampling="all",
+    )
+    assert dataset.label_dict == {"take": 0}
+
+
 def test_formal_regime_rejects_target_supervision():
     cfg = {"dataset_name": "epic", "dataset": {"action_subsampling": "10_majority_classes"},
            "diagnostic": {"supervised_upper_bound": "source_only",
@@ -88,6 +130,64 @@ def test_checkpoint_selection_matches_training_evaluation():
     assert selected_checkpoint_state(ckpt, cfg) == ("state_dict", {"student": 1})
     with pytest.raises(ValueError, match="lacks selected"):
         selected_checkpoint_state({}, cfg)
+
+
+def test_checkpoint_load_supports_torch_without_weights_only(monkeypatch):
+    calls = []
+
+    def fake_load(path, **kwargs):
+        calls.append(kwargs)
+        if "weights_only" in kwargs:
+            raise TypeError("load() got an unexpected keyword argument 'weights_only'")
+        return {"path": path}
+
+    monkeypatch.setattr(rq2_evaluate.torch, "load", fake_load)
+    assert load_checkpoint("checkpoint.pt") == {"path": "checkpoint.pt"}
+    assert calls == [
+        {"map_location": "cpu", "weights_only": False},
+        {"map_location": "cpu"},
+    ]
+
+
+def test_legacy_source_only_checkpoint_has_narrow_compatibility():
+    frozen = {
+        "dataset_name": "epic",
+        "dataset": {"action_subsampling": "10_majority_classes"},
+        "train_cfg": {"test_freq": 5},
+    }
+    saved = {
+        **frozen,
+        "dataset": dict(frozen["dataset"]),
+        "train_cfg": {"test_freq": -1},
+        "diagnostic": {"supervised_upper_bound": "source_only"},
+    }
+    audited, schema = checkpoint_config_for_audit(saved, frozen)
+    assert schema == "legacy-source-only"
+    assert audited["train_cfg"]["test_freq"] == 5
+    assert saved["train_cfg"]["test_freq"] == -1
+    saved["train_cfg"]["test_freq"] = 5
+    with pytest.raises(ValueError, match="periodic target evaluation"):
+        checkpoint_config_for_audit(saved, frozen)
+
+
+def test_formal_checkpoint_config_is_reaudited():
+    frozen = {
+        "dataset_name": "epic",
+        "dataset": {"action_subsampling": "10_majority_classes"},
+        "train_cfg": {"test_freq": 5},
+    }
+    saved = {
+        **frozen,
+        "dataset": dict(frozen["dataset"]),
+        "train_cfg": dict(frozen["train_cfg"]),
+        "diagnostic": {
+            "supervised_upper_bound": "source_only",
+            "oracle_target_task": "joint",
+        },
+        "rq2_formal": {"regime": "so", "target_manifest": None},
+    }
+    with pytest.raises(ValueError, match="forbids target GT"):
+        checkpoint_config_for_audit(saved, frozen)
 
 
 def test_runtime_config_only_allows_feature_interface_and_seed_changes():
