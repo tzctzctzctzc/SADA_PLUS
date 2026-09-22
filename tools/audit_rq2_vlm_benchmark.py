@@ -23,6 +23,11 @@ ALLOWED_CONFIG_DIFFERENCES = {
     ("rq2_feature_protocol",),
     ("name",),
 }
+ALLOWED_SO_UDA_DIFFERENCES = {
+    ("diagnostic", "supervised_upper_bound"),
+    ("rq2_formal", "regime"),
+    ("rq2_formal", "target_manifest"),
+}
 
 
 def audit_features(feature_root, reference_root):
@@ -98,7 +103,7 @@ def audit_configs(paths):
         candidate_flat = dict(_flatten(candidate))
         keys = set(baseline_flat) | set(candidate_flat)
         for key in sorted(keys):
-            if key in ALLOWED_CONFIG_DIFFERENCES:
+            if any(key[:len(allowed)] == allowed for allowed in ALLOWED_CONFIG_DIFFERENCES):
                 continue
             if baseline_flat.get(key) != candidate_flat.get(key):
                 failures.append(
@@ -110,6 +115,29 @@ def audit_configs(paths):
     if failures:
         raise RuntimeError("configuration fairness audit failed:\n" + "\n".join(failures))
     return {"configs": len(configs), "baseline": baseline_name}
+
+
+def audit_so_uda_pair(source_only_path, uda_path):
+    configs = []
+    for path in (source_only_path, uda_path):
+        with Path(path).open(encoding="utf-8") as stream:
+            configs.append(dict(_flatten(yaml.safe_load(stream))))
+    source_only, uda = configs
+    if source_only.get(("rq2_formal", "regime")) != "so":
+        raise ValueError("source-only config is not a formal RQ2 SO run")
+    if uda.get(("rq2_formal", "regime")) != "uda":
+        raise ValueError("UDA config is not a formal RQ2 UDA run")
+    failures = []
+    for key in sorted(set(source_only) | set(uda)):
+        if any(key[:len(allowed)] == allowed for allowed in ALLOWED_SO_UDA_DIFFERENCES):
+            continue
+        if source_only.get(key) != uda.get(key):
+            failures.append("{}: {!r} != {!r}".format(
+                ".".join(key), source_only.get(key), uda.get(key)
+            ))
+    if failures:
+        raise RuntimeError("SO/UDA pairing audit failed:\n" + "\n".join(failures))
+    return {"source_only": str(source_only_path), "uda": str(uda_path)}
 
 
 def audit_shift_registry(path):
@@ -162,6 +190,9 @@ def parse_args():
     feature_parser.add_argument("--reference-root", required=True)
     config_parser = subparsers.add_parser("configs")
     config_parser.add_argument("configs", nargs="+")
+    pair_parser = subparsers.add_parser("pair")
+    pair_parser.add_argument("--source-only", required=True)
+    pair_parser.add_argument("--uda", required=True)
     shift_parser = subparsers.add_parser("shifts")
     shift_parser.add_argument("--registry", required=True)
     return parser.parse_args()
@@ -175,6 +206,8 @@ def main():
         if len(args.configs) < 2:
             raise ValueError("configuration audit requires at least two configs")
         result = audit_configs(args.configs)
+    elif args.command == "pair":
+        result = audit_so_uda_pair(args.source_only, args.uda)
     else:
         result = audit_shift_registry(args.registry)
     print(json.dumps(result, indent=2, sort_keys=True))

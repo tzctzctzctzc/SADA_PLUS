@@ -147,6 +147,15 @@ def main(cfg, resume, project_name='sada', debug=False):
         train_dataset_tgt = train_dataset_src
         train_dataset_tgt2 = train_dataset_src2
         val_dataset_tgt = val_dataset_src
+    elif cfg.get('rq2_formal', {}).get('regime') == 'uda':
+        target_dataset_cfg = dict(cfg['dataset'])
+        target_dataset_cfg['json_file'] = cfg['rq2_formal']['target_manifest']['path']
+        target_dataset_cfg['unlabeled'] = True
+        train_dataset_tgt = make_dataset(
+            cfg['dataset_name'], True, cfg['tgt_train_split'], **target_dataset_cfg
+        )
+        train_dataset_tgt2 = train_dataset_src2
+        val_dataset_tgt = val_dataset_src
     else:
         train_dataset_tgt = make_dataset(
             cfg['dataset_name'], True, cfg['tgt_train_split'], **cfg['dataset']
@@ -1046,6 +1055,11 @@ def create_argparser():
         '--feature-protocol', default=None,
         help='RQ2 dense-feature protocol.json recorded and checked before training',
     )
+    parser.add_argument('--rq2-regime', choices=('so', 'uda'), default=None)
+    parser.add_argument('--rq2-target-manifest', default=None)
+    parser.add_argument('--rq2-shift', choices=('S1', 'S2', 'S3', 'S4', 'S5', 'S6'))
+    parser.add_argument('--rq2-registry', default='configs/rq2/shift_registry.yaml')
+    parser.add_argument('--rq2-reference-root', default='./data/ek100_slowfast/features')
     parser.add_argument(
         '--trident-head', action='store_true',
         help='use the TriDet class-conditioned boundary and offset heads',
@@ -2509,6 +2523,44 @@ if __name__ == '__main__':
     }
 
     update_config_with_arguments(config_dict, args, ARGS_TYPES, ARGS_CONFIGPATH)
+    if args.rq2_regime:
+        from tools.rq2_formal import (
+            check_formal_config, check_formal_features, check_registry_config,
+            check_slowfast_features,
+        )
+
+        if not args.rq2_shift:
+            raise ValueError('formal RQ2 requires --rq2-shift')
+        if args.trident_head or args.actionformer_backbone:
+            raise ValueError('formal RQ2 uses the frozen detector architecture')
+        if any(value for key, value in active_initialization_inputs.items() if key != 'resume'):
+            raise ValueError('formal RQ2 must initialize from scratch or resume the same run')
+        check_registry_config(
+            args.config_path, args.rq2_registry, args.rq2_shift, config_dict
+        )
+        if args.seed not in (6, 7, 8):
+            raise ValueError('formal RQ2 seeds are fixed to 6/7/8')
+        manifest = check_formal_config(
+            config_dict, args.rq2_regime, args.rq2_target_manifest
+        )
+        if int(config_dict['dataset']['input_dim']) != 2304:
+            config_dict['rq2_feature_protocol'] = check_formal_features(
+                config_dict, args.feature_protocol, args.rq2_reference_root
+            )
+        elif args.feature_protocol:
+            raise ValueError('SlowFast anchor must not use a VLM feature protocol')
+        else:
+            check_slowfast_features(
+                config_dict['dataset']['feat_folder'], args.rq2_registry
+            )
+        config_dict['benchmark_audit']['enabled'] = True
+        config_dict['rq2_formal'] = {
+            'regime': args.rq2_regime,
+            'shift': args.rq2_shift,
+            'target_manifest': manifest,
+        }
+    elif args.rq2_target_manifest or args.rq2_shift:
+        raise ValueError('RQ2 target manifest and shift require --rq2-regime')
     if args.feature_protocol:
         from tools.rq2_dense_protocol import validate_training_protocol
 

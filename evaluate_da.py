@@ -146,7 +146,12 @@ def main(cfg, resume, project_name='domain_adaptation', debug=False):
         from libs.models.SADA import make_meta_arch
         new_model = make_meta_arch(cfg['model_name'], cfg, device = device).to(device)
         model_ema = ModelEma2(new_model, decay=cfg['train_cfg']['ema_decay']).to(device)
-        model_ema.module.load_state_dict(model_weights_loaded)
+        selected_key = (
+            'ema_state_dict' if cfg['train_cfg'].get('ema_active', False)
+            and not cfg['train_cfg'].get('evaluate_student', False)
+            else 'state_dict'
+        )
+        model_ema.module.load_state_dict(model_weights_loaded[selected_key])
         # ---------------------------
         
         print("=> loaded checkpoint")
@@ -287,6 +292,13 @@ def create_argparser():
                         help='target-domain split to evaluate (default: train)')
     parser.add_argument('--eval_domain', choices=('src', 'tgt', 'both'), default='tgt',
                         help='domain to evaluate; both reports source then target')
+    parser.add_argument('--rq2-formal', action='store_true',
+                        help='evaluate both RQ2 validation domains and save predictions')
+    parser.add_argument('--rq2-output-dir', default=None)
+    parser.add_argument('--rq2-shift', choices=('S1', 'S2', 'S3', 'S4', 'S5', 'S6'))
+    parser.add_argument('--rq2-registry', default='configs/rq2/shift_registry.yaml')
+    parser.add_argument('--feature-protocol', default=None)
+    parser.add_argument('--rq2-reference-root', default='./data/ek100_slowfast/features')
 
     add_dict_to_argparser(parser, ARGS_TYPES)
 
@@ -316,4 +328,24 @@ if __name__ == '__main__':
     print("Configuration:")
     print(config_dict)
 
-    main(config_dict, resume=args.resume is not None, debug=args.debug)
+    if args.rq2_formal:
+        from tools.rq2_evaluate import evaluate
+        from tools.rq2_formal import check_registry_config
+
+        if not args.resume or not args.rq2_output_dir or not args.rq2_shift:
+            raise ValueError('RQ2 evaluation requires --resume, --rq2-output-dir and --rq2-shift')
+        check_registry_config(
+            args.config_path, args.rq2_registry, args.rq2_shift, config_dict
+        )
+        device = 'cuda:{}'.format(args.gpu) if args.gpu >= 0 else 'cpu'
+        summaries = evaluate(
+            config_dict, args.resume, args.config_path, args.rq2_output_dir,
+            device, args.feature_protocol, args.rq2_reference_root, args.rq2_registry,
+            args.rq2_shift,
+        )
+        for domain, summary in summaries.items():
+            print('{} validation mAP@0.1:0.5: {:.4f}'.format(
+                domain, summary['map_0.1_to_0.5']
+            ))
+    else:
+        main(config_dict, resume=args.resume is not None, debug=args.debug)

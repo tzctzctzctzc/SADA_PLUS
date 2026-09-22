@@ -232,6 +232,7 @@ class BaseTrainerDA:
         supervised_mode = self.cfg.get('diagnostic', {}).get(
             'supervised_upper_bound', 'off'
         )
+        rq2_formal = bool(self.cfg.get('rq2_formal'))
         oracle_target_task = self.cfg.get('diagnostic', {}).get(
             'oracle_target_task', 'off'
         )
@@ -313,7 +314,7 @@ class BaseTrainerDA:
                 self.valid_metrics_src.reset()
                 self.valid_metrics_tgt.reset()
                 
-                if supervised_mode != 'source_only':
+                if supervised_mode != 'source_only' and not rq2_formal:
                     target_loss_loader = (
                         self.val_loader_tgt
                         if select_with_target_loss else self.train_loader_tgt2
@@ -559,7 +560,7 @@ class BaseTrainerDA:
                     wandb.log(source_metrics_val, step=epoch)
                     benchmark_evaluation.update(source_metrics_val)
 
-                    if supervised_mode != 'source_only':
+                    if supervised_mode != 'source_only' and not rq2_formal:
                         target_metrics_train = self._test_epoch(
                             epoch, self.train_loader_tgt2, 'train', domain='tgt'
                         )
@@ -571,7 +572,7 @@ class BaseTrainerDA:
                 
                 # Strict source-only training never observes target metrics.
                 # Target-val is evaluated once, offline, after model selection.
-                if supervised_mode != 'source_only':
+                if supervised_mode != 'source_only' and not rq2_formal:
                     target_metrics_val = self._test_epoch(epoch, self.val_loader_tgt, 'test', domain='tgt')
                     target_metrics_val = {'v_tgt_'+k : v for k, v in list(target_metrics_val.items())}
                     wandb.log(target_metrics_val, step=epoch)

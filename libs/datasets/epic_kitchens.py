@@ -32,6 +32,7 @@ class EpicKitchensDataset(Dataset):
         action_subsampling='all', # subsample actions to max_seq_len
         crop_alignment=1,
         stage1_context=False,
+        unlabeled=False,
     ):
         # file path
         assert os.path.exists(feat_folder)
@@ -61,6 +62,7 @@ class EpicKitchensDataset(Dataset):
         self.num_classes = num_classes
         self.label_dict = None
         self.crop_ratio = crop_ratio
+        self.unlabeled = unlabeled
 
         # load database and select the subset
         dict_db, label_dict = self._load_json_db(self.json_file)
@@ -107,7 +109,7 @@ class EpicKitchensDataset(Dataset):
         if self.label_dict is None:
             label_dict = {}
             for key, value in json_db.items():
-                for act in value['annotations']:
+                for act in (() if self.unlabeled else value.get('annotations', ())):
                     label_dict[act['label']] = act['label_id']
 
         # fill in the db (immutable afterwards)
@@ -132,7 +134,7 @@ class EpicKitchensDataset(Dataset):
                 duration = 1e8
 
             # get annotations if available
-            if ('annotations' in value) and (len(value['annotations']) > 0):
+            if not self.unlabeled and value.get('annotations'):
                 num_acts = len(value['annotations'])
                 segments = np.zeros([num_acts, 2], dtype=np.float32)
                 labels = np.zeros([num_acts, ], dtype=np.int64)
@@ -182,6 +184,9 @@ class EpicKitchensDataset(Dataset):
             labels = torch.from_numpy(video_item['labels'])
         else:
             segments, labels = None, None
+        if self.unlabeled and self.is_training:
+            segments = torch.empty((0, 2), dtype=torch.float32)
+            labels = torch.empty((0,), dtype=torch.long)
         
         if self.action_subsampling == '10_majority_classes':
             # subsample the first 10 classes (which are the majority ones)
@@ -246,6 +251,7 @@ class EpicKitchensDataset(Dataset):
                 self.max_seq_len,
                 self.trunc_thresh,
                 self.crop_ratio,
+                has_action=not self.unlabeled,
                 crop_alignment=self.crop_alignment,
             )
         else:

@@ -1,8 +1,11 @@
 """Extract frozen full-video VLM features on the shared RQ2 temporal grid."""
 
 import argparse
+import hashlib
+import importlib.metadata
 import importlib
 import json
+import subprocess
 import sys
 import time
 import types
@@ -295,6 +298,45 @@ def checkpoint_hashes(args):
     return {Path(path).name: sha256_file(path) for path in paths}
 
 
+def git_provenance(path):
+    try:
+        code_revision = subprocess.check_output(
+            ["git", "-C", str(path), "rev-parse", "HEAD"],
+            text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+        diff = subprocess.check_output(
+            ["git", "-C", str(path), "diff", "--no-ext-diff", "--binary", "HEAD"],
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return {"revision": None, "tracked_diff_sha256": None}
+    return {
+        "revision": code_revision,
+        "tracked_diff_sha256": hashlib.sha256(diff).hexdigest(),
+    }
+
+
+def extraction_provenance(args):
+    packages = {}
+    for name in ("torch", "opencv-python", "transformers"):
+        try:
+            packages[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            packages[name] = None
+    return {
+        "extractor_sha256": sha256_file(Path(__file__).resolve()),
+        "repository": git_provenance(Path(__file__).resolve().parents[1]),
+        "external_repository": git_provenance(
+            args.egohod_root or args.internvideo_root or args.model_path
+        ),
+        "batch_tokens": args.batch_tokens,
+        "device_map": args.device_map,
+        "attention": args.attn_implementation,
+        "dtype": args.dtype,
+        "packages": packages,
+    }
+
+
 def required_video_ids_from_registry(path):
     registry_path = Path(path).resolve()
     registry = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
@@ -373,7 +415,9 @@ def main():
         raise FileNotFoundError(
             "selected videos missing reference features: {}".format(missing_references)
         )
-    payload = protocol_payload(args.model, checkpoint_hashes(args))
+    payload = protocol_payload(
+        args.model, checkpoint_hashes(args), extraction_provenance(args)
+    )
     payload["video_selection"] = selection_source
     payload["video_set_count"] = len(video_ids)
     payload["video_set_sha256"] = video_set_sha256(video_ids)

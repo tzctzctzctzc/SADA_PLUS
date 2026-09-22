@@ -56,7 +56,7 @@ def sha256_normalized_text(path):
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
-def protocol_payload(model_name, checkpoint_hashes):
+def protocol_payload(model_name, checkpoint_hashes, provenance=None):
     spec = MODEL_SPECS[model_name]
     return {
         "schema": SCHEMA,
@@ -70,6 +70,7 @@ def protocol_payload(model_name, checkpoint_hashes):
         "normalization": "l2",
         "checkpoint_sha256": checkpoint_hashes,
         "uses_annotations": False,
+        "provenance": provenance or {},
     }
 
 
