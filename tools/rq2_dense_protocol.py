@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 
 import numpy as np
@@ -189,6 +190,32 @@ def validate_training_protocol(path, feature_folder, input_dim):
         raise ValueError("RQ2 video index must contain sorted unique IDs")
     if payload.get("video_selection") != "shift_registry_and_annotation":
         raise ValueError("formal RQ2 features must be selected from the shift registry")
+    selection = payload.get("video_selection_provenance")
+    if not isinstance(selection, dict):
+        raise ValueError("formal RQ2 features lack video-selection provenance")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(selection.get("registry_sha256", ""))):
+        raise ValueError("invalid RQ2 shift-registry hash")
+    configs = selection.get("configs")
+    if not isinstance(configs, dict) or list(configs) != [
+        "S1", "S2", "S3", "S4", "S5", "S6"
+    ]:
+        raise ValueError("RQ2 selection provenance must bind S1--S6")
+    for shift_id, config in configs.items():
+        if (
+            not isinstance(config, dict)
+            or not isinstance(config.get("path"), str)
+            or not config["path"]
+            or not re.fullmatch(r"[0-9a-f]{64}", str(config.get("sha256", "")))
+        ):
+            raise ValueError("invalid {} config provenance".format(shift_id))
+    annotation = selection.get("annotation")
+    if (
+        not isinstance(annotation, dict)
+        or not isinstance(annotation.get("path"), str)
+        or not annotation["path"]
+        or not re.fullmatch(r"[0-9a-f]{64}", str(annotation.get("sha256", "")))
+    ):
+        raise ValueError("invalid RQ2 annotation provenance")
     if payload.get("video_set_count") != len(video_ids):
         raise ValueError("RQ2 video count does not match protocol")
     if payload.get("video_set_sha256") != video_set_sha256(video_ids):

@@ -6,6 +6,7 @@ from tools.audit_rq2_vlm_benchmark import audit_shift_registry
 from tools.extract_rq2_dense_vlm_features import (
     SequentialFrameReader,
     required_video_ids_from_registry,
+    video_selection_from_registry,
 )
 
 from tools.rq2_dense_protocol import (
@@ -21,6 +22,23 @@ from tools.rq2_dense_protocol import (
     atomic_savez,
     validate_feature_file,
 )
+
+
+def formal_selection_provenance():
+    return {
+        "registry_sha256": "a" * 64,
+        "configs": {
+            "S{}".format(index): {
+                "path": "configs/s{}.yaml".format(index),
+                "sha256": "b" * 64,
+            }
+            for index in range(1, 7)
+        },
+        "annotation": {
+            "path": "data/annotations.json",
+            "sha256": "c" * 64,
+        },
+    }
 
 
 def test_temporal_length_matches_slowfast_grid():
@@ -89,11 +107,69 @@ def test_frame_reader_decodes_overlapping_indices_once(monkeypatch, tmp_path):
     assert capture.set_count == 0
 
 
+def test_frame_reader_reopens_after_transient_decode_failure(monkeypatch, tmp_path):
+    import tools.extract_rq2_dense_vlm_features as extractor
+
+    captures = []
+
+    class FakeCapture:
+        def __init__(self, _path):
+            self.position = 0
+            self.fail_once = not captures
+            captures.append(self)
+
+        def isOpened(self):
+            return True
+
+        def grab(self):
+            self.position += 1
+            return True
+
+        def read(self):
+            if self.fail_once:
+                self.fail_once = False
+                return False, None
+            value = self.position
+            self.position += 1
+            return True, np.asarray([value], dtype=np.uint8)
+
+        def set(self, _property, value):
+            self.position = int(value)
+
+        def release(self):
+            pass
+
+    monkeypatch.setattr(extractor.cv2, "VideoCapture", FakeCapture)
+    monkeypatch.setattr(extractor.cv2, "cvtColor", lambda frame, _code: frame)
+    reader = SequentialFrameReader(tmp_path / "dummy.mp4")
+    try:
+        frames = reader.read(np.asarray([3]))
+    finally:
+        reader.close()
+    assert len(captures) == 2
+    assert int(frames[0][0]) == 3
+
+
 def test_centers_match_sada_coordinate_conversion():
     assert expected_centers_seconds(3).tolist() == [16 / 30, 32 / 30, 48 / 30]
 
 
 def test_training_protocol_binds_folder_and_dimension(tmp_path):
+    payload = protocol_payload("egovideo_hod", {"checkpoint.pt": "abc"})
+    video_ids = ["P01_01"]
+    payload["video_selection"] = "shift_registry_and_annotation"
+    payload["video_selection_provenance"] = formal_selection_provenance()
+    payload["video_set_count"] = len(video_ids)
+    payload["video_set_sha256"] = video_set_sha256(video_ids)
+    payload["protocol_sha256"] = protocol_sha256(payload)
+    protocol_path = tmp_path / "protocol.json"
+    protocol_path.write_text(json.dumps(payload), encoding="utf-8")
+    (tmp_path / "video_ids.txt").write_text("P01_01\n", encoding="ascii")
+    validated = validate_training_protocol(protocol_path, tmp_path, 512)
+    assert validated["model_name"] == "egovideo_hod"
+
+
+def test_training_protocol_requires_selection_provenance(tmp_path):
     payload = protocol_payload("egovideo_hod", {"checkpoint.pt": "abc"})
     video_ids = ["P01_01"]
     payload["video_selection"] = "shift_registry_and_annotation"
@@ -103,8 +179,12 @@ def test_training_protocol_binds_folder_and_dimension(tmp_path):
     protocol_path = tmp_path / "protocol.json"
     protocol_path.write_text(json.dumps(payload), encoding="utf-8")
     (tmp_path / "video_ids.txt").write_text("P01_01\n", encoding="ascii")
-    validated = validate_training_protocol(protocol_path, tmp_path, 512)
-    assert validated["model_name"] == "egovideo_hod"
+    try:
+        validate_training_protocol(protocol_path, tmp_path, 512)
+    except ValueError as exc:
+        assert "video-selection provenance" in str(exc)
+    else:
+        raise AssertionError("protocol without selection provenance was accepted")
 
 
 def test_training_protocol_rejects_wrong_dimension(tmp_path):
@@ -180,13 +260,35 @@ def test_rq2_video_set_comes_from_frozen_splits_and_annotations(tmp_path):
         encoding="utf-8",
     )
     registry = config_dir / "shift_registry.yaml"
+    config_hash = sha256_normalized_text(config)
     registry.write_text(
         "repository_root: ../..\n"
-        "shifts:\n  S1:\n    config: config.yaml\n",
+        "shifts:\n  S1:\n    config: config.yaml\n"
+        "    config_sha256: {}\n".format(config_hash),
         encoding="utf-8",
     )
-    video_ids = required_video_ids_from_registry(
-        registry
-    )
+    video_ids, provenance = video_selection_from_registry(registry)
     assert video_ids == ["P01_01", "P01_02"]
     assert len(video_set_sha256(video_ids)) == 64
+    assert provenance["configs"]["S1"]["sha256"] == config_hash
+    assert provenance["annotation"]["path"] == "data/annotations.json"
+
+
+def test_rq2_video_selection_rejects_modified_config(tmp_path):
+    config_dir = tmp_path / "configs" / "rq2"
+    config_dir.mkdir(parents=True)
+    config = tmp_path / "config.yaml"
+    config.write_text("src_train_split: []\n", encoding="utf-8")
+    registry = config_dir / "shift_registry.yaml"
+    registry.write_text(
+        "repository_root: ../..\n"
+        "shifts:\n  S1:\n    config: config.yaml\n"
+        "    config_sha256: {}\n".format("0" * 64),
+        encoding="utf-8",
+    )
+    try:
+        required_video_ids_from_registry(registry)
+    except ValueError as exc:
+        assert "config hash mismatch" in str(exc)
+    else:
+        raise AssertionError("modified shift config was accepted")

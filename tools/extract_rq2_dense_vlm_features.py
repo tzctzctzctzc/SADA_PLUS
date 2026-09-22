@@ -27,6 +27,7 @@ from tools.rq2_dense_protocol import (
     reference_temporal_length_is_compatible,
     sampled_source_indices,
     sha256_file,
+    sha256_normalized_text,
     temporal_length,
     validate_feature_file,
     video_set_sha256,
@@ -35,7 +36,8 @@ from tools.rq2_dense_protocol import (
 
 class SequentialFrameReader:
     def __init__(self, path):
-        self.capture = cv2.VideoCapture(str(path))
+        self.path = Path(path)
+        self.capture = cv2.VideoCapture(str(self.path))
         if not self.capture.isOpened():
             raise RuntimeError("cannot open video: {}".format(path))
         self.position = 0
@@ -60,7 +62,18 @@ class SequentialFrameReader:
                 self.position += 1
             ok, frame = self.capture.read()
             if not ok:
-                raise RuntimeError("failed to decode frame {}".format(index))
+                # Long videos can occasionally leave OpenCV's decoder in a bad
+                # state after repeated backward seeks. Reopen once at the exact
+                # requested frame before treating the source video as corrupt.
+                self.capture.release()
+                self.capture = cv2.VideoCapture(str(self.path))
+                if not self.capture.isOpened():
+                    raise RuntimeError("cannot reopen video: {}".format(self.path))
+                self.capture.set(cv2.CAP_PROP_POS_FRAMES, index)
+                self.position = index
+                ok, frame = self.capture.read()
+                if not ok:
+                    raise RuntimeError("failed to decode frame {}".format(index))
             self.position += 1
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             cache[index] = rgb
@@ -323,6 +336,23 @@ def extraction_provenance(args):
             packages[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
             packages[name] = None
+    runtime = {
+        "egovideo_hod": {
+            "device_map": "none",
+            "attention": "model_native",
+            "dtype": "float16",
+        },
+        "internvideo2_clip_1b": {
+            "device_map": "none",
+            "attention": "official_torch_unfused_ops",
+            "dtype": "bfloat16",
+        },
+        "qwen3_vl_8b": {
+            "device_map": args.device_map,
+            "attention": args.attn_implementation,
+            "dtype": args.dtype,
+        },
+    }[args.model]
     return {
         "extractor_sha256": sha256_file(Path(__file__).resolve()),
         "repository": git_provenance(Path(__file__).resolve().parents[1]),
@@ -330,21 +360,27 @@ def extraction_provenance(args):
             args.egohod_root or args.internvideo_root or args.model_path
         ),
         "batch_tokens": args.batch_tokens,
-        "device_map": args.device_map,
-        "attention": args.attn_implementation,
-        "dtype": args.dtype,
+        **runtime,
         "packages": packages,
     }
 
 
-def required_video_ids_from_registry(path):
+def video_selection_from_registry(path):
     registry_path = Path(path).resolve()
     registry = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
     repository_root = (registry_path.parent / registry["repository_root"]).resolve()
     subsets = set()
     annotation_paths = set()
-    for entry in registry["shifts"].values():
+    config_hashes = {}
+    for shift_id, entry in registry["shifts"].items():
         config_path = repository_root / entry["config"]
+        actual_hash = sha256_normalized_text(config_path)
+        if actual_hash != entry.get("config_sha256"):
+            raise ValueError("{} config hash mismatch".format(shift_id))
+        config_hashes[shift_id] = {
+            "path": entry["config"],
+            "sha256": actual_hash,
+        }
         config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         for key in ("src_train_split", "src_val_split", "tgt_train_split", "tgt_val_split"):
             subsets.update(str(value).lower() for value in config[key])
@@ -353,14 +389,26 @@ def required_video_ids_from_registry(path):
         )
     if len(annotation_paths) != 1:
         raise ValueError("RQ2 shifts must use one common annotation database")
-    database = json.loads(
-        Path(next(iter(annotation_paths))).read_text(encoding="utf-8")
-    )["database"]
-    return sorted(
+    annotation_path = Path(next(iter(annotation_paths)))
+    database = json.loads(annotation_path.read_text(encoding="utf-8"))["database"]
+    video_ids = sorted(
         video_id
         for video_id, entry in database.items()
         if str(entry["subset"]).lower() in subsets
     )
+    provenance = {
+        "registry_sha256": sha256_normalized_text(registry_path),
+        "configs": config_hashes,
+        "annotation": {
+            "path": str(annotation_path.relative_to(repository_root)).replace("\\", "/"),
+            "sha256": sha256_file(annotation_path),
+        },
+    }
+    return video_ids, provenance
+
+
+def required_video_ids_from_registry(path):
+    return video_selection_from_registry(path)[0]
 
 
 def build_encoder(args):
@@ -396,10 +444,13 @@ def main():
     spec = MODEL_SPECS[args.model]
     reference_root = Path(args.reference_feature_root)
     if args.shift_registry:
-        video_ids = required_video_ids_from_registry(args.shift_registry)
+        video_ids, selection_provenance = video_selection_from_registry(
+            args.shift_registry
+        )
         selection_source = "shift_registry_and_annotation"
     else:
         video_ids = sorted(path.stem for path in reference_root.glob("*.npz"))
+        selection_provenance = None
         selection_source = "reference_feature_root"
     if args.video_id:
         requested = set(args.video_id)
@@ -419,6 +470,8 @@ def main():
         args.model, checkpoint_hashes(args), extraction_provenance(args)
     )
     payload["video_selection"] = selection_source
+    if selection_provenance is not None:
+        payload["video_selection_provenance"] = selection_provenance
     payload["video_set_count"] = len(video_ids)
     payload["video_set_sha256"] = video_set_sha256(video_ids)
     signature = protocol_sha256(payload)
