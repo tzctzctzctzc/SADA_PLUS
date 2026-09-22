@@ -1,6 +1,7 @@
 import torch
 from abc import abstractmethod
 import os
+import random
 import time
 
 import wandb
@@ -8,6 +9,7 @@ import logging
 import math
 import csv
 import json
+import numpy as np
 
 from libs.evaluation.metrics import MetricTracker
 from libs.models.SADA.stage1_utils import validate_stage1_resume
@@ -99,6 +101,12 @@ class BaseTrainerDA:
         # configuration to monitor model performance and save best
         self.latest_best_epoch = -1
         self.start_epoch = 1
+        self.best_metric = 10000
+        self.not_improved_count = 0
+        self.selection_provenance = None
+        self.resume_rng_restored = False
+        self.source_rng_generator = None
+        self.target_rng_generator = None
 
         self.checkpoint_dir = os.path.join(self.cfg.save_dir, 'saved_ckpt')
         self.plots_dir = os.path.join(self.cfg.save_dir, 'plots')
@@ -208,8 +216,9 @@ class BaseTrainerDA:
 
         # if resuming => we iterate the data_loader "self.start_epoch" times, in order to keep results reproducible as if
         # we did the training from the beginning without stopping.
-        for epoch in range(1, self.start_epoch):
-            self._phantom_train_epoch()
+        if not self.resume_rng_restored:
+            for epoch in range(1, self.start_epoch):
+                self._phantom_train_epoch()
 
 
         # Pretrain the model if required (epoch == 0 to avoid pretraining when resuming)
@@ -221,9 +230,7 @@ class BaseTrainerDA:
         self.cls_static_anchors = None
         self.mean_conf_tgt = None
         
-        self.best_metric = 10000
         self.early_stop = self.cfg['train_cfg']['early_stop']
-        not_improved_count = 0
         
         print("Starting the training...")
         stop_after_epoch = self.cfg.get('diagnostic', {}).get(
@@ -330,14 +337,28 @@ class BaseTrainerDA:
                     print("Previous best metric: " + str(self.best_metric))
                     self.best_metric = selection_metric
                     print("New best metric: " + str(self.best_metric))
+                    self.not_improved_count = 0
+                    self.selection_provenance = {
+                        'split': 'source_validation',
+                        'metric': 'validation_loss',
+                        'metric_value': float(selection_metric),
+                        'selected_epoch': int(epoch),
+                        'state_key': (
+                            'ema_state_dict'
+                            if self.ema_active
+                            and not self.cfg['train_cfg'].get(
+                                'evaluate_student', False
+                            )
+                            else 'state_dict'
+                        ),
+                    }
                     self.save_ckpt(mode='best', epoch=epoch)
-                    not_improved_count = 0
                 else:
-                    not_improved_count += 1
+                    self.not_improved_count += 1
 
 
                 # Perform early stopping
-                if self.early_stop > 0 and not_improved_count >= self.early_stop:
+                if self.early_stop > 0 and self.not_improved_count >= self.early_stop:
                     print("Stopping due to early stopping")
                     self.logger.info("Validation performance didn\'t improve for {} epochs. "
                                      "Training stops.".format(self.early_stop))
@@ -588,7 +609,6 @@ class BaseTrainerDA:
     def save_ckpt(self, mode, epoch):
         if self.test_target_val_only:
             return
-        state = self.get_state(epoch)
 
         if mode == 'latest':
             os.makedirs(os.path.join(self.checkpoint_dir, 'latest_ckpt'), exist_ok=True)
@@ -602,6 +622,7 @@ class BaseTrainerDA:
             self.logger.info("Saving best checkpoint...")
             self.latest_best_epoch = epoch
 
+        state = self.get_state(epoch)
         torch.save(state, filename)
 
         if mode == 'latest':
@@ -618,8 +639,28 @@ class BaseTrainerDA:
             'optimizer_gen_source': self.optimizer_gen_source.state_dict(),
             'optimizer_gen_source_alignment': self.optimizer_gen_source_alignment.state_dict(),
             "optimizer_disc": self.optimizer_disc.state_dict(),
-            'config': self.cfg
+            'config': self.cfg,
+            'best_metric': self.best_metric,
+            'latest_best_epoch': self.latest_best_epoch,
+            'not_improved_count': self.not_improved_count,
+            'selection_provenance': self.selection_provenance,
+            'training_rng_state': {
+                'python': random.getstate(),
+                'numpy': np.random.get_state(),
+                'torch': torch.get_rng_state(),
+                'cuda': torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+                'source_loader': (
+                    self.source_rng_generator.get_state()
+                    if self.source_rng_generator is not None else None
+                ),
+                'target_loader': (
+                    self.target_rng_generator.get_state()
+                    if self.target_rng_generator is not None else None
+                ),
+            },
         }
+        if self.cfg.get('rq2_formal'):
+            state['rq2_run_signature'] = self.cfg['rq2_formal']['run_signature']
         if self.cfg.get('stage1', {}).get('enabled', False):
             state['stage1'] = {
                 'enabled': True,
@@ -653,6 +694,35 @@ class BaseTrainerDA:
                 self.routing_teacher.state_dict()
             )
         return state
+
+    def restore_control_state(self, checkpoint_state):
+        formal = bool(self.cfg.get('rq2_formal'))
+        required = (
+            'best_metric', 'latest_best_epoch', 'not_improved_count',
+            'training_rng_state', 'selection_provenance',
+        )
+        if formal and any(checkpoint_state.get(key) is None for key in required):
+            raise ValueError('formal RQ2 resume checkpoint lacks training control state')
+        if checkpoint_state.get('best_metric') is not None:
+            self.best_metric = checkpoint_state['best_metric']
+        if checkpoint_state.get('latest_best_epoch') is not None:
+            self.latest_best_epoch = int(checkpoint_state['latest_best_epoch'])
+        if checkpoint_state.get('not_improved_count') is not None:
+            self.not_improved_count = int(checkpoint_state['not_improved_count'])
+        self.selection_provenance = checkpoint_state.get('selection_provenance')
+        rng = checkpoint_state.get('training_rng_state')
+        if not rng:
+            return
+        random.setstate(rng['python'])
+        np.random.set_state(rng['numpy'])
+        torch.set_rng_state(rng['torch'].cpu())
+        if torch.cuda.is_available() and rng.get('cuda') is not None:
+            torch.cuda.set_rng_state_all([state.cpu() for state in rng['cuda']])
+        if self.source_rng_generator is not None and rng.get('source_loader') is not None:
+            self.source_rng_generator.set_state(rng['source_loader'].cpu())
+        if self.target_rng_generator is not None and rng.get('target_loader') is not None:
+            self.target_rng_generator.set_state(rng['target_loader'].cpu())
+        self.resume_rng_restored = True
 
 
     def _resume_checkpoint(self, resume_path):

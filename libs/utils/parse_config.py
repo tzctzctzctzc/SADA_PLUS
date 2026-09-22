@@ -54,8 +54,15 @@ class ConfigParser:
             save_dir = os.path.join("model_results", self.config["name"], run_id)
             # Path(self.config['trainer']['save_dir'])
 
-            if resume is not None and "models" in resume:
-                resumed_folder = os.path.dirname(resume)
+            if resume is not None:
+                resume_path = Path(resume).resolve()
+                if (
+                    resume_path.parent.name in ('latest_ckpt', 'best_ckpt')
+                    and resume_path.parent.parent.name == 'saved_ckpt'
+                ):
+                    resumed_folder = resume_path.parents[2]
+                else:
+                    resumed_folder = resume_path.parent
                 self._save_dir = Path(resumed_folder)
                 self._log_dir = self._save_dir
             else:

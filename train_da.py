@@ -4,6 +4,7 @@ import copy
 import os
 import time
 import datetime
+from pathlib import Path
 from pprint import pprint
 import wandb
 import logging
@@ -88,6 +89,9 @@ def sync_configs(from_cfg, to_cfg):
 ################################################################################
 def main(cfg, resume, project_name='sada', debug=False):
     """main function that handles training / inference"""
+    expected_formal_signature = copy.deepcopy(
+        cfg.get('rq2_formal', {}).get('run_signature')
+    )
     cfg = ConfigParser(cfg, resume=args.resume)
     
     # Prepare the wandb directory
@@ -104,6 +108,10 @@ def main(cfg, resume, project_name='sada', debug=False):
 
     
     sync_configs(wandb.config, cfg.config) # bring overriden parameters from sweep config to the config that is actually used (if sweep is used, otherwise no effect)
+    if expected_formal_signature is not None:
+        from tools.rq2_formal import validate_formal_runtime
+
+        validate_formal_runtime(cfg.config, expected_formal_signature)
     
     # Set the saving directory of the logger to the default wandb run
     logger = cfg.get_logger('train')
@@ -116,7 +124,12 @@ def main(cfg, resume, project_name='sada', debug=False):
         logger.info("---------------------- RESUMED ----------------------")
     
 
-    rng_generator = fix_random_seed(cfg['init_rand_seed'], include_cuda=True)
+    fix_random_seed(cfg['init_rand_seed'], include_cuda=True)
+    from libs.trainer.training_regimes import build_training_generators
+
+    source_rng_generator, target_rng_generator = build_training_generators(
+        cfg['init_rand_seed']
+    )
 
     """2. create dataset / dataloader"""
     stage1_cfg = cfg.get('stage1', {})
@@ -175,7 +188,7 @@ def main(cfg, resume, project_name='sada', debug=False):
     
     # Load the source and target datasets
     train_loader_src = make_data_loader(
-        train_dataset_src, True, rng_generator, **cfg['loader'])
+        train_dataset_src, True, source_rng_generator, **cfg['loader'])
     
     train_loader_src2 = make_data_loader(
         train_dataset_src2, False, None, 1, cfg['loader']['num_workers'])
@@ -184,7 +197,7 @@ def main(cfg, resume, project_name='sada', debug=False):
         val_dataset_src, False, None, 1, cfg['loader']['num_workers'])
     
     train_loader_tgt = make_data_loader(
-        train_dataset_tgt, True, rng_generator, **cfg['loader'])
+        train_dataset_tgt, True, target_rng_generator, **cfg['loader'])
     
     train_loader_tgt2 = make_data_loader(
         train_dataset_tgt2, False, None, 1, cfg['loader']['num_workers'])
@@ -273,6 +286,7 @@ def main(cfg, resume, project_name='sada', debug=False):
         supervised_mode,
         len(train_loader_src),
         len(train_loader_tgt),
+        cfg.get('rq2_formal', {}).get('regime'),
     )
     
     optimizer_gen_source = make_optimizer(model, cfg['opt'], cfg['opt']['learning_rate'], exclude_params = ['disc_dom_adv', 'disc_dom_conditional_adv', 'learnable_embeddings'])
@@ -770,11 +784,26 @@ def main(cfg, resume, project_name='sada', debug=False):
         del checkpoint
 
     # Resume an existing VLM experiment. This path remains signature-strict.
+    resume_control_state = None
     if args.resume:
         if os.path.isfile(args.resume):
             # load ckpt, reset epoch / best rmse
             checkpoint = torch.load(args.resume,
                                     map_location=lambda storage, loc: storage.cuda(device))
+            if cfg.get('rq2_formal'):
+                from tools.rq2_formal import validate_formal_resume
+
+                resume_path = Path(args.resume)
+                if resume_path.parent.name != 'latest_ckpt':
+                    raise ValueError('formal RQ2 resume requires the same run latest checkpoint')
+                expected_filename = 'checkpoint-epoch{}.pt'.format(
+                    int(checkpoint.get('epoch', -1))
+                )
+                if resume_path.name != expected_filename:
+                    raise ValueError('formal RQ2 resume checkpoint filename disagrees with epoch')
+                validate_formal_resume(
+                    checkpoint, cfg['rq2_formal']['run_signature']
+                )
             args.start_epoch = checkpoint['epoch'] + 1
             stage1 = validate_stage1_resume(
                 checkpoint,
@@ -850,6 +879,13 @@ def main(cfg, resume, project_name='sada', debug=False):
                 scheduler_gen_source_alignment,
                 scheduler_disc,
             )
+            resume_control_state = {
+                key: checkpoint.get(key)
+                for key in (
+                    'best_metric', 'latest_best_epoch', 'not_improved_count',
+                    'training_rng_state', 'selection_provenance',
+                )
+            }
             print("=> loaded checkpoint '{:s}' (epoch {:d}".format(
                 args.resume, checkpoint['epoch']
             ))
@@ -979,6 +1015,10 @@ def main(cfg, resume, project_name='sada', debug=False):
                         scheduler_gen_source=scheduler_gen_source,
                         scheduler_gen_source_alignment=scheduler_gen_source_alignment,
                         scheduler_disc=scheduler_disc)
+    trainer.source_rng_generator = source_rng_generator
+    trainer.target_rng_generator = target_rng_generator
+    if resume_control_state is not None:
+        trainer.restore_control_state(resume_control_state)
     trainer.start_epoch = args.start_epoch
     
     # ----------------------------------------------- TRAINING -----------------------------------------------
@@ -2558,6 +2598,8 @@ if __name__ == '__main__':
             'regime': args.rq2_regime,
             'shift': args.rq2_shift,
             'target_manifest': manifest,
+            'training_budget': 'source-batches-per-epoch-v1',
+            'rng_protocol': 'independent-source-target-generators-v1',
         }
     elif args.rq2_target_manifest or args.rq2_shift:
         raise ValueError('RQ2 target manifest and shift require --rq2-regime')
@@ -2590,6 +2632,13 @@ if __name__ == '__main__':
     config_dict["config_path"] = args.config_path
     config_dict["name"] = args.name
     config_dict["gpu"] = args.gpu
+
+    if args.rq2_regime:
+        from tools.rq2_formal import build_formal_run_signature
+
+        config_dict['rq2_formal']['run_signature'] = build_formal_run_signature(
+            config_dict
+        )
 
     print("Configuration:")
     print(config_dict)

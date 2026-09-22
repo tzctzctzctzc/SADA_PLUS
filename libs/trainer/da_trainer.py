@@ -333,6 +333,7 @@ class Trainer(BaseTrainerDA):
                 supervised_mode,
                 len(self.train_loader_src),
                 len(self.train_loader_tgt),
+                self.cfg.get('rq2_formal', {}).get('regime'),
             )):
                 next(iter_src)
             return
@@ -372,6 +373,7 @@ class Trainer(BaseTrainerDA):
             supervised_mode,
             len(self.train_loader_src),
             len(self.train_loader_tgt),
+            self.cfg.get('rq2_formal', {}).get('regime'),
         )
         
         counter = 0

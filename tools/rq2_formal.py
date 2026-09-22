@@ -1,8 +1,11 @@
 """Entry-point checks for the frozen full-video RQ2 SO/UDA experiment."""
 
 import argparse
+from copy import deepcopy
+import hashlib
 import json
 from pathlib import Path
+import re
 
 import numpy as np
 import yaml
@@ -12,6 +15,11 @@ from tools.rq2_dense_protocol import sha256_file, sha256_normalized_text
 
 FROZEN_VIDEO_COUNT = 626
 FROZEN_VIDEO_SET_SHA256 = "8308e5e6cd2076fa68247aaf71dc44d6a9ed87ae4a116b3c4971e02598cc54a2"
+RUN_SIGNATURE_SCHEMA = "rq2-formal-run-v1"
+TRAINING_BUDGET_PROTOCOL = "source-batches-per-epoch-v1"
+RNG_PROTOCOL = "independent-source-target-generators-v1"
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_GIT_REVISION = re.compile(r"^[0-9a-f]{40,64}$")
 
 
 def build_target_manifest(annotation_path, target_splits, output_path):
@@ -93,6 +101,42 @@ def check_formal_config(cfg, regime, manifest_path=None):
         raise ValueError("formal RQ2 forbids gradient harmonization diagnostics")
     if diag.get("no_conditional_update", False) or diag.get("selective_alignment", "off") != "off":
         raise ValueError("formal RQ2 requires the original SADA alignment objective")
+    required_diagnostics = {
+        "stop_after_epoch": None,
+        "alignment_levels": None,
+        "target_alignment": "both",
+        "class_support": False,
+        "action_alignment_levels": None,
+        "background_alignment_levels": None,
+        "conditional_paired_support": False,
+        "conditional_paired_fixed_denominator": False,
+    }
+    for key, expected in required_diagnostics.items():
+        if diag.get(key, expected) != expected:
+            raise ValueError(
+                "formal RQ2 requires diagnostic.{}={!r}".format(key, expected)
+            )
+    known_diagnostics = {
+        "oracle_routing", "oracle_forgetting", "oracle_forgetting_budget",
+        "binary_band_oracle", "binary_band_negative_route",
+        "binary_band_oracle_levels", "oracle_target_regression",
+        "oracle_target_regression_weight", "target_regression_levels",
+        "oracle_target_distillation", "oracle_target_distillation_budget",
+        "target_distillation_levels", "oracle_target_task",
+        "supervised_upper_bound", "stop_after_epoch", "no_conditional_update",
+        "alignment_levels", "target_alignment", "class_support",
+        "action_alignment_levels", "background_alignment_levels",
+        "selective_alignment", "conditional_paired_support",
+        "conditional_paired_fixed_denominator",
+    }
+    unknown = sorted(set(diag) - known_diagnostics)
+    if unknown:
+        raise ValueError("formal RQ2 has unknown diagnostic fields: {}".format(unknown))
+    train_cfg = cfg.get("train_cfg", {})
+    if train_cfg.get("evaluate_student", False):
+        raise ValueError("formal RQ2 selects and evaluates EMA weights")
+    if train_cfg.get("test_target_val_only", False):
+        raise ValueError("formal RQ2 forbids diagnostic target-only evaluation")
     if regime == "so" and manifest_path:
         raise ValueError("source-only must not receive a target manifest")
     if regime == "uda":
@@ -112,9 +156,7 @@ def check_formal_features(cfg, protocol_path, reference_root):
     protocol = validate_training_protocol(
         protocol_path, cfg["dataset"]["feat_folder"], cfg["dataset"]["input_dim"]
     )
-    provenance = protocol.get("provenance", {})
-    if not provenance.get("extractor_sha256") or not provenance.get("packages"):
-        raise ValueError("formal RQ2 feature protocol lacks extraction provenance")
+    _check_feature_provenance(protocol)
     if (protocol["video_set_count"] != FROZEN_VIDEO_COUNT
             or protocol["video_set_sha256"] != FROZEN_VIDEO_SET_SHA256):
         raise ValueError("formal RQ2 requires the complete frozen 626-video set")
@@ -122,6 +164,114 @@ def check_formal_features(cfg, protocol_path, reference_root):
     if result["protocol_sha256"] != protocol["protocol_sha256"]:
         raise ValueError("feature audit and training protocol disagree")
     return protocol
+
+
+def _check_feature_provenance(protocol):
+    provenance = protocol.get("provenance", {})
+    if not isinstance(provenance, dict):
+        raise ValueError("formal RQ2 feature provenance must be a mapping")
+    if not _SHA256.fullmatch(str(provenance.get("extractor_sha256", ""))):
+        raise ValueError("formal RQ2 feature protocol lacks extractor SHA256")
+    if not isinstance(provenance.get("batch_tokens"), int) or provenance["batch_tokens"] <= 0:
+        raise ValueError("formal RQ2 feature protocol lacks a valid batch_tokens")
+    for key in ("device_map", "attention", "dtype"):
+        if not isinstance(provenance.get(key), str) or not provenance[key]:
+            raise ValueError("formal RQ2 feature protocol lacks {} provenance".format(key))
+    packages = provenance.get("packages")
+    if (
+        not isinstance(packages, dict)
+        or not packages
+        or any(not isinstance(value, str) or not value for value in packages.values())
+    ):
+        raise ValueError("formal RQ2 feature package provenance is incomplete")
+    for key in ("repository", "external_repository"):
+        repository = provenance.get(key)
+        if not isinstance(repository, dict):
+            raise ValueError("formal RQ2 feature protocol lacks {} provenance".format(key))
+        revision = repository.get("revision")
+        diff_hash = repository.get("tracked_diff_sha256")
+        if (
+            not isinstance(revision, str)
+            or not _GIT_REVISION.fullmatch(revision)
+            or not _SHA256.fullmatch(str(diff_hash or ""))
+        ):
+            raise ValueError("formal RQ2 {} is not reproducibly identified".format(key))
+    checkpoints = protocol.get("checkpoint_sha256")
+    if (
+        not isinstance(checkpoints, dict)
+        or not checkpoints
+        or any(
+            not isinstance(name, str)
+            or not name
+            or not _SHA256.fullmatch(str(digest))
+            for name, digest in checkpoints.items()
+        )
+    ):
+        raise ValueError("formal RQ2 checkpoint provenance is incomplete")
+
+
+def _runtime_config_payload(cfg):
+    payload = deepcopy(getattr(cfg, "config", cfg))
+    for key in ("unique_id", "name", "gpu", "config_path"):
+        payload.pop(key, None)
+    formal = payload.get("rq2_formal")
+    if isinstance(formal, dict):
+        formal.pop("run_signature", None)
+    payload.get("dataset", {}).pop("stage1_context", None)
+    payload.get("train_cfg", {}).pop("head_empty_cls", None)
+    benchmark = payload.get("benchmark_audit")
+    if isinstance(benchmark, dict):
+        benchmark.pop("training_initialization", None)
+        benchmark.pop("initialization_inputs", None)
+    return payload
+
+
+def build_formal_run_signature(cfg):
+    payload = _runtime_config_payload(cfg)
+    formal = payload.get("rq2_formal", {})
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str
+    ).encode("ascii")
+    feature = payload.get("rq2_feature_protocol") or {}
+    manifest = formal.get("target_manifest") or {}
+    return {
+        "schema": RUN_SIGNATURE_SCHEMA,
+        "config_sha256": hashlib.sha256(encoded).hexdigest(),
+        "regime": formal.get("regime"),
+        "shift": formal.get("shift"),
+        "seed": int(payload.get("seed", payload.get("init_rand_seed", -1))),
+        "feature_protocol_sha256": feature.get("protocol_sha256"),
+        "target_manifest_sha256": (
+            manifest.get("sha256") if isinstance(manifest, dict) else None
+        ),
+        "training_budget": formal.get("training_budget"),
+        "rng_protocol": formal.get("rng_protocol"),
+    }
+
+
+def validate_formal_runtime(cfg, expected_signature=None):
+    formal = cfg.get("rq2_formal", {})
+    if formal.get("training_budget") != TRAINING_BUDGET_PROTOCOL:
+        raise ValueError("formal RQ2 training budget protocol differs")
+    if formal.get("rng_protocol") != RNG_PROTOCOL:
+        raise ValueError("formal RQ2 RNG protocol differs")
+    manifest = formal.get("target_manifest")
+    manifest_path = manifest.get("path") if isinstance(manifest, dict) else manifest
+    checked = check_formal_config(cfg, formal.get("regime"), manifest_path)
+    if checked and isinstance(manifest, dict):
+        if checked["sha256"] != manifest.get("sha256") or checked["videos"] != manifest.get("videos"):
+            raise ValueError("formal RQ2 target manifest changed after audit")
+    actual = build_formal_run_signature(cfg)
+    expected = expected_signature or formal.get("run_signature")
+    if expected != actual:
+        raise ValueError("formal RQ2 runtime configuration changed after audit")
+    return actual
+
+
+def validate_formal_resume(checkpoint, current_signature):
+    saved = checkpoint.get("rq2_run_signature") if isinstance(checkpoint, dict) else None
+    if saved != current_signature:
+        raise ValueError("formal RQ2 resume checkpoint has a different run signature")
 
 
 def check_slowfast_features(feature_root, registry_path):
@@ -167,6 +317,19 @@ def _compare_frozen_values(frozen, candidate, prefix=()):
             failures.extend(_compare_frozen_values(value, actual or {}, path))
         elif actual != value:
             failures.append("{}: {!r} != {!r}".format(".".join(path), actual, value))
+    generated = {
+        ("dataset",): {"stage1_context"},
+        ("model",): {"input_dim", "num_classes", "test_cfg", "max_seq_len"},
+        ("train_cfg",): {"head_empty_cls", "evaluate_student", "test_target_val_only"},
+    }
+    behavior_roots = {"dataset", "model", "opt", "loader", "train_cfg", "test_cfg"}
+    if prefix and prefix[0] in behavior_roots:
+        allowed_extras = generated.get(prefix, set())
+        extras = set(candidate or {}) - set(frozen) - allowed_extras
+        failures.extend(
+            "{}: unexpected runtime field".format(".".join(prefix + (str(key),)))
+            for key in sorted(extras)
+        )
     return failures
 
 
