@@ -7,6 +7,7 @@ common:
   temporal_grid: slowfast-compatible-left-edge-v1
   sampling: deterministic-uniform-within-receptive-field
   normalization: l2
+  tokenizer_fix_mistral_regex: true
   source_only_seed: 6
   epochs: 50
   checkpoint_selection: source_validation_loss
@@ -34,17 +35,23 @@ models:
     feature_interface: official_video_clip_projector
     execution_backend: official_torch_unfused_ops
   qwen3_vl_8b:
-    status: pending_implementation
+    status: smoke_verified
     output_dim: 4096
     input_frames: 8
     spatial_size: 448
     feature_interface: neutral_prompt_multimodal_last_token
     diagnostic_interface: vision_tower_spatial_pool_then_temporal_mean
   timelens2_8b:
-    status: pending_interface
-    feature_interface: predeclared_time_corresponding_multimodal_representation
-    note: no verified official temporal-head readout
+    status: smoke_verified
+    output_dim: 4096
+    input_frames: 8
+    spatial_size: 448
+    feature_interface: neutral_prompt_multimodal_last_token
+    note: full frozen multimodal forward; no claim of an official temporal head
   timeple_8b:
-    status: pending_interface
-    feature_interface: predeclared_time_corresponding_representation
-    note: record which temporal-specialization modules the readout actually uses
+    status: pending_weights_and_smoke
+    output_dim: 1024
+    input_frames: 8
+    spatial_size: 448
+    feature_interface: timespan_hidden_interface_adapter_decoder_trunk
+    note: readout explicitly traverses the official TimePLE output adapter and codec decoder trunk

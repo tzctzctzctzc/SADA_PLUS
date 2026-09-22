@@ -14,6 +14,22 @@ FEATURE_FPS = 30.0
 FEAT_STRIDE = 16
 RECEPTIVE_FIELD_FRAMES = 32
 
+NEUTRAL_MULTIMODAL_PROMPT = (
+    "Observe the chronological video frames and form a neutral representation "
+    "of the visible content. Do not assign an action category and do not predict "
+    "timestamps."
+)
+TIMEPLE_NEUTRAL_PROMPT = (
+    "Observe the chronological video frames and form a neutral interval "
+    "representation of the visible content without assigning an action category."
+)
+NEUTRAL_MULTIMODAL_PROMPT_SHA256 = hashlib.sha256(
+    NEUTRAL_MULTIMODAL_PROMPT.encode("utf-8")
+).hexdigest()
+TIMEPLE_NEUTRAL_PROMPT_SHA256 = hashlib.sha256(
+    TIMEPLE_NEUTRAL_PROMPT.encode("utf-8")
+).hexdigest()
+
 MODEL_SPECS = {
     "egovideo_hod": {
         "status": "smoke_verified",
@@ -33,6 +49,36 @@ MODEL_SPECS = {
         "execution_backend": "official_torch_unfused_ops",
     },
     "qwen3_vl_8b": {
+        "status": "smoke_verified",
+        "formal_eligible": True,
+        "output_dim": 4096,
+        "input_frames": 8,
+        "spatial_size": 448,
+        "interface": "neutral_prompt_multimodal_last_token",
+        "prompt_sha256": NEUTRAL_MULTIMODAL_PROMPT_SHA256,
+        "input_modality": "native_video_frames",
+    },
+    "timelens2_8b": {
+        "status": "smoke_verified",
+        "formal_eligible": True,
+        "output_dim": 4096,
+        "input_frames": 8,
+        "spatial_size": 448,
+        "interface": "neutral_prompt_multimodal_last_token",
+        "prompt_sha256": NEUTRAL_MULTIMODAL_PROMPT_SHA256,
+        "input_modality": "native_video_frames",
+    },
+    "timeple_8b": {
+        "status": "pending_weights_and_smoke",
+        "formal_eligible": False,
+        "output_dim": 1024,
+        "input_frames": 8,
+        "spatial_size": 448,
+        "interface": "timespan_hidden_interface_adapter_decoder_trunk",
+        "prompt_sha256": TIMEPLE_NEUTRAL_PROMPT_SHA256,
+        "input_modality": "native_video_frames",
+    },
+    "qwen3_vl_8b_vision_tower": {
         "status": "ablation_only",
         "formal_eligible": False,
         "output_dim": 4096,

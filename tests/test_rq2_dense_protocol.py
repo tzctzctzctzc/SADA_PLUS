@@ -5,9 +5,13 @@ from pathlib import Path
 from tools.audit_rq2_vlm_benchmark import audit_shift_registry
 from tools.extract_rq2_dense_vlm_features import (
     SequentialFrameReader,
+    assigned_video_ids,
+    checkpoint_fingerprint,
     required_video_ids_from_registry,
     video_selection_from_registry,
+    write_shared_protocol_files,
 )
+from tools.launch_rq2_dense_vlm import balanced_assignments, output_appears_complete
 
 from tools.rq2_dense_protocol import (
     expected_centers_seconds,
@@ -211,7 +215,7 @@ def test_feature_validation_rejects_temporal_collapse(tmp_path):
 
 
 def test_qwen_vision_tower_is_not_formal_training_interface(tmp_path):
-    payload = protocol_payload("qwen3_vl_8b", {"weights": "abc"})
+    payload = protocol_payload("qwen3_vl_8b_vision_tower", {"weights": "abc"})
     payload["protocol_sha256"] = protocol_sha256(payload)
     protocol_path = tmp_path / "protocol.json"
     protocol_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -221,6 +225,73 @@ def test_qwen_vision_tower_is_not_formal_training_interface(tmp_path):
         assert "not eligible" in str(exc)
     else:
         raise AssertionError("Qwen vision-tower ablation entered the formal table")
+
+
+def test_only_smoke_verified_new_models_are_formal_eligible():
+    from tools.rq2_dense_protocol import MODEL_SPECS
+    assert MODEL_SPECS["qwen3_vl_8b"]["formal_eligible"]
+    assert MODEL_SPECS["timelens2_8b"]["formal_eligible"]
+    assert not MODEL_SPECS["timeple_8b"]["formal_eligible"]
+
+
+def test_worker_assignment_does_not_change_canonical_protocol(tmp_path):
+    canonical = ["P01_01", "P01_02", "P01_03"]
+    assignment = tmp_path / "worker.txt"
+    assignment.write_text("P01_03\nP01_01\n", encoding="ascii")
+    assert assigned_video_ids(assignment, canonical) == ["P01_03", "P01_01"]
+    payload = protocol_payload("egovideo_hod", {"checkpoint.pt": "abc"})
+    payload["video_selection"] = "shift_registry_and_annotation"
+    payload["video_set_count"] = len(canonical)
+    payload["video_set_sha256"] = video_set_sha256(canonical)
+    signature = protocol_sha256(payload)
+    write_shared_protocol_files(tmp_path / "features", canonical, payload, signature)
+    written = json.loads((tmp_path / "features" / "protocol.json").read_text())
+    assert written["video_set_count"] == 3
+    assert written["protocol_sha256"] == signature
+
+
+def test_checkpoint_fingerprint_hashes_regular_file(tmp_path):
+    checkpoint = tmp_path / "weights.safetensors"
+    checkpoint.write_bytes(b"weights")
+    import hashlib
+    assert checkpoint_fingerprint(checkpoint) == hashlib.sha256(b"weights").hexdigest()
+
+
+def test_checkpoint_fingerprint_uses_content_addressed_symlink(monkeypatch, tmp_path):
+    checkpoint = tmp_path / "weights.safetensors"
+    digest = "d" * 64
+    monkeypatch.setattr(Path, "is_symlink", lambda self: self == checkpoint)
+    monkeypatch.setattr("os.readlink", lambda path: "../../blobs/" + digest)
+    assert checkpoint_fingerprint(checkpoint) == digest
+
+
+def test_balanced_assignments_cover_videos_without_overlap(tmp_path):
+    lengths = {"P01_01": 10, "P01_02": 8, "P01_03": 4, "P01_04": 2}
+    for video_id, length in lengths.items():
+        np.savez(tmp_path / (video_id + ".npz"), feats=np.zeros((length, 1)))
+    groups, totals = balanced_assignments(sorted(lengths), tmp_path, 2)
+    assert sorted(video_id for group in groups for video_id in group) == sorted(lengths)
+    assert abs(totals[0] - totals[1]) <= max(lengths.values())
+
+
+def test_output_completion_uses_canonical_video_index(tmp_path):
+    (tmp_path / "video_ids.txt").write_text("P01_01\nP01_02\n", encoding="ascii")
+    np.savez(tmp_path / "P01_01.npz", feats=np.zeros((1, 1)))
+    assert not output_appears_complete(tmp_path)
+    np.savez(tmp_path / "P01_02.npz", feats=np.zeros((1, 1)))
+    assert output_appears_complete(tmp_path)
+
+
+def test_shared_protocol_rejects_worker_overwrite(tmp_path):
+    output = tmp_path / "features"
+    payload = protocol_payload("egovideo_hod", {"checkpoint.pt": "abc"})
+    write_shared_protocol_files(output, ["P01_01"], payload, "first")
+    try:
+        write_shared_protocol_files(output, ["P01_02"], payload, "second")
+    except RuntimeError as exc:
+        assert "different" in str(exc)
+    else:
+        raise AssertionError("worker overwrote a different shared protocol")
 
 
 def test_shift_registry_matches_frozen_configs():

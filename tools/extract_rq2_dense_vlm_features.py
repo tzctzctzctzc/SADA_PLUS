@@ -5,6 +5,8 @@ import hashlib
 import importlib.metadata
 import importlib
 import json
+import os
+import re
 import subprocess
 import sys
 import time
@@ -19,7 +21,9 @@ from tools.rq2_dense_protocol import (
     FEAT_STRIDE,
     FEATURE_FPS,
     MODEL_SPECS,
+    NEUTRAL_MULTIMODAL_PROMPT,
     RECEPTIVE_FIELD_FRAMES,
+    TIMEPLE_NEUTRAL_PROMPT,
     atomic_savez,
     expected_centers_seconds,
     protocol_payload,
@@ -225,7 +229,141 @@ class InternVideoEncoder:
         return normalized_numpy(features)
 
 
-class QwenEncoder:
+def _video_messages(clips, prompt, min_pixels, max_pixels, assistant_text=None):
+    messages = []
+    sample_fps = (
+        (MODEL_SPECS["qwen3_vl_8b"]["input_frames"] - 1)
+        * FEATURE_FPS
+        / (RECEPTIVE_FIELD_FRAMES - 1)
+    )
+    for clip in clips:
+        user = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "video",
+                    "video": clip,
+                    "sample_fps": sample_fps,
+                    "raw_fps": sample_fps,
+                    "min_pixels": int(min_pixels),
+                    "max_pixels": int(max_pixels),
+                },
+                {"type": "text", "text": prompt},
+            ],
+        }
+        item = [user]
+        if assistant_text is not None:
+            item.append({"role": "assistant", "content": assistant_text})
+        messages.append(item)
+    return messages
+
+
+def _process_video_messages(runtime, messages, add_generation_prompt):
+    texts = [
+        runtime["processor"].apply_chat_template(
+            item,
+            tokenize=False,
+            add_generation_prompt=add_generation_prompt,
+        )
+        for item in messages
+    ]
+    image_inputs, video_inputs, video_kwargs = runtime["process_vision_info"](
+        messages,
+        image_patch_size=16,
+        return_video_kwargs=True,
+        return_video_metadata=True,
+    )
+    if video_inputs is not None:
+        video_inputs, video_metadata = zip(*video_inputs)
+        video_inputs = list(video_inputs)
+        video_metadata = list(video_metadata)
+    else:
+        video_metadata = None
+    return runtime["processor"](
+        text=texts,
+        images=image_inputs,
+        videos=video_inputs,
+        video_metadata=video_metadata,
+        padding=True,
+        return_tensors="pt",
+        do_resize=False,
+        **video_kwargs
+    ).to(runtime["device"])
+
+
+class MultimodalLastTokenEncoder:
+    def __init__(self, args):
+        import torch
+        from PIL import Image
+        from qwen_vl_utils import process_vision_info
+        from transformers import AutoModelForImageTextToText, AutoProcessor
+
+        if not args.model_repository:
+            raise ValueError("multimodal models require --model-repository")
+        dtype = "auto" if args.dtype == "auto" else getattr(torch, args.dtype)
+        kwargs = {
+            "dtype": dtype,
+            "attn_implementation": args.attn_implementation,
+            "local_files_only": args.offline,
+        }
+        if args.device_map != "none":
+            kwargs["device_map"] = args.device_map
+        model = AutoModelForImageTextToText.from_pretrained(
+            args.model_path, **kwargs
+        )
+        if args.device_map == "none":
+            model.to(args.device)
+        model.eval()
+        self.torch = torch
+        self.Image = Image
+        self.runtime = {
+            "torch": torch,
+            "model": model,
+            "processor": AutoProcessor.from_pretrained(
+                args.model_path,
+                local_files_only=args.offline,
+                fix_mistral_regex=True,
+            ),
+            "process_vision_info": process_vision_info,
+            "device": model.device,
+        }
+
+    def encode(self, frames, batch_tokens):
+        runtime = self.runtime
+        clips = [
+            [self.Image.fromarray(frame) for frame in frames[offset:offset + 8]]
+            for offset in range(0, len(frames), 8)
+        ]
+        messages = _video_messages(
+            clips,
+            NEUTRAL_MULTIMODAL_PROMPT,
+            224 * 224,
+            448 * 448,
+        )
+        inputs = _process_video_messages(runtime, messages, True)
+        with runtime["torch"].inference_mode():
+            output = runtime["model"](
+                **inputs,
+                use_cache=False,
+                logits_to_keep=1,
+                output_hidden_states=True,
+                return_dict=True,
+            )
+        if not output.hidden_states:
+            raise RuntimeError("model did not return multimodal hidden states")
+        attention_mask = inputs["attention_mask"].bool()
+        positions = runtime["torch"].arange(
+            attention_mask.shape[1], device=attention_mask.device
+        ).unsqueeze(0).expand_as(attention_mask)
+        last_positions = positions.masked_fill(~attention_mask, -1).max(dim=1).values
+        batch_indices = runtime["torch"].arange(
+            batch_tokens, device=last_positions.device
+        )
+        features = output.hidden_states[-1][batch_indices, last_positions].float()
+        return normalized_numpy(features)
+
+
+class QwenVisionEncoder:
     def __init__(self, args):
         from PIL import Image
         from tools.run_qwen3_vl_classification import load_qwen3
@@ -251,7 +389,92 @@ class QwenEncoder:
         per_frame = runtime["torch"].stack(
             [embedding.float().mean(dim=0) for embedding in embeddings]
         )
-        features = per_frame.reshape(batch_tokens, 8, -1).mean(dim=1)
+        return normalized_numpy(per_frame.reshape(batch_tokens, 8, -1).mean(dim=1))
+
+
+class TimePLEEncoder:
+    def __init__(self, args):
+        import torch
+        from PIL import Image
+        from qwen_vl_utils import process_vision_info
+
+        if not args.timeple_root:
+            raise ValueError("TimePLE requires --timeple-root")
+        source_root = str(Path(args.timeple_root).resolve() / "src")
+        if source_root not in sys.path:
+            sys.path.insert(0, source_root)
+        import timeple  # noqa: F401
+        from transformers import AutoModelForImageTextToText, AutoProcessor
+
+        dtype = "auto" if args.dtype == "auto" else getattr(torch, args.dtype)
+        kwargs = {
+            "dtype": dtype,
+            "attn_implementation": args.attn_implementation,
+            "local_files_only": args.offline,
+        }
+        if args.device_map != "none":
+            kwargs["device_map"] = args.device_map
+        model = AutoModelForImageTextToText.from_pretrained(
+            args.model_path, **kwargs
+        )
+        if args.device_map == "none":
+            model.to(args.device)
+        model.eval()
+        if not getattr(model, "use_timeple_codec", False):
+            raise RuntimeError("checkpoint does not enable the TimePLE codec")
+        self.Image = Image
+        self.runtime = {
+            "torch": torch,
+            "model": model,
+            "processor": AutoProcessor.from_pretrained(
+                args.model_path,
+                local_files_only=args.offline,
+                fix_mistral_regex=True,
+            ),
+            "process_vision_info": process_vision_info,
+            "device": model.device,
+        }
+
+    def encode(self, frames, batch_tokens):
+        runtime = self.runtime
+        clips = [
+            [self.Image.fromarray(frame) for frame in frames[offset:offset + 8]]
+            for offset in range(0, len(frames), 8)
+        ]
+        messages = _video_messages(
+            clips,
+            TIMEPLE_NEUTRAL_PROMPT,
+            224 * 224,
+            448 * 448,
+            assistant_text="<|TIMESPAN|>",
+        )
+        inputs = _process_video_messages(runtime, messages, False)
+        with runtime["torch"].inference_mode():
+            output = runtime["model"](
+                **inputs,
+                use_cache=False,
+                logits_to_keep=1,
+                compute_timeple_loss=False,
+                output_hidden_states=True,
+                return_dict=True,
+            )
+        hidden = output.hidden_states[-1]
+        token_id = int(runtime["model"].config.timespan_token_id)
+        matches = inputs["input_ids"].eq(token_id) & inputs["attention_mask"].bool()
+        if not runtime["torch"].all(matches.sum(dim=1) == 1):
+            raise RuntimeError("expected exactly one TimePLE timespan token per clip")
+        positions = matches.float().argmax(dim=1)
+        rows = runtime["torch"].arange(batch_tokens, device=hidden.device)
+        features = hidden[rows, positions]
+        model = runtime["model"]
+        if getattr(model, "use_timeple_interface_adapter", False):
+            features = model.timeple_interface_adapter.forward_output(
+                features,
+                compute_diagnostics=False,
+            ).adapted
+        trunk = model.timeple_codec.decoder.trunk
+        trunk_dtype = next(trunk.parameters()).dtype
+        features = trunk(features.to(trunk_dtype)).float()
         return normalized_numpy(features)
 
 
@@ -280,6 +503,10 @@ def parse_args():
     parser.add_argument("--stage2-checkpoint")
     parser.add_argument("--clip-checkpoint")
     parser.add_argument("--model-path", default="Qwen/Qwen3-VL-8B-Instruct")
+    parser.add_argument("--model-repository")
+    parser.add_argument("--timeple-root")
+    parser.add_argument("--assignment-file")
+    parser.add_argument("--protocol-only", action="store_true")
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--device-map", choices=("none", "auto"), default="none")
     parser.add_argument("--attn-implementation", default="sdpa")
@@ -293,7 +520,10 @@ def checkpoint_hashes(args):
         paths = [args.checkpoint]
     elif args.model == "internvideo2_clip_1b":
         paths = [args.stage2_checkpoint, args.clip_checkpoint]
-    elif args.model == "qwen3_vl_8b":
+    elif args.model in (
+        "qwen3_vl_8b", "timelens2_8b", "timeple_8b",
+        "qwen3_vl_8b_vision_tower",
+    ):
         model_root = Path(args.model_path)
         if not model_root.is_dir():
             raise FileNotFoundError(
@@ -308,7 +538,16 @@ def checkpoint_hashes(args):
     for path in paths:
         if not path or not Path(path).is_file():
             raise FileNotFoundError("required checkpoint is missing: {}".format(path))
-    return {Path(path).name: sha256_file(path) for path in paths}
+    return {Path(path).name: checkpoint_fingerprint(path) for path in paths}
+
+
+def checkpoint_fingerprint(path):
+    path = Path(path)
+    if path.is_symlink():
+        blob_name = Path(os.readlink(path)).name
+        if re.fullmatch(r"[0-9a-f]{64}", blob_name):
+            return blob_name
+    return sha256_file(path)
 
 
 def git_provenance(path):
@@ -351,13 +590,32 @@ def extraction_provenance(args):
             "device_map": args.device_map,
             "attention": args.attn_implementation,
             "dtype": args.dtype,
+            "fix_mistral_regex": True,
+        },
+        "timelens2_8b": {
+            "device_map": args.device_map,
+            "attention": args.attn_implementation,
+            "dtype": args.dtype,
+            "fix_mistral_regex": True,
+        },
+        "timeple_8b": {
+            "device_map": args.device_map,
+            "attention": args.attn_implementation,
+            "dtype": args.dtype,
+            "fix_mistral_regex": True,
+        },
+        "qwen3_vl_8b_vision_tower": {
+            "device_map": args.device_map,
+            "attention": args.attn_implementation,
+            "dtype": args.dtype,
         },
     }[args.model]
     return {
         "extractor_sha256": sha256_file(Path(__file__).resolve()),
         "repository": git_provenance(Path(__file__).resolve().parents[1]),
         "external_repository": git_provenance(
-            args.egohod_root or args.internvideo_root or args.model_path
+            args.egohod_root or args.internvideo_root or args.model_repository
+            or args.timeple_root or args.model_path
         ),
         "batch_tokens": args.batch_tokens,
         **runtime,
@@ -420,7 +678,11 @@ def build_encoder(args):
         if not args.internvideo_root:
             raise ValueError("InternVideo2 requires --internvideo-root")
         return InternVideoEncoder(args)
-    return QwenEncoder(args)
+    if args.model in ("qwen3_vl_8b", "timelens2_8b"):
+        return MultimodalLastTokenEncoder(args)
+    if args.model == "timeple_8b":
+        return TimePLEEncoder(args)
+    return QwenVisionEncoder(args)
 
 
 def video_metadata(path):
@@ -435,12 +697,47 @@ def video_metadata(path):
     return frame_count, fps
 
 
+def write_shared_protocol_files(output_root, video_ids, payload, signature):
+    documents = {
+        "video_ids.txt": "".join(video_id + "\n" for video_id in video_ids),
+        "protocol.json": json.dumps(
+            {**payload, "protocol_sha256": signature},
+            indent=2,
+            sort_keys=True,
+        ) + "\n",
+    }
+    output_root.mkdir(parents=True, exist_ok=True)
+    for name, content in documents.items():
+        path = output_root / name
+        if path.is_file() and path.read_text(encoding="utf-8") != content:
+            raise RuntimeError(
+                "shared output already contains a different {}".format(name)
+            )
+        temporary = output_root / ".{}.{}.tmp".format(name, os.getpid())
+        temporary.write_text(content, encoding="utf-8")
+        os.replace(temporary, path)
+
+
+def assigned_video_ids(path, canonical_video_ids):
+    if not path:
+        return list(canonical_video_ids)
+    requested = Path(path).read_text(encoding="ascii").splitlines()
+    if not requested or requested != list(dict.fromkeys(requested)):
+        raise ValueError("assignment file must contain unique video IDs")
+    unknown = sorted(set(requested).difference(canonical_video_ids))
+    if unknown:
+        raise ValueError("assignment contains videos outside the protocol: {}".format(unknown))
+    return requested
+
+
 def main():
     args = parse_args()
     if args.batch_tokens <= 0 or args.shard_count <= 0:
         raise ValueError("batch tokens and shard count must be positive")
     if not 0 <= args.shard_index < args.shard_count:
         raise ValueError("invalid shard index")
+    if args.video_id and args.assignment_file:
+        raise ValueError("--video-id and --assignment-file cannot be combined")
     spec = MODEL_SPECS[args.model]
     reference_root = Path(args.reference_feature_root)
     if args.shift_registry:
@@ -476,8 +773,9 @@ def main():
     payload["video_set_sha256"] = video_set_sha256(video_ids)
     signature = protocol_sha256(payload)
     all_video_ids = list(video_ids)
+    video_ids = assigned_video_ids(args.assignment_file, all_video_ids)
     video_ids = [
-        video_id for index, video_id in enumerate(all_video_ids)
+        video_id for index, video_id in enumerate(video_ids)
         if index % args.shard_count == args.shard_index
     ]
     if args.limit_videos > 0:
@@ -485,15 +783,12 @@ def main():
     if not video_ids:
         raise ValueError("no videos selected")
     output_root = Path(args.output_root)
-    output_root.mkdir(parents=True, exist_ok=True)
-    (output_root / "video_ids.txt").write_text(
-        "".join(video_id + "\n" for video_id in all_video_ids),
-        encoding="ascii",
+    write_shared_protocol_files(
+        output_root, all_video_ids, payload, signature
     )
-    (output_root / "protocol.json").write_text(
-        json.dumps({**payload, "protocol_sha256": signature}, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    if args.protocol_only:
+        print(signature, flush=True)
+        return 0
 
     pending = []
     for video_id in video_ids:
