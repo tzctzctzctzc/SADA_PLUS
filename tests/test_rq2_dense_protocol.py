@@ -231,11 +231,11 @@ def test_qwen_vision_tower_is_not_formal_training_interface(tmp_path):
         raise AssertionError("Qwen vision-tower ablation entered the formal table")
 
 
-def test_only_smoke_verified_new_models_are_formal_eligible():
+def test_new_models_are_formal_eligible_after_smoke():
     from tools.rq2_dense_protocol import MODEL_SPECS
     assert MODEL_SPECS["qwen3_vl_8b"]["formal_eligible"]
     assert MODEL_SPECS["timelens2_8b"]["formal_eligible"]
-    assert not MODEL_SPECS["timeple_8b"]["formal_eligible"]
+    assert MODEL_SPECS["timeple_8b"]["formal_eligible"]
 
 
 def test_worker_assignment_does_not_change_canonical_protocol(tmp_path):

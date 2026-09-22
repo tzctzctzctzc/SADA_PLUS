@@ -69,8 +69,8 @@ MODEL_SPECS = {
         "input_modality": "native_video_frames",
     },
     "timeple_8b": {
-        "status": "pending_weights_and_smoke",
-        "formal_eligible": False,
+        "status": "smoke_verified",
+        "formal_eligible": True,
         "output_dim": 1024,
         "input_frames": 8,
         "spatial_size": 448,

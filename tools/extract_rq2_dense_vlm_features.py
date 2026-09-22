@@ -458,30 +458,31 @@ class TimePLEEncoder:
                 output_hidden_states=True,
                 return_dict=True,
             )
-        hidden = output.hidden_states[-1]
-        token_id = int(runtime["model"].config.timespan_token_id)
-        matches = inputs["input_ids"].eq(token_id) & inputs["attention_mask"].bool()
-        if not runtime["torch"].all(matches.sum(dim=1) == 1):
-            raise RuntimeError("expected exactly one TimePLE timespan token per clip")
-        positions = matches.float().argmax(dim=1)
-        rows = runtime["torch"].arange(batch_tokens, device=hidden.device)
-        features = hidden[rows, positions]
-        model = runtime["model"]
-        if getattr(model, "use_timeple_interface_adapter", False):
-            features = model.timeple_interface_adapter.forward_output(
-                features,
-                compute_diagnostics=False,
-            ).adapted
-        trunk = model.timeple_codec.decoder.trunk
-        trunk_dtype = next(trunk.parameters()).dtype
-        features = trunk(features.to(trunk_dtype)).float()
+        with runtime["torch"].inference_mode():
+            hidden = output.hidden_states[-1]
+            token_id = int(runtime["model"].config.timespan_token_id)
+            matches = inputs["input_ids"].eq(token_id) & inputs["attention_mask"].bool()
+            if not runtime["torch"].all(matches.sum(dim=1) == 1):
+                raise RuntimeError("expected exactly one TimePLE timespan token per clip")
+            positions = matches.float().argmax(dim=1)
+            rows = runtime["torch"].arange(batch_tokens, device=hidden.device)
+            features = hidden[rows, positions]
+            model = runtime["model"]
+            if getattr(model, "use_timeple_interface_adapter", False):
+                features = model.timeple_interface_adapter.forward_output(
+                    features,
+                    compute_diagnostics=False,
+                ).adapted
+            trunk = model.timeple_codec.decoder.trunk
+            trunk_dtype = next(trunk.parameters()).dtype
+            features = trunk(features.to(trunk_dtype)).float()
         return normalized_numpy(features)
 
 
 def normalized_numpy(features):
     features = features.float()
     features = features / features.norm(dim=-1, keepdim=True).clamp_min(1e-12)
-    return features.cpu().numpy().astype(np.float16)
+    return features.detach().cpu().numpy().astype(np.float16)
 
 
 def parse_args():
