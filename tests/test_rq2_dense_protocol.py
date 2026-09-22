@@ -11,7 +11,11 @@ from tools.extract_rq2_dense_vlm_features import (
     video_selection_from_registry,
     write_shared_protocol_files,
 )
-from tools.launch_rq2_dense_vlm import balanced_assignments, output_appears_complete
+from tools.launch_rq2_dense_vlm import (
+    balanced_assignments,
+    output_appears_complete,
+    output_has_live_workers,
+)
 
 from tools.rq2_dense_protocol import (
     expected_centers_seconds,
@@ -280,6 +284,18 @@ def test_output_completion_uses_canonical_video_index(tmp_path):
     assert not output_appears_complete(tmp_path)
     np.savez(tmp_path / "P01_02.npz", feats=np.zeros((1, 1)))
     assert output_appears_complete(tmp_path)
+
+
+def test_live_worker_state_reserves_model(monkeypatch, tmp_path):
+    state = {"workers": [{"pid": 123}, {"pid": 456}]}
+    (tmp_path / "launch_state.json").write_text(json.dumps(state), encoding="utf-8")
+
+    def fake_kill(pid, _signal):
+        if pid == 123:
+            raise ProcessLookupError
+
+    monkeypatch.setattr("os.kill", fake_kill)
+    assert output_has_live_workers(tmp_path)
 
 
 def test_shared_protocol_rejects_worker_overwrite(tmp_path):

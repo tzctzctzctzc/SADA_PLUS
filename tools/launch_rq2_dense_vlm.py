@@ -194,7 +194,7 @@ def balanced_assignments(video_ids, reference_root, workers):
 def select_auto_model(args):
     for model_name in MODEL_QUEUE:
         output_root = Path(args.artifact_root) / model_name
-        if output_appears_complete(output_root):
+        if output_appears_complete(output_root) or output_has_live_workers(output_root):
             continue
         try:
             model_arguments(args, model_name)
@@ -216,6 +216,24 @@ def output_appears_complete(output_root):
     return completed == set(video_ids)
 
 
+def output_has_live_workers(output_root):
+    state_path = output_root / "launch_state.json"
+    if not state_path.is_file():
+        return False
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        pids = [int(worker["pid"]) for worker in state["workers"]]
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+    for pid in pids:
+        try:
+            os.kill(pid, 0)
+        except (ProcessLookupError, PermissionError):
+            continue
+        return True
+    return False
+
+
 def launch_workers(args, model_name, workers, batch_tokens):
     if not MODEL_SPECS[model_name]["formal_eligible"]:
         raise RuntimeError(
@@ -229,6 +247,8 @@ def launch_workers(args, model_name, workers, batch_tokens):
             )
         )
     output_root = Path(args.artifact_root) / model_name
+    if output_has_live_workers(output_root):
+        raise RuntimeError("{} already has live extraction workers".format(model_name))
     protocol_command = common_command(args, model_name, output_root, batch_tokens)
     subprocess.run(
         protocol_command + ["--protocol-only"],
