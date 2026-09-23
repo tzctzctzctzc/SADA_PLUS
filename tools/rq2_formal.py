@@ -318,7 +318,7 @@ def _compare_frozen_values(frozen, candidate, prefix=()):
         elif actual != value:
             failures.append("{}: {!r} != {!r}".format(".".join(path), actual, value))
     generated = {
-        ("dataset",): {"stage1_context"},
+        ("dataset",): {"stage1_context", "crop_alignment"},
         ("model",): {"input_dim", "num_classes", "test_cfg", "max_seq_len"},
         ("train_cfg",): {"head_empty_cls", "evaluate_student", "test_target_val_only"},
     }
@@ -330,6 +330,9 @@ def _compare_frozen_values(frozen, candidate, prefix=()):
             "{}: unexpected runtime field".format(".".join(prefix + (str(key),)))
             for key in sorted(extras)
         )
+    if prefix == ("dataset",) and "crop_alignment" not in frozen:
+        if candidate.get("crop_alignment", 1) != 1:
+            failures.append("dataset.crop_alignment must retain the default value 1")
     return failures
 
 
