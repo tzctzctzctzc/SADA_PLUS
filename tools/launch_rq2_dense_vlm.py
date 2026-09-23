@@ -48,6 +48,10 @@ def parse_args():
     parser.add_argument("--repository-root", default=str(Path(__file__).resolve().parents[1]))
     parser.add_argument("--video-root", default="/vepfs/vlms/data/EPIC_KITCHENS/videos")
     parser.add_argument(
+        "--frame-recovery-root",
+        default="/vepfs/vlms/data/EPIC_KITCHENS/rq2_frame_recovery",
+    )
+    parser.add_argument(
         "--reference-feature-root",
         default="/vepfs/vlms/SADA_PLUS/data/ek100_slowfast/features",
     )
@@ -100,6 +104,7 @@ def common_command(args, model_name, output_root, batch_tokens):
         "tools.extract_rq2_dense_vlm_features",
         *model_arguments(args, model_name),
         "--video-root", args.video_root,
+        "--frame-recovery-root", args.frame_recovery_root,
         "--reference-feature-root", args.reference_feature_root,
         "--output-root", str(output_root),
         "--shift-registry", args.shift_registry,

@@ -40,8 +40,17 @@ from tools.rq2_dense_protocol import (
 
 
 class SequentialFrameReader:
-    def __init__(self, path):
+    def __init__(self, path, frame_recovery_root=None):
         self.path = Path(path)
+        self.frame_recovery_root = (
+            Path(frame_recovery_root) if frame_recovery_root else None
+        )
+        self.frame_recovery_manifest = None
+        if self.frame_recovery_root:
+            manifest_path = self.frame_recovery_root / "manifest.json"
+            self.frame_recovery_manifest = json.loads(
+                manifest_path.read_text(encoding="utf-8")
+            )["frames"]
         self.capture = cv2.VideoCapture(str(self.path))
         if not self.capture.isOpened():
             raise RuntimeError("cannot open video: {}".format(path))
@@ -89,6 +98,23 @@ class SequentialFrameReader:
         self._reopen_at(index + 1)
         return frame
 
+    def _read_recovery_cache(self, index):
+        if self.frame_recovery_manifest is None:
+            return None
+        key = "{}:{}".format(self.path.stem, index)
+        entry = self.frame_recovery_manifest.get(key)
+        if entry is None:
+            return None
+        cache_path = self.frame_recovery_root / entry["path"]
+        frame = np.load(cache_path, allow_pickle=False)
+        actual_hash = hashlib.sha256(frame.tobytes()).hexdigest()
+        if actual_hash != entry["frame_sha256"]:
+            raise RuntimeError("recovery frame hash mismatch: {}".format(key))
+        if frame.dtype != np.uint8 or frame.ndim != 3 or frame.shape[2] != 3:
+            raise RuntimeError("recovery frame is invalid: {}".format(key))
+        self._reopen_at(index + 1)
+        return frame
+
     def read(self, indices):
         requested = np.asarray(indices, dtype=np.int64).reshape(-1)
         # Adjacent temporal tokens overlap. Decode each source frame once per
@@ -120,7 +146,9 @@ class SequentialFrameReader:
                     if ok:
                         break
                 if not ok:
-                    frame = self._read_exact_in_subprocess(index)
+                    frame = self._read_recovery_cache(index)
+                    if frame is None:
+                        frame = self._read_exact_in_subprocess(index)
                     isolated = True
             if not isolated:
                 self.position += 1
@@ -551,6 +579,7 @@ def parse_args():
     parser.add_argument("--model-path", default="Qwen/Qwen3-VL-8B-Instruct")
     parser.add_argument("--model-repository")
     parser.add_argument("--timeple-root")
+    parser.add_argument("--frame-recovery-root")
     parser.add_argument("--assignment-file")
     parser.add_argument("--protocol-only", action="store_true")
     parser.add_argument("--offline", action="store_true")
@@ -656,7 +685,7 @@ def extraction_provenance(args):
             "dtype": args.dtype,
         },
     }[args.model]
-    return {
+    provenance = {
         "extractor_sha256": sha256_file(Path(__file__).resolve()),
         "repository": git_provenance(Path(__file__).resolve().parents[1]),
         "external_repository": git_provenance(
@@ -667,6 +696,12 @@ def extraction_provenance(args):
         **runtime,
         "packages": packages,
     }
+    if args.frame_recovery_root:
+        manifest = Path(args.frame_recovery_root) / "manifest.json"
+        if not manifest.is_file():
+            raise FileNotFoundError("frame recovery manifest is missing")
+        provenance["frame_recovery_manifest_sha256"] = sha256_file(manifest)
+    return provenance
 
 
 def video_selection_from_registry(path):
@@ -865,7 +900,7 @@ def main():
                 )
             )
         chunks = []
-        reader = SequentialFrameReader(video_path)
+        reader = SequentialFrameReader(video_path, args.frame_recovery_root)
         try:
             for start in range(0, expected_length, args.batch_tokens):
                 stop = min(start + args.batch_tokens, expected_length)
