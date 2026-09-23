@@ -59,6 +59,7 @@ class SequentialFrameReader:
         self.position = index
 
     def _read_exact_in_subprocess(self, index):
+        self.capture.release()
         code = (
             "import cv2,numpy as np,sys\n"
             "capture=cv2.VideoCapture(sys.argv[1])\n"

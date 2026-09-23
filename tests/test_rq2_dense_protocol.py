@@ -220,6 +220,7 @@ def test_frame_reader_isolates_persistent_decoder_failure(monkeypatch, tmp_path)
     class FakeCapture:
         def __init__(self, _path):
             self.position = 0
+            self.released = False
             captures.append(self)
 
         def isOpened(self):
@@ -236,12 +237,13 @@ def test_frame_reader_isolates_persistent_decoder_failure(monkeypatch, tmp_path)
             self.position = int(value)
 
         def release(self):
-            pass
+            self.released = True
 
     buffer = io.BytesIO()
     np.save(buffer, np.asarray([[[3, 2, 1]]], dtype=np.uint8), allow_pickle=False)
 
     def isolated_read(*_args, **_kwargs):
+        assert captures[-1].released
         return extractor.subprocess.CompletedProcess(
             args=[], returncode=0, stdout=buffer.getvalue(), stderr=b""
         )
