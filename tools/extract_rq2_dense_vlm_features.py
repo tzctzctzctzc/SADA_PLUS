@@ -51,6 +51,21 @@ class SequentialFrameReader:
             self.frame_recovery_manifest = json.loads(
                 manifest_path.read_text(encoding="utf-8")
             )["frames"]
+            # A recovery entry is keyed by the source MP4 frame, while an
+            # official RGB package can expose the same PTS under a different
+            # frame number. Keep that declared alignment as a local alias so
+            # the sampled source index still consumes the verified cache.
+            self.frame_recovery_aliases = {}
+            for key, entry in self.frame_recovery_manifest.items():
+                video_id, frame_text = key.rsplit(":", 1)
+                if video_id != self.path.stem:
+                    continue
+                self.frame_recovery_aliases[int(frame_text)] = entry
+                aligned_index = entry.get("rgb_tar_frame_index")
+                if aligned_index is not None:
+                    self.frame_recovery_aliases[int(aligned_index)] = entry
+        else:
+            self.frame_recovery_aliases = {}
         self.capture = cv2.VideoCapture(str(self.path))
         if not self.capture.isOpened():
             raise RuntimeError("cannot open video: {}".format(path))
@@ -104,7 +119,7 @@ class SequentialFrameReader:
         if self.frame_recovery_manifest is None:
             return None
         key = "{}:{}".format(self.path.stem, index)
-        entry = self.frame_recovery_manifest.get(key)
+        entry = self.frame_recovery_aliases.get(index)
         if entry is None:
             return None
         cache_path = self.frame_recovery_root / entry["path"]
