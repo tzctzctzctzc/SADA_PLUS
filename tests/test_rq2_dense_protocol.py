@@ -1,6 +1,8 @@
-import numpy as np
+import io
 import json
 from pathlib import Path
+
+import numpy as np
 
 from tools.audit_rq2_vlm_benchmark import audit_shift_registry
 from tools.extract_rq2_dense_vlm_features import (
@@ -208,6 +210,52 @@ def test_frame_reader_reopens_after_transient_decode_failure(monkeypatch, tmp_pa
         reader.close()
     assert len(captures) == 4
     assert int(frames[0][0]) == 3
+
+
+def test_frame_reader_isolates_persistent_decoder_failure(monkeypatch, tmp_path):
+    import tools.extract_rq2_dense_vlm_features as extractor
+
+    captures = []
+
+    class FakeCapture:
+        def __init__(self, _path):
+            self.position = 0
+            captures.append(self)
+
+        def isOpened(self):
+            return True
+
+        def grab(self):
+            self.position += 1
+            return True
+
+        def read(self):
+            return False, None
+
+        def set(self, _property, value):
+            self.position = int(value)
+
+        def release(self):
+            pass
+
+    buffer = io.BytesIO()
+    np.save(buffer, np.asarray([[[3, 2, 1]]], dtype=np.uint8), allow_pickle=False)
+
+    def isolated_read(*_args, **_kwargs):
+        return extractor.subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=buffer.getvalue(), stderr=b""
+        )
+
+    monkeypatch.setattr(extractor.cv2, "VideoCapture", FakeCapture)
+    monkeypatch.setattr(extractor.cv2, "cvtColor", lambda frame, _code: frame)
+    monkeypatch.setattr(extractor.subprocess, "run", isolated_read)
+    reader = SequentialFrameReader(tmp_path / "dummy.mp4")
+    try:
+        frames = reader.read(np.asarray([3]))
+    finally:
+        reader.close()
+    assert frames[0].tolist() == [[[3, 2, 1]]]
+    assert len(captures) == 5
 
 
 def test_centers_match_sada_coordinate_conversion():

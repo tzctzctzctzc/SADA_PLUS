@@ -2,6 +2,7 @@
 
 import argparse
 import hashlib
+import io
 import importlib.metadata
 import importlib
 import json
@@ -57,6 +58,33 @@ class SequentialFrameReader:
         self.capture.set(cv2.CAP_PROP_POS_FRAMES, index)
         self.position = index
 
+    def _read_exact_in_subprocess(self, index):
+        code = (
+            "import cv2,numpy as np,sys\n"
+            "capture=cv2.VideoCapture(sys.argv[1])\n"
+            "capture.set(cv2.CAP_PROP_POS_FRAMES,int(sys.argv[2]))\n"
+            "ok,frame=capture.read()\n"
+            "capture.release()\n"
+            "sys.exit(2) if not ok else np.save(sys.stdout.buffer,frame,allow_pickle=False)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code, str(self.path), str(index)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                "isolated decoder failed at frame {}: {}".format(
+                    index, result.stderr.decode("utf-8", errors="replace").strip()
+                )
+            )
+        frame = np.load(io.BytesIO(result.stdout), allow_pickle=False)
+        if frame.ndim != 3 or frame.shape[2] != 3:
+            raise RuntimeError("isolated decoder returned an invalid frame")
+        self._reopen_at(index + 1)
+        return frame
+
     def read(self, indices):
         requested = np.asarray(indices, dtype=np.int64).reshape(-1)
         # Adjacent temporal tokens overlap. Decode each source frame once per
@@ -76,6 +104,7 @@ class SequentialFrameReader:
                     self._reopen_at(index)
                     break
                 self.position += 1
+            isolated = False
             ok, frame = self.capture.read()
             if not ok:
                 # Long videos can occasionally leave OpenCV's decoder in a bad
@@ -87,8 +116,10 @@ class SequentialFrameReader:
                     if ok:
                         break
                 if not ok:
-                    raise RuntimeError("failed to decode frame {}".format(index))
-            self.position += 1
+                    frame = self._read_exact_in_subprocess(index)
+                    isolated = True
+            if not isolated:
+                self.position += 1
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             cache[index] = rgb
         return [cache[int(index)] for index in requested.tolist()]
