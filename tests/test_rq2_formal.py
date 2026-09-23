@@ -210,6 +210,12 @@ def test_runtime_config_only_allows_feature_interface_and_seed_changes():
                  "dataset": {"feat_folder": "/vlm", "input_dim": 768,
                              "max_seq_len": 2304}}
     check_frozen_runtime_values(frozen, candidate)
+    candidate["dataset"]["crop_alignment"] = 1
+    check_frozen_runtime_values(frozen, candidate)
+    candidate["dataset"]["crop_alignment"] = 16
+    with pytest.raises(ValueError, match="dataset.crop_alignment"):
+        check_frozen_runtime_values(frozen, candidate)
+    candidate["dataset"]["crop_alignment"] = 1
     candidate["loader"]["batch_size"] = 4
     with pytest.raises(ValueError, match="loader.batch_size"):
         check_frozen_runtime_values(frozen, candidate)
