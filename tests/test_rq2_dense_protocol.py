@@ -283,6 +283,7 @@ def test_frame_reader_uses_verified_exact_frame_cache(monkeypatch, tmp_path):
     class FakeCapture:
         def __init__(self, _path):
             self.position = 0
+            self.read_count = 0
 
         def isOpened(self):
             return True
@@ -292,6 +293,7 @@ def test_frame_reader_uses_verified_exact_frame_cache(monkeypatch, tmp_path):
             return True
 
         def read(self):
+            self.read_count += 1
             return False, None
 
         def set(self, _property, value):
@@ -308,6 +310,7 @@ def test_frame_reader_uses_verified_exact_frame_cache(monkeypatch, tmp_path):
     finally:
         reader.close()
     assert frames[0].tolist() == frame.tolist()
+    assert reader.capture.read_count == 0
 
 
 def test_centers_match_sada_coordinate_conversion():

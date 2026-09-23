@@ -88,8 +88,10 @@ class SequentialFrameReader:
         )
         if result.returncode != 0:
             raise RuntimeError(
-                "isolated decoder failed at frame {}: {}".format(
-                    index, result.stderr.decode("utf-8", errors="replace").strip()
+                "isolated decoder failed for {} at frame {}: {}".format(
+                    self.path.stem,
+                    index,
+                    result.stderr.decode("utf-8", errors="replace").strip(),
                 )
             )
         frame = np.load(io.BytesIO(result.stdout), allow_pickle=False)
@@ -123,33 +125,35 @@ class SequentialFrameReader:
         cache = {}
         for index in unique_indices.tolist():
             index = int(index)
-            if index < self.position:
-                self.capture.set(cv2.CAP_PROP_POS_FRAMES, index)
-                self.position = index
-            while self.position < index:
-                if not self.capture.grab():
-                    # Some official EPIC-KITCHENS videos contain damaged
-                    # packets between valid sampled frames. Seek directly to
-                    # the requested frame instead of changing the sample.
-                    self._reopen_at(index)
-                    break
-                self.position += 1
-            isolated = False
-            ok, frame = self.capture.read()
-            if not ok:
-                # Long videos can occasionally leave OpenCV's decoder in a bad
-                # state after repeated seeks. Retry only the exact requested
-                # frame; never substitute a neighboring frame.
-                for _ in range(3):
-                    self._reopen_at(index)
-                    ok, frame = self.capture.read()
-                    if ok:
+            # A declared recovery frame is the verified exact source frame.
+            # Read it before touching the damaged MP4 packet at that index.
+            frame = self._read_recovery_cache(index)
+            isolated = frame is not None
+            if not isolated:
+                if index < self.position:
+                    self.capture.set(cv2.CAP_PROP_POS_FRAMES, index)
+                    self.position = index
+                while self.position < index:
+                    if not self.capture.grab():
+                        # Some official EPIC-KITCHENS videos contain damaged
+                        # packets between valid sampled frames. Seek directly
+                        # to the requested frame instead of changing the sample.
+                        self._reopen_at(index)
                         break
+                    self.position += 1
+                ok, frame = self.capture.read()
                 if not ok:
-                    frame = self._read_recovery_cache(index)
-                    if frame is None:
+                    # Long videos can occasionally leave OpenCV's decoder in a
+                    # bad state after repeated seeks. Retry only the exact
+                    # requested frame; never substitute a neighboring frame.
+                    for _ in range(3):
+                        self._reopen_at(index)
+                        ok, frame = self.capture.read()
+                        if ok:
+                            break
+                    if not ok:
                         frame = self._read_exact_in_subprocess(index)
-                    isolated = True
+                        isolated = True
             if not isolated:
                 self.position += 1
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
