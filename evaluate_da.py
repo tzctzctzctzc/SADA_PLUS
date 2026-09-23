@@ -26,9 +26,13 @@ GPU = 0
 # this will be overriden in config file only when set as arguments
 ARGS_CONFIGPATH = dict(  # alias for CLI argument: route in config file
     batch_size=("trainer", "batch_size"),
+    feature_folder=("dataset", "feat_folder"),
+    input_dim=("dataset", "input_dim"),
 )
 ARGS_TYPES = dict(
     batch_size=int,
+    feature_folder=str,
+    input_dim=int,
 ) 
 
 
