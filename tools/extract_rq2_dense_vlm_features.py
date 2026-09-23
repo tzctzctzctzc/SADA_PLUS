@@ -61,12 +61,15 @@ class SequentialFrameReader:
     def _read_exact_in_subprocess(self, index):
         self.capture.release()
         code = (
-            "import cv2,numpy as np,sys\n"
+            "import cv2,io,numpy as np,sys\n"
             "capture=cv2.VideoCapture(sys.argv[1])\n"
             "capture.set(cv2.CAP_PROP_POS_FRAMES,int(sys.argv[2]))\n"
             "ok,frame=capture.read()\n"
             "capture.release()\n"
-            "sys.exit(2) if not ok else np.save(sys.stdout.buffer,frame,allow_pickle=False)\n"
+            "sys.exit(2) if not ok else None\n"
+            "buffer=io.BytesIO()\n"
+            "np.save(buffer,frame,allow_pickle=False)\n"
+            "sys.stdout.buffer.write(buffer.getvalue())\n"
         )
         result = subprocess.run(
             [sys.executable, "-c", code, str(self.path), str(index)],
