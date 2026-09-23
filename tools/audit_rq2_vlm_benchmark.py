@@ -24,9 +24,14 @@ ALLOWED_CONFIG_DIFFERENCES = {
     ("name",),
 }
 ALLOWED_SO_UDA_DIFFERENCES = {
+    ("config_path",),
+    ("gpu",),
+    ("name",),
+    ("unique_id",),
     ("diagnostic", "supervised_upper_bound"),
     ("rq2_formal", "regime"),
     ("rq2_formal", "target_manifest"),
+    ("rq2_formal", "run_signature"),
 }
 
 
@@ -118,11 +123,23 @@ def audit_configs(paths):
 
 
 def audit_so_uda_pair(source_only_path, uda_path):
+    from tools.rq2_formal import build_formal_run_signature
+
     configs = []
     for path in (source_only_path, uda_path):
         with Path(path).open(encoding="utf-8") as stream:
-            configs.append(dict(_flatten(yaml.safe_load(stream))))
-    source_only, uda = configs
+            configs.append(yaml.safe_load(stream))
+    source_only_cfg, uda_cfg = configs
+    signatures = [
+        cfg.get("rq2_formal", {}).get("run_signature") for cfg in configs
+    ]
+    if any(signature is not None for signature in signatures):
+        if any(signature is None for signature in signatures):
+            raise ValueError("SO/UDA pair must contain both run signatures")
+        for cfg, signature in zip(configs, signatures):
+            if signature != build_formal_run_signature(cfg):
+                raise ValueError("SO/UDA pair contains an invalid run signature")
+    source_only, uda = (dict(_flatten(cfg)) for cfg in configs)
     if source_only.get(("rq2_formal", "regime")) != "so":
         raise ValueError("source-only config is not a formal RQ2 SO run")
     if uda.get(("rq2_formal", "regime")) != "uda":
