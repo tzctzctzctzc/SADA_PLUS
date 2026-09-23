@@ -313,6 +313,55 @@ def test_frame_reader_uses_verified_exact_frame_cache(monkeypatch, tmp_path):
     assert reader.capture.read_count == 0
 
 
+def test_frame_reader_uses_declared_rgb_alignment_alias(monkeypatch, tmp_path):
+    import hashlib
+    import tools.extract_rq2_dense_vlm_features as extractor
+
+    frame = np.asarray([[[3, 2, 1]]], dtype=np.uint8)
+    recovery_root = tmp_path / "recovery"
+    recovery_root.mkdir()
+    np.save(recovery_root / "frame.npy", frame, allow_pickle=False)
+    (recovery_root / "manifest.json").write_text(
+        json.dumps({
+            "frames": {
+                "dummy:3": {
+                    "path": "frame.npy",
+                    "frame_sha256": hashlib.sha256(frame.tobytes()).hexdigest(),
+                    "rgb_tar_frame_index": 5,
+                }
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    class FakeCapture:
+        def __init__(self, _path):
+            self.read_count = 0
+
+        def isOpened(self):
+            return True
+
+        def read(self):
+            self.read_count += 1
+            return False, None
+
+        def set(self, _property, _value):
+            pass
+
+        def release(self):
+            pass
+
+    monkeypatch.setattr(extractor.cv2, "VideoCapture", FakeCapture)
+    monkeypatch.setattr(extractor.cv2, "cvtColor", lambda value, _code: value)
+    reader = SequentialFrameReader(tmp_path / "dummy.mp4", recovery_root)
+    try:
+        frames = reader.read(np.asarray([5]))
+    finally:
+        reader.close()
+    assert frames[0].tolist() == frame.tolist()
+    assert reader.capture.read_count == 0
+
+
 def test_centers_match_sada_coordinate_conversion():
     assert expected_centers_seconds(3).tolist() == [16 / 30, 32 / 30, 48 / 30]
 
