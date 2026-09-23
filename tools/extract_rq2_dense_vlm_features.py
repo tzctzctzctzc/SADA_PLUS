@@ -290,12 +290,24 @@ class InternVideoEncoder:
     def encode(self, frames, batch_tokens):
         import torch.nn.functional as functional
 
-        array = np.stack(frames).reshape(batch_tokens, 8, *frames[0].shape)
-        tensor = self.torch.from_numpy(array).permute(0, 1, 4, 2, 3).float()
-        tensor = tensor.reshape(batch_tokens * 8, 3, *tensor.shape[-2:])
-        tensor = functional.interpolate(
-            tensor, size=(224, 224), mode="bicubic", align_corners=False
-        ).div_(255.0)
+        if all(frame.shape == frames[0].shape for frame in frames):
+            array = np.stack(frames).reshape(batch_tokens, 8, *frames[0].shape)
+            tensor = self.torch.from_numpy(array).permute(0, 1, 4, 2, 3).float()
+            tensor = tensor.reshape(batch_tokens * 8, 3, *tensor.shape[-2:])
+            tensor = functional.interpolate(
+                tensor, size=(224, 224), mode="bicubic", align_corners=False
+            )
+        else:
+            # Verified RGB recovery frames can differ in source resolution.
+            # Apply the same per-frame resize before stacking mixed shapes.
+            tensor = self.torch.stack([
+                functional.interpolate(
+                    self.torch.from_numpy(frame).permute(2, 0, 1)[None].float(),
+                    size=(224, 224), mode="bicubic", align_corners=False,
+                )[0]
+                for frame in frames
+            ])
+        tensor = tensor.div_(255.0)
         mean = tensor.new_tensor((0.485, 0.456, 0.406)).view(1, 3, 1, 1)
         std = tensor.new_tensor((0.229, 0.224, 0.225)).view(1, 3, 1, 1)
         tensor = tensor.sub_(mean).div_(std)
