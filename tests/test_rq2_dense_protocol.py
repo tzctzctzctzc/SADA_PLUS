@@ -313,7 +313,7 @@ def test_frame_reader_uses_verified_exact_frame_cache(monkeypatch, tmp_path):
     assert reader.capture.read_count == 0
 
 
-def test_frame_reader_uses_declared_rgb_alignment_alias(monkeypatch, tmp_path):
+def test_frame_reader_does_not_use_rgb_tar_number_as_mp4_index(monkeypatch, tmp_path):
     import hashlib
     import tools.extract_rq2_dense_vlm_features as extractor
 
@@ -355,10 +355,11 @@ def test_frame_reader_uses_declared_rgb_alignment_alias(monkeypatch, tmp_path):
     monkeypatch.setattr(extractor.cv2, "cvtColor", lambda value, _code: value)
     reader = SequentialFrameReader(tmp_path / "dummy.mp4", recovery_root)
     try:
-        frames = reader.read(np.asarray([5]))
+        assert reader._read_recovery_cache(5) is None
+        frame_at_mp4_index = reader._read_recovery_cache(3)
     finally:
         reader.close()
-    assert frames[0].tolist() == frame.tolist()
+    assert frame_at_mp4_index.tolist() == frame.tolist()
     assert reader.capture.read_count == 0
 
 
