@@ -115,6 +115,59 @@ def test_frame_reader_decodes_overlapping_indices_once(monkeypatch, tmp_path):
     assert capture.set_count == 0
 
 
+def test_frame_reader_reopens_at_exact_target_after_grab_failure(
+    monkeypatch, tmp_path
+):
+    import tools.extract_rq2_dense_vlm_features as extractor
+
+    class FakeCapture:
+        def __init__(self, _path, fail_grab):
+            self.position = 0
+            self.fail_grab = fail_grab
+            self.released = False
+            self.set_count = 0
+
+        def isOpened(self):
+            return True
+
+        def grab(self):
+            if self.fail_grab:
+                return False
+            self.position += 1
+            return True
+
+        def read(self):
+            value = self.position
+            self.position += 1
+            return True, np.asarray([value], dtype=np.uint8)
+
+        def set(self, _property, value):
+            self.position = int(value)
+            self.set_count += 1
+
+        def release(self):
+            self.released = True
+
+    captures = []
+
+    def make_capture(path):
+        capture = FakeCapture(path, fail_grab=not captures)
+        captures.append(capture)
+        return capture
+
+    monkeypatch.setattr(extractor.cv2, "VideoCapture", make_capture)
+    monkeypatch.setattr(extractor.cv2, "cvtColor", lambda frame, _code: frame)
+    reader = SequentialFrameReader(tmp_path / "dummy.mp4")
+    try:
+        frames = reader.read(np.asarray([2]))
+    finally:
+        reader.close()
+    assert int(frames[0][0]) == 2
+    assert len(captures) == 2
+    assert captures[0].released
+    assert captures[1].set_count == 1
+
+
 def test_frame_reader_reopens_after_transient_decode_failure(monkeypatch, tmp_path):
     import tools.extract_rq2_dense_vlm_features as extractor
 

@@ -49,6 +49,14 @@ class SequentialFrameReader:
     def close(self):
         self.capture.release()
 
+    def _reopen_at(self, index):
+        self.capture.release()
+        self.capture = cv2.VideoCapture(str(self.path))
+        if not self.capture.isOpened():
+            raise RuntimeError("cannot reopen video: {}".format(self.path))
+        self.capture.set(cv2.CAP_PROP_POS_FRAMES, index)
+        self.position = index
+
     def read(self, indices):
         requested = np.asarray(indices, dtype=np.int64).reshape(-1)
         # Adjacent temporal tokens overlap. Decode each source frame once per
@@ -62,19 +70,18 @@ class SequentialFrameReader:
                 self.position = index
             while self.position < index:
                 if not self.capture.grab():
-                    raise RuntimeError("failed to seek frame {}".format(index))
+                    # Some official EPIC-KITCHENS videos contain damaged
+                    # packets between valid sampled frames. Seek directly to
+                    # the requested frame instead of changing the sample.
+                    self._reopen_at(index)
+                    break
                 self.position += 1
             ok, frame = self.capture.read()
             if not ok:
                 # Long videos can occasionally leave OpenCV's decoder in a bad
                 # state after repeated backward seeks. Reopen once at the exact
                 # requested frame before treating the source video as corrupt.
-                self.capture.release()
-                self.capture = cv2.VideoCapture(str(self.path))
-                if not self.capture.isOpened():
-                    raise RuntimeError("cannot reopen video: {}".format(self.path))
-                self.capture.set(cv2.CAP_PROP_POS_FRAMES, index)
-                self.position = index
+                self._reopen_at(index)
                 ok, frame = self.capture.read()
                 if not ok:
                     raise RuntimeError("failed to decode frame {}".format(index))
