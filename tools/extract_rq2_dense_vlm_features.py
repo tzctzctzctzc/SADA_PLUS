@@ -79,10 +79,13 @@ class SequentialFrameReader:
             ok, frame = self.capture.read()
             if not ok:
                 # Long videos can occasionally leave OpenCV's decoder in a bad
-                # state after repeated backward seeks. Reopen once at the exact
-                # requested frame before treating the source video as corrupt.
-                self._reopen_at(index)
-                ok, frame = self.capture.read()
+                # state after repeated seeks. Retry only the exact requested
+                # frame; never substitute a neighboring frame.
+                for _ in range(3):
+                    self._reopen_at(index)
+                    ok, frame = self.capture.read()
+                    if ok:
+                        break
                 if not ok:
                     raise RuntimeError("failed to decode frame {}".format(index))
             self.position += 1

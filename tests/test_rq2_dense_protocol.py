@@ -176,7 +176,7 @@ def test_frame_reader_reopens_after_transient_decode_failure(monkeypatch, tmp_pa
     class FakeCapture:
         def __init__(self, _path):
             self.position = 0
-            self.fail_once = not captures
+            self.fail_read = len(captures) < 3
             captures.append(self)
 
         def isOpened(self):
@@ -187,8 +187,7 @@ def test_frame_reader_reopens_after_transient_decode_failure(monkeypatch, tmp_pa
             return True
 
         def read(self):
-            if self.fail_once:
-                self.fail_once = False
+            if self.fail_read:
                 return False, None
             value = self.position
             self.position += 1
@@ -207,7 +206,7 @@ def test_frame_reader_reopens_after_transient_decode_failure(monkeypatch, tmp_pa
         frames = reader.read(np.asarray([3]))
     finally:
         reader.close()
-    assert len(captures) == 2
+    assert len(captures) == 4
     assert int(frames[0][0]) == 3
 
 
