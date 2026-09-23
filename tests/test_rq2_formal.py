@@ -346,6 +346,32 @@ def test_so_uda_pair_audit_only_allows_regime_and_manifest(tmp_path):
         audit_so_uda_pair(so_path, uda_path)
 
 
+def test_so_uda_pair_audit_accepts_distinct_valid_run_signatures(tmp_path):
+    common = {"seed": 6, "model": {"fpn_dim": 512}}
+    source_only = {
+        **common, "name": "so", "unique_id": "run_so", "gpu": 0,
+        "config_path": "/checkout_so/S1.yaml",
+        "diagnostic": {"supervised_upper_bound": "source_only"},
+        "rq2_formal": {"regime": "so", "target_manifest": None},
+    }
+    uda = {
+        **common, "name": "uda", "unique_id": "run_uda", "gpu": 1,
+        "config_path": "/checkout_uda/S1.yaml",
+        "diagnostic": {"supervised_upper_bound": "off"},
+        "rq2_formal": {"regime": "uda", "target_manifest": {"sha256": "abc"}},
+    }
+    for cfg in (source_only, uda):
+        cfg["rq2_formal"]["run_signature"] = build_formal_run_signature(cfg)
+    so_path, uda_path = tmp_path / "so.json", tmp_path / "uda.json"
+    so_path.write_text(json.dumps(source_only), encoding="utf-8")
+    uda_path.write_text(json.dumps(uda), encoding="utf-8")
+    audit_so_uda_pair(so_path, uda_path)
+    uda["rq2_formal"]["run_signature"]["seed"] = 7
+    uda_path.write_text(json.dumps(uda), encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid run signature"):
+        audit_so_uda_pair(so_path, uda_path)
+
+
 def test_so_uda_summary_computes_required_metrics_and_hashes(tmp_path, monkeypatch):
     common = {
         "split": ["validation"], "seed": 6, "shift": "S1",
