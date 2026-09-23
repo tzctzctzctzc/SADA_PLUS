@@ -94,21 +94,25 @@ def main():
             decoded = exact_mp4_frame(args.video_path, index)
             tar_index = round(index * 1001 / 1000) + 1
             if decoded is None:
-                failures.append((index, tar_index))
+                failures.append((index, tar_index, "decode_failed"))
             else:
                 reference = small(decoded)
                 errors = []
                 for offset in (-1, 0, 1):
                     _, candidate = tar_frame(archive, tar_index + offset)
                     errors.append((round(float(np.abs(reference - small(candidate)).mean()), 3), tar_index + offset))
-                matches.append((index, tar_index, min(errors)))
+                best = min(errors)
+                if best[0] > 25:
+                    failures.append((index, tar_index, "decoded_frame_mismatch"))
+                else:
+                    matches.append((index, tar_index, best))
         print(json.dumps({"fps": fps, "candidates": len(candidates), "failed": failures,
                           "healthy_alignment": matches}, indent=2), flush=True)
         if not args.recover:
             return
         if not matches or any(abs(best - predicted) > 1 for _, predicted, (_, best) in matches):
             raise RuntimeError("official RGB alignment is not validated")
-        for index, tar_index in failures:
+        for index, tar_index, reason in failures:
             key = "{}:{}".format(video_id, index)
             if key in manifest["frames"]:
                 continue
@@ -139,6 +143,7 @@ def main():
                 "pixel_array_semantics": "opencv_bgr_before_reader_color_conversion",
                 "rgb_tar_frame_index": tar_index, "rgb_tar_md5": tar_md5,
                 "rgb_tar_member": member, "shape": list(frame.shape),
+                "recovery_reason": reason,
                 "source_kind": "official_rgb_frame_tar_time_aligned_to_mp4_pts",
                 "video_md5": video_md5,
             }
