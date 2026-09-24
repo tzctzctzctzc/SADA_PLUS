@@ -18,7 +18,7 @@ manifests=/vepfs/vlms/rq2_uda_target_manifests_0924
 case "$model:$gpu" in
   egovideo_hod:0) dim=512 ;;
   internvideo2_clip_1b:1) dim=768 ;;
-  slowfast:1) dim=2304; features=$reference; registry=$data_root/configs/rq2/shift_registry.yaml ;;
+  slowfast:1|slowfast:3) dim=2304; features=$reference; registry=$data_root/configs/rq2/shift_registry.yaml ;;
   *) echo "unsupported model/GPU pair: $model:$gpu" >&2; exit 2 ;;
 esac
 protocol_args=()
@@ -111,6 +111,13 @@ for spec in "${specs[@]}"; do
     exit 0
   fi
   if [[ "$mode" == launch ]]; then
+    if [[ "$model" == slowfast ]]; then
+      read -r gpu_memory gpu_util < <(nvidia-smi -i "$gpu" --query-gpu=memory.used,utilization.gpu --format=csv,noheader,nounits | tr -d ' ')
+      if (( gpu_memory > 10000 || gpu_util > 25 )); then
+        echo "GPU $gpu is busy: memory=${gpu_memory}MiB utilization=${gpu_util}%" >&2
+        exit 2
+      fi
+    fi
     echo "$(date -Is) audited and start $name gpu=$gpu code=$expected_head"
     "$python" -B "$code_root/train_da.py" \
       -c "$code_root/$config" -n "$name" -s "$seed" -i "$gpu" --debug \

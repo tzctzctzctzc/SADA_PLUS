@@ -57,6 +57,11 @@ for spec in "${specs[@]}"; do
   test -z "$(git status --porcelain)"
   if [[ "$model" == slowfast ]]; then
     "$python" -B -c 'import sys; from tools.rq2_formal import check_slowfast_features; check_slowfast_features(sys.argv[1], sys.argv[2])' "$features" "$registry"
+    read -r gpu_memory gpu_util < <(nvidia-smi -i "$gpu" --query-gpu=memory.used,utilization.gpu --format=csv,noheader,nounits | tr -d ' ')
+    if (( gpu_memory > 10000 || gpu_util > 25 )); then
+      echo "GPU $gpu is busy: memory=${gpu_memory}MiB utilization=${gpu_util}%" >&2
+      exit 2
+    fi
   fi
   cd "$data_root"
   test ! -e "$output"
