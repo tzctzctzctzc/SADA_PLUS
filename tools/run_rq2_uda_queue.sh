@@ -18,8 +18,13 @@ manifests=/vepfs/vlms/rq2_uda_target_manifests_0924
 case "$model:$gpu" in
   egovideo_hod:0) dim=512 ;;
   internvideo2_clip_1b:1) dim=768 ;;
+  slowfast:1) dim=2304; features=$reference; registry=$data_root/configs/rq2/shift_registry.yaml ;;
   *) echo "unsupported model/GPU pair: $model:$gpu" >&2; exit 2 ;;
 esac
+protocol_args=()
+if [[ "$model" != slowfast ]]; then
+  protocol_args=(--feature-protocol "$features/protocol.json")
+fi
 case "$mode" in
   launch|audit-only|evaluate-existing) ;;
   *) echo "unsupported mode: $mode" >&2; exit 2 ;;
@@ -36,7 +41,9 @@ mkdir -p "$artifact_root/logs"
 if [[ "$mode" == launch ]]; then
   for seed in 6 7 8; do
     for shift in S1 S2 S3 S4 S5 S6; do
-      if [[ "$seed" == 6 && ( "$shift" == S1 || "$shift" == S2 ) ]]; then
+      if [[ "$model" == slowfast ]]; then
+        so_root=/vepfs/vlms/rq2_slowfast_so_cc8_0924
+      elif [[ "$seed" == 6 && ( "$shift" == S1 || "$shift" == S2 ) ]]; then
         so_root=/vepfs/vlms/rq2_so_eval_9a4b0f_0924
       else
         so_root=/vepfs/vlms/rq2_so_full_dee1b_0924
@@ -65,7 +72,9 @@ for spec in "${specs[@]}"; do
     S6) config=configs/new_vs_old/version_paper_s6_dim512.yaml ;;
   esac
 
-  if [[ "$seed" == 6 && ( "$shift" == S1 || "$shift" == S2 ) ]]; then
+  if [[ "$model" == slowfast ]]; then
+    so_root=/vepfs/vlms/rq2_slowfast_so_cc8_0924
+  elif [[ "$seed" == 6 && ( "$shift" == S1 || "$shift" == S2 ) ]]; then
     so_root=/vepfs/vlms/rq2_so_eval_9a4b0f_0924
   else
     so_root=/vepfs/vlms/rq2_so_full_dee1b_0924
@@ -86,7 +95,11 @@ for spec in "${specs[@]}"; do
   fi
   test ! -e "$output"
   "$python" -B -m tools.audit_rq2_vlm_benchmark shifts --registry "$registry" > "$artifact_root/logs/$name.shifts_audit.json"
-  "$python" -B -m tools.audit_rq2_vlm_benchmark features --feature-root "$features" --reference-root "$reference" > "$artifact_root/logs/$name.features_audit.json"
+  if [[ "$model" == slowfast ]]; then
+    "$python" -B -c 'import json, sys; from tools.rq2_formal import check_slowfast_features; print(json.dumps(check_slowfast_features(sys.argv[1], sys.argv[2])))' "$features" "$registry" > "$artifact_root/logs/$name.features_audit.json"
+  else
+    "$python" -B -m tools.audit_rq2_vlm_benchmark features --feature-root "$features" --reference-root "$reference" > "$artifact_root/logs/$name.features_audit.json"
+  fi
 
   cd "$data_root"
   "$python" -B -c 'import sys, yaml; from tools.rq2_formal import check_target_manifest; cfg=yaml.safe_load(open(sys.argv[1])); check_target_manifest(sys.argv[2], cfg["tgt_train_split"], cfg["dataset"]["json_file"])' "$code_root/$config" "$manifest"
@@ -102,7 +115,7 @@ for spec in "${specs[@]}"; do
     "$python" -B "$code_root/train_da.py" \
       -c "$code_root/$config" -n "$name" -s "$seed" -i "$gpu" --debug \
       --feature_folder "$features" --input_dim "$dim" \
-      --feature-protocol "$features/protocol.json" \
+      "${protocol_args[@]}" \
       --rq2-regime uda --rq2-target-manifest "$manifest" \
       --rq2-shift "$shift" --rq2-registry "$registry" \
       --rq2-reference-root "$reference" --supervised-upper-bound off \
@@ -124,7 +137,7 @@ for spec in "${specs[@]}"; do
     -c "$code_root/$config" -n "${name}_eval" -s "$seed" -i "$gpu" \
     -r "${checkpoints[0]}" --rq2-formal --rq2-output-dir "$output" \
     --rq2-shift "$shift" --rq2-registry "$registry" \
-    --feature-protocol "$features/protocol.json" \
+    "${protocol_args[@]}" \
     --rq2-reference-root "$reference" \
     --feature_folder "$features" --input_dim "$dim" \
     > "$artifact_root/logs/$name.eval.log" 2>&1
