@@ -59,20 +59,24 @@ for spec in "${specs[@]}"; do
     "$python" -B -c 'import sys; from tools.rq2_formal import check_slowfast_features; check_slowfast_features(sys.argv[1], sys.argv[2])' "$features" "$registry"
   fi
   cd "$data_root"
-  test ! -e "model_results/$name"
   test ! -e "$output"
-  echo "$(date -Is) start $name gpu=$gpu code=$expected_head"
-  "$python" -B "$code_root/train_da.py" \
-    -c "$code_root/$config" -n "$name" -s "$seed" -i "$gpu" --debug \
-    --feature_folder "$features" --input_dim "$dim" \
-    "${protocol_args[@]}" \
-    --rq2-regime so --rq2-shift "$shift" --rq2-registry "$registry" \
-    --rq2-reference-root "$reference" --supervised-upper-bound source_only \
-    --benchmark-audit-log > "$artifact_root/logs/$name.train.log" 2>&1
+  if [[ -d "model_results/$name" ]]; then
+    echo "$(date -Is) reuse completed training $name"
+  else
+    echo "$(date -Is) start $name gpu=$gpu code=$expected_head"
+    "$python" -B "$code_root/train_da.py" \
+      -c "$code_root/$config" -n "$name" -s "$seed" -i "$gpu" --debug \
+      --feature_folder "$features" --input_dim "$dim" \
+      "${protocol_args[@]}" \
+      --rq2-regime so --rq2-shift "$shift" --rq2-registry "$registry" \
+      --rq2-reference-root "$reference" --supervised-upper-bound source_only \
+      --benchmark-audit-log > "$artifact_root/logs/$name.train.log" 2>&1
+  fi
 
   mapfile -t checkpoints < <(find "model_results/$name" -path '*/best_ckpt/*.pt' -type f)
   test "${#checkpoints[@]}" -eq 1
-  test -s "${checkpoints[0]%/best_ckpt/*}/saved_ckpt/latest_ckpt/checkpoint-epoch50.pt"
+  checkpoint_dir=${checkpoints[0]%/best_ckpt/*}
+  test -s "$checkpoint_dir/latest_ckpt/checkpoint-epoch50.pt"
   echo "$(date -Is) evaluate $name checkpoint=${checkpoints[0]}"
   "$python" -B "$code_root/evaluate_da.py" \
     -c "$code_root/$config" -n "${name}_eval" -s "$seed" -i "$gpu" \
