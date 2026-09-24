@@ -6,6 +6,7 @@ gpu=$2
 artifact_root=$3
 expected_head=$4
 mode=${5:-launch}
+spec_filter=${6:-}
 code_root=$(cd "$(dirname "$0")/.." && pwd)
 data_root=/vepfs/vlms/SADA_PLUS
 python=/vepfs/vlms/envs/sada/bin/python
@@ -20,9 +21,13 @@ case "$model:$gpu" in
   *) echo "unsupported model/GPU pair: $model:$gpu" >&2; exit 2 ;;
 esac
 case "$mode" in
-  launch|audit-only) ;;
+  launch|audit-only|evaluate-existing) ;;
   *) echo "unsupported mode: $mode" >&2; exit 2 ;;
 esac
+if [[ -n "$spec_filter" && ! "$spec_filter" =~ ^S[1-6]:[678]$ ]]; then
+  echo "unsupported shift/seed: $spec_filter" >&2
+  exit 2
+fi
 
 export PYTHONPATH="$code_root"
 export PYTHONUNBUFFERED=1
@@ -44,7 +49,11 @@ if [[ "$mode" == launch ]]; then
 fi
 
 # Each model/shift/seed is a new GPU job. Recheck its frozen inputs first.
-for spec in S1:6 S2:6 S3:6 S4:6 S5:6 S6:6 S1:7 S2:7 S3:7 S4:7 S5:7 S6:7 S1:8 S2:8 S3:8 S4:8 S5:8 S6:8; do
+specs=(S1:6 S2:6 S3:6 S4:6 S5:6 S6:6 S1:7 S2:7 S3:7 S4:7 S5:7 S6:7 S1:8 S2:8 S3:8 S4:8 S5:8 S6:8)
+if [[ -n "$spec_filter" ]]; then
+  specs=("$spec_filter")
+fi
+for spec in "${specs[@]}"; do
   shift=${spec%:*}
   seed=${spec#*:}
   case "$shift" in
@@ -72,7 +81,9 @@ for spec in S1:6 S2:6 S3:6 S4:6 S5:6 S6:6 S1:7 S2:7 S3:7 S4:7 S5:7 S6:7 S1:8 S2:
   test -s "$so_result/source_val.json"
   test -s "$so_result/target_val.json"
   test -s "$so_result/manifest.json"
-  test ! -e "$data_root/model_results/$name"
+  if [[ "$mode" == launch ]]; then
+    test ! -e "$data_root/model_results/$name"
+  fi
   test ! -e "$output"
   "$python" -B -m tools.audit_rq2_vlm_benchmark shifts --registry "$registry" > "$artifact_root/logs/$name.shifts_audit.json"
   "$python" -B -m tools.audit_rq2_vlm_benchmark features --feature-root "$features" --reference-root "$reference" > "$artifact_root/logs/$name.features_audit.json"
@@ -86,25 +97,29 @@ for spec in S1:6 S2:6 S3:6 S4:6 S5:6 S6:6 S1:7 S2:7 S3:7 S4:7 S5:7 S6:7 S1:8 S2:
     echo "$(date -Is) UDA preflight passed: $model $shift seed=$seed"
     exit 0
   fi
-  echo "$(date -Is) audited and start $name gpu=$gpu code=$expected_head"
-  "$python" -B "$code_root/train_da.py" \
-    -c "$code_root/$config" -n "$name" -s "$seed" -i "$gpu" --debug \
-    --feature_folder "$features" --input_dim "$dim" \
-    --feature-protocol "$features/protocol.json" \
-    --rq2-regime uda --rq2-target-manifest "$manifest" \
-    --rq2-shift "$shift" --rq2-registry "$registry" \
-    --rq2-reference-root "$reference" --supervised-upper-bound off \
-    --benchmark-audit-log > "$artifact_root/logs/$name.train.log" 2>&1
+  if [[ "$mode" == launch ]]; then
+    echo "$(date -Is) audited and start $name gpu=$gpu code=$expected_head"
+    "$python" -B "$code_root/train_da.py" \
+      -c "$code_root/$config" -n "$name" -s "$seed" -i "$gpu" --debug \
+      --feature_folder "$features" --input_dim "$dim" \
+      --feature-protocol "$features/protocol.json" \
+      --rq2-regime uda --rq2-target-manifest "$manifest" \
+      --rq2-shift "$shift" --rq2-registry "$registry" \
+      --rq2-reference-root "$reference" --supervised-upper-bound off \
+      --benchmark-audit-log > "$artifact_root/logs/$name.train.log" 2>&1
+  fi
 
   mapfile -t run_configs < <(find "model_results/$name" -maxdepth 2 -name config.json -type f)
   mapfile -t checkpoints < <(find "model_results/$name" -path '*/best_ckpt/*.pt' -type f)
   test "${#run_configs[@]}" -eq 1
   test "${#checkpoints[@]}" -eq 1
   test -s "${run_configs[0]%/config.json}/saved_ckpt/latest_ckpt/checkpoint-epoch50.pt"
+  cd "$code_root"
   "$python" -B -m tools.audit_rq2_vlm_benchmark pair \
-    --source-only "$so_config" --uda "${run_configs[0]}" \
+    --source-only "$so_config" --uda "$data_root/${run_configs[0]}" \
     > "$artifact_root/logs/$name.pair_audit.json"
   echo "$(date -Is) evaluate $name checkpoint=${checkpoints[0]}"
+  cd "$data_root"
   "$python" -B "$code_root/evaluate_da.py" \
     -c "$code_root/$config" -n "${name}_eval" -s "$seed" -i "$gpu" \
     -r "${checkpoints[0]}" --rq2-formal --rq2-output-dir "$output" \
