@@ -407,10 +407,24 @@ class MultimodalLastTokenEncoder:
 
     def encode(self, frames, batch_tokens):
         runtime = self.runtime
-        clips = [
-            [self.Image.fromarray(frame) for frame in frames[offset:offset + 8]]
-            for offset in range(0, len(frames), 8)
-        ]
+        # Exact RGB recovery frames may have a different native size than MP4 frames.
+        size_counts = {}
+        for frame in frames:
+            size = tuple(frame.shape[:2])
+            size_counts[size] = size_counts.get(size, 0) + 1
+        target_height, target_width = max(size_counts, key=size_counts.get)
+        clips = []
+        for offset in range(0, len(frames), 8):
+            clip = []
+            for frame in frames[offset:offset + 8]:
+                image = self.Image.fromarray(frame)
+                if image.size != (target_width, target_height):
+                    image = image.resize(
+                        (target_width, target_height),
+                        resample=self.Image.Resampling.BICUBIC,
+                    )
+                clip.append(image)
+            clips.append(clip)
         messages = _video_messages(
             clips,
             NEUTRAL_MULTIMODAL_PROMPT,
