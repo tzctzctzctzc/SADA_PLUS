@@ -347,7 +347,7 @@ def test_so_uda_pair_audit_only_allows_regime_and_manifest(tmp_path):
 
 
 def test_so_uda_pair_audit_accepts_distinct_valid_run_signatures(tmp_path):
-    common = {"seed": 6, "model": {"fpn_dim": 512}}
+    common = {"seed": 6, "model": {"fpn_dim": 512}, "opt": {"eta_min": 5e-5}}
     source_only = {
         **common, "name": "so", "unique_id": "run_so", "gpu": 0,
         "config_path": "/checkout_so/S1.yaml",

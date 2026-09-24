@@ -128,7 +128,7 @@ def audit_so_uda_pair(source_only_path, uda_path):
     configs = []
     for path in (source_only_path, uda_path):
         with Path(path).open(encoding="utf-8") as stream:
-            configs.append(yaml.safe_load(stream))
+            configs.append(json.load(stream) if Path(path).suffix == ".json" else yaml.safe_load(stream))
     source_only_cfg, uda_cfg = configs
     signatures = [
         cfg.get("rq2_formal", {}).get("run_signature") for cfg in configs
