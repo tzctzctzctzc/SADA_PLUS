@@ -12,7 +12,7 @@ reference=$data_root/data/ek100_slowfast/features
 registry=$code_root/configs/rq2/shift_registry.yaml
 protocol=e5887af04cdb04811a0c35d335411dfb7beb0ca1e30ee14f4a79974d0cc6fa3e
 
-test "$gpu" = 0
+test "$gpu" = 2
 mkdir -p "$artifact_root/logs"
 exec 9>"$artifact_root/.queue.lock"
 flock -n 9
