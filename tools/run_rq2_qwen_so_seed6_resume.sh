@@ -14,7 +14,6 @@ registry=$code_root/configs/rq2/shift_registry.yaml
 protocol=e5887af04cdb04811a0c35d335411dfb7beb0ca1e30ee14f4a79974d0cc6fa3e
 
 test "$gpu" = 3
-test ! -e "$artifact_root"
 mkdir -p "$artifact_root/logs"
 exec 9>"$artifact_root/.queue.lock"
 flock -n 9
@@ -66,6 +65,27 @@ for shift in S3 S4 S5 S6; do
   esac
   name=rq2_so_qwen3_vl_8b_${shift}_seed6_5a8041d
   output=$artifact_root/${shift}_seed6
+
+  if test -d "$output"; then
+    "$python" -B - "$output" "$shift" "$protocol" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+root, shift, expected_protocol = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+manifest = json.loads((root / 'manifest.json').read_text())
+assert manifest['shift'] == shift and manifest['seed'] == 6
+assert manifest['feature_protocol_sha256'] == expected_protocol
+assert manifest['selection_provenance']['split'] == 'source_validation'
+for name in ('source_val.json', 'target_val.json'):
+    path = root / name
+    assert path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == manifest['outputs'][name]
+PY
+    echo "$(date -Is) skip verified $name"
+    continue
+  fi
+
   test ! -e "$data_root/model_results/$name"
   test ! -e "$output"
   audit_inputs
