@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-19T22:40:00+08:00",
+  "as_of": "2026-09-27T23:30:00+08:00",
   "goal_status": "active",
-  "phase": "P049_counterfactual_verifier_partial_signal_no_full",
+  "phase": "P049_reaudit_P050_selective_gate_novelty_threatened",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 1,
@@ -14,7 +14,7 @@
     ],
     "submission_year_assumption": 2027
   },
-  "direction": "Do not scale P049. Retain the frozen-retriever plus candidate verifier architecture, but treat role-intervention deltas as selective robustness evidence rather than a universal ranking score. The next falsifier must use an independently frozen calibration split, broaden beyond color, and beat the ordinary verifier on paired mAP while preserving the demonstrated paraphrase and hard-negative gains.",
+  "direction": "Do not scale P049 and do not present generic selective gating as the P050 novelty. Retain the frozen retriever and candidate verifier, but move the scientific center to human-auditable multi-reference source-role binding: first establish on the official PinPoint multi-image split that shared-candidate role interventions are more reliable than absolute relation judgments and predict real ranking errors. Only then test independently calibrated role-effect residuals as a utility-preserving method component, with broader roles, ordinary-verifier superiority, overall/single-image non-inferiority, and a second model or domain required before full-scale execution.",
   "known_evidence": [
     "SoFA 使用跨图双向 attention 插值；Delimiter Scaling 加强图像边界，两者报告收益，但实验设置不同，不能直接声称矛盾。",
     "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
@@ -60,7 +60,12 @@
     "The DoD arm achieved mAP@10 0.84979, paraphrase mAP@10 0.83953, binding accuracy 0.94531, DoD pair accuracy 0.90625, and hard-negative violation 0.07031.",
     "Paired bootstrap supported DoD over frozen on mAP (+0.05141, 95% CI [0.01424, 0.09094]), paraphrase mAP (+0.10760, [0.06437, 0.15396]), DoD margin over ordinary (+0.22271, [0.17048, 0.27544]), and hard-negative violation reduction (-0.0625, [-0.11719, -0.015625]).",
     "The primary innovation gate failed because DoD did not beat the ordinary verifier on mAP (-0.00698, 95% CI [-0.03639, 0.01942]); full-scale execution is not authorized.",
-    "Failure localization showed DoD raw-score mAP 0.85359 versus delta-score mAP 0.84979, while paraphrase moved in the opposite direction (0.82930 raw to 0.83953 delta). Universal delta use is the current bottleneck; the main evidence is concentrated in color roles and cannot support general-role claims."
+    "Failure localization showed DoD raw-score mAP 0.85359 versus delta-score mAP 0.84979, while paraphrase moved in the opposite direction (0.82930 raw to 0.83953 delta). Universal delta use is the current bottleneck; the main evidence is concentrated in color roles and cannot support general-role claims.",
+    "The 2026-09-27 novelty re-audit found that TAPR/MulVec (arXiv:2608.25305v2) already factorizes CIR requests into Target/Add/Preserve/Remove and performs factor-specific candidate evidence matching; generic role or factor decomposition is occupied.",
+    "WISER (CVPR 2026) already uses verifier confidence for adaptive fusion and conditional refinement, while AutoConcept (arXiv:2609.01456, PRICAI 2026) already performs query-specific reliability gating and calibrated interpolation between a fixed retriever and concept evidence; selective score fusion is not a standalone P050 novelty.",
+    "EviRank (arXiv:2608.20886) already converts composed queries into typed required/forbidden/ignorable evidence and performs evidence-conditioned verification; generic structured verifier or evidence checklist claims are occupied.",
+    "The public search did not find a direct work that jointly studies multi-reference source-role binding, shared-candidate single-role swap difference-in-differences, and official PinPoint multi-image evaluation. This is a provisional novelty delta, not a first claim, and must be confirmed by a deeper full-paper search before submission.",
+    "Current re-audit verdict: the problem has high value and the route has medium-high development potential, but current conference readiness is low. P050 as a generic selective gate should not proceed unchanged; the next pilot must first validate the phenomenon with human-auditable role annotations and official multi-image metrics."
   ],
   "hypotheses": [
     {
