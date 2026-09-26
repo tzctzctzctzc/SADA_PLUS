@@ -1,7 +1,7 @@
 {
   "id": "P051",
   "name": "TraceBind",
-  "status": "core_runtime_audited_data_supply_gate_failed_no_efficacy_pilot",
+  "status": "core_paths_audited_correct_raw_supply_complete_visual_annotation_gate_failed_no_training",
   "root": "/vepfs/vlms/1",
   "gpu_index": 1,
   "gpu_uuid": "GPU-083bb0e7-ec90-e4d1-c3bc-2357f7a715d8",
@@ -75,18 +75,79 @@
         "table base",
         "number of drawers",
         "waist line",
-        "waistline",
-        "movement type"
+        "waistline"
       ]
     },
-    "split_policy": "connected components of all reference/positive/negative product IDs; no product crosses splits; within-train reuse is reported and is not counted as independent products",
+    "split_policy": "product IDs assigned by preregistered hash pools before model results; actual decoded pixel aliases removed across splits and historical heldout; train reuse bounded and reported",
     "metadata_is_visual_proof": false,
     "cross_domain_pretraining": {
       "dataset": "ByteDance-FanQie/SemAlign-MS-Subjects200K",
       "source_images": "Yuanshi/Subjects200K",
-      "status": "schema_verified_image_and_correspondence_join_not_yet_verified",
-      "required_before_full_method_pilot": true
-    }
+      "status": "7170_real_pairs_all_hashes_and_coordinates_checked_exact_pixel_disjoint",
+      "required_before_full_method_pilot": true,
+      "source_revision": "0d1cf6536239888f1a8e218790649344810067bc",
+      "annotation_revision": "27ac24b51dbd15513dd37fc20e255ff0ef642ff62",
+      "minimum_pairs": 5000,
+      "annotations_are_pseudo_labels": true,
+      "retrieval_role_ground_truth": false
+    },
+    "construction": {
+      "seed": "P051-orbits-v2-before-model-results",
+      "candidate_counts": {
+        "train": 10000,
+        "validation": 2000,
+        "confirmation": 800
+      },
+      "final_counts": {
+        "train": 5000,
+        "validation": 1000,
+        "confirmation": 400
+      },
+      "three_reference_fraction": 0.3,
+      "maximum_product_uses": {
+        "train": 8,
+        "validation": 1,
+        "confirmation": 1
+      },
+      "search_width": 16,
+      "metadata_labels_are_weak": true,
+      "require_visual_relative_audit": true,
+      "product_split_percent": {
+        "train": 40,
+        "validation": 40,
+        "confirmation": 20
+      }
+    },
+    "visual_screening": {
+      "models": {
+        "large": {
+          "path": "models/Qwen2.5-VL-7B-Instruct",
+          "revision": "cc594898137f460bfe9f0759e9844b3ce807cfb5"
+        },
+        "small": {
+          "path": "models/Qwen2.5-VL-3B-Instruct",
+          "revision": "66285546d2b821cf421d4f5eb2576359d3770cd3"
+        }
+      },
+      "min_pixels": 12544,
+      "max_pixels": 200704,
+      "batch_size": 24,
+      "minimum_option_probability": 0.65,
+      "minimum_logit_margin": 0.5,
+      "absolute_positive_correctness_is_not_certified": true,
+      "metadata_is_never_in_judge_prompt": true,
+      "require_both_reference_orders": true,
+      "judge_agreement_scope": "same-family cross-size consistency; not independent ground truth",
+      "minimum_total_option_mass": 0.5
+    },
+    "implemented_pilot_source_counts": [
+      2,
+      3
+    ],
+    "four_reference_runtime_verified": false,
+    "annotation_quality_pilot_config": "configs/P051_annotation_v3.json",
+    "final_visually_verified_pilot_ready": false,
+    "visual_annotation_gate_status": "v3_failed_primary_22_of_96_secondary_0_of_96_joint_0_of_96_do_not_scale"
   },
   "training": {
     "arms": [
@@ -110,7 +171,8 @@
     "consistency_weight": 0.1,
     "distillation_weight": 0.25,
     "audit_optimizer_steps": 2,
-    "save_checkpoint": true
+    "save_checkpoint": true,
+    "geometry_anchor_weight": 1.0
   },
   "pilot_gates": {
     "main_map_gain_vs_strongest_matched_control_ci_lower_min": 0.0,
@@ -127,7 +189,14 @@
     "require_indexed_and_direct_score_equality": true,
     "require_valid_assignment_set_for_ambiguous_swaps": true,
     "require_checkpoint_roundtrip": true,
-    "audit_examples_are_not_efficacy_evidence": true
+    "audit_examples_are_not_efficacy_evidence": true,
+    "audit_entrypoint": "scripts/audit_P051_end_to_end.py",
+    "legacy_runtime_audit_is_debug_only": true,
+    "complete_multi_arm_driver_ready": false,
+    "official_full_gallery_evaluation_ready": false,
+    "runtime_pass_is_complete_method_pass": false,
+    "all_20_math_and_19_runtime_checks_passed": true,
+    "audit_result": "results/P051_tracebind/comprehensive_audit.json"
   },
   "theory_limits": [
     "For two references, binding posterior is exactly a log-sigmoid of the identity-minus-swap energy; this formula alone is not a new mechanism.",

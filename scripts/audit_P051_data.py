@@ -37,6 +37,11 @@ def main():
     config = json.loads(Path(args.config).read_text(encoding="utf-8"))
     data = config["data"]
     meta_path = Path(args.metadata or data["metadata_path"])
+    if not args.metadata:
+        manifest = json.loads((meta_path.parent / "metadata_manifest.json").read_text())
+        assert manifest["complete"] and manifest["dataset_revision"] == data["dataset_revision"]
+        assert len(manifest["selected_shards"]) == data["total_shards"]
+        assert hashlib.sha256(meta_path.read_bytes()).hexdigest() == manifest["sha256"]
     meta = {row["idx"]: row for row in read_jsonl(meta_path)}
     families = {key: family for family, keys in data["visual_families"].items() for key in keys}
     out = Path("runs/P051_tracebind")
@@ -91,9 +96,9 @@ def main():
             neg_energies = [semantic_energy(sources, neg, keys, permutation) for permutation in permutations]
             known_wrong = [i for i, flag in enumerate(wrong) if flag]
             # DoD 的偏序必须有元数据依据；普通 hard negative 并不天然满足。
-            positive_gap = 1.0 - max(energies[i] for i in known_wrong)
-            negative_gap = None if neg_energies[0] is None or any(neg_energies[i] is None for i in known_wrong) else neg_energies[0] - max(neg_energies[i] for i in known_wrong)
-            dod_eligible = negative_gap is not None and positive_gap > negative_gap
+            dod_assignments = [i for i in known_wrong if neg_energies[0] is not None and neg_energies[i] is not None
+                               and 1.0 - energies[i] > neg_energies[0] - neg_energies[i]]
+            dod_eligible = bool(dod_assignments)
             if dod_eligible:
                 counts["metadata_supported_dod_pair"] += 1
             mismatched_roles = sorted({role for permutation, energy in zip(permutations, energies)
@@ -112,6 +117,7 @@ def main():
                                "valid_assignments": [value == 1.0 for value in energies],
                                "supervised_assignments": [value is not None for value in energies],
                                "verified_wrong_assignments": wrong, "dod_eligible": dod_eligible,
+                               "verified_dod_assignments": dod_assignments,
                                "semantic_assignment_energies": energies, "negative_semantic_assignment_energies": neg_energies,
                                "instruction": item["query instruction"],
                                "source_locations": {product: {"shard": meta[product]["shard"], "row_index": meta[product]["row_index"]} for product in products}})
@@ -144,7 +150,7 @@ def main():
     supply_checks = {"raw_groups_for_requested_splits": n >= data["minimum_train_groups"] + data["minimum_validation_groups"],
                      "four_visual_families_available": len(active) >= data["minimum_visual_families"],
                      "balanced_pool_upper_bound_large_enough": balanced_upper >= data["minimum_train_groups"] + data["minimum_validation_groups"],
-                     "independent_validation_upper_supply": validation_count >= data["minimum_validation_groups"]}
+                     "greedy_feasible_validation_supply": validation_count >= data["minimum_validation_groups"]}
     manifest_path = out / ("candidate_pool_partial.jsonl" if args.metadata else "candidate_pool.jsonl")
     with manifest_path.open("w") as handle:
         for row in candidates:
@@ -155,6 +161,7 @@ def main():
               "unique_products": len(parent), "connected_components": len(components),
               "largest_component_groups": max(components.values(), default=0),
               "greedy_globally_product_disjoint_groups": validation_count,
+              "greedy_count_is_lower_bound_not_maximum": True,
               "greedy_independent_active_families": independent_active, "balanced_pool_upper_bound": balanced_upper,
               "necessary_supply_checks": supply_checks, "pilot_authorized": False,
               "remaining_gates": ["frozen feasible split", "visual intervention verification", "cross-domain correspondence join", "complete implementation runtime audit"],

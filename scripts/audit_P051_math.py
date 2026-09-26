@@ -11,7 +11,7 @@ from torch.nn import functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from tracebind import (TraceBindHead, assignment_set_nll, binding_advantage,
-                       paired_dod_loss, teacher_ranking_loss, correspondence_loss)
+                       paired_dod_loss, teacher_ranking_loss, correspondence_loss, tracebind_objective, compile_role_keys)
 
 
 def main():
@@ -28,6 +28,16 @@ def main():
     score = head.score(q, g, probes, evidence)
     checks = {"six_assignments_for_three_roles": score.energies.shape == (7, 6),
               "posterior_normalization": bool(torch.allclose(score.assignment_log_probs.exp().sum(-1), torch.ones(7)))}
+    checks["roles_compile_from_canonical_and_official_query_syntax"] = (
+        compile_role_keys("the same color as Product 1 and the same collar type as Product 2", 2)
+        == compile_role_keys("the same collar type with <Product 2> and the same color as in <Product 1>", 2)
+        == ["color", "collar type"])
+    try:
+        compile_role_keys("the same color as Product 1 and the same collar type as Product 1", 2)
+    except AssertionError:
+        checks["missing_source_binding_rejected"] = True
+    else:
+        checks["missing_source_binding_rejected"] = False
     # 来源行重排同时更新 intended mapping；角色列顺序仍固定。
     order = torch.tensor([2, 0, 1])
     inverse = order.argsort()
@@ -51,6 +61,10 @@ def main():
     checks["unknown_assignment_not_punished"] = unknown.grad[1].item() == 0
     ambiguous = assignment_set_nll(e.detach(), [True, True, True], [True, True, True], 0.1)
     checks["all_assignments_valid_zero_nll"] = ambiguous.item() == 0
+    batched = assignment_set_nll(torch.tensor([[1., 0., 9.], [0., 1., 9.]]),
+                                 [[True, False, False], [False, True, False]],
+                                 [[True, True, False], [True, True, False]], .1)
+    checks["batched_unknowns_and_valid_sets"] = bool(torch.isfinite(batched) and batched < .001)
     pos, neg = torch.tensor([0.8, 0.1], requires_grad=True), torch.tensor([0.4, 0.3], requires_grad=True)
     dod = paired_dod_loss(binding_advantage(pos, [True, False], [False, True], .1),
                           binding_advantage(neg, [True, False], [False, True], .1), .05, .07)
@@ -65,6 +79,18 @@ def main():
     corr = correspondence_loss(corr_src, corr_tgt, [0, 1, 2], torch.ones(3, 4, dtype=torch.bool))
     corr.backward()
     checks["correspondence_both_sides_gradient"] = bool(corr_src.grad.abs().sum() > 0 and corr_tgt.grad.abs().sum() > 0)
+    all_positive_corr = correspondence_loss(corr_src.detach(), corr_tgt.detach(), torch.ones(3, 4, dtype=torch.bool), torch.ones(3, 4, dtype=torch.bool))
+    checks["multiple_correct_correspondences_not_negatives"] = all_positive_corr.item() == 0
+    role_gradient = torch.tensor([[.8, .1], [.4, .3]], requires_grad=True)
+    unit = head.score(q, g[:2], probes[:2, :2], evidence[:2])
+    unit.energies = role_gradient
+    row = {"valid_assignments": [True, False], "supervised_assignments": [True, True], "verified_dod_assignments": [1]}
+    _, parts = tracebind_objective([unit, unit, unit], row, torch.randn(3, 2), config)
+    parts["dod"].backward()
+    checks["shared_objective_dod_label_path_and_signs"] = bool(role_gradient.grad[0, 0] < 0 and role_gradient.grad[0, 1] > 0
+                                                            and role_gradient.grad[1, 0] > 0 and role_gradient.grad[1, 1] < 0)
+    _, control = tracebind_objective([unit, unit, unit], row, torch.randn(3, 2), config, arm="role_sum")
+    checks["role_sum_control_has_no_binding_supervision"] = control["dod"].item() == control["assignment"].item() == 0
     head.zero_grad()
     loss = F.cross_entropy(score.total.unsqueeze(0) / .07, torch.tensor([0]))
     loss.backward()

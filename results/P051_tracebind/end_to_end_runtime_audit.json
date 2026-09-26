@@ -1,0 +1,197 @@
+{
+  "classification": "complete_computational_paths_pass_training_driver_and_visual_data_gate_pending",
+  "checks": {
+    "merger_all_parameters_have_gradient": true,
+    "heads_all_parameters_have_gradient": true,
+    "finite_loss_and_all_gradients": true,
+    "all_lora_tensors_have_gradient_after_second_step": true,
+    "all_merger_and_head_parameters_update": true,
+    "all_lora_tensors_update_after_two_steps": true,
+    "all_36_layers_gradient_and_update": true,
+    "all_feature_branches_receive_gradient": true,
+    "frozen_teacher_neighbourhood_unchanged": true,
+    "real_correspondence_both_features_have_gradient": true,
+    "real_correspondence_reaches_merger_and_lora": true,
+    "real_correspondence_dataset_used": true,
+    "indexed_direct_equality": true,
+    "three_reference_structure_equivariance": true,
+    "binding_changes_score_vs_role_sum": true,
+    "role_sum_changes_score_vs_global": true,
+    "inference_needs_no_candidate_or_role_labels": true,
+    "fresh_model_checkpoint_roundtrip": true,
+    "optimizer_state_restored": true
+  },
+  "actual_source_counts": [
+    2,
+    3,
+    3
+  ],
+  "history": [
+    {
+      "step": 0,
+      "bundle_id": "P051-train-1730210556809808733-color",
+      "valid_assignment_count": 1,
+      "parts": {
+        "rank": 0.09189101308584213,
+        "assignment": 0.7353384494781494,
+        "dod": 0.07230200618505478,
+        "consistency": 0.00014806873514316976,
+        "distillation": -3.2596292331987797e-10,
+        "geometry_anchors": 5.960464477539063e-08
+      }
+    },
+    {
+      "step": 0,
+      "bundle_id": "P051-train-1730158570132309656-color",
+      "valid_assignment_count": 1,
+      "parts": {
+        "rank": 0.12778189778327942,
+        "assignment": 1.642051100730896,
+        "dod": 0.07224926352500916,
+        "consistency": 0.0022141006775200367,
+        "distillation": 2.173086155465853e-09,
+        "geometry_anchors": 4.967053968130131e-08
+      }
+    },
+    {
+      "step": 0,
+      "bundle_id": "P051-train-1730730729684895955-back-type",
+      "valid_assignment_count": 2,
+      "parts": {
+        "rank": 0.1185513362288475,
+        "assignment": 1.0923564434051514,
+        "dod": 0.07453911006450653,
+        "consistency": 0.00039105876930989325,
+        "distillation": -3.31395522135125e-10,
+        "geometry_anchors": 0.0
+      }
+    },
+    {
+      "step": 1,
+      "bundle_id": "P051-train-1730210556809808733-color",
+      "valid_assignment_count": 1,
+      "parts": {
+        "rank": 0.011976068839430809,
+        "assignment": 0.003921031951904297,
+        "dod": 0.007564387749880552,
+        "consistency": 7.049534178804606e-05,
+        "distillation": 0.0018586046062409878,
+        "geometry_anchors": 0.04519977048039436
+      }
+    },
+    {
+      "step": 1,
+      "bundle_id": "P051-train-1730158570132309656-color",
+      "valid_assignment_count": 1,
+      "parts": {
+        "rank": 0.017811214551329613,
+        "assignment": 0.4781358242034912,
+        "dod": 0.03497149050235748,
+        "consistency": 0.0022327613551169634,
+        "distillation": 0.003939641639590263,
+        "geometry_anchors": 0.03550800681114197
+      }
+    },
+    {
+      "step": 1,
+      "bundle_id": "P051-train-1730730729684895955-back-type",
+      "valid_assignment_count": 2,
+      "parts": {
+        "rank": 0.00855100154876709,
+        "assignment": 0.5888943672180176,
+        "dod": 0.04374366253614426,
+        "consistency": 0.000470649276394397,
+        "distillation": 0.005826978944242001,
+        "geometry_anchors": 0.03471865504980087
+      }
+    }
+  ],
+  "feature_gradient_norms": [
+    {
+      "source_count": 2,
+      "probe_gradient": 0.38974565267562866,
+      "evidence_gradient": 0.07575757056474686,
+      "gallery_global_gradient": 0.41356900334358215,
+      "query_global_gradients": [
+        0.1467970311641693,
+        0.14671817421913147,
+        0.14663824439048767
+      ]
+    },
+    {
+      "source_count": 3,
+      "probe_gradient": 0.319500595331192,
+      "evidence_gradient": 0.06068341061472893,
+      "gallery_global_gradient": 0.429219514131546,
+      "query_global_gradients": [
+        0.14504219591617584,
+        0.1640021800994873,
+        0.1558500975370407
+      ]
+    },
+    {
+      "source_count": 3,
+      "probe_gradient": 0.2466064989566803,
+      "evidence_gradient": 0.04018700122833252,
+      "gallery_global_gradient": 0.43528854846954346,
+      "query_global_gradients": [
+        0.15404585003852844,
+        0.15022243559360504,
+        0.16076478362083435
+      ]
+    },
+    {
+      "source_count": 2,
+      "probe_gradient": 0.010413517244160175,
+      "evidence_gradient": 0.006833437830209732,
+      "gallery_global_gradient": 0.2491457313299179,
+      "query_global_gradients": [
+        0.11439350247383118,
+        0.11428359895944595,
+        0.11421643942594528
+      ]
+    },
+    {
+      "source_count": 3,
+      "probe_gradient": 0.15825600922107697,
+      "evidence_gradient": 0.033414360135793686,
+      "gallery_global_gradient": 0.2550404965877533,
+      "query_global_gradients": [
+        0.11189232766628265,
+        0.12399367988109589,
+        0.11374279856681824
+      ]
+    },
+    {
+      "source_count": 3,
+      "probe_gradient": 0.17829616367816925,
+      "evidence_gradient": 0.024516651406884193,
+      "gallery_global_gradient": 0.2428160011768341,
+      "query_global_gradients": [
+        0.11210090667009354,
+        0.11224083602428436,
+        0.114153191447258
+      ]
+    }
+  ],
+  "real_correspondence": {
+    "uid": "43f6ebbb06305f67f63c7ed12440ed6c2431edd777c72e60142afe01cdf4e412",
+    "loss": 2.0563385486602783,
+    "trusted_points": 33,
+    "source_cells": 18,
+    "target_cells": 12,
+    "multi_positive_cells": 3
+  },
+  "trainable_parameters": 131623682,
+  "peak_cuda_allocated_bytes": 36318172160,
+  "source_hashes": {
+    "src/tracebind.py": "79771540f403b6f841b77b0a668a61b31210f803213b26f6e08e061e303f0373",
+    "src/tracebind_encoder.py": "99087985f552558896e31df3de95e782b47862029a1de9ac2ea9cefedb5f8b0d",
+    "scripts/audit_P051_end_to_end.py": "c9ce742de9e66d1fc66fa9ac86278607e4d1a115612f8c1e23f00e3e674e9d70"
+  },
+  "is_efficacy_evidence": false,
+  "remaining": [
+    "visual relative quality gate and manual inspection",
+    "matched full multi-arm driver and complete gallery metric integration"
+  ]
+}

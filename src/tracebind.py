@@ -7,11 +7,22 @@ from __future__ import annotations
 
 import itertools
 import math
+import re
 from dataclasses import dataclass
 
 import torch
 from torch import nn
 from torch.nn import functional as F
+
+
+def compile_role_keys(instruction, source_count):
+    pattern = r"the same\s+(.+?)\s+(?:with|as(?:\s+in)?)\s+<?Product\s+(\d+)>?"
+    matches = re.findall(pattern, instruction, flags=re.I)
+    by_source = {int(index) - 1: role.strip().lower() for role, index in matches}
+    assert len(matches) == source_count and set(by_source) == set(range(source_count)), "查询必须明示每个来源的角色；不能从候选标签补角色"
+    roles = [by_source[i] for i in range(source_count)]
+    assert len(set(roles)) == source_count, "当前 pilot 仅验证每来源一个不同角色的查询"
+    return roles
 
 
 @dataclass
@@ -93,9 +104,9 @@ def assignment_set_nll(energies, valid, supervised, temperature):
     valid = torch.as_tensor(valid, dtype=torch.bool, device=energies.device)
     supervised = torch.as_tensor(supervised, dtype=torch.bool, device=energies.device)
     assert valid.shape == supervised.shape == energies.shape
-    assert valid.any() and (valid & ~supervised).sum() == 0
+    assert valid.any(-1).all() and (valid & ~supervised).sum() == 0
     logits = energies / temperature
-    return torch.logsumexp(logits.masked_fill(~supervised, -torch.inf), -1) - torch.logsumexp(logits.masked_fill(~valid, -torch.inf), -1)
+    return (torch.logsumexp(logits.masked_fill(~supervised, -torch.inf), -1) - torch.logsumexp(logits.masked_fill(~valid, -torch.inf), -1)).mean()
 
 
 def binding_advantage(energies, valid, wrong, temperature):
@@ -114,8 +125,10 @@ def paired_dod_loss(positive_advantage, negative_advantage, margin, temperature)
 
 def teacher_ranking_loss(student, teacher, temperature):
     # teacher 必须来自微调前的原始模型；detach 防止蒸馏目标随学生更新。
-    return F.kl_div(F.log_softmax(student / temperature, -1),
-                    F.softmax(teacher.detach() / temperature, -1), reduction="sum") * temperature ** 2
+    kl = F.kl_div(F.log_softmax(student / temperature, -1),
+                  F.softmax(teacher.detach() / temperature, -1), reduction="none").sum(-1)
+    # 排序损失同样乘 temperature，以匹配分数梯度尺度，避免额外乘一次温度削弱保护。
+    return kl.mean() * temperature
 
 
 def correspondence_loss(source_features, target_features, target_match_indices,
@@ -125,6 +138,51 @@ def correspondence_loss(source_features, target_features, target_match_indices,
     target_features = F.normalize(target_features.float(), dim=-1)
     logits = source_features @ target_features.T / temperature
     allowed = torch.as_tensor(candidate_mask, device=logits.device, dtype=torch.bool)
-    target_match_indices = torch.as_tensor(target_match_indices, device=logits.device, dtype=torch.long)
-    assert allowed.shape == logits.shape and allowed[torch.arange(len(logits)), target_match_indices].all()
-    return F.cross_entropy(logits.masked_fill(~allowed, -torch.inf), target_match_indices)
+    matches = torch.as_tensor(target_match_indices, device=logits.device)
+    if matches.ndim == 1:
+        positives = torch.zeros_like(allowed)
+        positives[torch.arange(len(logits), device=logits.device), matches.long()] = True
+    else:
+        positives = matches.bool()
+    assert positives.shape == allowed.shape == logits.shape
+    assert positives.any(-1).all() and not (positives & ~allowed).any()
+    # 网格池化可使一个来源位置对应多个目标槽；不把其他正确位置当作负例。
+    return (torch.logsumexp(logits.masked_fill(~allowed, -torch.inf), -1)
+            - torch.logsumexp(logits.masked_fill(~positives, -torch.inf), -1)).mean()
+
+
+def tracebind_objective(scores, row, teacher_scores, config, arm="tracebind", geometry=None):
+    """训练与运行审计共用真实标签；DoD 只施加于逐排列核验的偏序。"""
+    tc, mc = config["training"], config["model"]
+    zero = scores[0].total.new_zeros(())
+    selected = scores if arm in {"permutation_augmentation", "tracebind"} else scores[:1]
+    rank_terms = []
+    for score in selected:
+        assert score.total.numel() == 2, "本版本使用唯一正例及已核验的单角色困难负例"
+        rank_terms.append(tc["temperature"] * F.softplus((tc["rank_margin"] - score.total[0] + score.total[1]) / tc["temperature"]))
+    rank = torch.stack(rank_terms).mean()
+    assignment, dod, consistency = zero, zero, zero
+    if arm == "tracebind":
+        assignment = assignment_set_nll(scores[0].energies[0], row["valid_assignments"], row["supervised_assignments"], mc["assignment_temperature"])
+        assert row["verified_dod_assignments"], "不能用未知或无偏序依据的排列补 DoD"
+        dod = torch.stack([paired_dod_loss(scores[0].energies[0, 0] - scores[0].energies[0, index],
+                                         scores[0].energies[1, 0] - scores[0].energies[1, index],
+                                         tc["dod_margin"], tc["temperature"])
+                           for index in row["verified_dod_assignments"]]).mean()
+        consistency = torch.stack([F.smooth_l1_loss(scores[0].total, score.total) for score in scores[1:]]).mean()
+    if geometry is None:
+        distillation = torch.stack([teacher_ranking_loss(score.utility, teacher_scores[index], tc["temperature"])
+                                    for index, score in enumerate(scores)]).mean()
+        anchors = zero
+    else:
+        q, g = geometry["student_queries"], geometry["student_candidates"]
+        tq, tg = geometry["teacher_queries"].detach(), geometry["teacher_candidates"].detach()
+        neighbours = geometry["teacher_neighbours"].detach()
+        distillation = torch.stack([teacher_ranking_loss(value @ neighbours.T, teacher @ neighbours.T, tc["temperature"])
+                                    for value, teacher in zip(q, tq)]).mean()
+        anchors = (1 - (torch.stack(q) * tq).sum(-1)).mean() + (1 - (g * tg).sum(-1)).mean()
+    loss = (rank + tc["assignment_weight"] * assignment + tc["dod_weight"] * dod
+            + tc["consistency_weight"] * consistency + tc["distillation_weight"] * distillation
+            + tc.get("geometry_anchor_weight", 0.0) * anchors)
+    return loss, {"rank": rank, "assignment": assignment, "dod": dod,
+                  "consistency": consistency, "distillation": distillation, "geometry_anchors": anchors}

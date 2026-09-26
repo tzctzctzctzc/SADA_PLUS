@@ -1,0 +1,123 @@
+{
+  "status": "pass",
+  "revision": "2c4565515e0f265c6511776e7193b22c0968ddc7",
+  "weight_files_verified": 4,
+  "runtime_files_verified": 19,
+  "verified_files": [
+    {
+      "name": "added_tokens.json",
+      "bytes": 707,
+      "upstream_hash": "b54f9135e44c1e81047e8d05cb027af8bc039eed",
+      "hash_type": "sha1_git_blob"
+    },
+    {
+      "name": "chat_template.jinja",
+      "bytes": 5519,
+      "upstream_hash": "a0b161f8af53a32ce7e659103babce500990a863",
+      "hash_type": "sha1_git_blob"
+    },
+    {
+      "name": "config.json",
+      "bytes": 1539,
+      "upstream_hash": "bbc95092cb9d1bccc2e2205eeaa2625bc385b59b",
+      "hash_type": "sha1_git_blob"
+    },
+    {
+      "name": "config_sentence_transformers.json",
+      "bytes": 238,
+      "upstream_hash": "45201cb7fdb6b2546b0887a0f4f29d01df334ca4",
+      "hash_type": "sha1_git_blob"
+    },
+    {
+      "name": "merges.txt",
+      "bytes": 1671853,
+      "upstream_hash": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7",
+      "hash_type": "sha1_git_blob"
+    },
+    {
+      "name": "model-00001-of-00004.safetensors",
+      "bytes": 4998056552,
+      "upstream_hash": "79ef275ec5f751d5fb59357c00d473268f9fd74abf5e38aa30137d268e7733c4",
+      "hash_type": "sha256_lfs"
+    },
+    {
+      "name": "model-00002-of-00004.safetensors",
+      "bytes": 4915962464,
+      "upstream_hash": "a4da61f512e84fc0f0b80bcb7bcc5137eb3bf25b658a7d55f84f4056078545f0",
+      "hash_type": "sha256_lfs"
+    },
+    {
+      "name": "model-00003-of-00004.safetensors",
+      "bytes": 4915962496,
+      "upstream_hash": "7fb17cf8f06d6fe5aaacf114e85c4e6d8318799f24b517f50d1ec154a8d47007",
+      "hash_type": "sha256_lfs"
+    },
+    {
+      "name": "model-00004-of-00004.safetensors",
+      "bytes": 1459698112,
+      "upstream_hash": "000213b6d1d03ed9023fac23716da51ec4c5be221a04526c2f732d31d8fed1f5",
+      "hash_type": "sha256_lfs"
+    },
+    {
+      "name": "model.safetensors.index.json",
+      "bytes": 67737,
+      "upstream_hash": "8adc862dba2582b08afd3679524c100eb042f57b",
+      "hash_type": "sha1_git_blob"
+    },
+    {
+      "name": "modules.json",
+      "bytes": 430,
+      "upstream_hash": "b90278c6da887b649f2c892ca2512ecd7775ef83",
+      "hash_type": "sha1_git_blob"
+    },
+    {
+      "name": "preprocessor_config.json",
+      "bytes": 784,
+      "upstream_hash": "a1352efedad1e881d73ea4d9f30d9ae6a149dd63",
+      "hash_type": "sha1_git_blob"
+    },
+    {
+      "name": "scripts/qwen3_vl_embedding.py",
+      "bytes": 13258,
+      "upstream_hash": "36d45865735be96a1278a21c132ff640e2ae68ca",
+      "hash_type": "sha1_git_blob"
+    },
+    {
+      "name": "sentence_bert_config.json",
+      "bytes": 771,
+      "upstream_hash": "3385a6eaa790e12ba8cd8b9fe747efbe6500b338",
+      "hash_type": "sha1_git_blob"
+    },
+    {
+      "name": "special_tokens_map.json",
+      "bytes": 613,
+      "upstream_hash": "ac23c0aaa2434523c494330aeb79c58395378103",
+      "hash_type": "sha1_git_blob"
+    },
+    {
+      "name": "tokenizer.json",
+      "bytes": 11423705,
+      "upstream_hash": "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a",
+      "hash_type": "sha256_lfs"
+    },
+    {
+      "name": "tokenizer_config.json",
+      "bytes": 5404,
+      "upstream_hash": "1d4fba2de0e94e8f97e08927cfb7d084160c2880",
+      "hash_type": "sha1_git_blob"
+    },
+    {
+      "name": "video_preprocessor_config.json",
+      "bytes": 817,
+      "upstream_hash": "e32b1d90356f74457edbfca27aa1e121dab7cdc7",
+      "hash_type": "sha1_git_blob"
+    },
+    {
+      "name": "vocab.json",
+      "bytes": 2776833,
+      "upstream_hash": "4783fe10ac3adce15ac8f358ef5462739852c569",
+      "hash_type": "sha1_git_blob"
+    }
+  ],
+  "scope": "main embedding encoder weights, tokenizer/processor configs and official embedding source; not model efficacy"
+}

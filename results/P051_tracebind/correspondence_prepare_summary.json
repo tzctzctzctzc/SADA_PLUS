@@ -1,0 +1,20 @@
+{
+  "status": "pass",
+  "pairs": 7170,
+  "unique_uids": 7170,
+  "minimum_pairs": 5000,
+  "counts": {
+    "eligible_source_rows": 13234,
+    "uid_joined": 13217,
+    "coordinate_valid": 7170
+  },
+  "total_verified_points": 628801,
+  "correspondences_sha256": "f2de8ceae048ca88f9e09c2e620c13b2ad07bf565e61d38f7450dd164fb42c92",
+  "source_revision": "0d1cf6536239888f1a8e218790649344810067bc",
+  "annotation_revision": "27ac24b51dbd15513d37fc20e255ff0ef642ff62",
+  "target_mask_required": true,
+  "dift_geoaware_agreement_required": true,
+  "missing_annotations_never_filled": true,
+  "point_grid_yx_size": 64,
+  "retrieval_role_labels": false
+}

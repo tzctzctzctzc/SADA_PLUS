@@ -6,40 +6,39 @@
     "official_multi_reference_single_pair": 38644,
     "available_metadata": 38644,
     "unambiguous_one_role_per_source": 38628,
-    "all_roles_visual_allowlisted": 8734,
-    "positive_metadata_consistent": 8649,
-    "some_verified_wrong_binding": 1897,
-    "historical_heldout_products_excluded": 1548,
-    "metadata_supported_dod_pair": 680
+    "all_roles_visual_allowlisted": 8622,
+    "positive_metadata_consistent": 8537,
+    "some_verified_wrong_binding": 1853,
+    "historical_heldout_products_excluded": 1515,
+    "metadata_supported_dod_pair": 663
   },
-  "candidate_groups": 1548,
+  "candidate_groups": 1515,
   "active_family_counts": {
-    "construction": 594,
-    "shape": 647,
-    "color": 222,
+    "construction": 574,
+    "shape": 637,
+    "color": 219,
     "pattern": 85
   },
   "active_role_counts": {
     "closure type": 273,
     "heel height": 335,
-    "color": 222,
+    "color": 219,
     "pattern/print": 66,
     "shoe type": 210,
     "toe style": 50,
-    "back type": 61,
+    "back type": 51,
     "waist line": 61,
     "pockets": 50,
     "collar type": 86,
     "number of drawers": 3,
-    "arm type": 30,
+    "arm type": 25,
     "boot height": 9,
-    "chair type": 24,
+    "chair type": 14,
     "pattern": 19,
     "sleeve type": 1,
     "sleeve length": 3,
     "bag type": 4,
     "closure": 16,
-    "movement type": 5,
     "form factor": 2,
     "table type": 6,
     "strap type": 2,
@@ -48,25 +47,26 @@
     "hem shape": 4
   },
   "source_count_distribution": {
-    "2": 1545,
+    "2": 1512,
     "3": 3
   },
-  "unique_products": 3861,
-  "connected_components": 721,
+  "unique_products": 3812,
+  "connected_components": 718,
   "largest_component_groups": 33,
-  "greedy_globally_product_disjoint_groups": 813,
+  "greedy_globally_product_disjoint_groups": 804,
+  "greedy_count_is_lower_bound_not_maximum": true,
   "greedy_independent_active_families": {
-    "construction": 299,
-    "shape": 310,
-    "color": 149,
+    "construction": 297,
+    "shape": 306,
+    "color": 146,
     "pattern": 55
   },
-  "balanced_pool_upper_bound": 1548,
+  "balanced_pool_upper_bound": 1515,
   "necessary_supply_checks": {
     "raw_groups_for_requested_splits": false,
     "four_visual_families_available": true,
     "balanced_pool_upper_bound_large_enough": false,
-    "independent_validation_upper_supply": false
+    "greedy_feasible_validation_supply": false
   },
   "pilot_authorized": false,
   "remaining_gates": [
@@ -75,5 +75,5 @@
     "cross-domain correspondence join",
     "complete implementation runtime audit"
   ],
-  "candidate_pool_sha256": "19eef4525550e9745bfa025fd5a1529723fb81d2d9f54c591990c46445a5e1f0"
+  "candidate_pool_sha256": "cf0143b4ce6e382548bdd5866ec9ce22ae366ad5915619b12ae53cc8158f7488"
 }

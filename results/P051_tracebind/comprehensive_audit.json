@@ -1,0 +1,127 @@
+{
+  "classification": "core_computational_paths_correct_complete_training_method_not_ready",
+  "audit_scope": "P051 TraceBind model, objective, encoder, checkpoint, construction/extraction/isolation/correspondence/visual-screening pipeline; historical methods are evidence, not reimplemented here",
+  "math_checks_passed": 20,
+  "live_runtime_checks_passed": 19,
+  "fixed_issues": [
+    "valid-assignment likelihood handles multiple positives and masks unknown permutations",
+    "DoD uses the exact same per-permutation positive-minus-negative ordering as construction audit",
+    "correspondence loss supports multiple correct cells; unverified neighboring cells are not false negatives",
+    "teacher loss temperature matches ranking-score gradient scale; teacher encoded before adaptation and detached",
+    "FP32 trainable visual merger with BF16 autocast prevents non-updating low-precision parameters",
+    "query roles compile from original text; label-free inference score matches labelled audit path",
+    "fresh-model checkpoint and optimizer restore validated",
+    "cached image identity requires matching pinned product-to-byte manifests",
+    "native model image token counts and actual generated first answer token checked before annotation"
+  ],
+  "blocking_findings": [
+    {
+      "priority": 0,
+      "issue": "Matched multi-arm training driver and official full-gallery metric integration are missing",
+      "effect": "A two-step runtime audit cannot certify faithful complete training or SOTA."
+    },
+    {
+      "priority": 0,
+      "issue": "Final visually verified 5000/1000/400 role-balanced orbit dataset is not certified",
+      "effect": "Metadata-derived candidates and cross-domain pseudo correspondences cannot bypass the visual gate."
+    },
+    {
+      "priority": 1,
+      "issue": "Synthetic coarse-attribute queries can have unlabelled semantic positives",
+      "effect": "Single-product-ID mAP over their full gallery can count correct targets as negatives; requires multi-positive relevance or separate official query evaluation."
+    },
+    {
+      "priority": 1,
+      "issue": "One distinct role per source and restricted same-attribute grammar",
+      "effect": "Cannot claim unrestricted PinPoint query support; official instruction parser and coverage audit remain necessary."
+    },
+    {
+      "priority": 1,
+      "issue": "The permutation-augmentation control currently has equivalent query views, not genuine wrong-binding augmentation",
+      "effect": "It is not yet the promised strong matched corruption-augmentation baseline."
+    },
+    {
+      "priority": 1,
+      "issue": "Active-role relative validation does not verify all roles or full-energy DoD assumptions",
+      "effect": "Other-role error cancellation remains a weak metadata assumption; must retain that uncertainty in claims and supervision."
+    },
+    {
+      "priority": 1,
+      "issue": "Every non-identity bijective permutation changes at least two source-role bindings",
+      "effect": "Permutation DoD is not a controlled single-role intervention. Checking only the active cue cannot certify the complete permutation ordering; isolate the intervention or verify the other changed roles before making that claim."
+    },
+    {
+      "priority": 1,
+      "issue": "Exact pixel isolation does not exclude all near-duplicate product photos",
+      "effect": "Near-duplicate review still required before an independent generalization claim."
+    }
+  ],
+  "theory_limits": [
+    "R2 assignment posterior equals log-sigmoid of identity-minus-swap energy; the formula alone is not innovation.",
+    "Frozen anchors constrain geometry locally; they do not prove global recall is preserved.",
+    "Cross-domain correspondence agreement is pseudo supervision, not retrieval role ground truth."
+  ],
+  "data": {
+    "metadata_products": 135027,
+    "images_extracted": 31297,
+    "raw_groups": 12800,
+    "isolated_split_groups": {
+      "confirmation": 767,
+      "validation": 1793,
+      "train": 8599
+    },
+    "correspondence_pairs": 7170,
+    "correspondence_points": 628801,
+    "quality_status": "annotation_quality_pilot_failed_do_not_scale"
+  },
+  "training_pilot_ready": false,
+  "full_training_allowed": false,
+  "sota_evidence_exists": false,
+  "evidence_files": {
+    "math_audit": {
+      "path": "runs/P051_tracebind/math_audit.json",
+      "sha256": "e4b99736b92e91808b021119317e3cbb2f760add9967bd9b07bae333755cf1ee"
+    },
+    "end_to_end_runtime_audit": {
+      "path": "runs/P051_tracebind/end_to_end_runtime_audit.json",
+      "sha256": "69b7248733fe2d26b2de23811b832c4e5e3981e24150f76f68cc66d1e02d12ad"
+    },
+    "orbits_prepare_summary": {
+      "path": "runs/P051_tracebind/orbits_prepare_summary.json",
+      "sha256": "68bb2a43ed393aa63c6ec5db4722f78771a9750865c51c03b381d2db33275e0b"
+    },
+    "orbits_integrity_audit": {
+      "path": "runs/P051_tracebind/orbits_integrity_audit.json",
+      "sha256": "b31b3f18cfafc5f51ebf9520504c999ba562acb8b6ab7a53f1f891561cc4da98"
+    },
+    "correspondence_prepare_summary": {
+      "path": "runs/P051_tracebind/correspondence_prepare_summary.json",
+      "sha256": "7041281fd26a1f1c2b71fec44423bcd59435e5d095d39b8048937ee39bff543f"
+    },
+    "correspondence_integrity_audit": {
+      "path": "runs/P051_tracebind/correspondence_integrity_audit.json",
+      "sha256": "528fd41caf7aa6bffddf3415abb897860f2bc8d92e1869900b0658597e4dda3c"
+    },
+    "image_cache_provenance_audit": {
+      "path": "runs/P051_tracebind/image_cache_provenance_audit.json",
+      "sha256": "0c6ddebd652040296f5acc9ceb0ba503270da9bdcef0442d6a40425d2a41964e"
+    },
+    "visual_calibration_audit": {
+      "path": "runs/P051_tracebind/visual_calibration_audit.json",
+      "sha256": "1705f1fcb59ad40c7f0d3e99045f0f306d2844fc0b4b842dc5392c757d995adb"
+    },
+    "visual_v3_quality_audit": {
+      "path": "runs/P051_tracebind/visual_v3_quality_audit.json",
+      "sha256": "0416b145a07546e1d225bfb225c59733f130aa5dd8bd25dd1b883b5e612a8c66"
+    },
+    "embedding_model_integrity_audit": {
+      "path": "runs/P051_tracebind/embedding_model_integrity_audit.json",
+      "sha256": "fefa5e80f690c9c1ce73f0efd5f53aa5e5954c49953fe5b70b5df50360d5708e"
+    }
+  },
+  "source_hashes": {
+    "src/tracebind.py": "79771540f403b6f841b77b0a668a61b31210f803213b26f6e08e061e303f0373",
+    "src/tracebind_encoder.py": "99087985f552558896e31df3de95e782b47862029a1de9ac2ea9cefedb5f8b0d",
+    "scripts/audit_P051_end_to_end.py": "c9ce742de9e66d1fc66fa9ac86278607e4d1a115612f8c1e23f00e3e674e9d70"
+  }
+}

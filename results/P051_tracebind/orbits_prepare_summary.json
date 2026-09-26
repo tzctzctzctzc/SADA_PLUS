@@ -1,0 +1,144 @@
+{
+  "status": "metadata_screened_visual_gate_pending",
+  "groups": 12800,
+  "splits": {
+    "train": {
+      "groups": 10000,
+      "requested_candidates": 10000,
+      "families": {
+        "color": 2500,
+        "construction": 2500,
+        "shape": 2500,
+        "pattern": 2500
+      },
+      "active_roles": {
+        "color": 2500,
+        "collar type": 322,
+        "shoe type": 1130,
+        "closure type": 1007,
+        "toe style": 323,
+        "pattern/print": 1915,
+        "pattern": 585,
+        "chair type": 262,
+        "back type": 115,
+        "shape": 72,
+        "heel height": 302,
+        "hem shape": 113,
+        "strap type": 65,
+        "arm type": 108,
+        "table type": 48,
+        "bag type": 91,
+        "sleeve length": 94,
+        "waist line": 289,
+        "table base": 22,
+        "number of drawers": 17,
+        "sleeve type": 31,
+        "boot height": 40,
+        "closure": 224,
+        "pockets": 197,
+        "form factor": 119,
+        "handle type": 9
+      },
+      "source_counts": {
+        "3": 3000,
+        "2": 7000
+      },
+      "unique_products": 19257,
+      "maximum_product_uses": 8
+    },
+    "confirmation": {
+      "groups": 800,
+      "requested_candidates": 800,
+      "families": {
+        "color": 200,
+        "shape": 200,
+        "construction": 200,
+        "pattern": 200
+      },
+      "active_roles": {
+        "color": 200,
+        "shoe type": 86,
+        "closure type": 62,
+        "toe style": 29,
+        "pattern/print": 158,
+        "chair type": 19,
+        "sleeve length": 8,
+        "back type": 13,
+        "heel height": 30,
+        "boot height": 4,
+        "collar type": 40,
+        "bag type": 6,
+        "closure": 23,
+        "table base": 4,
+        "pattern": 42,
+        "table type": 2,
+        "arm type": 6,
+        "hem shape": 8,
+        "waist line": 28,
+        "pockets": 11,
+        "shape": 3,
+        "form factor": 13,
+        "strap type": 2,
+        "sleeve type": 2,
+        "number of drawers": 1
+      },
+      "source_counts": {
+        "3": 240,
+        "2": 560
+      },
+      "unique_products": 3440,
+      "maximum_product_uses": 1
+    },
+    "validation": {
+      "groups": 2000,
+      "requested_candidates": 2000,
+      "families": {
+        "color": 500,
+        "construction": 500,
+        "shape": 500,
+        "pattern": 500
+      },
+      "active_roles": {
+        "color": 500,
+        "waist line": 73,
+        "shoe type": 229,
+        "closure type": 161,
+        "pattern": 110,
+        "heel height": 62,
+        "arm type": 17,
+        "pattern/print": 390,
+        "back type": 27,
+        "table type": 8,
+        "toe style": 68,
+        "boot height": 15,
+        "shape": 15,
+        "number of drawers": 5,
+        "strap type": 12,
+        "sleeve type": 4,
+        "bag type": 17,
+        "chair type": 40,
+        "collar type": 76,
+        "hem shape": 23,
+        "closure": 61,
+        "sleeve length": 12,
+        "table base": 7,
+        "pockets": 41,
+        "form factor": 23,
+        "handle type": 4
+      },
+      "source_counts": {
+        "3": 600,
+        "2": 1400
+      },
+      "unique_products": 8600,
+      "maximum_product_uses": 1
+    }
+  },
+  "product_split_overlap": 0,
+  "excluded_historical_or_official_products": 5162,
+  "orbits_sha256": "b282a68d8801e8223aefa506a76b4eaf1b78dd28ed9f9eb8a57d8c05b89e2c5b",
+  "metadata_sha256": "de1a454842084e487a88a5c07805e0430389300de03c462a21807d8e31ccee03",
+  "visual_gate_passed": false,
+  "pilot_authorized": false,
+  "template_policy": "new metadata-derived queries; not official MERIT queries or official benchmark scores"
+}

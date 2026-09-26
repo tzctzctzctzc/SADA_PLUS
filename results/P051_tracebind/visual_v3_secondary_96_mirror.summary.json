@@ -1,0 +1,10 @@
+{
+  "checks": 384,
+  "groups": 96,
+  "passed_groups": 0,
+  "passed_family_counts": {},
+  "scope": "relative active-role pseudo labels only",
+  "dataset_sha256": "50ab8f9e19da47ed358f789e2c89a36af833e846c689e3b85382fec7cebb28ea",
+  "elapsed_seconds": 192.327711366117,
+  "peak_gpu_memory_bytes": 19141736960
+}

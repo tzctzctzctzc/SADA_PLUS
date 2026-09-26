@@ -1,0 +1,11 @@
+{
+  "model": "small",
+  "checks": 384,
+  "groups": 96,
+  "passed_groups": 0,
+  "passed_family_counts": {},
+  "uncertain_predictions": 61,
+  "scope": "relative active-role quality screening only; not absolute multi-role ground truth",
+  "dataset_sha256": "50ab8f9e19da47ed358f789e2c89a36af833e846c689e3b85382fec7cebb28ea",
+  "elapsed_seconds": 64.15497735887766
+}

@@ -1,0 +1,84 @@
+{
+  "status": "annotation_quality_pilot_failed_do_not_scale",
+  "checks": {
+    "at_least_four_joint_pass_groups_per_family": false,
+    "known_assistant_visual_contradictions_rejected": true
+  },
+  "models": {
+    "primary": {
+      "passed_groups": 22,
+      "passed_families": {
+        "shape": 9,
+        "construction": 6,
+        "color": 4,
+        "pattern": 3
+      },
+      "all_four_predictions_agree_with_metadata_ignoring_confidence": 28,
+      "option_prediction_counts": {
+        "A": 125,
+        "B": 166,
+        "D": 93
+      },
+      "position_consistent_comparisons_per_family_out_of_48": {
+        "color": 35,
+        "shape": 40,
+        "construction": 38,
+        "pattern": 39
+      },
+      "same_AB_letter_after_references_swapped": {
+        "color": 3,
+        "shape": 2,
+        "construction": 2,
+        "pattern": 2
+      },
+      "median_total_option_mass": 0.9997367858886719,
+      "inspection_passed_group_assessments": {
+        "relative_comparison_visually_plausible": 10
+      },
+      "known_inspection_contradictions_accepted": []
+    },
+    "secondary": {
+      "passed_groups": 0,
+      "passed_families": {},
+      "all_four_predictions_agree_with_metadata_ignoring_confidence": 3,
+      "option_prediction_counts": {
+        "C": 57,
+        "B": 267,
+        "A": 57,
+        "D": 3
+      },
+      "position_consistent_comparisons_per_family_out_of_48": {
+        "color": 18,
+        "shape": 14,
+        "construction": 14,
+        "pattern": 23
+      },
+      "same_AB_letter_after_references_swapped": {
+        "color": 13,
+        "shape": 27,
+        "construction": 29,
+        "pattern": 19
+      },
+      "median_total_option_mass": 0.9954110085964203,
+      "inspection_passed_group_assessments": {},
+      "known_inspection_contradictions_accepted": []
+    }
+  },
+  "joint_pass_groups": 0,
+  "joint_pass_families": {},
+  "cross_model_per_check_physical_choice_agreement": 0.5364583333333334,
+  "inspection_contradictions_checked": 4,
+  "joint_false_accepts_of_known_contradictions": [],
+  "quality_pilot_and_inspection_overlap": 0,
+  "visual_inspection_is_assistant_assessment_not_independent_expert_truth": true,
+  "thresholds_relaxed": false,
+  "training_pilot_ready": false,
+  "missing_final_verified_counts": {
+    "train": 5000,
+    "validation": 1000,
+    "confirmation": 400
+  },
+  "absolute_all_role_ground_truth_certified": false,
+  "is_efficacy_evidence": false,
+  "dataset_sha256": "50ab8f9e19da47ed358f789e2c89a36af833e846c689e3b85382fec7cebb28ea"
+}

@@ -1,0 +1,108 @@
+{
+  "classification": "pass",
+  "checks": {
+    "all_image_token_counts_match_three_images_per_row": true,
+    "batch_replay_exact": true,
+    "batch_and_single_argmax_agree": true,
+    "generation_is_same_option_as_single_logits": true
+  },
+  "batch_single_max_logit_drift": 0.25,
+  "generation": [
+    "A",
+    "B",
+    "A",
+    "B"
+  ],
+  "vocabulary_top": [
+    [
+      {
+        "token": "A",
+        "logit": 26.375
+      },
+      {
+        "token": "C",
+        "logit": 24.875
+      },
+      {
+        "token": "B",
+        "logit": 24.875
+      },
+      {
+        "token": "D",
+        "logit": 24.625
+      },
+      {
+        "token": "E",
+        "logit": 17.25
+      }
+    ],
+    [
+      {
+        "token": "B",
+        "logit": 25.375
+      },
+      {
+        "token": "D",
+        "logit": 24.0
+      },
+      {
+        "token": "C",
+        "logit": 24.0
+      },
+      {
+        "token": "A",
+        "logit": 23.875
+      },
+      {
+        "token": "E",
+        "logit": 16.625
+      }
+    ],
+    [
+      {
+        "token": "A",
+        "logit": 24.5
+      },
+      {
+        "token": "B",
+        "logit": 24.375
+      },
+      {
+        "token": "C",
+        "logit": 23.875
+      },
+      {
+        "token": "D",
+        "logit": 23.625
+      },
+      {
+        "token": "E",
+        "logit": 16.125
+      }
+    ],
+    [
+      {
+        "token": "B",
+        "logit": 24.25
+      },
+      {
+        "token": "C",
+        "logit": 23.75
+      },
+      {
+        "token": "D",
+        "logit": 23.125
+      },
+      {
+        "token": "A",
+        "logit": 22.875
+      },
+      {
+        "token": "E",
+        "logit": 15.75
+      }
+    ]
+  ],
+  "processor_class": "Qwen2VLImageProcessorFast",
+  "is_data_correctness_or_efficacy_evidence": false
+}

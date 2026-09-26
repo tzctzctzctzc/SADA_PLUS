@@ -1,0 +1,55 @@
+{
+  "status": "label_and_exact_pixel_audit_pass_visual_quality_pending",
+  "input_groups": 12800,
+  "retained_groups": 11159,
+  "issues_removed": {
+    "historical_heldout_pixel_alias_removed": 143,
+    "within_group_duplicate_pixels": 67,
+    "confirmation_pixel_overlap_removed": 22,
+    "validation_pixel_overlap_removed": 183,
+    "train_pixel_overlap_removed": 1226
+  },
+  "all_labels_recomputed": true,
+  "source_count_distribution_before_filters": {
+    "3": 3840,
+    "2": 8960
+  },
+  "dod_pair_count_distribution": {
+    "4": 3688,
+    "2": 152,
+    "1": 8960
+  },
+  "dataset_sha256": "50ab8f9e19da47ed358f789e2c89a36af833e846c689e3b85382fec7cebb28ea",
+  "image_manifest_sha256": "116629755d1db26c45cda51f48d12aacf27f215772803a3fdfaf0f87c5613bed",
+  "split_groups": {
+    "confirmation": 767,
+    "validation": 1793,
+    "train": 8599
+  },
+  "split_families": {
+    "train": {
+      "color": 2163,
+      "shape": 2085,
+      "pattern": 2183,
+      "construction": 2168
+    },
+    "confirmation": {
+      "shape": 192,
+      "color": 194,
+      "construction": 189,
+      "pattern": 192
+    },
+    "validation": {
+      "shape": 438,
+      "construction": 447,
+      "pattern": 461,
+      "color": 447
+    }
+  },
+  "train_heldout_exact_pixel_overlap": 0,
+  "heldout_between_group_exact_pixel_overlap": 0,
+  "historical_heldout_exact_pixel_overlap": 0,
+  "historical_heldout_images_checked": 1301,
+  "near_duplicate_photos_not_certified_absent": true,
+  "visual_gate_passed": false
+}

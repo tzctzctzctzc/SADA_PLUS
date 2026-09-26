@@ -3,6 +3,8 @@
   "checks": {
     "six_assignments_for_three_roles": true,
     "posterior_normalization": true,
+    "roles_compile_from_canonical_and_official_query_syntax": true,
+    "missing_source_binding_rejected": true,
     "source_reindex_equivariance": true,
     "role_reindex_equivariance": true,
     "chunked_index_equals_direct_score": true,
@@ -10,13 +12,17 @@
     "both_valid_assignments_get_reward": true,
     "unknown_assignment_not_punished": true,
     "all_assignments_valid_zero_nll": true,
+    "batched_unknowns_and_valid_sets": true,
     "dod_four_gradient_signs": true,
     "teacher_target_detached": true,
     "correspondence_both_sides_gradient": true,
+    "multiple_correct_correspondences_not_negatives": true,
+    "shared_objective_dod_label_path_and_signs": true,
+    "role_sum_control_has_no_binding_supervision": true,
     "all_head_parameters_receive_gradient": true,
     "head_has_nonzero_support_and_binding": true
   },
-  "source_sha256": "55010ffbbfd4bfb2ab92972a01fea537441d5749db6772314076a49b78d9a73f",
+  "source_sha256": "79771540f403b6f841b77b0a668a61b31210f803213b26f6e08e061e303f0373",
   "is_efficacy_evidence": false,
-  "loss": 5.933540344238281
+  "loss": 5.9335408210754395
 }

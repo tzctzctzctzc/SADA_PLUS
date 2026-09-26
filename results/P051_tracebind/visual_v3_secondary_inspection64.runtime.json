@@ -1,0 +1,72 @@
+{
+  "checks": {
+    "image_token_counts_match": true,
+    "single_batch_argmax_agree": true,
+    "generation_first_token_agrees_with_single_option": true
+  },
+  "status": "pass",
+  "generated": [
+    "C",
+    "B = Reference B",
+    "B = Reference B",
+    "C"
+  ],
+  "generated_first_token_ids": [
+    34,
+    33,
+    33,
+    34
+  ],
+  "maximum_batch_single_logit_drift": 0.0,
+  "processor_class": "GotOcr2ImageProcessorFast",
+  "screening_config": {
+    "protocol": "P051_relative_annotation_v3",
+    "status": "models_preparing_bounded_quality_pilot_only",
+    "root": "/vepfs/vlms/1",
+    "dataset": "runs/P051_tracebind/orbits_byte_disjoint.jsonl",
+    "dataset_sha256": "50ab8f9e19da47ed358f789e2c89a36af833e846c689e3b85382fec7cebb28ea",
+    "models": {
+      "primary": {
+        "repo": "Qwen/Qwen3-VL-32B-Instruct",
+        "path": "models/Qwen3-VL-32B-Instruct",
+        "revision": "0cfaf48183f594c314753d30a4c4974bc75f3ccb",
+        "batch_size": 4,
+        "type": "qwen3_vl",
+        "image_kwargs": {
+          "min_pixels": 12544,
+          "max_pixels": 200704
+        }
+      },
+      "secondary": {
+        "repo": "OpenGVLab/InternVL3_5-8B-HF",
+        "path": "models/InternVL3_5-8B-HF",
+        "revision": "741a7d03020411e666c6109218ab71e08151ef86",
+        "batch_size": 4,
+        "type": "internvl",
+        "image_kwargs": {
+          "crop_to_patches": true,
+          "min_patches": 1,
+          "max_patches": 4
+        }
+      }
+    },
+    "minimum_option_probability": 0.65,
+    "minimum_total_option_mass": 0.5,
+    "minimum_logit_margin": 0.5,
+    "both_reference_orders_required": true,
+    "dtype": "bfloat16",
+    "attention_backend": "sdpa",
+    "image_processor_use_fast": true,
+    "disable_thinking": true,
+    "quality_pilot_groups": 96,
+    "minimum_joint_pass_groups_per_family_before_scaling": 4,
+    "known_visual_contradictions_must_be_rejected": true,
+    "same_language_backbone_correlation_acknowledged": true,
+    "pseudo_labels_are_not_ground_truth": true,
+    "absolute_positive_all_roles_correctness_certified": false,
+    "thresholds_and_roles_not_relaxed_after_v2_failure": true,
+    "method_efficacy_gates_unchanged": true
+  },
+  "model": "secondary",
+  "is_quality_or_efficacy_evidence": false
+}

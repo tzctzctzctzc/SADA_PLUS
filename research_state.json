@@ -1,7 +1,7 @@
 {
   "as_of": "2026-09-27",
   "goal_status": "active",
-  "phase": "TraceBind_confirmed_core_runtime_audited_data_supply_gate_failed",
+  "phase": "TraceBind_comprehensive_audit_complete_raw_data_ready_visual_quality_failed_no_training",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 1,
@@ -14,7 +14,7 @@
     ],
     "submission_year_assumption": 2027
   },
-  "direction": "用户已确认 TraceBind。实现可索引来源×角色矩阵、有效绑定集合似然、DoD、全局效用与教师排序蒸馏；核心计算已通过数学和真实 GPU1 路径审计。完整训练方法尚未完成：跨域精细对应数据接入、多组匹配训练和全图库评估仍待实现。既定 5000/1000 pilot 不得以现有较小数据冒充。",
+  "direction": "TraceBind 核心计算通过 20 项数学和 19 项真实运行核验，所有 LoRA 张量和视觉 merger 均有梯度与实际更新；数据原料完整，但双模型视觉标注质量门槛失败。当前仅核心实现正确，完整匹配训练驱动、官方全图库评价及可信 5000/1000/400 标注仍缺，未启动效果 pilot 或全量。",
   "known_evidence": [
     "SoFA 使用跨图双向 attention 插值；Delimiter Scaling 加强图像边界，两者报告收益，但实验设置不同，不能直接声称矛盾。",
     "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
@@ -73,7 +73,8 @@
     "CVPR 2027 paper registration and submission deadlines are 2026-11-10 and 2026-11-16 AOE, respectively; the remaining schedule requires a kill-gated method pilot before full training.",
     "P051 双参考排列后验精确等于 log-sigmoid(identity-minus-swap energy)；公式本身不能构成区别于差分打分的创新。",
     "P051 完整 281 分片含 135027 商品；扩展可见形态白名单并隔离旧 heldout 后得到 1548 候选组（1545 双参考、3 三参考），其中 680 对有元数据支持的 DoD 偏序；元数据一致性不是视觉证明。",
-    "P051 数学审计及 GPU1 两步运行审计通过：36 层 LoRA、视觉 merger、新头有梯度及更新，可索引打分与直接计算一致，检查点重载一致。此为核心计算路径验证，完整数据与多组效果训练管线仍未完成，不能称完整忠实实现或 SOTA 证据。"
+    "P051 数学审计及 GPU1 两步运行审计通过：36 层 LoRA、视觉 merger、新头有梯度及更新，可索引打分与直接计算一致，检查点重载一致。此为核心计算路径验证，完整数据与多组效果训练管线仍未完成，不能称完整忠实实现或 SOTA 证据。",
+    "P051 全面审计：20 数学/19 真实运行项通过；135027 商品、31297 图片、7170 精细伪对应对补齐。12800 元数据候选经像素与历史保留集隔离后为8599/1793/767组；v3 Qwen3-VL-32B 通过22/96，InternVL通过0/96，两模型共同0/96，故标注扩量和效果训练未启动。非恒等双射排列至少改变两个绑定，不能当作严格单角色干预。"
   ],
   "hypotheses": [
     {
@@ -929,11 +930,51 @@
     },
     "P051_runtime_audit": {
       "status": "completed",
-      "pid": 2681196,
-      "classification": "runtime_paths_pass_data_and_full_training_pipeline_pending",
-      "summary": "results/P051_tracebind/runtime_audit.json",
+      "pid": 2695372,
+      "classification": "complete_computational_paths_pass_training_driver_and_visual_data_gate_pending",
+      "summary": "results/P051_tracebind/end_to_end_runtime_audit.json",
       "is_efficacy_evidence": false,
-      "exitcode": 0
+      "exitcode": 0,
+      "checks_passed": 19
+    },
+    "P051_images": {
+      "status": "completed",
+      "pid": 2685020,
+      "images": 31297,
+      "complete": true,
+      "summary": "runs/P051_tracebind/orbits_image_manifest.json"
+    },
+    "P051_correspondence_prepare": {
+      "status": "completed",
+      "pairs": 7170,
+      "trusted_pseudo_points": 628801,
+      "summary": "runs/P051_tracebind/correspondence_prepare_summary.json"
+    },
+    "P051_integrity": {
+      "status": "completed",
+      "pid": 2685389,
+      "log": "runs/P051_tracebind/integrity_pipeline.log",
+      "exitcode": 0,
+      "summary": "results/P051_tracebind/orbits_integrity_audit.json",
+      "retained_groups": 11159
+    },
+    "P051_annotation_quality_v3": {
+      "status": "completed_quality_gate_failed_no_scale",
+      "summary": "results/P051_tracebind/visual_v3_quality_audit.json",
+      "primary_pass_groups": 22,
+      "secondary_pass_groups": 0,
+      "joint_pass_groups": 0,
+      "calibration_groups": 96,
+      "inspection_groups": 64,
+      "is_efficacy_evidence": false
+    },
+    "P051_annotation_model_preparation": {
+      "status": "completed_all_downloaded_weights_hash_verified",
+      "models": [
+        "Qwen/Qwen3-VL-32B-Instruct",
+        "OpenGVLab/InternVL3_5-8B-HF"
+      ],
+      "required_templates_included": true
     }
   },
   "monitor": {
@@ -954,7 +995,7 @@
     "automation_display_name": "GPU1 独立研究进展",
     "rules_first": "Read /vepfs/vlms/1/研究规则.md before continuing; the automation was updated to GPU1 and evidence-first/pilot-first execution on 2026-09-17."
   },
-  "next": "保持既定 pilot 数量与门槛，先补建并视觉核验角色均衡的 MERIT 反事实轨道，覆盖三参考以上；完成 SemAlign/Subjects200K 精细对应接入和公平多组训练/全图库评估，再做完整实现审计。尚未启动效果 pilot 或全量训练。",
+  "next": "Do not scale the failed v3 annotation protocol. Resolve annotation position bias, genuinely controlled role interventions and incomplete multi-positive relevance; complete matched multi-arm training and official full-gallery metrics before any efficacy pilot. Do not relax the 5000/1000/400 or effect gates.",
   "results": {
     "P001": {
       "n": 4,
@@ -2039,6 +2080,8 @@
         "checks": {
           "six_assignments_for_three_roles": true,
           "posterior_normalization": true,
+          "roles_compile_from_canonical_and_official_query_syntax": true,
+          "missing_source_binding_rejected": true,
           "source_reindex_equivariance": true,
           "role_reindex_equivariance": true,
           "chunked_index_equals_direct_score": true,
@@ -2046,17 +2089,315 @@
           "both_valid_assignments_get_reward": true,
           "unknown_assignment_not_punished": true,
           "all_assignments_valid_zero_nll": true,
+          "batched_unknowns_and_valid_sets": true,
           "dod_four_gradient_signs": true,
           "teacher_target_detached": true,
           "correspondence_both_sides_gradient": true,
+          "multiple_correct_correspondences_not_negatives": true,
+          "shared_objective_dod_label_path_and_signs": true,
+          "role_sum_control_has_no_binding_supervision": true,
           "all_head_parameters_receive_gradient": true,
           "head_has_nonzero_support_and_binding": true
         },
-        "source_sha256": "55010ffbbfd4bfb2ab92972a01fea537441d5749db6772314076a49b78d9a73f",
+        "source_sha256": "79771540f403b6f841b77b0a668a61b31210f803213b26f6e08e061e303f0373",
         "is_efficacy_evidence": false,
-        "loss": 5.933540344238281
+        "loss": 5.9335408210754395
       },
       "runtime_audit": {
+        "classification": "complete_computational_paths_pass_training_driver_and_visual_data_gate_pending",
+        "checks": {
+          "merger_all_parameters_have_gradient": true,
+          "heads_all_parameters_have_gradient": true,
+          "finite_loss_and_all_gradients": true,
+          "all_lora_tensors_have_gradient_after_second_step": true,
+          "all_merger_and_head_parameters_update": true,
+          "all_lora_tensors_update_after_two_steps": true,
+          "all_36_layers_gradient_and_update": true,
+          "all_feature_branches_receive_gradient": true,
+          "frozen_teacher_neighbourhood_unchanged": true,
+          "real_correspondence_both_features_have_gradient": true,
+          "real_correspondence_reaches_merger_and_lora": true,
+          "real_correspondence_dataset_used": true,
+          "indexed_direct_equality": true,
+          "three_reference_structure_equivariance": true,
+          "binding_changes_score_vs_role_sum": true,
+          "role_sum_changes_score_vs_global": true,
+          "inference_needs_no_candidate_or_role_labels": true,
+          "fresh_model_checkpoint_roundtrip": true,
+          "optimizer_state_restored": true
+        },
+        "actual_source_counts": [
+          2,
+          3,
+          3
+        ],
+        "history": [
+          {
+            "step": 0,
+            "bundle_id": "P051-train-1730210556809808733-color",
+            "valid_assignment_count": 1,
+            "parts": {
+              "rank": 0.09189101308584213,
+              "assignment": 0.7353384494781494,
+              "dod": 0.07230200618505478,
+              "consistency": 0.00014806873514316976,
+              "distillation": -3.2596292331987797e-10,
+              "geometry_anchors": 5.960464477539063e-08
+            }
+          },
+          {
+            "step": 0,
+            "bundle_id": "P051-train-1730158570132309656-color",
+            "valid_assignment_count": 1,
+            "parts": {
+              "rank": 0.12778189778327942,
+              "assignment": 1.642051100730896,
+              "dod": 0.07224926352500916,
+              "consistency": 0.0022141006775200367,
+              "distillation": 2.173086155465853e-09,
+              "geometry_anchors": 4.967053968130131e-08
+            }
+          },
+          {
+            "step": 0,
+            "bundle_id": "P051-train-1730730729684895955-back-type",
+            "valid_assignment_count": 2,
+            "parts": {
+              "rank": 0.1185513362288475,
+              "assignment": 1.0923564434051514,
+              "dod": 0.07453911006450653,
+              "consistency": 0.00039105876930989325,
+              "distillation": -3.31395522135125e-10,
+              "geometry_anchors": 0.0
+            }
+          },
+          {
+            "step": 1,
+            "bundle_id": "P051-train-1730210556809808733-color",
+            "valid_assignment_count": 1,
+            "parts": {
+              "rank": 0.011976068839430809,
+              "assignment": 0.003921031951904297,
+              "dod": 0.007564387749880552,
+              "consistency": 7.049534178804606e-05,
+              "distillation": 0.0018586046062409878,
+              "geometry_anchors": 0.04519977048039436
+            }
+          },
+          {
+            "step": 1,
+            "bundle_id": "P051-train-1730158570132309656-color",
+            "valid_assignment_count": 1,
+            "parts": {
+              "rank": 0.017811214551329613,
+              "assignment": 0.4781358242034912,
+              "dod": 0.03497149050235748,
+              "consistency": 0.0022327613551169634,
+              "distillation": 0.003939641639590263,
+              "geometry_anchors": 0.03550800681114197
+            }
+          },
+          {
+            "step": 1,
+            "bundle_id": "P051-train-1730730729684895955-back-type",
+            "valid_assignment_count": 2,
+            "parts": {
+              "rank": 0.00855100154876709,
+              "assignment": 0.5888943672180176,
+              "dod": 0.04374366253614426,
+              "consistency": 0.000470649276394397,
+              "distillation": 0.005826978944242001,
+              "geometry_anchors": 0.03471865504980087
+            }
+          }
+        ],
+        "feature_gradient_norms": [
+          {
+            "source_count": 2,
+            "probe_gradient": 0.38974565267562866,
+            "evidence_gradient": 0.07575757056474686,
+            "gallery_global_gradient": 0.41356900334358215,
+            "query_global_gradients": [
+              0.1467970311641693,
+              0.14671817421913147,
+              0.14663824439048767
+            ]
+          },
+          {
+            "source_count": 3,
+            "probe_gradient": 0.319500595331192,
+            "evidence_gradient": 0.06068341061472893,
+            "gallery_global_gradient": 0.429219514131546,
+            "query_global_gradients": [
+              0.14504219591617584,
+              0.1640021800994873,
+              0.1558500975370407
+            ]
+          },
+          {
+            "source_count": 3,
+            "probe_gradient": 0.2466064989566803,
+            "evidence_gradient": 0.04018700122833252,
+            "gallery_global_gradient": 0.43528854846954346,
+            "query_global_gradients": [
+              0.15404585003852844,
+              0.15022243559360504,
+              0.16076478362083435
+            ]
+          },
+          {
+            "source_count": 2,
+            "probe_gradient": 0.010413517244160175,
+            "evidence_gradient": 0.006833437830209732,
+            "gallery_global_gradient": 0.2491457313299179,
+            "query_global_gradients": [
+              0.11439350247383118,
+              0.11428359895944595,
+              0.11421643942594528
+            ]
+          },
+          {
+            "source_count": 3,
+            "probe_gradient": 0.15825600922107697,
+            "evidence_gradient": 0.033414360135793686,
+            "gallery_global_gradient": 0.2550404965877533,
+            "query_global_gradients": [
+              0.11189232766628265,
+              0.12399367988109589,
+              0.11374279856681824
+            ]
+          },
+          {
+            "source_count": 3,
+            "probe_gradient": 0.17829616367816925,
+            "evidence_gradient": 0.024516651406884193,
+            "gallery_global_gradient": 0.2428160011768341,
+            "query_global_gradients": [
+              0.11210090667009354,
+              0.11224083602428436,
+              0.114153191447258
+            ]
+          }
+        ],
+        "real_correspondence": {
+          "uid": "43f6ebbb06305f67f63c7ed12440ed6c2431edd777c72e60142afe01cdf4e412",
+          "loss": 2.0563385486602783,
+          "trusted_points": 33,
+          "source_cells": 18,
+          "target_cells": 12,
+          "multi_positive_cells": 3
+        },
+        "trainable_parameters": 131623682,
+        "peak_cuda_allocated_bytes": 36318172160,
+        "source_hashes": {
+          "src/tracebind.py": "79771540f403b6f841b77b0a668a61b31210f803213b26f6e08e061e303f0373",
+          "src/tracebind_encoder.py": "99087985f552558896e31df3de95e782b47862029a1de9ac2ea9cefedb5f8b0d",
+          "scripts/audit_P051_end_to_end.py": "c9ce742de9e66d1fc66fa9ac86278607e4d1a115612f8c1e23f00e3e674e9d70"
+        },
+        "is_efficacy_evidence": false,
+        "remaining": [
+          "visual relative quality gate and manual inspection",
+          "matched full multi-arm driver and complete gallery metric integration"
+        ]
+      },
+      "data_audit": {
+        "status": "screening_only_no_visual_or_split_gate",
+        "metadata_products": 135027,
+        "complete_metadata": true,
+        "filter_counts": {
+          "official_multi_reference_single_pair": 38644,
+          "available_metadata": 38644,
+          "unambiguous_one_role_per_source": 38628,
+          "all_roles_visual_allowlisted": 8622,
+          "positive_metadata_consistent": 8537,
+          "some_verified_wrong_binding": 1853,
+          "historical_heldout_products_excluded": 1515,
+          "metadata_supported_dod_pair": 663
+        },
+        "candidate_groups": 1515,
+        "active_family_counts": {
+          "construction": 574,
+          "shape": 637,
+          "color": 219,
+          "pattern": 85
+        },
+        "active_role_counts": {
+          "closure type": 273,
+          "heel height": 335,
+          "color": 219,
+          "pattern/print": 66,
+          "shoe type": 210,
+          "toe style": 50,
+          "back type": 51,
+          "waist line": 61,
+          "pockets": 50,
+          "collar type": 86,
+          "number of drawers": 3,
+          "arm type": 25,
+          "boot height": 9,
+          "chair type": 14,
+          "pattern": 19,
+          "sleeve type": 1,
+          "sleeve length": 3,
+          "bag type": 4,
+          "closure": 16,
+          "form factor": 2,
+          "table type": 6,
+          "strap type": 2,
+          "table base": 3,
+          "shape": 3,
+          "hem shape": 4
+        },
+        "source_count_distribution": {
+          "2": 1512,
+          "3": 3
+        },
+        "unique_products": 3812,
+        "connected_components": 718,
+        "largest_component_groups": 33,
+        "greedy_globally_product_disjoint_groups": 804,
+        "greedy_count_is_lower_bound_not_maximum": true,
+        "greedy_independent_active_families": {
+          "construction": 297,
+          "shape": 306,
+          "color": 146,
+          "pattern": 55
+        },
+        "balanced_pool_upper_bound": 1515,
+        "necessary_supply_checks": {
+          "raw_groups_for_requested_splits": false,
+          "four_visual_families_available": true,
+          "balanced_pool_upper_bound_large_enough": false,
+          "greedy_feasible_validation_supply": false
+        },
+        "pilot_authorized": false,
+        "remaining_gates": [
+          "frozen feasible split",
+          "visual intervention verification",
+          "cross-domain correspondence join",
+          "complete implementation runtime audit"
+        ],
+        "candidate_pool_sha256": "cf0143b4ce6e382548bdd5866ec9ce22ae366ad5915619b12ae53cc8158f7488"
+      },
+      "metadata_construction_feasibility": {
+        "products_with_visual_family": {
+          "color": 89132,
+          "construction": 60257,
+          "shape": 34164,
+          "pattern": 13949
+        },
+        "products_with_family_pairs": {
+          "color+construction": 40072,
+          "color+shape": 23510,
+          "construction+shape": 19492,
+          "color+pattern": 9790,
+          "construction+pattern": 6720,
+          "pattern+shape": 3030
+        },
+        "products_with_three_or_more_visual_families": 18528,
+        "is_verified_query_supply": false
+      },
+      "legacy_debug_runtime_audit": {
         "classification": "runtime_paths_pass_data_and_full_training_pipeline_pending",
         "checks": {
           "physical_gpu1_uuid_verified": true,
@@ -2142,115 +2483,665 @@
         ],
         "runtime_label_scope": "P049 images reused only to test computational paths; assignment/DoD labels here are not new verified research evidence"
       },
-      "data_audit": {
-        "status": "screening_only_no_visual_or_split_gate",
-        "metadata_products": 135027,
-        "complete_metadata": true,
-        "filter_counts": {
-          "official_multi_reference_single_pair": 38644,
-          "available_metadata": 38644,
-          "unambiguous_one_role_per_source": 38628,
-          "all_roles_visual_allowlisted": 8734,
-          "positive_metadata_consistent": 8649,
-          "some_verified_wrong_binding": 1897,
-          "historical_heldout_products_excluded": 1548,
-          "metadata_supported_dod_pair": 680
+      "orbits_prepare_summary": {
+        "status": "metadata_screened_visual_gate_pending",
+        "groups": 12800,
+        "splits": {
+          "train": {
+            "groups": 10000,
+            "requested_candidates": 10000,
+            "families": {
+              "color": 2500,
+              "construction": 2500,
+              "shape": 2500,
+              "pattern": 2500
+            },
+            "active_roles": {
+              "color": 2500,
+              "collar type": 322,
+              "shoe type": 1130,
+              "closure type": 1007,
+              "toe style": 323,
+              "pattern/print": 1915,
+              "pattern": 585,
+              "chair type": 262,
+              "back type": 115,
+              "shape": 72,
+              "heel height": 302,
+              "hem shape": 113,
+              "strap type": 65,
+              "arm type": 108,
+              "table type": 48,
+              "bag type": 91,
+              "sleeve length": 94,
+              "waist line": 289,
+              "table base": 22,
+              "number of drawers": 17,
+              "sleeve type": 31,
+              "boot height": 40,
+              "closure": 224,
+              "pockets": 197,
+              "form factor": 119,
+              "handle type": 9
+            },
+            "source_counts": {
+              "3": 3000,
+              "2": 7000
+            },
+            "unique_products": 19257,
+            "maximum_product_uses": 8
+          },
+          "confirmation": {
+            "groups": 800,
+            "requested_candidates": 800,
+            "families": {
+              "color": 200,
+              "shape": 200,
+              "construction": 200,
+              "pattern": 200
+            },
+            "active_roles": {
+              "color": 200,
+              "shoe type": 86,
+              "closure type": 62,
+              "toe style": 29,
+              "pattern/print": 158,
+              "chair type": 19,
+              "sleeve length": 8,
+              "back type": 13,
+              "heel height": 30,
+              "boot height": 4,
+              "collar type": 40,
+              "bag type": 6,
+              "closure": 23,
+              "table base": 4,
+              "pattern": 42,
+              "table type": 2,
+              "arm type": 6,
+              "hem shape": 8,
+              "waist line": 28,
+              "pockets": 11,
+              "shape": 3,
+              "form factor": 13,
+              "strap type": 2,
+              "sleeve type": 2,
+              "number of drawers": 1
+            },
+            "source_counts": {
+              "3": 240,
+              "2": 560
+            },
+            "unique_products": 3440,
+            "maximum_product_uses": 1
+          },
+          "validation": {
+            "groups": 2000,
+            "requested_candidates": 2000,
+            "families": {
+              "color": 500,
+              "construction": 500,
+              "shape": 500,
+              "pattern": 500
+            },
+            "active_roles": {
+              "color": 500,
+              "waist line": 73,
+              "shoe type": 229,
+              "closure type": 161,
+              "pattern": 110,
+              "heel height": 62,
+              "arm type": 17,
+              "pattern/print": 390,
+              "back type": 27,
+              "table type": 8,
+              "toe style": 68,
+              "boot height": 15,
+              "shape": 15,
+              "number of drawers": 5,
+              "strap type": 12,
+              "sleeve type": 4,
+              "bag type": 17,
+              "chair type": 40,
+              "collar type": 76,
+              "hem shape": 23,
+              "closure": 61,
+              "sleeve length": 12,
+              "table base": 7,
+              "pockets": 41,
+              "form factor": 23,
+              "handle type": 4
+            },
+            "source_counts": {
+              "3": 600,
+              "2": 1400
+            },
+            "unique_products": 8600,
+            "maximum_product_uses": 1
+          }
         },
-        "candidate_groups": 1548,
-        "active_family_counts": {
-          "construction": 594,
-          "shape": 647,
-          "color": 222,
-          "pattern": 85
-        },
-        "active_role_counts": {
-          "closure type": 273,
-          "heel height": 335,
-          "color": 222,
-          "pattern/print": 66,
-          "shoe type": 210,
-          "toe style": 50,
-          "back type": 61,
-          "waist line": 61,
-          "pockets": 50,
-          "collar type": 86,
-          "number of drawers": 3,
-          "arm type": 30,
-          "boot height": 9,
-          "chair type": 24,
-          "pattern": 19,
-          "sleeve type": 1,
-          "sleeve length": 3,
-          "bag type": 4,
-          "closure": 16,
-          "movement type": 5,
-          "form factor": 2,
-          "table type": 6,
-          "strap type": 2,
-          "table base": 3,
-          "shape": 3,
-          "hem shape": 4
-        },
-        "source_count_distribution": {
-          "2": 1545,
-          "3": 3
-        },
-        "unique_products": 3861,
-        "connected_components": 721,
-        "largest_component_groups": 33,
-        "greedy_globally_product_disjoint_groups": 813,
-        "greedy_independent_active_families": {
-          "construction": 299,
-          "shape": 310,
-          "color": 149,
-          "pattern": 55
-        },
-        "balanced_pool_upper_bound": 1548,
-        "necessary_supply_checks": {
-          "raw_groups_for_requested_splits": false,
-          "four_visual_families_available": true,
-          "balanced_pool_upper_bound_large_enough": false,
-          "independent_validation_upper_supply": false
-        },
+        "product_split_overlap": 0,
+        "excluded_historical_or_official_products": 5162,
+        "orbits_sha256": "b282a68d8801e8223aefa506a76b4eaf1b78dd28ed9f9eb8a57d8c05b89e2c5b",
+        "metadata_sha256": "de1a454842084e487a88a5c07805e0430389300de03c462a21807d8e31ccee03",
+        "visual_gate_passed": false,
         "pilot_authorized": false,
-        "remaining_gates": [
-          "frozen feasible split",
-          "visual intervention verification",
-          "cross-domain correspondence join",
-          "complete implementation runtime audit"
-        ],
-        "candidate_pool_sha256": "19eef4525550e9745bfa025fd5a1529723fb81d2d9f54c591990c46445a5e1f0"
+        "template_policy": "new metadata-derived queries; not official MERIT queries or official benchmark scores"
       },
-      "metadata_construction_feasibility": {
-        "products_with_visual_family": {
-          "color": 89132,
-          "construction": 60257,
-          "shape": 34164,
-          "pattern": 13949
+      "orbits_integrity_audit": {
+        "status": "label_and_exact_pixel_audit_pass_visual_quality_pending",
+        "input_groups": 12800,
+        "retained_groups": 11159,
+        "issues_removed": {
+          "historical_heldout_pixel_alias_removed": 143,
+          "within_group_duplicate_pixels": 67,
+          "confirmation_pixel_overlap_removed": 22,
+          "validation_pixel_overlap_removed": 183,
+          "train_pixel_overlap_removed": 1226
         },
-        "products_with_family_pairs": {
-          "color+construction": 40072,
-          "color+shape": 23510,
-          "construction+shape": 19492,
-          "color+pattern": 9790,
-          "construction+pattern": 6720,
-          "pattern+shape": 3030
+        "all_labels_recomputed": true,
+        "source_count_distribution_before_filters": {
+          "3": 3840,
+          "2": 8960
         },
-        "products_with_three_or_more_visual_families": 18528,
-        "is_verified_query_supply": false
-      }
+        "dod_pair_count_distribution": {
+          "4": 3688,
+          "2": 152,
+          "1": 8960
+        },
+        "dataset_sha256": "50ab8f9e19da47ed358f789e2c89a36af833e846c689e3b85382fec7cebb28ea",
+        "image_manifest_sha256": "116629755d1db26c45cda51f48d12aacf27f215772803a3fdfaf0f87c5613bed",
+        "split_groups": {
+          "confirmation": 767,
+          "validation": 1793,
+          "train": 8599
+        },
+        "split_families": {
+          "train": {
+            "color": 2163,
+            "shape": 2085,
+            "pattern": 2183,
+            "construction": 2168
+          },
+          "confirmation": {
+            "shape": 192,
+            "color": 194,
+            "construction": 189,
+            "pattern": 192
+          },
+          "validation": {
+            "shape": 438,
+            "construction": 447,
+            "pattern": 461,
+            "color": 447
+          }
+        },
+        "train_heldout_exact_pixel_overlap": 0,
+        "heldout_between_group_exact_pixel_overlap": 0,
+        "historical_heldout_exact_pixel_overlap": 0,
+        "historical_heldout_images_checked": 1301,
+        "near_duplicate_photos_not_certified_absent": true,
+        "visual_gate_passed": false
+      },
+      "correspondence_prepare_summary": {
+        "status": "pass",
+        "pairs": 7170,
+        "unique_uids": 7170,
+        "minimum_pairs": 5000,
+        "counts": {
+          "eligible_source_rows": 13234,
+          "uid_joined": 13217,
+          "coordinate_valid": 7170
+        },
+        "total_verified_points": 628801,
+        "correspondences_sha256": "f2de8ceae048ca88f9e09c2e620c13b2ad07bf565e61d38f7450dd164fb42c92",
+        "source_revision": "0d1cf6536239888f1a8e218790649344810067bc",
+        "annotation_revision": "27ac24b51dbd15513d37fc20e255ff0ef642ff62",
+        "target_mask_required": true,
+        "dift_geoaware_agreement_required": true,
+        "missing_annotations_never_filled": true,
+        "point_grid_yx_size": 64,
+        "retrieval_role_labels": false
+      },
+      "correspondence_integrity_audit": {
+        "status": "pass",
+        "input_pairs": 7170,
+        "retained_pairs": 7170,
+        "heldout_overlaps_removed": 0,
+        "all_images_and_coordinates_hash_verified": true,
+        "coordinate_ranges_and_counts_verified": true,
+        "retrieval_heldout_exact_pixel_overlap": 0,
+        "dataset_sha256": "25d1727dd0b021f8bc67fdab18192ce0b668d0496f69b6472be45735a35e2466",
+        "near_duplicate_cross_dataset_overlap_not_certified_absent": true,
+        "correspondence_annotations_are_pseudo_labels": true,
+        "retrieval_role_ground_truth": false
+      },
+      "image_cache_provenance_audit": {
+        "status": "pass",
+        "counts": {
+          "new_pinned_parquet_extraction": 30154,
+          "matching_product_bytes_in_pinned_historical_manifest": 1143
+        },
+        "issues": [],
+        "dataset_revision": "fd1c52c3ce3f1d53f7781afa64f350564cece6e8",
+        "all_current_bytes_and_metadata_locations_verified": true,
+        "scope": "new extraction trace plus pinned historical ID-to-byte manifests; not a second upstream download"
+      },
+      "embedding_model_integrity_audit": {
+        "status": "pass",
+        "revision": "2c4565515e0f265c6511776e7193b22c0968ddc7",
+        "weight_files_verified": 4,
+        "runtime_files_verified": 19,
+        "verified_files": [
+          {
+            "name": "added_tokens.json",
+            "bytes": 707,
+            "upstream_hash": "b54f9135e44c1e81047e8d05cb027af8bc039eed",
+            "hash_type": "sha1_git_blob"
+          },
+          {
+            "name": "chat_template.jinja",
+            "bytes": 5519,
+            "upstream_hash": "a0b161f8af53a32ce7e659103babce500990a863",
+            "hash_type": "sha1_git_blob"
+          },
+          {
+            "name": "config.json",
+            "bytes": 1539,
+            "upstream_hash": "bbc95092cb9d1bccc2e2205eeaa2625bc385b59b",
+            "hash_type": "sha1_git_blob"
+          },
+          {
+            "name": "config_sentence_transformers.json",
+            "bytes": 238,
+            "upstream_hash": "45201cb7fdb6b2546b0887a0f4f29d01df334ca4",
+            "hash_type": "sha1_git_blob"
+          },
+          {
+            "name": "merges.txt",
+            "bytes": 1671853,
+            "upstream_hash": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7",
+            "hash_type": "sha1_git_blob"
+          },
+          {
+            "name": "model-00001-of-00004.safetensors",
+            "bytes": 4998056552,
+            "upstream_hash": "79ef275ec5f751d5fb59357c00d473268f9fd74abf5e38aa30137d268e7733c4",
+            "hash_type": "sha256_lfs"
+          },
+          {
+            "name": "model-00002-of-00004.safetensors",
+            "bytes": 4915962464,
+            "upstream_hash": "a4da61f512e84fc0f0b80bcb7bcc5137eb3bf25b658a7d55f84f4056078545f0",
+            "hash_type": "sha256_lfs"
+          },
+          {
+            "name": "model-00003-of-00004.safetensors",
+            "bytes": 4915962496,
+            "upstream_hash": "7fb17cf8f06d6fe5aaacf114e85c4e6d8318799f24b517f50d1ec154a8d47007",
+            "hash_type": "sha256_lfs"
+          },
+          {
+            "name": "model-00004-of-00004.safetensors",
+            "bytes": 1459698112,
+            "upstream_hash": "000213b6d1d03ed9023fac23716da51ec4c5be221a04526c2f732d31d8fed1f5",
+            "hash_type": "sha256_lfs"
+          },
+          {
+            "name": "model.safetensors.index.json",
+            "bytes": 67737,
+            "upstream_hash": "8adc862dba2582b08afd3679524c100eb042f57b",
+            "hash_type": "sha1_git_blob"
+          },
+          {
+            "name": "modules.json",
+            "bytes": 430,
+            "upstream_hash": "b90278c6da887b649f2c892ca2512ecd7775ef83",
+            "hash_type": "sha1_git_blob"
+          },
+          {
+            "name": "preprocessor_config.json",
+            "bytes": 784,
+            "upstream_hash": "a1352efedad1e881d73ea4d9f30d9ae6a149dd63",
+            "hash_type": "sha1_git_blob"
+          },
+          {
+            "name": "scripts/qwen3_vl_embedding.py",
+            "bytes": 13258,
+            "upstream_hash": "36d45865735be96a1278a21c132ff640e2ae68ca",
+            "hash_type": "sha1_git_blob"
+          },
+          {
+            "name": "sentence_bert_config.json",
+            "bytes": 771,
+            "upstream_hash": "3385a6eaa790e12ba8cd8b9fe747efbe6500b338",
+            "hash_type": "sha1_git_blob"
+          },
+          {
+            "name": "special_tokens_map.json",
+            "bytes": 613,
+            "upstream_hash": "ac23c0aaa2434523c494330aeb79c58395378103",
+            "hash_type": "sha1_git_blob"
+          },
+          {
+            "name": "tokenizer.json",
+            "bytes": 11423705,
+            "upstream_hash": "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a",
+            "hash_type": "sha256_lfs"
+          },
+          {
+            "name": "tokenizer_config.json",
+            "bytes": 5404,
+            "upstream_hash": "1d4fba2de0e94e8f97e08927cfb7d084160c2880",
+            "hash_type": "sha1_git_blob"
+          },
+          {
+            "name": "video_preprocessor_config.json",
+            "bytes": 817,
+            "upstream_hash": "e32b1d90356f74457edbfca27aa1e121dab7cdc7",
+            "hash_type": "sha1_git_blob"
+          },
+          {
+            "name": "vocab.json",
+            "bytes": 2776833,
+            "upstream_hash": "4783fe10ac3adce15ac8f358ef5462739852c569",
+            "hash_type": "sha1_git_blob"
+          }
+        ],
+        "scope": "main embedding encoder weights, tokenizer/processor configs and official embedding source; not model efficacy"
+      },
+      "visual_calibration_audit": {
+        "large": {
+          "comparisons": 192,
+          "family_comparisons": {
+            "color": 48,
+            "shape": 48,
+            "construction": 48,
+            "pattern": 48
+          },
+          "position_consistent": {
+            "color": 42,
+            "shape": 37,
+            "construction": 27,
+            "pattern": 32
+          },
+          "same_letter_after_swap": {
+            "color": 2,
+            "shape": 7,
+            "construction": 20,
+            "pattern": 10
+          },
+          "metadata_relative_label_agreement_with_confidence": {
+            "color": 5,
+            "shape": 6,
+            "construction": 1,
+            "pattern": 4
+          },
+          "prediction_counts": {
+            "A": 210,
+            "B": 142,
+            "C": 10,
+            "D": 22
+          }
+        },
+        "small": {
+          "comparisons": 192,
+          "family_comparisons": {
+            "color": 48,
+            "shape": 48,
+            "construction": 48,
+            "pattern": 48
+          },
+          "position_consistent": {
+            "color": 31,
+            "shape": 36,
+            "construction": 25,
+            "pattern": 39
+          },
+          "same_letter_after_swap": {
+            "color": 14,
+            "shape": 10,
+            "construction": 7,
+            "pattern": 5
+          },
+          "metadata_relative_label_agreement_with_confidence": {
+            "color": 2,
+            "shape": 0,
+            "construction": 0,
+            "pattern": 2
+          },
+          "prediction_counts": {
+            "A": 174,
+            "B": 149,
+            "D": 61
+          }
+        },
+        "cross_size_physical_decision_agreement": 0.4739583333333333,
+        "same_family_models_do_not_certify_ground_truth": true,
+        "thresholds_adjusted_using_calibration": false
+      },
+      "visual_v3_quality_audit": {
+        "status": "annotation_quality_pilot_failed_do_not_scale",
+        "checks": {
+          "at_least_four_joint_pass_groups_per_family": false,
+          "known_assistant_visual_contradictions_rejected": true
+        },
+        "models": {
+          "primary": {
+            "passed_groups": 22,
+            "passed_families": {
+              "shape": 9,
+              "construction": 6,
+              "color": 4,
+              "pattern": 3
+            },
+            "all_four_predictions_agree_with_metadata_ignoring_confidence": 28,
+            "option_prediction_counts": {
+              "A": 125,
+              "B": 166,
+              "D": 93
+            },
+            "position_consistent_comparisons_per_family_out_of_48": {
+              "color": 35,
+              "shape": 40,
+              "construction": 38,
+              "pattern": 39
+            },
+            "same_AB_letter_after_references_swapped": {
+              "color": 3,
+              "shape": 2,
+              "construction": 2,
+              "pattern": 2
+            },
+            "median_total_option_mass": 0.9997367858886719,
+            "inspection_passed_group_assessments": {
+              "relative_comparison_visually_plausible": 10
+            },
+            "known_inspection_contradictions_accepted": []
+          },
+          "secondary": {
+            "passed_groups": 0,
+            "passed_families": {},
+            "all_four_predictions_agree_with_metadata_ignoring_confidence": 3,
+            "option_prediction_counts": {
+              "C": 57,
+              "B": 267,
+              "A": 57,
+              "D": 3
+            },
+            "position_consistent_comparisons_per_family_out_of_48": {
+              "color": 18,
+              "shape": 14,
+              "construction": 14,
+              "pattern": 23
+            },
+            "same_AB_letter_after_references_swapped": {
+              "color": 13,
+              "shape": 27,
+              "construction": 29,
+              "pattern": 19
+            },
+            "median_total_option_mass": 0.9954110085964203,
+            "inspection_passed_group_assessments": {},
+            "known_inspection_contradictions_accepted": []
+          }
+        },
+        "joint_pass_groups": 0,
+        "joint_pass_families": {},
+        "cross_model_per_check_physical_choice_agreement": 0.5364583333333334,
+        "inspection_contradictions_checked": 4,
+        "joint_false_accepts_of_known_contradictions": [],
+        "quality_pilot_and_inspection_overlap": 0,
+        "visual_inspection_is_assistant_assessment_not_independent_expert_truth": true,
+        "thresholds_relaxed": false,
+        "training_pilot_ready": false,
+        "missing_final_verified_counts": {
+          "train": 5000,
+          "validation": 1000,
+          "confirmation": 400
+        },
+        "absolute_all_role_ground_truth_certified": false,
+        "is_efficacy_evidence": false,
+        "dataset_sha256": "50ab8f9e19da47ed358f789e2c89a36af833e846c689e3b85382fec7cebb28ea"
+      },
+      "comprehensive_audit": {
+        "classification": "core_computational_paths_correct_complete_training_method_not_ready",
+        "audit_scope": "P051 TraceBind model, objective, encoder, checkpoint, construction/extraction/isolation/correspondence/visual-screening pipeline; historical methods are evidence, not reimplemented here",
+        "math_checks_passed": 20,
+        "live_runtime_checks_passed": 19,
+        "fixed_issues": [
+          "valid-assignment likelihood handles multiple positives and masks unknown permutations",
+          "DoD uses the exact same per-permutation positive-minus-negative ordering as construction audit",
+          "correspondence loss supports multiple correct cells; unverified neighboring cells are not false negatives",
+          "teacher loss temperature matches ranking-score gradient scale; teacher encoded before adaptation and detached",
+          "FP32 trainable visual merger with BF16 autocast prevents non-updating low-precision parameters",
+          "query roles compile from original text; label-free inference score matches labelled audit path",
+          "fresh-model checkpoint and optimizer restore validated",
+          "cached image identity requires matching pinned product-to-byte manifests",
+          "native model image token counts and actual generated first answer token checked before annotation"
+        ],
+        "blocking_findings": [
+          {
+            "priority": 0,
+            "issue": "Matched multi-arm training driver and official full-gallery metric integration are missing",
+            "effect": "A two-step runtime audit cannot certify faithful complete training or SOTA."
+          },
+          {
+            "priority": 0,
+            "issue": "Final visually verified 5000/1000/400 role-balanced orbit dataset is not certified",
+            "effect": "Metadata-derived candidates and cross-domain pseudo correspondences cannot bypass the visual gate."
+          },
+          {
+            "priority": 1,
+            "issue": "Synthetic coarse-attribute queries can have unlabelled semantic positives",
+            "effect": "Single-product-ID mAP over their full gallery can count correct targets as negatives; requires multi-positive relevance or separate official query evaluation."
+          },
+          {
+            "priority": 1,
+            "issue": "One distinct role per source and restricted same-attribute grammar",
+            "effect": "Cannot claim unrestricted PinPoint query support; official instruction parser and coverage audit remain necessary."
+          },
+          {
+            "priority": 1,
+            "issue": "The permutation-augmentation control currently has equivalent query views, not genuine wrong-binding augmentation",
+            "effect": "It is not yet the promised strong matched corruption-augmentation baseline."
+          },
+          {
+            "priority": 1,
+            "issue": "Active-role relative validation does not verify all roles or full-energy DoD assumptions",
+            "effect": "Other-role error cancellation remains a weak metadata assumption; must retain that uncertainty in claims and supervision."
+          },
+          {
+            "priority": 1,
+            "issue": "Every non-identity bijective permutation changes at least two source-role bindings",
+            "effect": "Permutation DoD is not a controlled single-role intervention. Checking only the active cue cannot certify the complete permutation ordering; isolate the intervention or verify the other changed roles before making that claim."
+          },
+          {
+            "priority": 1,
+            "issue": "Exact pixel isolation does not exclude all near-duplicate product photos",
+            "effect": "Near-duplicate review still required before an independent generalization claim."
+          }
+        ],
+        "theory_limits": [
+          "R2 assignment posterior equals log-sigmoid of identity-minus-swap energy; the formula alone is not innovation.",
+          "Frozen anchors constrain geometry locally; they do not prove global recall is preserved.",
+          "Cross-domain correspondence agreement is pseudo supervision, not retrieval role ground truth."
+        ],
+        "data": {
+          "metadata_products": 135027,
+          "images_extracted": 31297,
+          "raw_groups": 12800,
+          "isolated_split_groups": {
+            "confirmation": 767,
+            "validation": 1793,
+            "train": 8599
+          },
+          "correspondence_pairs": 7170,
+          "correspondence_points": 628801,
+          "quality_status": "annotation_quality_pilot_failed_do_not_scale"
+        },
+        "training_pilot_ready": false,
+        "full_training_allowed": false,
+        "sota_evidence_exists": false,
+        "evidence_files": {
+          "math_audit": {
+            "path": "runs/P051_tracebind/math_audit.json",
+            "sha256": "e4b99736b92e91808b021119317e3cbb2f760add9967bd9b07bae333755cf1ee"
+          },
+          "end_to_end_runtime_audit": {
+            "path": "runs/P051_tracebind/end_to_end_runtime_audit.json",
+            "sha256": "69b7248733fe2d26b2de23811b832c4e5e3981e24150f76f68cc66d1e02d12ad"
+          },
+          "orbits_prepare_summary": {
+            "path": "runs/P051_tracebind/orbits_prepare_summary.json",
+            "sha256": "68bb2a43ed393aa63c6ec5db4722f78771a9750865c51c03b381d2db33275e0b"
+          },
+          "orbits_integrity_audit": {
+            "path": "runs/P051_tracebind/orbits_integrity_audit.json",
+            "sha256": "b31b3f18cfafc5f51ebf9520504c999ba562acb8b6ab7a53f1f891561cc4da98"
+          },
+          "correspondence_prepare_summary": {
+            "path": "runs/P051_tracebind/correspondence_prepare_summary.json",
+            "sha256": "7041281fd26a1f1c2b71fec44423bcd59435e5d095d39b8048937ee39bff543f"
+          },
+          "correspondence_integrity_audit": {
+            "path": "runs/P051_tracebind/correspondence_integrity_audit.json",
+            "sha256": "528fd41caf7aa6bffddf3415abb897860f2bc8d92e1869900b0658597e4dda3c"
+          },
+          "image_cache_provenance_audit": {
+            "path": "runs/P051_tracebind/image_cache_provenance_audit.json",
+            "sha256": "0c6ddebd652040296f5acc9ceb0ba503270da9bdcef0442d6a40425d2a41964e"
+          },
+          "visual_calibration_audit": {
+            "path": "runs/P051_tracebind/visual_calibration_audit.json",
+            "sha256": "1705f1fcb59ad40c7f0d3e99045f0f306d2844fc0b4b842dc5392c757d995adb"
+          },
+          "visual_v3_quality_audit": {
+            "path": "runs/P051_tracebind/visual_v3_quality_audit.json",
+            "sha256": "0416b145a07546e1d225bfb225c59733f130aa5dd8bd25dd1b883b5e612a8c66"
+          },
+          "embedding_model_integrity_audit": {
+            "path": "runs/P051_tracebind/embedding_model_integrity_audit.json",
+            "sha256": "fefa5e80f690c9c1ce73f0efd5f53aa5e5954c49953fe5b70b5df50360d5708e"
+          }
+        },
+        "source_hashes": {
+          "src/tracebind.py": "79771540f403b6f841b77b0a668a61b31210f803213b26f6e08e061e303f0373",
+          "src/tracebind_encoder.py": "99087985f552558896e31df3de95e782b47862029a1de9ac2ea9cefedb5f8b0d",
+          "scripts/audit_P051_end_to_end.py": "c9ce742de9e66d1fc66fa9ac86278607e4d1a115612f8c1e23f00e3e674e9d70"
+        }
+      },
+      "decision": "核心计算路径正确，完整方法尚未就绪；原始数据已补齐，正式 pilot 标注未达标。停止该版本自动标注扩量和效果训练，不把质量核验失败解释为 TraceBind 效果失败。"
     }
   },
   "novelty_status": "A generic frozen-retriever plus multimodal verifier is occupied prior art and is a strong P049 control (mAP@10 0.8568). P049 establishes a narrower mechanism signal: candidate-level role interventions with difference-in-differences significantly improve role margin, paraphrase retrieval, and hard-negative violations over the frozen baseline, but do not beat the ordinary verifier on primary mAP. Novelty is therefore not established. A defensible next claim would require independently calibrated selective use of role effects and broader-role evidence, rather than universal delta reranking or generic verifier training.",
   "last_progress_audit": {
     "this_turn": "SSH 已恢复，TraceBind 核心实现和运行审计完成；数据规模门槛未通过",
-    "full_method_classification": "仅核心实现，完整训练管线与跨域数据接入未完成",
+    "full_method_classification": "core_and_data_paths_being_verified_full_matched_training_driver_missing",
     "pilot_authorized": false,
     "remaining": [
-      "新增可验证且角色均衡的独立反事实组",
-      "跨域精细对应数据真实接入",
-      "完整匹配对照训练与全图库评估",
-      "完整方案实现审计"
+      "real 2/3-reference and correspondence runtime audit",
+      "visual relative screening and stratified inspection",
+      "matched multi-arm training driver and gallery metrics"
     ],
     "published_core_commit": "931ad46",
     "published_repository": "tzcinhust/SADA_PLUS"
@@ -2971,14 +3862,14 @@
     },
     {
       "id": "source_role_permutation_retriever_v1",
-      "status": "proposed_pending_user_confirmation_no_implementation",
+      "status": "confirmed_core_implementation_audited_complete_training_method_and_verified_data_pending",
       "working_name": "TraceBind",
       "title": "Candidate-conditioned permutation-normalized source-role binding for multi-reference composed image retrieval",
       "core_model": {
         "query": "Encode interleaved reference-role pairs and form every source-under-role probe u_ij.",
         "gallery": "Precompute a global vector and a compact bank of candidate evidence slots.",
         "affinity": "A_ij(x)=SmoothMax_k <u_ij,v_k(x)> gives an R-by-R source-role affinity matrix for candidate x.",
-        "structured_binding": "For every feasible source-role permutation pi, E_pi(x)=sum_j A_{pi(j),j}(x); log P(pi*=correct|Q,x) is the correct energy normalized over counterfactual permutations.",
+        "structured_binding": "E_pi(x)=mean_j A_{pi(j),j}(x), normalized over feasible bijective permutations; R2 is exactly log-sigmoid of identity-minus-swap energy.",
         "retrieval_score": "Combine a preserved global relevance score with correct-role support and bounded structured binding likelihood; jointly permuting source-role blocks is invariant, while independently rebinding roles changes the score."
       },
       "training": [
@@ -3026,7 +3917,9 @@
           "binding stress tests",
           "latency and memory"
         ]
-      }
+      },
+      "implementation_audit_summary": "results/P051_tracebind/comprehensive_audit.json",
+      "implemented_training_scope": "Pairwise ranking on a positive and partial negative; set NLL, energy DoD, equivalent-view consistency and frozen neighborhood/geometry anchors. Full matched driver and multi-positive official relevance evaluation remain missing."
     }
   ]
 }

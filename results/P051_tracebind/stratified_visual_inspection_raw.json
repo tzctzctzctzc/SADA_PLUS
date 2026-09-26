@@ -1,0 +1,972 @@
+{
+  "scope": "assistant visual inspection of 64 predetermined stratified raw groups; not independent expert annotations or calibrated accuracy",
+  "labels_visible_to_reviewer": true,
+  "all_roles_absolute_correctness_certified": false,
+  "counts": {
+    "relative_comparison_visually_plausible": 36,
+    "ambiguous_or_unobservable": 24,
+    "contradiction": 4
+  },
+  "groups": [
+    {
+      "inspection_index": 1,
+      "bundle_id": "P051-train-1730976947601769603-color",
+      "role": "color",
+      "family": "color",
+      "product_ids": [
+        "1730976947601769603",
+        "1730861595551042525",
+        "1730741333206861202",
+        "1729445381997562805"
+      ],
+      "page": "page_00.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 2,
+      "bundle_id": "P051-train-1732032075878140912-color",
+      "role": "color",
+      "family": "color",
+      "product_ids": [
+        "1732032075878140912",
+        "1729879478923135893",
+        "1730484939310402482",
+        "1729635045279500493"
+      ],
+      "page": "page_00.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 3,
+      "bundle_id": "P051-train-1730580293817763887-color",
+      "role": "color",
+      "family": "color",
+      "product_ids": [
+        "1730580293817763887",
+        "1729680064156371107",
+        "1730614666707895434",
+        "1730745942797814101"
+      ],
+      "page": "page_00.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 4,
+      "bundle_id": "P051-confirmation-1729399795061395123-color",
+      "role": "color",
+      "family": "color",
+      "product_ids": [
+        "1729399795061395123",
+        "1729666705284761869",
+        "1730000174477904182",
+        "1730828459579837254"
+      ],
+      "page": "page_00.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 5,
+      "bundle_id": "P051-train-1729666809546573069-color",
+      "role": "color",
+      "family": "color",
+      "product_ids": [
+        "1729666809546573069",
+        "1729845156023012012",
+        "1730799539689915653",
+        "1730766195121751419"
+      ],
+      "page": "page_01.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 6,
+      "bundle_id": "P051-train-1729654362671319577-color",
+      "role": "color",
+      "family": "color",
+      "product_ids": [
+        "1729654362671319577",
+        "1730784039681427244",
+        "1729698080892421568",
+        "1731214854070242164"
+      ],
+      "page": "page_01.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 7,
+      "bundle_id": "P051-train-1729796777724185081-color",
+      "role": "color",
+      "family": "color",
+      "product_ids": [
+        "1729796777724185081",
+        "1731795183908981241",
+        "1730215016481000391",
+        "1729850787569437072"
+      ],
+      "page": "page_01.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 8,
+      "bundle_id": "P051-train-1731236144663267924-color",
+      "role": "color",
+      "family": "color",
+      "product_ids": [
+        "1731236144663267924",
+        "1730836243885163645",
+        "1730311116908103034",
+        "1729717120268929501"
+      ],
+      "page": "page_01.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 9,
+      "bundle_id": "P051-train-1731187449627315167-color",
+      "role": "color",
+      "family": "color",
+      "product_ids": [
+        "1731187449627315167",
+        "1731674708332153703",
+        "1729752045262768349",
+        "1730838609308845236"
+      ],
+      "page": "page_02.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 10,
+      "bundle_id": "P051-train-1730880473445075566-color",
+      "role": "color",
+      "family": "color",
+      "product_ids": [
+        "1730880473445075566",
+        "1729553198568409024",
+        "1730977503876122080",
+        "1730805981823142527"
+      ],
+      "page": "page_02.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 11,
+      "bundle_id": "P051-train-1729783330305967999-color",
+      "role": "color",
+      "family": "color",
+      "product_ids": [
+        "1729783330305967999",
+        "1730042053429528903",
+        "1730962887176390326",
+        "1730615291385578700"
+      ],
+      "page": "page_02.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 12,
+      "bundle_id": "P051-train-1729398930031218526-color",
+      "role": "color",
+      "family": "color",
+      "product_ids": [
+        "1729398930031218526",
+        "1730885492854130342",
+        "1729750851459254466",
+        "1730666404598809978"
+      ],
+      "page": "page_02.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 13,
+      "bundle_id": "P051-train-1730596668188756470-color",
+      "role": "color",
+      "family": "color",
+      "product_ids": [
+        "1730596668188756470",
+        "1730007380718749901",
+        "1731141319666666073",
+        "1729759631766881939"
+      ],
+      "page": "page_03.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 14,
+      "bundle_id": "P051-train-1729886046989028154-color",
+      "role": "color",
+      "family": "color",
+      "product_ids": [
+        "1729886046989028154",
+        "1729565045180368092",
+        "1730499288082188226",
+        "1732135717879056934"
+      ],
+      "page": "page_03.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 15,
+      "bundle_id": "P051-train-1731276448119818634-color",
+      "role": "color",
+      "family": "color",
+      "product_ids": [
+        "1731276448119818634",
+        "1730420559235876245",
+        "1730862750050059954",
+        "1730007117253675784"
+      ],
+      "page": "page_03.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 16,
+      "bundle_id": "P051-train-1729858906053576977-color",
+      "role": "color",
+      "family": "color",
+      "product_ids": [
+        "1729858906053576977",
+        "1729927181764298798",
+        "1730160614818810763",
+        "1731573580597856952"
+      ],
+      "page": "page_03.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 17,
+      "bundle_id": "P051-train-1730866557435479748-pattern/print",
+      "role": "pattern/print",
+      "family": "pattern",
+      "product_ids": [
+        "1730866557435479748",
+        "1730862718585702508",
+        "1729714831735228408",
+        "1729671844546316063"
+      ],
+      "page": "page_04.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 18,
+      "bundle_id": "P051-train-1729793941572717078-pattern/print",
+      "role": "pattern/print",
+      "family": "pattern",
+      "product_ids": [
+        "1729793941572717078",
+        "1730509535355440067",
+        "1732051620867770902",
+        "1732109699986983868"
+      ],
+      "page": "page_04.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 19,
+      "bundle_id": "P051-train-1732129227246373330-pattern/print",
+      "role": "pattern/print",
+      "family": "pattern",
+      "product_ids": [
+        "1732129227246373330",
+        "1730871127848749710",
+        "1730524827758266871",
+        "1730524827758463479"
+      ],
+      "page": "page_04.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 20,
+      "bundle_id": "P051-train-1732028907614341662-pattern/print",
+      "role": "pattern/print",
+      "family": "pattern",
+      "product_ids": [
+        "1732028907614341662",
+        "1730661598387603691",
+        "1730699947621844317",
+        "1731101544894138728"
+      ],
+      "page": "page_04.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 21,
+      "bundle_id": "P051-train-1730892163596519080-pattern/print",
+      "role": "pattern/print",
+      "family": "pattern",
+      "product_ids": [
+        "1730892163596519080",
+        "1729780409682920539",
+        "1730022720286919611",
+        "1731768481927957196"
+      ],
+      "page": "page_05.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 22,
+      "bundle_id": "P051-train-1730842502610717159-pattern/print",
+      "role": "pattern/print",
+      "family": "pattern",
+      "product_ids": [
+        "1730842502610717159",
+        "1729538480297774054",
+        "1732167817687829436",
+        "1732109699986983868"
+      ],
+      "page": "page_05.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 23,
+      "bundle_id": "P051-train-1731971470538804219-pattern/print",
+      "role": "pattern/print",
+      "family": "pattern",
+      "product_ids": [
+        "1731971470538804219",
+        "1732037971928451562",
+        "1732167817687829436",
+        "1731089720250435657"
+      ],
+      "page": "page_05.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 24,
+      "bundle_id": "P051-confirmation-1729620070108136469-pattern/print",
+      "role": "pattern/print",
+      "family": "pattern",
+      "product_ids": [
+        "1729620070108136469",
+        "1729669696483985698",
+        "1732005563613612345",
+        "1730834555667450874"
+      ],
+      "page": "page_05.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 25,
+      "bundle_id": "P051-train-1731768481927891660-pattern/print",
+      "role": "pattern/print",
+      "family": "pattern",
+      "product_ids": [
+        "1731768481927891660",
+        "1730927708284488202",
+        "1730240838139610331",
+        "1731610947671853555"
+      ],
+      "page": "page_06.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 26,
+      "bundle_id": "P051-train-1731881167863974606-pattern/print",
+      "role": "pattern/print",
+      "family": "pattern",
+      "product_ids": [
+        "1731881167863974606",
+        "1729630871212230906",
+        "1731948150281308899",
+        "1731840476687731559"
+      ],
+      "page": "page_06.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 27,
+      "bundle_id": "P051-train-1731837432069064874-pattern/print",
+      "role": "pattern/print",
+      "family": "pattern",
+      "product_ids": [
+        "1731837432069064874",
+        "1730570442035070691",
+        "1729639869681142716",
+        "1729394889963900855"
+      ],
+      "page": "page_06.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 28,
+      "bundle_id": "P051-train-1729680512556698101-pattern",
+      "role": "pattern",
+      "family": "pattern",
+      "product_ids": [
+        "1729680512556698101",
+        "1729791567334574875",
+        "1730032541978954288",
+        "1730998231111010480"
+      ],
+      "page": "page_06.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 29,
+      "bundle_id": "P051-confirmation-1731101544894073192-pattern/print",
+      "role": "pattern/print",
+      "family": "pattern",
+      "product_ids": [
+        "1731101544894073192",
+        "1729611943939836860",
+        "1730959241667184524",
+        "1732137526477097635"
+      ],
+      "page": "page_07.jpg",
+      "assessment": "contradiction",
+      "note": "Both positive and partial negative show floral lace; the claimed negative does not clearly prefer the batik reference."
+    },
+    {
+      "inspection_index": 30,
+      "bundle_id": "P051-validation-1730806026214344642-pattern/print",
+      "role": "pattern/print",
+      "family": "pattern",
+      "product_ids": [
+        "1730806026214344642",
+        "1729846199453518331",
+        "1730724122056624207",
+        "1729632166653626129"
+      ],
+      "page": "page_07.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 31,
+      "bundle_id": "P051-train-1729583867526744840-pattern",
+      "role": "pattern",
+      "family": "pattern",
+      "product_ids": [
+        "1729583867526744840",
+        "1729665588750355207",
+        "1729398841868324285",
+        "1730037226613345010"
+      ],
+      "page": "page_07.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 32,
+      "bundle_id": "P051-train-1729852239263860669-pattern/print",
+      "role": "pattern/print",
+      "family": "pattern",
+      "product_ids": [
+        "1729852239263860669",
+        "1731938792553876404",
+        "1729625458909218584",
+        "1729781391586659019"
+      ],
+      "page": "page_07.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 33,
+      "bundle_id": "P051-validation-1730294433227703709-shoe-type",
+      "role": "shoe type",
+      "family": "shape",
+      "product_ids": [
+        "1730294433227703709",
+        "1730316445423209291",
+        "1731083451455276632",
+        "1730501147751450017"
+      ],
+      "page": "page_08.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 34,
+      "bundle_id": "P051-train-1729840377675679848-heel-height",
+      "role": "heel height",
+      "family": "shape",
+      "product_ids": [
+        "1729840377675679848",
+        "1730899503635466390",
+        "1730766203721452318",
+        "1729992398438566034"
+      ],
+      "page": "page_08.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 35,
+      "bundle_id": "P051-train-1731091476663602024-shoe-type",
+      "role": "shoe type",
+      "family": "shape",
+      "product_ids": [
+        "1731091476663602024",
+        "1729588470990473218",
+        "1730453249270777321",
+        "1729391310595788508"
+      ],
+      "page": "page_08.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 36,
+      "bundle_id": "P051-train-1730005171102583612-shoe-type",
+      "role": "shoe type",
+      "family": "shape",
+      "product_ids": [
+        "1730005171102583612",
+        "1730838531017901415",
+        "1729679617070041494",
+        "1729640338329602864"
+      ],
+      "page": "page_08.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 37,
+      "bundle_id": "P051-train-1729687564944115807-chair-type",
+      "role": "chair type",
+      "family": "shape",
+      "product_ids": [
+        "1729687564944115807",
+        "1730802945519617704",
+        "1730205699075705043",
+        "1730679000850532995"
+      ],
+      "page": "page_09.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 38,
+      "bundle_id": "P051-train-1731974015303977308-shoe-type",
+      "role": "shoe type",
+      "family": "shape",
+      "product_ids": [
+        "1731974015303977308",
+        "1730275239447006064",
+        "1731296120261282085",
+        "1730777382451054019"
+      ],
+      "page": "page_09.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 39,
+      "bundle_id": "P051-train-1729623963644299970-bag-type",
+      "role": "bag type",
+      "family": "shape",
+      "product_ids": [
+        "1729623963644299970",
+        "1730278178887600905",
+        "1730414568088504375",
+        "1730768951979640887"
+      ],
+      "page": "page_09.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 40,
+      "bundle_id": "P051-train-1729386851264792231-heel-height",
+      "role": "heel height",
+      "family": "shape",
+      "product_ids": [
+        "1729386851264792231",
+        "1730944246652109848",
+        "1730602008726636376",
+        "1729398022151703698"
+      ],
+      "page": "page_09.jpg",
+      "assessment": "contradiction",
+      "note": "The negative high heel is closer in heel height to the intended wedge than to the swapped flat sandal."
+    },
+    {
+      "inspection_index": 41,
+      "bundle_id": "P051-train-1729642326488942769-toe-style",
+      "role": "toe style",
+      "family": "shape",
+      "product_ids": [
+        "1729642326488942769",
+        "1731972792828922432",
+        "1730694330903791356",
+        "1732164271741176190"
+      ],
+      "page": "page_10.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 42,
+      "bundle_id": "P051-confirmation-1731131160049519052-chair-type",
+      "role": "chair type",
+      "family": "shape",
+      "product_ids": [
+        "1731131160049519052",
+        "1729577898152658156",
+        "1731754314043591492",
+        "1729638690213038317"
+      ],
+      "page": "page_10.jpg",
+      "assessment": "contradiction",
+      "note": "The positive floor chair is closer in chair type to the swapped floor armchair than to the intended raised sofa."
+    },
+    {
+      "inspection_index": 43,
+      "bundle_id": "P051-train-1730208649589786315-shoe-type",
+      "role": "shoe type",
+      "family": "shape",
+      "product_ids": [
+        "1730208649589786315",
+        "1730980393268513369",
+        "1731068594386798241",
+        "1729679616486508950"
+      ],
+      "page": "page_10.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 44,
+      "bundle_id": "P051-validation-1731256141424855059-boot-height",
+      "role": "boot height",
+      "family": "shape",
+      "product_ids": [
+        "1731256141424855059",
+        "1729588921166300647",
+        "1729993592248371246",
+        "1730527440423782991"
+      ],
+      "page": "page_10.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 45,
+      "bundle_id": "P051-train-1731296120261347621-shoe-type",
+      "role": "shoe type",
+      "family": "shape",
+      "product_ids": [
+        "1731296120261347621",
+        "1729984397892028512",
+        "1729760380994357119",
+        "1730938064308897401"
+      ],
+      "page": "page_11.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 46,
+      "bundle_id": "P051-train-1731012793765234133-shoe-type",
+      "role": "shoe type",
+      "family": "shape",
+      "product_ids": [
+        "1731012793765234133",
+        "1731024206046333567",
+        "1729624396475959718",
+        "1729486558445930411"
+      ],
+      "page": "page_11.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 47,
+      "bundle_id": "P051-train-1729780929849231465-toe-style",
+      "role": "toe style",
+      "family": "shape",
+      "product_ids": [
+        "1729780929849231465",
+        "1730732522080536144",
+        "1730224715552098890",
+        "1731181084538538619"
+      ],
+      "page": "page_11.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 48,
+      "bundle_id": "P051-validation-1729766118696256822-hem-shape",
+      "role": "hem shape",
+      "family": "shape",
+      "product_ids": [
+        "1729766118696256822",
+        "1730117712382363598",
+        "1730602095135196206",
+        "1732140567008414412"
+      ],
+      "page": "page_11.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 49,
+      "bundle_id": "P051-train-1730652037261789423-arm-type",
+      "role": "arm type",
+      "family": "construction",
+      "product_ids": [
+        "1730652037261789423",
+        "1729586111094425544",
+        "1730631067274282887",
+        "1730807904949668706"
+      ],
+      "page": "page_12.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 50,
+      "bundle_id": "P051-train-1729588597074724648-closure",
+      "role": "closure",
+      "family": "construction",
+      "product_ids": [
+        "1729588597074724648",
+        "1730146310450088589",
+        "1729454568365853265",
+        "1729692430943947009"
+      ],
+      "page": "page_12.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 51,
+      "bundle_id": "P051-train-1729549133354075672-collar-type",
+      "role": "collar type",
+      "family": "construction",
+      "product_ids": [
+        "1729549133354075672",
+        "1730924682652518179",
+        "1729770242840167844",
+        "1730666909083338415"
+      ],
+      "page": "page_12.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 52,
+      "bundle_id": "P051-train-1732136724882950202-pockets",
+      "role": "pockets",
+      "family": "construction",
+      "product_ids": [
+        "1732136724882950202",
+        "1731555318349662655",
+        "1730345024933299841",
+        "1732034434308606212"
+      ],
+      "page": "page_12.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 53,
+      "bundle_id": "P051-train-1729758225994451081-closure-type",
+      "role": "closure type",
+      "family": "construction",
+      "product_ids": [
+        "1729758225994451081",
+        "1730974560904382382",
+        "1729766758107350366",
+        "1729638387161794910"
+      ],
+      "page": "page_13.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 54,
+      "bundle_id": "P051-train-1730095124635944871-waist-line",
+      "role": "waist line",
+      "family": "construction",
+      "product_ids": [
+        "1730095124635944871",
+        "1732187326983342201",
+        "1730988412997503396",
+        "1729720131896117039"
+      ],
+      "page": "page_13.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 55,
+      "bundle_id": "P051-validation-1730621960814560615-closure",
+      "role": "closure",
+      "family": "construction",
+      "product_ids": [
+        "1730621960814560615",
+        "1730764237425839085",
+        "1730622026140911673",
+        "1731026117723653780"
+      ],
+      "page": "page_13.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 56,
+      "bundle_id": "P051-validation-1729721447151143864-collar-type",
+      "role": "collar type",
+      "family": "construction",
+      "product_ids": [
+        "1729721447151143864",
+        "1729554284883707775",
+        "1729857193062402094",
+        "1729396743224462382"
+      ],
+      "page": "page_13.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 57,
+      "bundle_id": "P051-train-1730904937261861564-closure-type",
+      "role": "closure type",
+      "family": "construction",
+      "product_ids": [
+        "1730904937261861564",
+        "1729723759444265783",
+        "1730983120269313633",
+        "1730968487541901299"
+      ],
+      "page": "page_14.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 58,
+      "bundle_id": "P051-train-1731729771834018065-strap-type",
+      "role": "strap type",
+      "family": "construction",
+      "product_ids": [
+        "1731729771834018065",
+        "1729782243365259060",
+        "1731766837858240526",
+        "1731766837858174990"
+      ],
+      "page": "page_14.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 59,
+      "bundle_id": "P051-train-1730714832065235163-sleeve-length",
+      "role": "sleeve length",
+      "family": "construction",
+      "product_ids": [
+        "1730714832065235163",
+        "1730839018693166385",
+        "1730570049200752978",
+        "1731121153734511056"
+      ],
+      "page": "page_14.jpg",
+      "assessment": "contradiction",
+      "note": "The positive has no clearly visible sleeves; the proposed short-sleeve preference over a sleeveless reference is unsupported."
+    },
+    {
+      "inspection_index": 60,
+      "bundle_id": "P051-train-1730962920477723391-closure-type",
+      "role": "closure type",
+      "family": "construction",
+      "product_ids": [
+        "1730962920477723391",
+        "1731273898118842834",
+        "1730904241766107341",
+        "1730797865633023724"
+      ],
+      "page": "page_14.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 61,
+      "bundle_id": "P051-validation-1729626281185741770-closure-type",
+      "role": "closure type",
+      "family": "construction",
+      "product_ids": [
+        "1729626281185741770",
+        "1731994209048889874",
+        "1730076623675558301",
+        "1730631492491773795"
+      ],
+      "page": "page_15.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 62,
+      "bundle_id": "P051-validation-1729495176352139311-closure-type",
+      "role": "closure type",
+      "family": "construction",
+      "product_ids": [
+        "1729495176352139311",
+        "1730672393869952882",
+        "1731064777186118624",
+        "1730912339454034985"
+      ],
+      "page": "page_15.jpg",
+      "assessment": "relative_comparison_visually_plausible",
+      "note": "Positive appears closer to intended reference; negative appears closer to swapped reference, for the displayed active cue only."
+    },
+    {
+      "inspection_index": 63,
+      "bundle_id": "P051-train-1729655722968320239-closure-type",
+      "role": "closure type",
+      "family": "construction",
+      "product_ids": [
+        "1729655722968320239",
+        "1730453950571121322",
+        "1731243423039064149",
+        "1729791736340776008"
+      ],
+      "page": "page_15.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    },
+    {
+      "inspection_index": 64,
+      "bundle_id": "P051-train-1729749914910623373-waist-line",
+      "role": "waist line",
+      "family": "construction",
+      "product_ids": [
+        "1729749914910623373",
+        "1730535595909548467",
+        "1729658875813659979",
+        "1729729031109248537"
+      ],
+      "page": "page_15.jpg",
+      "assessment": "ambiguous_or_unobservable",
+      "note": "One or both comparisons not sufficiently clear at the available view/resolution."
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "status": "pass",
+  "counts": {
+    "new_pinned_parquet_extraction": 30154,
+    "matching_product_bytes_in_pinned_historical_manifest": 1143
+  },
+  "issues": [],
+  "dataset_revision": "fd1c52c3ce3f1d53f7781afa64f350564cece6e8",
+  "all_current_bytes_and_metadata_locations_verified": true,
+  "scope": "new extraction trace plus pinned historical ID-to-byte manifests; not a second upstream download"
+}

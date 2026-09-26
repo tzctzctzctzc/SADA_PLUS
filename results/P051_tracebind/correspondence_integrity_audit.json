@@ -1,0 +1,13 @@
+{
+  "status": "pass",
+  "input_pairs": 7170,
+  "retained_pairs": 7170,
+  "heldout_overlaps_removed": 0,
+  "all_images_and_coordinates_hash_verified": true,
+  "coordinate_ranges_and_counts_verified": true,
+  "retrieval_heldout_exact_pixel_overlap": 0,
+  "dataset_sha256": "25d1727dd0b021f8bc67fdab18192ce0b668d0496f69b6472be45735a35e2466",
+  "near_duplicate_cross_dataset_overlap_not_certified_absent": true,
+  "correspondence_annotations_are_pseudo_labels": true,
+  "retrieval_role_ground_truth": false
+}

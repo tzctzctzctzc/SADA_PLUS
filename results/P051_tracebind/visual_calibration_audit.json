@@ -1,0 +1,70 @@
+{
+  "large": {
+    "comparisons": 192,
+    "family_comparisons": {
+      "color": 48,
+      "shape": 48,
+      "construction": 48,
+      "pattern": 48
+    },
+    "position_consistent": {
+      "color": 42,
+      "shape": 37,
+      "construction": 27,
+      "pattern": 32
+    },
+    "same_letter_after_swap": {
+      "color": 2,
+      "shape": 7,
+      "construction": 20,
+      "pattern": 10
+    },
+    "metadata_relative_label_agreement_with_confidence": {
+      "color": 5,
+      "shape": 6,
+      "construction": 1,
+      "pattern": 4
+    },
+    "prediction_counts": {
+      "A": 210,
+      "B": 142,
+      "C": 10,
+      "D": 22
+    }
+  },
+  "small": {
+    "comparisons": 192,
+    "family_comparisons": {
+      "color": 48,
+      "shape": 48,
+      "construction": 48,
+      "pattern": 48
+    },
+    "position_consistent": {
+      "color": 31,
+      "shape": 36,
+      "construction": 25,
+      "pattern": 39
+    },
+    "same_letter_after_swap": {
+      "color": 14,
+      "shape": 10,
+      "construction": 7,
+      "pattern": 5
+    },
+    "metadata_relative_label_agreement_with_confidence": {
+      "color": 2,
+      "shape": 0,
+      "construction": 0,
+      "pattern": 2
+    },
+    "prediction_counts": {
+      "A": 174,
+      "B": 149,
+      "D": 61
+    }
+  },
+  "cross_size_physical_decision_agreement": 0.4739583333333333,
+  "same_family_models_do_not_certify_ground_truth": true,
+  "thresholds_adjusted_using_calibration": false
+}
