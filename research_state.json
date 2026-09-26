@@ -1,7 +1,7 @@
 {
-  "as_of": "2026-09-27T23:30:00+08:00",
+  "as_of": "2026-09-27T23:58:00+08:00",
   "goal_status": "active",
-  "phase": "P049_reaudit_P050_selective_gate_novelty_threatened",
+  "phase": "CVPR2027_SOTA_audit_complete_SourceRole_structured_retriever_pending_confirmation",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 1,
@@ -14,7 +14,7 @@
     ],
     "submission_year_assumption": 2027
   },
-  "direction": "Do not scale P049 and do not present generic selective gating as the P050 novelty. Retain the frozen retriever and candidate verifier, but move the scientific center to human-auditable multi-reference source-role binding: first establish on the official PinPoint multi-image split that shared-candidate role interventions are more reliable than absolute relation judgments and predict real ranking errors. Only then test independently calibrated role-effect residuals as a utility-preserving method component, with broader roles, ordinary-verifier superiority, overall/single-image non-inferiority, and a second model or domain required before full-scale execution.",
+  "direction": "Retire P050 selective gating as the paper-level main method. The strongest current route is an indexable multi-reference retriever that builds a candidate-conditioned source-by-role affinity matrix, scores the intended assignment against counterfactual source-role permutations, and preserves the global retrieval branch by distillation. Use correspondence-rich multi-reference generation data only as cross-domain pretraining, then adapt on balanced MERIT counterfactual orbits. No implementation or GPU pilot starts until this route is confirmed; after confirmation, run a sufficiently powered pilot and audit the implementation before efficacy testing.",
   "known_evidence": [
     "SoFA 使用跨图双向 attention 插值；Delimiter Scaling 加强图像边界，两者报告收益，但实验设置不同，不能直接声称矛盾。",
     "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
@@ -65,7 +65,12 @@
     "WISER (CVPR 2026) already uses verifier confidence for adaptive fusion and conditional refinement, while AutoConcept (arXiv:2609.01456, PRICAI 2026) already performs query-specific reliability gating and calibrated interpolation between a fixed retriever and concept evidence; selective score fusion is not a standalone P050 novelty.",
     "EviRank (arXiv:2608.20886) already converts composed queries into typed required/forbidden/ignorable evidence and performs evidence-conditioned verification; generic structured verifier or evidence checklist claims are occupied.",
     "The public search did not find a direct work that jointly studies multi-reference source-role binding, shared-candidate single-role swap difference-in-differences, and official PinPoint multi-image evaluation. This is a provisional novelty delta, not a first claim, and must be confirmed by a deeper full-paper search before submission.",
-    "Current re-audit verdict: the problem has high value and the route has medium-high development potential, but current conference readiness is low. P050 as a generic selective gate should not proceed unchanged; the next pilot must first validate the phenomenon with human-auditable role annotations and official multi-image metrics."
+    "Current re-audit verdict: the problem has high value and the route has medium-high development potential, but current conference readiness is low. P050 as a generic selective gate should not proceed unchanged; the next pilot must first validate the phenomenon with human-auditable role annotations and official multi-image metrics.",
+    "PinPoint explicitly reports that multi-image queries drop 48-72%; the strongest reported multi-image mAP@10 is 0.074 for GPT-5 text premerge plus reranking, while reranking does not improve multi-image results. The paper calls for better image-composition architectures and linguistically diverse training.",
+    "STiTch/SCOT/DIPNEC occupy generic optimal-transport alignment for CIR, while TAPR occupies atomic role factorization plus full-gallery local evidence matching. OT, local tokens, and generic role decomposition are not sufficient novelty.",
+    "MOSAIC (ICLR 2026) and ReBind show that explicit multi-reference correspondence/attribution can prevent reference interference in generation/editing. A direct copy is invalid for retrieval because the target is unknown and gallery representations must be indexable; the transferable supervision is source-to-target correspondence, not the generation architecture.",
+    "A targeted public search found no direct CIR method that constructs a candidate-conditioned source-role affinity matrix and normalizes the intended assignment against all counterfactual source-role permutations. This is a provisional novelty delta and not a first claim.",
+    "CVPR 2027 paper registration and submission deadlines are 2026-11-10 and 2026-11-16 AOE, respectively; the remaining schedule requires a kill-gated method pilot before full training."
   ],
   "hypotheses": [
     {
@@ -927,7 +932,7 @@
     "automation_display_name": "GPU1 独立研究进展",
     "rules_first": "Read /vepfs/vlms/1/研究规则.md before continuing; the automation was updated to GPU1 and evidence-first/pilot-first execution on 2026-09-17."
   },
-  "next": "Preregister a P050 selective-effect pilot before any new training: start from the ordinary verifier as the utility anchor, apply the role-effect residual only when an independently calibrated reliability rule fires, and compare ordinary, universal-DoD, and selective/constrained variants with matched compute. Require paired mAP superiority over ordinary, paraphrase noninferiority, hard-negative improvement, and non-color role coverage before multi-seed or full-scale work.",
+  "next": "After user confirmation, do a data-and-interface feasibility audit for TraceBind, freeze the pilot protocol, implement the complete R-by-R structured scorer and all training branches, run the mandatory postimplementation audit, and only then launch a >=5k-group GPU1 pilot. Do not implement or scale P050 selective gating as the main method.",
   "results": {
     "P001": {
       "n": 4,
@@ -2075,6 +2080,55 @@
         "A later paper claim requires full-corpus retrieval, uncertainty by reference component, and at least one independently trained model family."
       ],
       "recommendation": "Run P039 only as a kill-gated mechanism screen; do not call the idea novel or effective unless later prospective evidence survives."
+    },
+    "CVPR2027_SOTA_route_20260927": {
+      "mode": "standard_literature_grounded",
+      "target": "CVPR 2027 main conference",
+      "verdict": "P050 is too incremental as a main method; proceed only with a structured full-gallery source-role binding retriever after user confirmation.",
+      "current_readiness": "low",
+      "development_potential": "high_but_high_risk",
+      "candidate_comparison": {
+        "P050_selective_gate": {
+          "novelty": "low",
+          "sota_potential": "low_to_medium",
+          "feasibility": "high",
+          "decision": "reject_as_main_method"
+        },
+        "role_exclusive_OT": {
+          "novelty": "low_to_medium",
+          "sota_potential": "medium",
+          "feasibility": "medium",
+          "decision": "reject_because_OT/local_matching_is_crowded_and_spatial_exclusivity_is_not_always_valid"
+        },
+        "structured_permutation_binding_retriever": {
+          "novelty": "medium_high_provisional",
+          "sota_potential": "high",
+          "feasibility": "medium",
+          "decision": "selected"
+        },
+        "role_binding_benchmark_only": {
+          "novelty": "medium",
+          "sota_potential": "not_a_method_claim",
+          "feasibility": "medium",
+          "decision": "fallback_only"
+        }
+      },
+      "strongest_point": "It turns the demonstrated shared-candidate role-swap signal into an indexable structured assignment likelihood that can affect full-gallery retrieval, rather than another Top-K gate.",
+      "top_rejection_risks": [
+        "Reviewers may view it as TAPR multi-vector matching plus permutation negatives unless the source-role assignment likelihood and retrieval-specific invariance are isolated by direct controls.",
+        "MERIT role metadata is noisy and earlier pilots were color-dominated; correspondence pretraining and balanced multi-role counterfactual groups must pass data audits.",
+        "A multi-vector full-gallery scorer can be too slow or gain only on identity-style data; latency, memory, and cross-domain attribute transfer must be measured.",
+        "The provisional novelty search may miss contemporaneous work, so first-use language remains forbidden."
+      ],
+      "scorecard_out_of_5": {
+        "problem_importance": 5.0,
+        "novelty_provisional": 4.0,
+        "mechanistic_clarity": 4.5,
+        "evidence_alignment": 4.5,
+        "current_empirical_support": 2.5,
+        "execution_feasibility_before_deadline": 3.0,
+        "sota_potential": 4.0
+      }
     }
   },
   "research_rules_file": "研究规则.md",
@@ -2689,6 +2743,65 @@
         "decision": "Do not scale. Preserve the ordinary verifier utility anchor and test independently calibrated selective role-effect correction on broader roles."
       },
       "transfer_insight": "The ordinary verifier acts as a utility model, while the DoD objective acts as an invariance/robustness regularizer. Uniformly replacing utility with causal-effect scores creates a Pareto trade-off; the next falsifier should borrow independently calibrated selective routing or constrained multi-objective optimization, without claiming those generic tools as novelty."
+    },
+    {
+      "id": "source_role_permutation_retriever_v1",
+      "status": "proposed_pending_user_confirmation_no_implementation",
+      "working_name": "TraceBind",
+      "title": "Candidate-conditioned permutation-normalized source-role binding for multi-reference composed image retrieval",
+      "core_model": {
+        "query": "Encode interleaved reference-role pairs and form every source-under-role probe u_ij.",
+        "gallery": "Precompute a global vector and a compact bank of candidate evidence slots.",
+        "affinity": "A_ij(x)=SmoothMax_k <u_ij,v_k(x)> gives an R-by-R source-role affinity matrix for candidate x.",
+        "structured_binding": "For every feasible source-role permutation pi, E_pi(x)=sum_j A_{pi(j),j}(x); log P(pi*=correct|Q,x) is the correct energy normalized over counterfactual permutations.",
+        "retrieval_score": "Combine a preserved global relevance score with correct-role support and bounded structured binding likelihood; jointly permuting source-role blocks is invariant, while independently rebinding roles changes the score."
+      },
+      "training": [
+        "Ordinary multi-positive retrieval loss for utility.",
+        "Structured permutation NLL on the positive candidate.",
+        "Positive-versus-partial-negative difference-in-differences on binding likelihood.",
+        "Paraphrase and joint-permutation consistency.",
+        "Frozen-teacher neighborhood/ranking distillation to prevent the P048 global-geometry collapse.",
+        "Optional correspondence loss from SemAlign-MS only if the dataset contract and retrieval conversion audit pass."
+      ],
+      "data_plan": {
+        "correspondence_pretraining": "Audit and convert a bounded subset of SemAlign-MS-Subjects200K into reference-target evidence supervision; do not claim its generation annotations as retrieval labels without validation.",
+        "task_adaptation": "Build role-balanced MERIT counterfactual orbits with all valid source-role permutations, partial-match hard negatives, and product/reference separation.",
+        "pinpoint": "No PinPoint-specific training or threshold tuning; reproduce the pinned official protocol and evaluate it only after method and hyperparameters are frozen."
+      },
+      "distinction_from_prior_work": {
+        "TAPR": "single-reference semantic factor matching without a cross-reference assignment posterior.",
+        "MOSAIC_ReBind": "generation/editing correspondence and attribution, not an indexable gallery retrieval energy.",
+        "P049": "Top-10 scalar cross-encoder difference; TraceBind uses a full source-role matrix and can alter full-gallery retrieval.",
+        "P050": "generic selective gating is not the core mechanism."
+      },
+      "pilot_gate_draft": {
+        "data": "At least 5,000 training groups and 1,000 product-disjoint validation groups, balanced across at least four visible role families; no role exceeds 40%. Final counts depend on a pretraining-data audit.",
+        "controls": [
+          "matched ordinary retriever",
+          "multi-reference TAPR-style independent role sum",
+          "same-data permutation augmentation without structured assignment energy",
+          "global-only and binding-only ablations"
+        ],
+        "pass": [
+          "multi-reference task mAP@10 improvement over the strongest matched control with paired 95% lower bound > 0",
+          "binding/partial-negative improvement in at least three non-color role strata",
+          "global Recall@100 and paraphrase performance non-inferior within preregistered margins",
+          "implementation classified faithful after static, gradient, score-decomposition, and permutation-equivariance audits"
+        ],
+        "stop": "Any failure blocks full-scale training; proxy binding improvement alone cannot pass."
+      },
+      "paper_target": {
+        "primary": "PinPoint official multi-image mAP@10 under the same zero-shot protocol and corpus revision.",
+        "ambitious_threshold": "Beat the matched strongest baseline and the historical 0.074 reference; target >=0.085 rather than a marginal tie, while keeping overall/single-image non-inferior.",
+        "secondary": [
+          "NegRecall@10",
+          "linguistic sensitivity",
+          "CIRR/CIRCO or MERIT transfer",
+          "binding stress tests",
+          "latency and memory"
+        ]
+      }
     }
   ]
 }
