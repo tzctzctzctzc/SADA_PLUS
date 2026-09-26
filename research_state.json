@@ -1,11 +1,11 @@
 {
-  "as_of": "2026-09-27T23:58:00+08:00",
+  "as_of": "2026-09-27",
   "goal_status": "active",
-  "phase": "CVPR2027_SOTA_audit_complete_SourceRole_structured_retriever_pending_confirmation",
+  "phase": "TraceBind_confirmed_core_runtime_audited_data_supply_gate_failed",
   "scope": {
     "root": "/vepfs/vlms/1",
     "physical_gpu": 1,
-    "gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
+    "gpu_uuid": "GPU-083bb0e7-ec90-e4d1-c3bc-2357f7a715d8",
     "only_write_inside_root": true,
     "target_venues": [
       "CVPR",
@@ -14,7 +14,7 @@
     ],
     "submission_year_assumption": 2027
   },
-  "direction": "Retire P050 selective gating as the paper-level main method. The strongest current route is an indexable multi-reference retriever that builds a candidate-conditioned source-by-role affinity matrix, scores the intended assignment against counterfactual source-role permutations, and preserves the global retrieval branch by distillation. Use correspondence-rich multi-reference generation data only as cross-domain pretraining, then adapt on balanced MERIT counterfactual orbits. No implementation or GPU pilot starts until this route is confirmed; after confirmation, run a sufficiently powered pilot and audit the implementation before efficacy testing.",
+  "direction": "用户已确认 TraceBind。实现可索引来源×角色矩阵、有效绑定集合似然、DoD、全局效用与教师排序蒸馏；核心计算已通过数学和真实 GPU1 路径审计。完整训练方法尚未完成：跨域精细对应数据接入、多组匹配训练和全图库评估仍待实现。既定 5000/1000 pilot 不得以现有较小数据冒充。",
   "known_evidence": [
     "SoFA 使用跨图双向 attention 插值；Delimiter Scaling 加强图像边界，两者报告收益，但实验设置不同，不能直接声称矛盾。",
     "FOCUS 已使用单图保留、其余加噪再聚合 logits，简单分图集成缺乏新意。",
@@ -70,7 +70,10 @@
     "STiTch/SCOT/DIPNEC occupy generic optimal-transport alignment for CIR, while TAPR occupies atomic role factorization plus full-gallery local evidence matching. OT, local tokens, and generic role decomposition are not sufficient novelty.",
     "MOSAIC (ICLR 2026) and ReBind show that explicit multi-reference correspondence/attribution can prevent reference interference in generation/editing. A direct copy is invalid for retrieval because the target is unknown and gallery representations must be indexable; the transferable supervision is source-to-target correspondence, not the generation architecture.",
     "A targeted public search found no direct CIR method that constructs a candidate-conditioned source-role affinity matrix and normalizes the intended assignment against all counterfactual source-role permutations. This is a provisional novelty delta and not a first claim.",
-    "CVPR 2027 paper registration and submission deadlines are 2026-11-10 and 2026-11-16 AOE, respectively; the remaining schedule requires a kill-gated method pilot before full training."
+    "CVPR 2027 paper registration and submission deadlines are 2026-11-10 and 2026-11-16 AOE, respectively; the remaining schedule requires a kill-gated method pilot before full training.",
+    "P051 双参考排列后验精确等于 log-sigmoid(identity-minus-swap energy)；公式本身不能构成区别于差分打分的创新。",
+    "P051 完整 281 分片含 135027 商品；扩展可见形态白名单并隔离旧 heldout 后得到 1548 候选组（1545 双参考、3 三参考），其中 680 对有元数据支持的 DoD 偏序；元数据一致性不是视觉证明。",
+    "P051 数学审计及 GPU1 两步运行审计通过：36 层 LoRA、视觉 merger、新头有梯度及更新，可索引打分与直接计算一致，检查点重载一致。此为核心计算路径验证，完整数据与多组效果训练管线仍未完成，不能称完整忠实实现或 SOTA 证据。"
   ],
   "hypotheses": [
     {
@@ -915,24 +918,41 @@
       ],
       "steps_per_arm": 216,
       "seed": 20260919
+    },
+    "P051_metadata": {
+      "status": "completed",
+      "pid": 2680476,
+      "product_count": 135027,
+      "shards": 281,
+      "summary": "runs/P051_tracebind/metadata_manifest.json"
+    },
+    "P051_runtime_audit": {
+      "status": "completed",
+      "pid": 2681196,
+      "classification": "runtime_paths_pass_data_and_full_training_pipeline_pending",
+      "summary": "results/P051_tracebind/runtime_audit.json",
+      "is_efficacy_evidence": false
     }
   },
   "monitor": {
     "preferred_gpu_index": 1,
-    "preferred_gpu_uuid": "GPU-277ce254-c418-8feb-d0eb-e3929d6a6f9f",
+    "preferred_gpu_uuid": "GPU-083bb0e7-ec90-e4d1-c3bc-2357f7a715d8",
     "launch_rule": "Check live GPU1 memory/utilization and process occupancy immediately before every new experiment; do not silently fall back to another GPU.",
     "gpu_queue": "Future drivers should serialize with flock on /vepfs/vlms/1/runs/gpu1.lock.",
     "last_check": {
-      "memory_used_mib": 3873,
+      "checked_date": "2026-09-27",
+      "physical_gpu": 1,
+      "uuid": "GPU-083bb0e7-ec90-e4d1-c3bc-2357f7a715d8",
+      "memory_used_mib": 4,
       "memory_total_mib": 81920,
       "utilization_percent": 0,
-      "checked_at": "2026-09-18T00:18:00+08:00"
+      "after_runtime_audit": true
     },
     "automation_id": "gpu3",
     "automation_display_name": "GPU1 独立研究进展",
     "rules_first": "Read /vepfs/vlms/1/研究规则.md before continuing; the automation was updated to GPU1 and evidence-first/pilot-first execution on 2026-09-17."
   },
-  "next": "After user confirmation, do a data-and-interface feasibility audit for TraceBind, freeze the pilot protocol, implement the complete R-by-R structured scorer and all training branches, run the mandatory postimplementation audit, and only then launch a >=5k-group GPU1 pilot. Do not implement or scale P050 selective gating as the main method.",
+  "next": "保持既定 pilot 数量与门槛，先补建并视觉核验角色均衡的 MERIT 反事实轨道，覆盖三参考以上；完成 SemAlign/Subjects200K 精细对应接入和公平多组训练/全图库评估，再做完整实现审计。尚未启动效果 pilot 或全量训练。",
   "results": {
     "P001": {
       "n": 4,
@@ -2010,24 +2030,225 @@
         "scope": "126/128 validation examples use color as the active role; general-role claims are unsupported."
       },
       "decision": "Do not scale. Preserve the ordinary verifier utility anchor and test independently calibrated selective role-effect correction on broader roles."
+    },
+    "P051": {
+      "math_audit": {
+        "classification": "math_pass_runtime_and_data_pending",
+        "checks": {
+          "six_assignments_for_three_roles": true,
+          "posterior_normalization": true,
+          "source_reindex_equivariance": true,
+          "role_reindex_equivariance": true,
+          "chunked_index_equals_direct_score": true,
+          "two_reference_exact_logsigmoid_identity": true,
+          "both_valid_assignments_get_reward": true,
+          "unknown_assignment_not_punished": true,
+          "all_assignments_valid_zero_nll": true,
+          "dod_four_gradient_signs": true,
+          "teacher_target_detached": true,
+          "correspondence_both_sides_gradient": true,
+          "all_head_parameters_receive_gradient": true,
+          "head_has_nonzero_support_and_binding": true
+        },
+        "source_sha256": "55010ffbbfd4bfb2ab92972a01fea537441d5749db6772314076a49b78d9a73f",
+        "is_efficacy_evidence": false,
+        "loss": 5.933540344238281
+      },
+      "runtime_audit": {
+        "classification": "runtime_paths_pass_data_and_full_training_pipeline_pending",
+        "checks": {
+          "physical_gpu1_uuid_verified": true,
+          "teacher_encoded_before_any_update": true,
+          "all_three_forward_paths_exercised": true,
+          "no_unexpected_trainable_parameters": true,
+          "merger_nonzero_gradient": true,
+          "every_head_parameter_nonzero_gradient": true,
+          "finite_loss_and_gradients": true,
+          "all_language_layers_have_lora_gradient": true,
+          "lora_merger_and_all_heads_updated": true,
+          "teacher_values_unchanged": true,
+          "indexed_direct_score_equality": true,
+          "structured_branch_source_permutation_equivariance": true,
+          "checkpoint_roundtrip_scores_equal": true
+        },
+        "is_efficacy_evidence": false,
+        "gpu_uuid": "GPU-083bb0e7-ec90-e4d1-c3bc-2357f7a715d8",
+        "language_layers": 36,
+        "gradient_layers": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35
+        ],
+        "trainable_parameters": 131623682,
+        "changed_parameter_tensors": 517,
+        "audit_steps": 2,
+        "losses": [
+          {
+            "rank": 0.3874170780181885,
+            "assignment": 0.7408697009086609,
+            "dod": 0.07658877968788147,
+            "consistency": 0.0033438997343182564,
+            "distillation": -1.7036994037766817e-10
+          },
+          {
+            "rank": 0.017187027260661125,
+            "assignment": 0.0037031173706054688,
+            "dod": 0.04486895352602005,
+            "consistency": 0.0025692826602607965,
+            "distillation": 0.0020747268572449684
+          }
+        ],
+        "elapsed_seconds": 4.511137302964926,
+        "peak_cuda_allocated_bytes": 18729017856,
+        "remaining": [
+          "real correspondence dataset integration",
+          "visually verified balanced task dataset",
+          "matched multi-arm training and full-gallery evaluation"
+        ],
+        "runtime_label_scope": "P049 images reused only to test computational paths; assignment/DoD labels here are not new verified research evidence"
+      },
+      "data_audit": {
+        "status": "screening_only_no_visual_or_split_gate",
+        "metadata_products": 135027,
+        "complete_metadata": true,
+        "filter_counts": {
+          "official_multi_reference_single_pair": 38644,
+          "available_metadata": 38644,
+          "unambiguous_one_role_per_source": 38628,
+          "all_roles_visual_allowlisted": 8734,
+          "positive_metadata_consistent": 8649,
+          "some_verified_wrong_binding": 1897,
+          "historical_heldout_products_excluded": 1548,
+          "metadata_supported_dod_pair": 680
+        },
+        "candidate_groups": 1548,
+        "active_family_counts": {
+          "construction": 594,
+          "shape": 647,
+          "color": 222,
+          "pattern": 85
+        },
+        "active_role_counts": {
+          "closure type": 273,
+          "heel height": 335,
+          "color": 222,
+          "pattern/print": 66,
+          "shoe type": 210,
+          "toe style": 50,
+          "back type": 61,
+          "waist line": 61,
+          "pockets": 50,
+          "collar type": 86,
+          "number of drawers": 3,
+          "arm type": 30,
+          "boot height": 9,
+          "chair type": 24,
+          "pattern": 19,
+          "sleeve type": 1,
+          "sleeve length": 3,
+          "bag type": 4,
+          "closure": 16,
+          "movement type": 5,
+          "form factor": 2,
+          "table type": 6,
+          "strap type": 2,
+          "table base": 3,
+          "shape": 3,
+          "hem shape": 4
+        },
+        "source_count_distribution": {
+          "2": 1545,
+          "3": 3
+        },
+        "unique_products": 3861,
+        "connected_components": 721,
+        "largest_component_groups": 33,
+        "greedy_globally_product_disjoint_groups": 813,
+        "greedy_independent_active_families": {
+          "construction": 299,
+          "shape": 310,
+          "color": 149,
+          "pattern": 55
+        },
+        "balanced_pool_upper_bound": 1548,
+        "necessary_supply_checks": {
+          "raw_groups_for_requested_splits": false,
+          "four_visual_families_available": true,
+          "balanced_pool_upper_bound_large_enough": false,
+          "independent_validation_upper_supply": false
+        },
+        "pilot_authorized": false,
+        "remaining_gates": [
+          "frozen feasible split",
+          "visual intervention verification",
+          "cross-domain correspondence join",
+          "complete implementation runtime audit"
+        ],
+        "candidate_pool_sha256": "19eef4525550e9745bfa025fd5a1529723fb81d2d9f54c591990c46445a5e1f0"
+      },
+      "metadata_construction_feasibility": {
+        "products_with_visual_family": {
+          "color": 89132,
+          "construction": 60257,
+          "shape": 34164,
+          "pattern": 13949
+        },
+        "products_with_family_pairs": {
+          "color+construction": 40072,
+          "color+shape": 23510,
+          "construction+shape": 19492,
+          "color+pattern": 9790,
+          "construction+pattern": 6720,
+          "pattern+shape": 3030
+        },
+        "products_with_three_or_more_visual_families": 18528,
+        "is_verified_query_supply": false
+      }
     }
   },
   "novelty_status": "A generic frozen-retriever plus multimodal verifier is occupied prior art and is a strong P049 control (mAP@10 0.8568). P049 establishes a narrower mechanism signal: candidate-level role interventions with difference-in-differences significantly improve role margin, paraphrase retrieval, and hard-negative violations over the frozen baseline, but do not beat the ordinary verifier on primary mAP. Novelty is therefore not established. A defensible next claim would require independently calibrated selective use of role effects and broader-role evidence, rather than universal delta reranking or generic verifier training.",
   "last_progress_audit": {
-    "previous_goal_turn": "P048 mechanism supported but frozen geometry not preserved",
-    "evidence": [
-      "P048 text role swapping improved role-binding controls but damaged frozen retrieval geometry."
-    ],
-    "this_turn": "P049 completed with strict stop decision",
-    "new_evidence": [
-      "P049 exactly reproduced the P048 frozen baseline after the implementation audit caught and corrected a system-prompt mismatch: mAP@10 0.7983817 and R@10 0.9609375.",
-      "P049 used 144/128/64 train/validation/confirmation bundles and 1,344 within-pilot-disjoint products; validation and confirmation were identical to P048, and training products had zero held-out overlap.",
-      "P049 final static and runtime audits were faithful: 36/36 LoRA language layers, the visual merger, scalar head, original/swap positive and negative branches, and paraphrase branches all received gradients; the frozen base had no optimizer path.",
-      "The ordinary verifier was a strong control at mAP@10 0.85677 and paraphrase mAP@10 0.80614. Positive-only counterfactual training raised main mAP to 0.87943 but collapsed paraphrase mAP to 0.68533, exposing a surface-form shortcut.",
-      "The DoD arm achieved mAP@10 0.84979, paraphrase mAP@10 0.83953, binding accuracy 0.94531, DoD pair accuracy 0.90625, and hard-negative violation 0.07031.",
-      "Paired bootstrap supported DoD over frozen on mAP (+0.05141, 95% CI [0.01424, 0.09094]), paraphrase mAP (+0.10760, [0.06437, 0.15396]), DoD margin over ordinary (+0.22271, [0.17048, 0.27544]), and hard-negative violation reduction (-0.0625, [-0.11719, -0.015625]).",
-      "The primary innovation gate failed because DoD did not beat the ordinary verifier on mAP (-0.00698, 95% CI [-0.03639, 0.01942]); full-scale execution is not authorized.",
-      "Failure localization showed DoD raw-score mAP 0.85359 versus delta-score mAP 0.84979, while paraphrase moved in the opposite direction (0.82930 raw to 0.83953 delta). Universal delta use is the current bottleneck; the main evidence is concentrated in color roles and cannot support general-role claims."
+    "this_turn": "SSH 已恢复，TraceBind 核心实现和运行审计完成；数据规模门槛未通过",
+    "full_method_classification": "仅核心实现，完整训练管线与跨域数据接入未完成",
+    "pilot_authorized": false,
+    "remaining": [
+      "新增可验证且角色均衡的独立反事实组",
+      "跨域精细对应数据真实接入",
+      "完整匹配对照训练与全图库评估",
+      "完整方案实现审计"
     ]
   },
   "idea_audits": {

@@ -1,0 +1,18 @@
+{
+  "products_with_visual_family": {
+    "color": 89132,
+    "construction": 60257,
+    "shape": 34164,
+    "pattern": 13949
+  },
+  "products_with_family_pairs": {
+    "color+construction": 40072,
+    "color+shape": 23510,
+    "construction+shape": 19492,
+    "color+pattern": 9790,
+    "construction+pattern": 6720,
+    "pattern+shape": 3030
+  },
+  "products_with_three_or_more_visual_families": 18528,
+  "is_verified_query_supply": false
+}

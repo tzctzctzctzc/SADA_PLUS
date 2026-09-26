@@ -1,0 +1,138 @@
+{
+  "id": "P051",
+  "name": "TraceBind",
+  "status": "core_runtime_audited_data_supply_gate_failed_no_efficacy_pilot",
+  "root": "/vepfs/vlms/1",
+  "gpu_index": 1,
+  "gpu_uuid": "GPU-083bb0e7-ec90-e4d1-c3bc-2357f7a715d8",
+  "model": {
+    "path": "models/Qwen3-VL-Embedding-8B",
+    "revision": "2c4565515e0f265c6511776e7193b22c0968ddc7",
+    "max_length": 1024,
+    "min_pixels": 50176,
+    "max_pixels": 100352,
+    "attn_implementation": "sdpa",
+    "evidence_grid": 4,
+    "compact_dim": 512,
+    "local_temperature": 0.07,
+    "assignment_temperature": 0.1,
+    "support_weight": 0.25,
+    "binding_weight": 0.1
+  },
+  "data": {
+    "dataset": "WeiChow/merit",
+    "dataset_revision": "fd1c52c3ce3f1d53f7781afa64f350564cece6e8",
+    "endpoint": "https://hf-mirror.com",
+    "total_shards": 281,
+    "query_path": "data/MERIT/queries-train.json",
+    "query_sha256": "34d9c785433b08ca5c1936161005969bcd76da3a06c0d1d8f78259b9e83bc241",
+    "metadata_path": "runs/P051_tracebind/products_metadata.jsonl",
+    "cached_metadata_path": "runs/P041_selective_dependence/products_metadata.jsonl",
+    "cached_metadata_manifest": "runs/P041_selective_dependence/metadata_manifest.json",
+    "metadata_workers": 4,
+    "minimum_train_groups": 5000,
+    "minimum_validation_groups": 1000,
+    "minimum_visual_families": 4,
+    "maximum_active_role_fraction": 0.4,
+    "source_counts": [
+      2,
+      3,
+      4
+    ],
+    "visual_families": {
+      "color": [
+        "color"
+      ],
+      "pattern": [
+        "pattern/print",
+        "pattern"
+      ],
+      "shape": [
+        "shape",
+        "toe style",
+        "heel type",
+        "heel height",
+        "hem shape",
+        "boot height",
+        "shoe type",
+        "bag type",
+        "chair type",
+        "table type",
+        "form factor"
+      ],
+      "construction": [
+        "closure type",
+        "closure",
+        "sleeve length",
+        "sleeve type",
+        "collar type",
+        "neckline",
+        "pockets",
+        "strap type",
+        "handle type",
+        "back type",
+        "arm type",
+        "table base",
+        "number of drawers",
+        "waist line",
+        "waistline",
+        "movement type"
+      ]
+    },
+    "split_policy": "connected components of all reference/positive/negative product IDs; no product crosses splits; within-train reuse is reported and is not counted as independent products",
+    "metadata_is_visual_proof": false,
+    "cross_domain_pretraining": {
+      "dataset": "ByteDance-FanQie/SemAlign-MS-Subjects200K",
+      "source_images": "Yuanshi/Subjects200K",
+      "status": "schema_verified_image_and_correspondence_join_not_yet_verified",
+      "required_before_full_method_pilot": true
+    }
+  },
+  "training": {
+    "arms": [
+      "ordinary",
+      "role_sum",
+      "permutation_augmentation",
+      "tracebind"
+    ],
+    "seed": 20260927,
+    "lora_rank": 32,
+    "lora_alpha": 64,
+    "train_visual_merger": true,
+    "learning_rate_lora": 0.0001,
+    "learning_rate_visual_merger": 2e-05,
+    "learning_rate_head": 0.0003,
+    "temperature": 0.07,
+    "rank_margin": 0.1,
+    "dod_margin": 0.05,
+    "assignment_weight": 0.25,
+    "dod_weight": 0.25,
+    "consistency_weight": 0.1,
+    "distillation_weight": 0.25,
+    "audit_optimizer_steps": 2,
+    "save_checkpoint": true
+  },
+  "pilot_gates": {
+    "main_map_gain_vs_strongest_matched_control_ci_lower_min": 0.0,
+    "paraphrase_map_noninferiority_tolerance": 0.005,
+    "recall_at_100_noninferiority_tolerance": 0.005,
+    "minimum_improving_noncolor_families": 3,
+    "independent_confirmation_required": true,
+    "all_required": true,
+    "full_gallery_required_for_sota": true
+  },
+  "implementation_gate": {
+    "require_live_gradient_and_parameter_update": true,
+    "require_joint_source_role_permutation_equivariance": true,
+    "require_indexed_and_direct_score_equality": true,
+    "require_valid_assignment_set_for_ambiguous_swaps": true,
+    "require_checkpoint_roundtrip": true,
+    "audit_examples_are_not_efficacy_evidence": true
+  },
+  "theory_limits": [
+    "For two references, binding posterior is exactly a log-sigmoid of the identity-minus-swap energy; this formula alone is not a new mechanism.",
+    "Assignment preference alone cannot certify candidate relevance; global utility and intended-assignment support remain in the score.",
+    "Multiple roles may share one evidence region; no exclusive spatial transport constraint is imposed.",
+    "Metadata agreement is necessary screening and is not proof of visual agreement."
+  ]
+}

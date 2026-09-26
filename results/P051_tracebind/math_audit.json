@@ -1,0 +1,22 @@
+{
+  "classification": "math_pass_runtime_and_data_pending",
+  "checks": {
+    "six_assignments_for_three_roles": true,
+    "posterior_normalization": true,
+    "source_reindex_equivariance": true,
+    "role_reindex_equivariance": true,
+    "chunked_index_equals_direct_score": true,
+    "two_reference_exact_logsigmoid_identity": true,
+    "both_valid_assignments_get_reward": true,
+    "unknown_assignment_not_punished": true,
+    "all_assignments_valid_zero_nll": true,
+    "dod_four_gradient_signs": true,
+    "teacher_target_detached": true,
+    "correspondence_both_sides_gradient": true,
+    "all_head_parameters_receive_gradient": true,
+    "head_has_nonzero_support_and_binding": true
+  },
+  "source_sha256": "55010ffbbfd4bfb2ab92972a01fea537441d5749db6772314076a49b78d9a73f",
+  "is_efficacy_evidence": false,
+  "loss": 5.933540344238281
+}
