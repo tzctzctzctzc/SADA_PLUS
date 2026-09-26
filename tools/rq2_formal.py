@@ -16,10 +16,33 @@ from tools.rq2_dense_protocol import sha256_file, sha256_normalized_text
 FROZEN_VIDEO_COUNT = 626
 FROZEN_VIDEO_SET_SHA256 = "8308e5e6cd2076fa68247aaf71dc44d6a9ed87ae4a116b3c4971e02598cc54a2"
 RUN_SIGNATURE_SCHEMA = "rq2-formal-run-v1"
-TRAINING_BUDGET_PROTOCOL = "source-batches-per-epoch-v1"
+TRAINING_BUDGET_PROTOCOL = "max-source-target-batches-per-epoch-v2"
+SOURCE_OPTIMIZATION_PROTOCOL = "sada-matched-two-phase-adamw-v1"
 RNG_PROTOCOL = "independent-source-target-generators-v1"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _GIT_REVISION = re.compile(r"^[0-9a-f]{40,64}$")
+
+
+def build_epoch_budget(cfg):
+    # Read only split membership from the already frozen annotation file.
+    # SO never loads target features or uses target action annotations.
+    with Path(cfg["dataset"]["json_file"]).open(encoding="utf-8") as stream:
+        database = json.load(stream)["database"]
+    batch_size = int(cfg["loader"]["batch_size"])
+    counts = {
+        domain: sum(video["subset"].lower() in cfg[key] for video in database.values())
+        for domain, key in (("source", "src_train_split"), ("target", "tgt_train_split"))
+    }
+    source_batches = counts["source"] // batch_size
+    target_batches = counts["target"] // batch_size
+    if min(source_batches, target_batches) < 1:
+        raise ValueError("formal RQ2 needs nonempty source and target batches")
+    return {
+        "source_videos": counts["source"], "target_videos": counts["target"],
+        "source_batches": source_batches, "target_batches": target_batches,
+        "iterations_per_epoch": max(source_batches, target_batches),
+        "batch_size": batch_size, "drop_last": True,
+    }
 
 
 def build_target_manifest(annotation_path, target_splits, output_path):
@@ -253,6 +276,10 @@ def validate_formal_runtime(cfg, expected_signature=None):
     formal = cfg.get("rq2_formal", {})
     if formal.get("training_budget") != TRAINING_BUDGET_PROTOCOL:
         raise ValueError("formal RQ2 training budget protocol differs")
+    if formal.get("source_optimization") != SOURCE_OPTIMIZATION_PROTOCOL:
+        raise ValueError("formal RQ2 source optimization protocol differs")
+    if formal.get("epoch_budget") != build_epoch_budget(cfg):
+        raise ValueError("formal RQ2 epoch budget differs from frozen video counts")
     if formal.get("rng_protocol") != RNG_PROTOCOL:
         raise ValueError("formal RQ2 RNG protocol differs")
     manifest = formal.get("target_manifest")

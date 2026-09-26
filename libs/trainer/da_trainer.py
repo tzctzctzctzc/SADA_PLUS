@@ -8,7 +8,9 @@ import subprocess
 from pathlib import Path
 
 from .base_trainer_da import BaseTrainerDA
-from .training_regimes import consumes_target_train, training_epoch_length
+from .training_regimes import (
+    consumes_target_train, epoch_length_from_config, uses_alignment_optimizer,
+)
 from libs.datasets import truncate_feats
 from libs.utils.train_utils import AverageMeter
 from libs.models.SADA.stage1_calibration import (
@@ -329,17 +331,16 @@ class Trainer(BaseTrainerDA):
             return
         if supervised_mode == 'source_only':
             iter_src = itertools.cycle(iter(self.train_loader_src))
-            for _ in range(training_epoch_length(
-                supervised_mode,
-                len(self.train_loader_src),
-                len(self.train_loader_tgt),
-                self.cfg.get('rq2_formal', {}).get('regime'),
+            for _ in range(epoch_length_from_config(
+                self.cfg, len(self.train_loader_src), len(self.train_loader_tgt)
             )):
                 next(iter_src)
             return
         iter_src = itertools.cycle(iter(self.train_loader_src))
         iter_tgt = itertools.cycle(iter(self.train_loader_tgt))
-        for _ in range(max(len(self.train_loader_src), len(self.train_loader_tgt))):
+        for _ in range(epoch_length_from_config(
+            self.cfg, len(self.train_loader_src), len(self.train_loader_tgt)
+        )):
             next(iter_src)
             next(iter_tgt)
 
@@ -369,11 +370,10 @@ class Trainer(BaseTrainerDA):
             if not consumes_target_train(supervised_mode)
             else itertools.cycle(iter(self.train_loader_tgt))
         )
-        num_iters = training_epoch_length(
-            supervised_mode,
-            len(self.train_loader_src),
-            len(self.train_loader_tgt),
-            self.cfg.get('rq2_formal', {}).get('regime'),
+        formal_regime = self.cfg.get('rq2_formal', {}).get('regime')
+        matched_source_only = supervised_mode == 'source_only' and formal_regime == 'so'
+        num_iters = epoch_length_from_config(
+            self.cfg, len(self.train_loader_src), len(self.train_loader_tgt)
         )
         
         counter = 0
@@ -455,6 +455,9 @@ class Trainer(BaseTrainerDA):
             warmup_adv = self.cfg['train_cfg'].get('warmup_adv', 0)
             adv_method = self.cfg['model']['adv_method']
             adv_disc = self.cfg['model'].get('use_adv_discriminator', True)
+            use_alignment_optimizer = uses_alignment_optimizer(
+                supervised_mode, curr_epoch, warmup_adv, formal_regime
+            )
             
             
             final_loss = torch.tensor(0.0, requires_grad=True).to(self.model.device)
@@ -465,7 +468,12 @@ class Trainer(BaseTrainerDA):
                 task_loss = losses['downstream_loss']
                 final_loss = task_loss
             elif supervised_mode == 'source_only':
-                task_loss = losses['downstream_loss']
+                # Match SADA's two-phase source objective; only adaptation is off.
+                weight = (
+                    self.cfg['model']['loss_weights']['weight_downstream']
+                    if use_alignment_optimizer else 1.0
+                )
+                task_loss = weight * losses['downstream_loss']
                 final_loss = task_loss
             elif supervised_mode == 'source_target':
                 task_loss = 0.5 * (
@@ -623,14 +631,11 @@ class Trainer(BaseTrainerDA):
                     self.cfg['train_cfg']['clip_grad_l2norm'],
                 )
             
-            if supervised_mode != 'off':
+            if not use_alignment_optimizer:
                 self.optimizer_gen_source.step()
-            elif curr_epoch < warmup_adv:
-                self.optimizer_gen_source.step()
-                
             else:
-                # For the rest of the cases, we can optimize them together
-                self.optimizer_disc.step()
+                if supervised_mode == 'off':
+                    self.optimizer_disc.step()
                 self.optimizer_gen_source_alignment.step()
                     
                 
@@ -681,14 +686,14 @@ class Trainer(BaseTrainerDA):
             
             # OPTIONAL: Update the learning rate
             if self.lr_scheduler_gen_source is not None:
-                self.lr_scheduler_gen_source.step()  # once per epoch
+                self.lr_scheduler_gen_source.step()  # once per iteration
             if (
-                supervised_mode == 'off'
+                (supervised_mode == 'off' or matched_source_only)
                 and self.lr_scheduler_gen_source_alignment is not None
             ):
-                self.lr_scheduler_gen_source_alignment.step()  # once per epoch
+                self.lr_scheduler_gen_source_alignment.step()  # once per iteration
             if supervised_mode == 'off' and self.lr_scheduler_disc is not None:
-                self.lr_scheduler_disc.step()  # once per epoch
+                self.lr_scheduler_disc.step()  # once per iteration
            
                 
     def _valid_epoch(self, curr_epoch, data_loader, domain='src'):

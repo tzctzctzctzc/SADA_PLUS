@@ -157,6 +157,10 @@ def evaluate(cfg, ckpt_path, config_path, output_dir, device, feature_protocol=N
         "config_sha256": sha256_normalized_text(config_path),
         "feature_protocol_sha256": feature_hash,
         "annotation_sha256": sha256_file(cfg["dataset"]["json_file"]),
+        "training_protocol": {
+            key: saved_config.get("rq2_formal", {}).get(key)
+            for key in ("training_budget", "source_optimization", "epoch_budget")
+        },
     }
     summaries = {}
     for name, split_key, output_path in zip(
@@ -331,6 +335,12 @@ def summarize_so_uda(
         )}
         if len(values) != 1:
             raise ValueError("SO/UDA result {} differs".format(key))
+    training_protocols = {
+        json.dumps(item.get("training_protocol"), sort_keys=True)
+        for item in (so_source, so_target, uda_source, uda_target)
+    }
+    if len(training_protocols) != 1:
+        raise ValueError("SO/UDA training protocols differ; do not mix old and new runs")
     for source, target in ((so_source, so_target), (uda_source, uda_target)):
         if source["checkpoint_sha256"] != target["checkpoint_sha256"]:
             raise ValueError("source and target results use different checkpoints")
@@ -360,6 +370,7 @@ def summarize_so_uda(
         "seed": so_source["seed"],
         "shift": so_source["shift"],
         "feature_protocol_sha256": so_source["feature_protocol_sha256"],
+        "training_protocol": so_source.get("training_protocol"),
         "inputs": {
             label: {"path": str(path.resolve()), "sha256": sha256_file(path)}
             for label, path in zip(
@@ -429,6 +440,16 @@ def aggregate_pair_summaries(pair_paths, output_path, require_complete=True):
     }
     if len(protocol_hashes) != 1:
         raise ValueError("aggregate inputs use different feature protocols")
+    # Counts differ by shift; the budget and optimization policy must not.
+    training_policies = {
+        json.dumps({
+            key: (record.get("training_protocol") or {}).get(key)
+            for key in ("training_budget", "source_optimization")
+        }, sort_keys=True)
+        for record in records
+    }
+    if len(training_policies) != 1:
+        raise ValueError("aggregate inputs use different training protocols")
     keys = [(record["shift"], int(record["seed"])) for record in records]
     if len(set(keys)) != len(keys):
         raise ValueError("aggregate inputs repeat a shift/seed pair")
@@ -465,6 +486,7 @@ def aggregate_pair_summaries(pair_paths, output_path, require_complete=True):
     result = {
         "schema": "rq2-so-uda-aggregate-v1",
         "feature_protocol_sha256": next(iter(protocol_hashes)),
+        "training_policy": json.loads(next(iter(training_policies))),
         "inputs": {
             str(path.resolve()): sha256_file(path) for path in paths
         },

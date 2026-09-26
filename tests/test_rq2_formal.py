@@ -12,6 +12,7 @@ from tools.rq2_evaluate import (
 )
 from tools.rq2_formal import (
     FROZEN_VIDEO_SET_SHA256, build_formal_run_signature, build_target_manifest,
+    build_epoch_budget, TRAINING_BUDGET_PROTOCOL, SOURCE_OPTIMIZATION_PROTOCOL,
     check_formal_config, check_formal_features, check_frozen_runtime_values,
     check_target_manifest, validate_formal_resume, validate_formal_runtime,
 )
@@ -285,28 +286,58 @@ def test_formal_config_rejects_behavior_changing_diagnostics():
         check_formal_config(cfg, "so")
 
 
-def test_formal_runtime_and_resume_require_exact_signature():
+def test_formal_runtime_and_resume_require_exact_signature(tmp_path):
+    annotation = tmp_path / "annotations.json"
+    annotation.write_text(json.dumps({"database": {
+        "s": {"subset": "source_train"}, "t": {"subset": "target_train"},
+    }}), encoding="utf-8")
     cfg = {
         "dataset_name": "epic",
-        "dataset": {"action_subsampling": "10_majority_classes"},
+        "dataset": {"action_subsampling": "10_majority_classes", "json_file": str(annotation)},
+        "src_train_split": ["source_train"], "tgt_train_split": ["target_train"],
+        "loader": {"batch_size": 1},
         "train_cfg": {"evaluate_student": False, "test_target_val_only": False},
         "diagnostic": {"supervised_upper_bound": "source_only"},
         "rq2_formal": {
             "regime": "so", "shift": "S1", "target_manifest": None,
-            "training_budget": "source-batches-per-epoch-v1",
+            "training_budget": TRAINING_BUDGET_PROTOCOL,
+            "source_optimization": SOURCE_OPTIMIZATION_PROTOCOL,
             "rng_protocol": "independent-source-target-generators-v1",
         },
         "seed": 6,
     }
+    cfg["rq2_formal"]["epoch_budget"] = build_epoch_budget(cfg)
     signature = build_formal_run_signature(cfg)
     cfg["rq2_formal"]["run_signature"] = signature
     assert validate_formal_runtime(cfg, signature) == signature
     validate_formal_resume({"rq2_run_signature": signature}, signature)
+    old_signature = {**signature, "training_budget": "source-batches-per-epoch-v1"}
+    with pytest.raises(ValueError, match="different run signature"):
+        validate_formal_resume({"rq2_run_signature": old_signature}, signature)
+    cfg["rq2_formal"]["epoch_budget"]["target_batches"] = 9
+    with pytest.raises(ValueError, match="epoch budget"):
+        validate_formal_runtime(cfg, signature)
+    cfg["rq2_formal"]["epoch_budget"] = build_epoch_budget(cfg)
     cfg["train_cfg"]["test_freq"] = -1
     with pytest.raises(ValueError, match="changed after audit"):
         validate_formal_runtime(cfg, signature)
     with pytest.raises(ValueError, match="different run signature"):
         validate_formal_resume({"rq2_run_signature": {}}, signature)
+
+
+def test_epoch_budget_reads_membership_without_target_action_fields(tmp_path):
+    annotation = tmp_path / "annotations.json"
+    annotation.write_text(json.dumps({"database": {
+        **{"s%d" % i: {"subset": "source_train"} for i in range(5)},
+        **{"t%d" % i: {"subset": "target_train", "annotations": "not accessed"}
+           for i in range(9)},
+    }}), encoding="utf-8")
+    cfg = {"dataset": {"json_file": str(annotation)}, "loader": {"batch_size": 2},
+           "src_train_split": ["source_train"], "tgt_train_split": ["target_train"]}
+    budget = build_epoch_budget(cfg)
+    assert budget == {"source_videos": 5, "target_videos": 9, "source_batches": 2,
+                      "target_batches": 4, "iterations_per_epoch": 4,
+                      "batch_size": 2, "drop_last": True}
 
 
 def test_resume_operational_path_does_not_change_run_signature():
@@ -405,6 +436,10 @@ def test_so_uda_summary_computes_required_metrics_and_hashes(tmp_path, monkeypat
     assert result["metrics"]["Change_source"] == pytest.approx(-0.02)
     assert result["metrics"]["Recovery_gap"] == pytest.approx(0.08)
     assert set(result["inputs"]) == {"SO_source", "SO_target", "UDA_source", "UDA_target"}
+    payloads[-1]["training_protocol"] = {"training_budget": TRAINING_BUDGET_PROTOCOL}
+    paths[-1].write_text(json.dumps(payloads[-1]), encoding="utf-8")
+    with pytest.raises(ValueError, match="training protocols differ"):
+        summarize_so_uda(*paths, "annotations.json", tmp_path / "mixed.json")
 
 
 def test_pair_aggregate_requires_complete_seed_grid(tmp_path):
@@ -426,3 +461,7 @@ def test_pair_aggregate_requires_complete_seed_grid(tmp_path):
     assert partial["per_shift"]["S1"]["seeds"] == [6, 7, 8]
     with pytest.raises(ValueError, match="all six shifts"):
         aggregate_pair_summaries(paths, tmp_path / "full.json")
+    payload["training_protocol"] = {"training_budget": TRAINING_BUDGET_PROTOCOL}
+    paths[-1].write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="different training protocols"):
+        aggregate_pair_summaries(paths, tmp_path / "mixed.json", require_complete=False)

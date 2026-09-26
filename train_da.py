@@ -281,13 +281,11 @@ def main(cfg, resume, project_name='sada', debug=False):
     for module in model.disc_dom_conditional_adv:
         disc_params += list(module.parameters())
     
-    from libs.trainer.training_regimes import training_epoch_length
-    num_iters_epoch = training_epoch_length(
-        supervised_mode,
-        len(train_loader_src),
-        len(train_loader_tgt),
-        cfg.get('rq2_formal', {}).get('regime'),
+    from libs.trainer.training_regimes import epoch_length_from_config
+    num_iters_epoch = epoch_length_from_config(
+        cfg, len(train_loader_src), len(train_loader_tgt)
     )
+    logger.info("Training iterations per epoch: %s", num_iters_epoch)
     
     optimizer_gen_source = make_optimizer(model, cfg['opt'], cfg['opt']['learning_rate'], exclude_params = ['disc_dom_adv', 'disc_dom_conditional_adv', 'learnable_embeddings'])
     scheduler_gen_source = make_scheduler(optimizer_gen_source, cfg['opt'], num_iters_epoch)
@@ -2566,7 +2564,8 @@ if __name__ == '__main__':
     if args.rq2_regime:
         from tools.rq2_formal import (
             check_formal_config, check_formal_features, check_registry_config,
-            check_slowfast_features,
+            check_slowfast_features, build_epoch_budget,
+            TRAINING_BUDGET_PROTOCOL, SOURCE_OPTIMIZATION_PROTOCOL,
         )
 
         if not args.rq2_shift:
@@ -2598,7 +2597,9 @@ if __name__ == '__main__':
             'regime': args.rq2_regime,
             'shift': args.rq2_shift,
             'target_manifest': manifest,
-            'training_budget': 'source-batches-per-epoch-v1',
+            'training_budget': TRAINING_BUDGET_PROTOCOL,
+            'source_optimization': SOURCE_OPTIMIZATION_PROTOCOL,
+            'epoch_budget': build_epoch_budget(config_dict),
             'rng_protocol': 'independent-source-target-generators-v1',
         }
     elif args.rq2_target_manifest or args.rq2_shift:
