@@ -924,14 +924,16 @@
       "pid": 2680476,
       "product_count": 135027,
       "shards": 281,
-      "summary": "runs/P051_tracebind/metadata_manifest.json"
+      "summary": "runs/P051_tracebind/metadata_manifest.json",
+      "exitcode": 0
     },
     "P051_runtime_audit": {
       "status": "completed",
       "pid": 2681196,
       "classification": "runtime_paths_pass_data_and_full_training_pipeline_pending",
       "summary": "results/P051_tracebind/runtime_audit.json",
-      "is_efficacy_evidence": false
+      "is_efficacy_evidence": false,
+      "exitcode": 0
     }
   },
   "monitor": {
@@ -2249,7 +2251,9 @@
       "跨域精细对应数据真实接入",
       "完整匹配对照训练与全图库评估",
       "完整方案实现审计"
-    ]
+    ],
+    "published_core_commit": "931ad46",
+    "published_repository": "tzcinhust/SADA_PLUS"
   },
   "idea_audits": {
     "P032_quick": {
