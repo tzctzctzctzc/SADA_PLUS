@@ -12,7 +12,7 @@ import sys
 import yaml
 
 from tools.audit_rq2_vlm_benchmark import audit_so_uda_pair
-from tools.rq2_dense_protocol import sha256_file
+from tools.rq2_dense_protocol import MODEL_SPECS, sha256_file, validate_training_protocol
 from tools.rq2_evaluate import load_checkpoint, selected_checkpoint_state
 from tools.rq2_formal import (
     RNG_PROTOCOL, SOURCE_OPTIMIZATION_PROTOCOL, TRAINING_BUDGET_PROTOCOL,
@@ -21,6 +21,25 @@ from tools.rq2_formal import (
 
 
 CODE_ROOT = Path(__file__).resolve().parents[1]
+MATCHED_MODELS = ("slowfast", "egovideo_hod", "internvideo2_clip_1b", "qwen3_vl_8b", "timelens2_8b")
+
+
+def matched_feature_args(model, feature_root):
+    """Only the frozen representation and its input dimension may change."""
+    if model == "slowfast":
+        if feature_root is not None:
+            raise ValueError("SlowFast uses the frozen reference feature root")
+        return []
+    if feature_root is None:
+        raise ValueError("VLM matched control requires --feature-root")
+    root = Path(feature_root).resolve()
+    protocol_path = root / "protocol.json"
+    dim = MODEL_SPECS[model]["output_dim"]
+    protocol = validate_training_protocol(protocol_path, root, dim)
+    if protocol["model_name"] != model:
+        raise ValueError("feature protocol belongs to another model")
+    return ["--feature_folder", str(root), "--input_dim", str(dim),
+            "--feature-protocol", str(protocol_path)]
 
 
 def check_code(expected_head):
@@ -121,7 +140,9 @@ def run_command(command, log, data_root, gpu_uuid=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", choices=("slowfast",), default="slowfast")
+    parser.add_argument("--model", choices=MATCHED_MODELS, default="slowfast")
+    parser.add_argument("--feature-root", type=Path,
+                        help="complete frozen VLM features with protocol.json and video_ids.txt")
     parser.add_argument("--shift", choices=["S" + str(i) for i in range(1, 7)], default="S1")
     parser.add_argument("--seed", type=int, choices=(6, 7, 8), default=6)
     parser.add_argument("--gpu", type=int, choices=range(4), required=True)
@@ -146,6 +167,7 @@ def main():
     common = ["-c", str(config), "-s", str(args.seed), "-i", "0",
               "--rq2-shift", args.shift, "--rq2-registry", str(registry),
               "--rq2-reference-root", str(reference)]
+    common += matched_feature_args(args.model, args.feature_root)
     train_commands, audited = {}, {}
     for regime, supervised in (("so", "source_only"), ("uda", "off")):
         name = "rq2_matched_{}_{}_seed{}_{}_{}".format(
@@ -212,6 +234,7 @@ def main():
             "model": args.model, "shift": args.shift, "seed": args.seed,
             "gpu": args.gpu, "code_commit": args.expected_head,
             "training_budget": TRAINING_BUDGET_PROTOCOL, "rng_protocol": RNG_PROTOCOL,
+            "feature_protocol_sha256": audited["so"].get("rq2_feature_protocol", {}).get("protocol_sha256"),
             "so": str(actual_configs["so"]), "uda": str(actual_configs["uda"]),
         }, sort_keys=True))
 
