@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+echo 'Legacy queue references old SO results. Use tools/run_rq2_matched_control.py for the new protocol.' >&2
+exit 2
 
 model=$1
 gpu=$2

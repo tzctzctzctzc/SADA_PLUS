@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+echo 'Legacy queue belongs to the old protocol. Do not resume it in this worktree.' >&2
+exit 2
 
 gpu=$1
 artifact_root=$2

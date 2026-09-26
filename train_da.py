@@ -4,6 +4,8 @@ import copy
 import os
 import time
 import datetime
+import json
+import sys
 from pathlib import Path
 from pprint import pprint
 import wandb
@@ -188,22 +190,28 @@ def main(cfg, resume, project_name='sada', debug=False):
     
     # Load the source and target datasets
     train_loader_src = make_data_loader(
-        train_dataset_src, True, source_rng_generator, **cfg['loader'])
+        train_dataset_src, True, source_rng_generator,
+        persistent_workers=not bool(cfg.get('rq2_formal')), **cfg['loader'])
     
     train_loader_src2 = make_data_loader(
-        train_dataset_src2, False, None, 1, cfg['loader']['num_workers'])
+        train_dataset_src2, False, None, 1, cfg['loader']['num_workers'],
+        persistent_workers=not bool(cfg.get('rq2_formal')))
     
     val_loader_src = make_data_loader(
-        val_dataset_src, False, None, 1, cfg['loader']['num_workers'])
+        val_dataset_src, False, None, 1, cfg['loader']['num_workers'],
+        persistent_workers=not bool(cfg.get('rq2_formal')))
     
     train_loader_tgt = make_data_loader(
-        train_dataset_tgt, True, target_rng_generator, **cfg['loader'])
+        train_dataset_tgt, True, target_rng_generator,
+        persistent_workers=not bool(cfg.get('rq2_formal')), **cfg['loader'])
     
     train_loader_tgt2 = make_data_loader(
-        train_dataset_tgt2, False, None, 1, cfg['loader']['num_workers'])
+        train_dataset_tgt2, False, None, 1, cfg['loader']['num_workers'],
+        persistent_workers=not bool(cfg.get('rq2_formal')))
     
     val_loader_tgt = make_data_loader(
-        val_dataset_tgt, False, None, 1, cfg['loader']['num_workers'])
+        val_dataset_tgt, False, None, 1, cfg['loader']['num_workers'],
+        persistent_workers=not bool(cfg.get('rq2_formal')))
     
     # Initialize the device
     gpu = cfg["gpu"]
@@ -1605,6 +1613,10 @@ def create_argparser():
             'target validation remains reporting-only'
         ),
     )
+    parser.add_argument(
+        '--rq2-audit-output', type=str, default=None,
+        help='audit formal data/config on CPU, save the exact runtime config, and exit before training',
+    )
 
     add_dict_to_argparser(parser, ARGS_TYPES)
 
@@ -2565,7 +2577,8 @@ if __name__ == '__main__':
         from tools.rq2_formal import (
             check_formal_config, check_formal_features, check_registry_config,
             check_slowfast_features, build_epoch_budget,
-            TRAINING_BUDGET_PROTOCOL, SOURCE_OPTIMIZATION_PROTOCOL,
+            TRAINING_BUDGET_PROTOCOL, SOURCE_OPTIMIZATION_PROTOCOL, RNG_PROTOCOL,
+            build_data_provenance,
         )
 
         if not args.rq2_shift:
@@ -2600,7 +2613,8 @@ if __name__ == '__main__':
             'training_budget': TRAINING_BUDGET_PROTOCOL,
             'source_optimization': SOURCE_OPTIMIZATION_PROTOCOL,
             'epoch_budget': build_epoch_budget(config_dict),
-            'rng_protocol': 'independent-source-target-generators-v1',
+            'data_provenance': build_data_provenance(config_dict),
+            'rng_protocol': RNG_PROTOCOL,
         }
     elif args.rq2_target_manifest or args.rq2_shift:
         raise ValueError('RQ2 target manifest and shift require --rq2-regime')
@@ -2643,5 +2657,16 @@ if __name__ == '__main__':
 
     print("Configuration:")
     print(config_dict)
+
+    if args.rq2_audit_output:
+        if not args.rq2_regime:
+            raise ValueError('--rq2-audit-output requires a formal RQ2 regime')
+        from tools.rq2_formal import validate_formal_runtime
+
+        validate_formal_runtime(config_dict)
+        with Path(args.rq2_audit_output).open('x', encoding='utf-8') as stream:
+            json.dump(config_dict, stream, sort_keys=True)
+        print('RQ2 CPU audit passed; no model or GPU job was created')
+        sys.exit(0)
 
     main(config_dict, resume=args.resume is not None, debug=args.debug)

@@ -365,7 +365,7 @@ class BaseTrainerDA:
                     break
 
             # Always save the current model
-            if epoch % self.save_period == 0:
+            if epoch % self.save_period == 0 and not rq2_formal:
                 self.save_ckpt(mode='latest', epoch=epoch)
 
             # extractions of accumulated metrics
@@ -602,6 +602,11 @@ class BaseTrainerDA:
                     'benchmark_eval_metrics.jsonl', benchmark_evaluation
                 )
 
+            # Periodic reporting creates loader iterators and consumes RNG.
+            # A resumable formal checkpoint must describe the END of the epoch.
+            if rq2_formal and epoch % self.save_period == 0:
+                self.save_ckpt(mode='latest', epoch=epoch)
+
         # Save the last model
         self.save_ckpt(mode='latest', epoch=epoch)
 
@@ -661,6 +666,7 @@ class BaseTrainerDA:
         }
         if self.cfg.get('rq2_formal'):
             state['rq2_run_signature'] = self.cfg['rq2_formal']['run_signature']
+            state['rq2_training_state'] = self.get_formal_training_state()
         if self.cfg.get('stage1', {}).get('enabled', False):
             state['stage1'] = {
                 'enabled': True,
@@ -695,6 +701,36 @@ class BaseTrainerDA:
             )
         return state
 
+    def get_formal_training_state(self):
+        fields = ('loss_normalizer', 'loss_normalizer_pseudo_labels', 'train_label_smoothing')
+        return {
+            'schema': 'rq2-training-control-v2',
+            'model': {key: float(getattr(self.model, key)) for key in fields},
+            'ema': {key: float(getattr(self.model_ema.module, key)) for key in fields},
+            'schedulers': {
+                key: scheduler.state_dict() if scheduler is not None else None
+                for key, scheduler in (
+                    ('source', self.lr_scheduler_gen_source),
+                    ('alignment', self.lr_scheduler_gen_source_alignment),
+                    ('discriminator', self.lr_scheduler_disc),
+                )
+            },
+        }
+
+    def restore_formal_training_state(self, state):
+        if not isinstance(state, dict) or state.get('schema') != 'rq2-training-control-v2':
+            raise ValueError('formal RQ2 resume lacks complete model/scheduler control state')
+        for name, model in (('model', self.model), ('ema', self.model_ema.module)):
+            for key in ('loss_normalizer', 'loss_normalizer_pseudo_labels', 'train_label_smoothing'):
+                setattr(model, key, float(state[name][key]))
+        for key, scheduler in (
+            ('source', self.lr_scheduler_gen_source),
+            ('alignment', self.lr_scheduler_gen_source_alignment),
+            ('discriminator', self.lr_scheduler_disc),
+        ):
+            if scheduler is not None:
+                scheduler.load_state_dict(state['schedulers'][key])
+
     def restore_control_state(self, checkpoint_state):
         formal = bool(self.cfg.get('rq2_formal'))
         required = (
@@ -703,6 +739,8 @@ class BaseTrainerDA:
         )
         if formal and any(checkpoint_state.get(key) is None for key in required):
             raise ValueError('formal RQ2 resume checkpoint lacks training control state')
+        if formal:
+            self.restore_formal_training_state(checkpoint_state.get('rq2_training_state'))
         if checkpoint_state.get('best_metric') is not None:
             self.best_metric = checkpoint_state['best_metric']
         if checkpoint_state.get('latest_best_epoch') is not None:

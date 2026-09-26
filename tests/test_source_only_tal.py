@@ -10,6 +10,9 @@ import ast
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
+import random
+import numpy as np
+from libs.datasets import make_data_loader
 
 
 def test_source_only_uses_only_source_epoch_length():
@@ -124,3 +127,124 @@ def test_target_iterator_does_not_change_source_order():
         torch.randperm(100, generator=source_a),
         torch.randperm(100, generator=source_b),
     )
+
+
+class RandomCropProbe(torch.utils.data.Dataset):
+    def __len__(self):
+        return 8
+
+    def __getitem__(self, index):
+        return (index, random.random(), float(np.random.random()), float(torch.rand(())))
+
+
+def test_epoch_reset_workers_preserve_order_and_crop_rng_after_resume():
+    generator = torch.Generator().manual_seed(6)
+    loader = make_data_loader(RandomCropProbe(), True, generator, 2, 2,
+                              persistent_workers=False)
+    list(loader)
+    saved = generator.get_state()
+    expected = list(loader)
+    restored = torch.Generator()
+    restored.set_state(saved)
+    resumed = make_data_loader(RandomCropProbe(), True, restored, 2, 2,
+                               persistent_workers=False)
+    assert expected == list(resumed)
+
+
+def test_actual_checkpoint_control_restores_normalizers_and_scheduler_phases():
+    path = Path(__file__).parents[1] / "libs/trainer/base_trainer_da.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    methods = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+               and node.name in ("get_formal_training_state", "restore_formal_training_state")]
+    namespace = {}
+    exec(compile(ast.Module(body=methods, type_ignores=[]), str(path), "exec"), namespace)
+
+    def trainer(normalizer):
+        fields = dict(loss_normalizer=normalizer, loss_normalizer_pseudo_labels=127.5,
+                      train_label_smoothing=0.1)
+        parameter = torch.nn.Parameter(torch.tensor(1.0))
+        optimizer = torch.optim.AdamW([parameter], lr=0.01)
+        return SimpleNamespace(
+            model=SimpleNamespace(**fields), model_ema=SimpleNamespace(module=SimpleNamespace(**fields)),
+            lr_scheduler_gen_source=torch.optim.lr_scheduler.StepLR(optimizer, 2),
+            lr_scheduler_gen_source_alignment=torch.optim.lr_scheduler.StepLR(optimizer, 3),
+            lr_scheduler_disc=torch.optim.lr_scheduler.StepLR(optimizer, 4),
+        )
+
+    continuous, resumed = trainer(318.8), trainer(250)
+    # Deliberately distinct phases: SO must not reconstruct a progressing discriminator.
+    continuous.lr_scheduler_gen_source.last_epoch = 4
+    continuous.lr_scheduler_gen_source_alignment.last_epoch = 9
+    continuous.lr_scheduler_disc.last_epoch = 0
+    state = namespace["get_formal_training_state"](continuous)
+    namespace["restore_formal_training_state"](resumed, state)
+    assert namespace["get_formal_training_state"](resumed) == state
+    assert 1600 / continuous.model.loss_normalizer == 1600 / resumed.model.loss_normalizer
+    with pytest.raises(ValueError, match="complete model/scheduler"):
+        namespace["restore_formal_training_state"](resumed, None)
+
+
+def test_formal_latest_checkpoint_is_saved_after_rng_consuming_reporting():
+    path = Path(__file__).parents[1] / "libs/trainer/base_trainer_da.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    train = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+                 and node.name == "train")
+    loop = next(node for node in train.body if isinstance(node, ast.For)
+                and isinstance(node.target, ast.Name) and node.target.id == "epoch"
+                and any(isinstance(item, ast.Call) and isinstance(item.func, ast.Attribute)
+                        and item.func.attr == "_train_epoch" for item in ast.walk(node)))
+    last_report = max(node.lineno for node in ast.walk(loop) if isinstance(node, ast.Call)
+                      and isinstance(node.func, ast.Attribute) and node.func.attr == "_test_epoch")
+    formal_save = next(node for node in loop.body if isinstance(node, ast.If)
+                       and isinstance(node.test, ast.BoolOp)
+                       and isinstance(node.test.values[0], ast.Name)
+                       and node.test.values[0].id == "rq2_formal")
+    assert formal_save.lineno > last_report
+
+
+def test_real_sada_next_loss_and_gradient_match_after_control_restore():
+    pytest.importorskip("einops")  # Full-model regression runs in the remote SADA environment.
+    from libs.models.SADA import make_meta_arch
+    from libs.utils.utils import read_yaml, _update_config
+    from libs.utils.parse_config import ConfigParser
+
+    root = Path(__file__).parents[1]
+    cfg = read_yaml(root / "configs/dark_vs_all_new_videos_full/version_final_ckpt.yaml")
+    # Short CPU input; detector/loss code and all hidden dimensions are unchanged.
+    cfg["dataset"]["max_seq_len"] = 256
+    cfg["diagnostic"] = {"supervised_upper_bound": "source_only"}
+    cfg = _update_config(cfg)
+    previous_threads = torch.get_num_threads()
+    torch.set_num_threads(2)
+    try:
+        torch.manual_seed(6)
+        model = make_meta_arch(cfg["model_name"], ConfigParser(cfg, save=False), device="cpu")
+        model.train()
+        video = {"feats": torch.randn(2304, 96), "segments": torch.tensor([[20., 40.]]),
+                 "labels": torch.tensor([0]), "video_id": "cpu_probe"}
+        model([video], [video], mode="train", curr_epoch=1)
+        path = root / "libs/trainer/base_trainer_da.py"
+        methods = [node for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+                   if isinstance(node, ast.FunctionDef)
+                   and node.name in ("get_formal_training_state", "restore_formal_training_state")]
+        namespace = {}
+        exec(compile(ast.Module(body=methods, type_ignores=[]), str(path), "exec"), namespace)
+        trainer = SimpleNamespace(model=model, model_ema=SimpleNamespace(module=model),
+                                  lr_scheduler_gen_source=None,
+                                  lr_scheduler_gen_source_alignment=None, lr_scheduler_disc=None)
+        state = namespace["get_formal_training_state"](trainer)
+        rng = torch.get_rng_state()
+        first = model([video], [video], mode="train", curr_epoch=1)[0]["downstream_loss"]
+        first.backward()
+        parameter = next(parameter for parameter in model.parameters() if parameter.grad is not None)
+        gradient = parameter.grad.clone()
+        model.zero_grad(set_to_none=True)
+        model.loss_normalizer = model.loss_normalizer_pseudo_labels = 250
+        namespace["restore_formal_training_state"](trainer, state)
+        torch.set_rng_state(rng)
+        restored = model([video], [video], mode="train", curr_epoch=1)[0]["downstream_loss"]
+        restored.backward()
+        torch.testing.assert_close(first, restored, rtol=0, atol=0)
+        torch.testing.assert_close(gradient, parameter.grad, rtol=0, atol=0)
+    finally:
+        torch.set_num_threads(previous_threads)

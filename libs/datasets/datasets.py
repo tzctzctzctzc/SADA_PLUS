@@ -16,7 +16,8 @@ def make_dataset(name, is_training, split, **kwargs):
    dataset = datasets[name](is_training, split, **kwargs)
    return dataset
 
-def make_data_loader(dataset, is_training, generator, batch_size, num_workers):
+def make_data_loader(dataset, is_training, generator, batch_size, num_workers,
+                     persistent_workers=True):
     """
         A simple dataloder builder
     """
@@ -29,6 +30,6 @@ def make_data_loader(dataset, is_training, generator, batch_size, num_workers):
         shuffle=is_training,
         drop_last=is_training,
         generator=generator,
-        persistent_workers=True
+        persistent_workers=persistent_workers and num_workers > 0
     )
     return loader

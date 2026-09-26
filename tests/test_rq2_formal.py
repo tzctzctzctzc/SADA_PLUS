@@ -12,7 +12,8 @@ from tools.rq2_evaluate import (
 )
 from tools.rq2_formal import (
     FROZEN_VIDEO_SET_SHA256, build_formal_run_signature, build_target_manifest,
-    build_epoch_budget, TRAINING_BUDGET_PROTOCOL, SOURCE_OPTIMIZATION_PROTOCOL,
+    build_epoch_budget, build_data_provenance, RNG_PROTOCOL,
+    TRAINING_BUDGET_PROTOCOL, SOURCE_OPTIMIZATION_PROTOCOL,
     check_formal_config, check_formal_features, check_frozen_runtime_values,
     check_target_manifest, validate_formal_resume, validate_formal_runtime,
 )
@@ -302,11 +303,12 @@ def test_formal_runtime_and_resume_require_exact_signature(tmp_path):
             "regime": "so", "shift": "S1", "target_manifest": None,
             "training_budget": TRAINING_BUDGET_PROTOCOL,
             "source_optimization": SOURCE_OPTIMIZATION_PROTOCOL,
-            "rng_protocol": "independent-source-target-generators-v1",
+            "rng_protocol": RNG_PROTOCOL,
         },
         "seed": 6,
     }
     cfg["rq2_formal"]["epoch_budget"] = build_epoch_budget(cfg)
+    cfg["rq2_formal"]["data_provenance"] = build_data_provenance(cfg)
     signature = build_formal_run_signature(cfg)
     cfg["rq2_formal"]["run_signature"] = signature
     assert validate_formal_runtime(cfg, signature) == signature
@@ -338,6 +340,37 @@ def test_epoch_budget_reads_membership_without_target_action_fields(tmp_path):
     assert budget == {"source_videos": 5, "target_videos": 9, "source_batches": 2,
                       "target_batches": 4, "iterations_per_epoch": 4,
                       "batch_size": 2, "drop_last": True}
+
+
+@pytest.mark.parametrize("change", ["label", "segment", "membership"])
+def test_data_provenance_rejects_same_count_annotation_changes(tmp_path, change):
+    annotation = tmp_path / "annotations.json"
+    database = {
+        "s": {"subset": "source_train", "annotations": [{"label_id": 0, "segment": [1, 2]}]},
+        "t": {"subset": "target_train", "annotations": []},
+    }
+    annotation.write_text(json.dumps({"database": database}), encoding="utf-8")
+    cfg = {
+        "dataset": {"json_file": str(annotation)}, "loader": {"batch_size": 1},
+        "src_train_split": ["source_train"], "tgt_train_split": ["target_train"],
+        "rq2_formal": {"training_budget": TRAINING_BUDGET_PROTOCOL,
+                       "source_optimization": SOURCE_OPTIMIZATION_PROTOCOL,
+                       "rng_protocol": RNG_PROTOCOL},
+    }
+    cfg["rq2_formal"]["epoch_budget"] = build_epoch_budget(cfg)
+    cfg["rq2_formal"]["data_provenance"] = build_data_provenance(cfg)
+    if change == "membership":
+        database["s"]["subset"], database["t"]["subset"] = "target_train", "source_train"
+    elif change == "label":
+        database["s"]["annotations"][0]["label_id"] = 1
+    else:
+        database["s"]["annotations"][0]["segment"] = [2, 3]
+    annotation.write_text(json.dumps({"database": database}), encoding="utf-8")
+    assert build_epoch_budget(cfg) == cfg["rq2_formal"]["epoch_budget"]
+    with pytest.raises(ValueError, match="annotation or split membership"):
+        validate_formal_runtime(cfg)
+    with pytest.raises(ValueError, match="provenance differs"):
+        checkpoint_config_for_audit(cfg, {})
 
 
 def test_resume_operational_path_does_not_change_run_signature():
@@ -465,3 +498,26 @@ def test_pair_aggregate_requires_complete_seed_grid(tmp_path):
     paths[-1].write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ValueError, match="different training protocols"):
         aggregate_pair_summaries(paths, tmp_path / "mixed.json", require_complete=False)
+
+
+def test_aggregate_allows_shift_members_but_requires_same_data_and_rng(tmp_path):
+    paths = []
+    for shift in ("S1", "S2"):
+        payload = {
+            "schema": "rq2-so-uda-pair-v1", "seed": 6, "shift": shift,
+            "feature_protocol_sha256": "feature", "metrics": {"T_SO": 0.2, "T_UDA": 0.3},
+            "map_by_tiou": {}, "ap_by_class": {},
+            "training_protocol": {
+                "training_budget": TRAINING_BUDGET_PROTOCOL, "rng_protocol": RNG_PROTOCOL,
+                "source_optimization": SOURCE_OPTIMIZATION_PROTOCOL,
+                "data_provenance": {"annotation_sha256": "same", "split_members_sha256": shift},
+            },
+        }
+        path = tmp_path / (shift + ".json")
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        paths.append(path)
+    aggregate_pair_summaries(paths, tmp_path / "ok.json", require_complete=False)
+    payload["training_protocol"]["data_provenance"]["annotation_sha256"] = "changed"
+    paths[-1].write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="different training protocols"):
+        aggregate_pair_summaries(paths, tmp_path / "bad.json", require_complete=False)

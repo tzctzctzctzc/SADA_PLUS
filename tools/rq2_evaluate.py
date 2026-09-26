@@ -30,6 +30,10 @@ def load_checkpoint(path):
 def checkpoint_config_for_audit(saved_config, frozen_config):
     formal = saved_config.get("rq2_formal")
     if formal:
+        if formal.get('data_provenance'):
+            from tools.rq2_formal import build_data_provenance
+            if formal['data_provenance'] != build_data_provenance(saved_config):
+                raise ValueError('checkpoint annotation or split membership provenance differs')
         manifest = formal.get("target_manifest")
         manifest_path = manifest.get("path") if isinstance(manifest, dict) else manifest
         checked_manifest = check_formal_config(
@@ -159,7 +163,7 @@ def evaluate(cfg, ckpt_path, config_path, output_dir, device, feature_protocol=N
         "annotation_sha256": sha256_file(cfg["dataset"]["json_file"]),
         "training_protocol": {
             key: saved_config.get("rq2_formal", {}).get(key)
-            for key in ("training_budget", "source_optimization", "epoch_budget")
+            for key in ("training_budget", "source_optimization", "epoch_budget", "rng_protocol", "data_provenance")
         },
     }
     summaries = {}
@@ -443,8 +447,11 @@ def aggregate_pair_summaries(pair_paths, output_path, require_complete=True):
     # Counts differ by shift; the budget and optimization policy must not.
     training_policies = {
         json.dumps({
+            "annotation_sha256": ((record.get("training_protocol") or {}).get("data_provenance") or {}).get("annotation_sha256"),
+            **{
             key: (record.get("training_protocol") or {}).get(key)
-            for key in ("training_budget", "source_optimization")
+            for key in ("training_budget", "source_optimization", "rng_protocol")
+            },
         }, sort_keys=True)
         for record in records
     }

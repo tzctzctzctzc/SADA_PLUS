@@ -18,9 +18,23 @@ FROZEN_VIDEO_SET_SHA256 = "8308e5e6cd2076fa68247aaf71dc44d6a9ed87ae4a116b3c4971e
 RUN_SIGNATURE_SCHEMA = "rq2-formal-run-v1"
 TRAINING_BUDGET_PROTOCOL = "max-source-target-batches-per-epoch-v2"
 SOURCE_OPTIMIZATION_PROTOCOL = "sada-matched-two-phase-adamw-v1"
-RNG_PROTOCOL = "independent-source-target-generators-v1"
+RNG_PROTOCOL = "epoch-reset-source-target-generators-v2"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _GIT_REVISION = re.compile(r"^[0-9a-f]{40,64}$")
+
+
+def build_data_provenance(cfg):
+    path = Path(cfg['dataset']['json_file'])
+    with path.open(encoding='utf-8') as stream:
+        database = json.load(stream)['database']
+    members = {}
+    for key in ('src_train_split', 'tgt_train_split', 'src_val_split', 'tgt_val_split'):
+        selected = sorted(video_id for video_id, video in database.items()
+                          if video['subset'].lower() in cfg.get(key, []))
+        members[key] = hashlib.sha256(('\n'.join(selected) + '\n').encode('utf-8')).hexdigest()
+    # Hashing the file establishes provenance; target action fields never enter
+    # training, crop selection, budget computation, or checkpoint selection.
+    return {'annotation_sha256': sha256_file(path), 'split_members_sha256': members}
 
 
 def build_epoch_budget(cfg):
@@ -280,6 +294,8 @@ def validate_formal_runtime(cfg, expected_signature=None):
         raise ValueError("formal RQ2 source optimization protocol differs")
     if formal.get("epoch_budget") != build_epoch_budget(cfg):
         raise ValueError("formal RQ2 epoch budget differs from frozen video counts")
+    if formal.get('data_provenance') != build_data_provenance(cfg):
+        raise ValueError('formal RQ2 annotation or split membership changed after audit')
     if formal.get("rng_protocol") != RNG_PROTOCOL:
         raise ValueError("formal RQ2 RNG protocol differs")
     manifest = formal.get("target_manifest")

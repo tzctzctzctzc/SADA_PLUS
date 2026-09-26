@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+echo 'Legacy queue references old SO results. Do not use it for the new matched protocol.' >&2
+exit 2
 
 gpu=$1
 artifact_root=$2
