@@ -794,8 +794,14 @@ def main(cfg, resume, project_name='sada', debug=False):
     if args.resume:
         if os.path.isfile(args.resume):
             # load ckpt, reset epoch / best rmse
-            checkpoint = torch.load(args.resume,
-                                    map_location=lambda storage, loc: storage.cuda(device))
+            if cfg.get('rq2_formal'):
+                from tools.rq2_evaluate import load_checkpoint
+
+                # Local full checkpoints include config and Python/NumPy RNG state.
+                checkpoint = load_checkpoint(args.resume)
+            else:
+                checkpoint = torch.load(args.resume,
+                                        map_location=lambda storage, loc: storage.cuda(device))
             if cfg.get('rq2_formal'):
                 from tools.rq2_formal import validate_formal_resume
 
@@ -890,6 +896,7 @@ def main(cfg, resume, project_name='sada', debug=False):
                 for key in (
                     'best_metric', 'latest_best_epoch', 'not_improved_count',
                     'training_rng_state', 'selection_provenance',
+                    'rq2_training_state',
                 )
             }
             print("=> loaded checkpoint '{:s}' (epoch {:d}".format(

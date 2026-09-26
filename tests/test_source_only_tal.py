@@ -202,6 +202,18 @@ def test_formal_latest_checkpoint_is_saved_after_rng_consuming_reporting():
     assert formal_save.lineno > last_report
 
 
+def test_training_entry_forwards_new_checkpoint_control_to_trainer():
+    path = Path(__file__).parents[1] / "train_da.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    assignment = next(node for node in ast.walk(tree) if isinstance(node, ast.Assign)
+                      and any(isinstance(target, ast.Name) and target.id == "resume_control_state"
+                              for target in node.targets)
+                      and isinstance(node.value, ast.DictComp))
+    context = {"checkpoint": {"rq2_training_state": {"schema": "rq2-training-control-v2"}}}
+    exec(compile(ast.Module(body=[assignment], type_ignores=[]), str(path), "exec"), context)
+    assert context["resume_control_state"]["rq2_training_state"] == context["checkpoint"]["rq2_training_state"]
+
+
 def test_real_sada_next_loss_and_gradient_match_after_control_restore():
     pytest.importorskip("einops")  # Full-model regression runs in the remote SADA environment.
     from libs.models.SADA import make_meta_arch
