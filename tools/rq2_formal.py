@@ -117,6 +117,10 @@ def check_target_manifest(path, target_splits, annotation_path=None):
 def check_formal_config(cfg, regime, manifest_path=None):
     if regime not in ("so", "uda"):
         raise ValueError("RQ2 regime must be so or uda")
+    if cfg.get("rq3_auxiliary"):
+        # RQ3复用相同预算/标签隔离门禁；只有这个明确记录的新辅助项可以开启。
+        from tools.rq3_protocol import validate_config
+        validate_config(cfg, regime)
     if cfg["dataset_name"] != "epic" or cfg["dataset"].get("action_subsampling") != "10_majority_classes":
         raise ValueError("formal RQ2 requires EPIC ten-class TAL")
     supervised = cfg.get("diagnostic", {}).get("supervised_upper_bound", "off")

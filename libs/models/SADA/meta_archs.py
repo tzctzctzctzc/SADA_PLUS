@@ -47,6 +47,7 @@ from .target_adapter import (
     build_vlm_target_distillation,
     load_vlm_target_adapter_cache,
 )
+from .rq3_auxiliary import RQ3Auxiliary
 from .oracle_task import (
     ORACLE_TARGET_TASK_MODES,
     compose_oracle_target_task_loss,
@@ -1508,6 +1509,15 @@ class SADA(nn.Module):
             )
 
         self.proposal_semantic_branch = None
+        self.rq3_auxiliary = None
+        if cfg.get('rq3_auxiliary'):
+            from tools.rq3_protocol import load_cache
+            rq3 = cfg['rq3_auxiliary']
+            _, rq3_cache = load_cache(rq3['cache_path'], rq3['teacher_model'])
+            self.rq3_auxiliary = RQ3Auxiliary(
+                rq3['strategy'], rq3['levels'], [fpn_dim] * self.n_levels,
+                self.num_class_orig, rq3_cache, rq3['budget'], rq3['prototype_momentum'],
+            )
         self.proposal_target_adapters = nn.ModuleList()
         self.proposal_logit_adapters = nn.ModuleList()
         if self.proposal_semantic_enabled:
@@ -3203,6 +3213,19 @@ class SADA(nn.Module):
                     losses['downstream_loss'] + weighted_relation_loss
                 )
             
+            if mode == 'train' and self.rq3_auxiliary is not None:
+                rq3_output = self.rq3_auxiliary(
+                    video_list_tgt, points, fpn_masks_tgt,
+                    [value.permute(0, 2, 1) for value in out_cls_logits_tgt],
+                    fpn_feats_tgt, fpn_feats_src, fpn_masks_src, gts_cls_per_level_src,
+                    losses['source_gt_downstream_loss'], curr_epoch >= self.warmup_adv,
+                    self.cfg['model'].get('pl_threshold', 0.7),
+                    self.cfg['model'].get('focal_loss_gamma', 2.0),
+                )
+                for key, value in rq3_output.items():
+                    losses['rq3_' + key] = torch.as_tensor(value, device=self.device).detach()
+                losses['downstream_loss'] = losses['downstream_loss'] + rq3_output['loss']
+
             # Return the GTs of the target domain as well, to be used to compute the anchors
             gt_tgt_cls = torch.stack(gt_cls_labels[bs:])   # shape: List of B elements B x FT x C
             gt_tgt_cls = gt_tgt_cls[valid_mask_tgt_pl]  # T' x C

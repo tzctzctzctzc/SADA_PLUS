@@ -1113,6 +1113,9 @@ def create_argparser():
     parser.add_argument('--rq2-shift', choices=('S1', 'S2', 'S3', 'S4', 'S5', 'S6'))
     parser.add_argument('--rq2-registry', default='configs/rq2/shift_registry.yaml')
     parser.add_argument('--rq2-reference-root', default='./data/ek100_slowfast/features')
+    parser.add_argument('--rq3-strategy', choices=('off', 'hard', 'verify', 'prototype'), default='off')
+    parser.add_argument('--rq3-cache', default=None)
+    parser.add_argument('--rq3-teacher', choices=('egovideo_hod', 'internvideo2_clip_1b', 'qwen3_vl_8b'))
     parser.add_argument(
         '--trident-head', action='store_true',
         help='use the TriDet class-conditioned boundary and offset heads',
@@ -2654,6 +2657,13 @@ if __name__ == '__main__':
     config_dict["config_path"] = args.config_path
     config_dict["name"] = args.name
     config_dict["gpu"] = args.gpu
+
+    if args.rq3_strategy != 'off' and (args.rq2_regime != 'uda' or args.seed != 6):
+        raise ValueError('RQ3 auxiliary strategies require matched UDA and seed6')
+    # 原YAML的seed是123；必须在CLI覆盖为实际运行seed之后绑定RQ3缓存。
+    from tools.rq3_protocol import configure as configure_rq3
+    configure_rq3(config_dict, args.rq3_strategy, args.rq3_cache,
+                  args.rq3_teacher, args.rq2_shift)
 
     if args.rq2_regime:
         from tools.rq2_formal import build_formal_run_signature

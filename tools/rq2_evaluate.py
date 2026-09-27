@@ -139,6 +139,9 @@ def evaluate(cfg, ckpt_path, config_path, output_dir, device, feature_protocol=N
 
     from libs.utils.parse_config import ConfigParser
 
+    if saved_config.get("rq3_auxiliary"):
+        # 推理时保留buffer/配置身份以strict加载；forward不使用教师或辅助损失。
+        cfg["rq3_auxiliary"] = deepcopy(saved_config["rq3_auxiliary"])
     model_cfg = ConfigParser(cfg, save=False)
     model = make_meta_arch(cfg["model_name"], model_cfg, device=device).to(device)
     model.load_state_dict(state, strict=True)
@@ -167,6 +170,8 @@ def evaluate(cfg, ckpt_path, config_path, output_dir, device, feature_protocol=N
         },
     }
     summaries = {}
+    if saved_config.get("rq3_auxiliary"):
+        metadata["rq3_auxiliary"] = saved_config["rq3_auxiliary"]
     for name, split_key, output_path in zip(
         ("source", "target"), ("src_val_split", "tgt_val_split"), output_paths
     ):

@@ -1,0 +1,152 @@
+"""RQ3：三个VLM教师×三个策略×六shift×seed6。默认只打印计划，不训练。"""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+
+import yaml
+
+from tools.rq2_dense_protocol import sha256_file
+from tools.rq3_protocol import MODELS, STRATEGIES, audit_baseline, load_cache, members_for
+
+CODE_ROOT = Path(__file__).resolve().parents[1]
+
+
+def matrix():
+    return [(model, strategy, "S" + str(shift))
+            for model in MODELS for strategy in STRATEGIES for shift in range(1, 7)]
+
+
+def baseline_root(parent, shift):
+    return parent / ("rq2_matched_slowfast_{}_seed6_7067306_0927".format(shift))
+
+
+def completed_baseline(root, shift):
+    from tools.run_rq2_matched_control import check_new_protocol, checked_evaluation, checked_train_result
+    complete = json.loads((root / "complete.json").read_text())
+    if complete["model"] != "slowfast" or complete["shift"] != shift or complete["seed"] != 6:
+        raise ValueError("RQ3 baseline root belongs to another model/shift/seed")
+    configs, checkpoints = {}, {}
+    for regime in ("so", "uda"):
+        path = Path(complete[regime])
+        cfg = json.loads(path.read_text())
+        check_new_protocol(cfg)
+        run_root = path.parent.parent
+        checked_path, checkpoint = checked_train_result(run_root, root / "logs" / (regime + ".train.log"), cfg)
+        if checked_path != path:
+            raise ValueError("completed baseline checkpoint/config identity differs")
+        checked_evaluation(root / regime / (shift + "_seed6"), cfg, checkpoint)
+        configs[regime], checkpoints[regime] = cfg, checkpoint
+    from tools.audit_rq2_vlm_benchmark import audit_so_uda_pair
+    audit_so_uda_pair(Path(complete["so"]), Path(complete["uda"]))
+    return configs["uda"], checkpoints["so"]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--gpu", type=int, choices=(3,), default=3)
+    parser.add_argument("--cache-root", type=Path, required=True,
+                        help="<root>/<teacher>/<shift>.json；三策略复用同一缓存")
+    parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--baseline-parent", type=Path, default=Path("/vepfs/vlms"))
+    parser.add_argument("--data-root", type=Path, default=Path("/vepfs/vlms/SADA_PLUS"))
+    parser.add_argument("--manifest-root", type=Path, default=Path("/vepfs/vlms/rq2_uda_target_manifests_0924"))
+    parser.add_argument("--expected-head", required=True)
+    parser.add_argument("--audit-only", action="store_true", help="真实train_da CPU预检，不创建GPU任务")
+    parser.add_argument("--execute", action="store_true", help="显式执行54项；只使用GPU3")
+    args = parser.parse_args()
+    if args.audit_only and args.execute:
+        parser.error("--audit-only and --execute are exclusive")
+    if not args.audit_only and not args.execute:
+        for model, strategy, shift in matrix():
+            print("{} {} {} seed6 gpu3 cache={}".format(model, strategy, shift, args.cache_root / model / (shift + ".json")))
+        return
+    from tools.run_rq2_matched_control import (
+        check_code, check_new_protocol, checked_evaluation, checked_train_result,
+        idle_gpu_uuid, run_command,
+    )
+    # 后面会切换到数据工作树；相对路径只在调用目录解释一次。
+    for key in ("cache_root", "output_root", "baseline_parent", "data_root", "manifest_root"):
+        setattr(args, key, getattr(args, key).resolve())
+    check_code(args.expected_head)
+    args.output_root.mkdir(parents=True, exist_ok=False)
+    registry = args.data_root / "configs/rq2/shift_registry.yaml"
+    if sha256_file(registry) != sha256_file(CODE_ROOT / "configs/rq2/shift_registry.yaml"):
+        raise ValueError("RQ3 code/data registries differ")
+    shifts = yaml.safe_load(registry.read_text())["shifts"]
+    previous = Path.cwd()
+    os.chdir(args.data_root)
+    try:
+        baselines = {shift: completed_baseline(baseline_root(args.baseline_parent, shift), shift)
+                     for shift in ("S" + str(index) for index in range(1, 7))}
+        # 三模型每shift必须实际使用同一候选、SO teacher和帧；不按增益筛选。
+        shared = {}
+        for model in MODELS:
+            for shift, (cfg, teacher_checkpoint) in baselines.items():
+                path = args.cache_root / model / (shift + ".json")
+                payload, _ = load_cache(path, model, shift, members_for(cfg, "tgt"))
+                if payload["teacher_checkpoint_sha256"] != sha256_file(teacher_checkpoint):
+                    raise ValueError("RQ3 cache does not use the completed source-selected SO teacher")
+                identity = (payload["candidate_sha256"], payload["frames_sha256"], payload["teacher_checkpoint_sha256"])
+                if shift in shared and shared[shift] != identity:
+                    raise ValueError("RQ3 VLMs use different candidate/frame/teacher inputs")
+                shared[shift] = identity
+        # 同一物理卡锁覆盖整个训练/评估队列；从不干预外部任务。
+        import fcntl
+        with (args.data_root / ".rq2_gpu3.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            for model, strategy, shift in matrix():
+                root = args.output_root / model / strategy / (shift + "_seed6")
+                (root / "logs").mkdir(parents=True, exist_ok=False)
+                name = "rq3_{}_{}_{}_seed6_{}".format(model, strategy, shift, args.output_root.name)
+                if (args.data_root / "model_results" / name).exists():
+                    raise FileExistsError("RQ3 result exists; never overwrite partial or completed runs")
+                config = CODE_ROOT / shifts[shift]["config"]
+                common = ["-c", str(config), "-s", "6", "-i", "0", "--rq2-shift", shift,
+                          "--rq2-registry", str(registry), "--rq2-reference-root",
+                          str(args.data_root / "data/ek100_slowfast/features")]
+                command = [sys.executable, "-B", str(CODE_ROOT / "train_da.py"), *common, "-n", name,
+                           "--debug", "--benchmark-audit-log", "--rq2-regime", "uda",
+                           "--supervised-upper-bound", "off", "--rq2-target-manifest",
+                           str(args.manifest_root / (shift + ".json")), "--rq3-strategy", strategy,
+                           "--rq3-teacher", model, "--rq3-cache", str(args.cache_root / model / (shift + ".json"))]
+                check_code(args.expected_head)
+                preflight = root / "preflight.json"
+                run_command(command + ["--rq2-audit-output", str(preflight)], root / "logs/preflight.log", args.data_root)
+                cfg = json.loads(preflight.read_text())
+                check_new_protocol(cfg)
+                pairing = audit_baseline(baselines[shift][0], cfg)
+                (root / "baseline_pair.json").write_text(json.dumps(pairing, sort_keys=True))
+                if args.audit_only:
+                    continue
+                check_code(args.expected_head)
+                uuid = idle_gpu_uuid(3)
+                run_command(command, root / "logs/uda.train.log", args.data_root, uuid)
+                config_path, checkpoint = checked_train_result(args.data_root / "model_results" / name,
+                                                              root / "logs/uda.train.log", cfg)
+                audit_baseline(baselines[shift][0], json.loads(config_path.read_text()))
+                check_code(args.expected_head)
+                uuid = idle_gpu_uuid(3)
+                evaluation = [sys.executable, "-B", str(CODE_ROOT / "evaluate_da.py"), *common,
+                              "-n", name + "_eval", "-r", str(checkpoint), "--rq2-formal",
+                              "--rq2-output-dir", str(root / "evaluation")]
+                run_command(evaluation, root / "logs/uda.eval.log", args.data_root, uuid)
+                manifest = checked_evaluation(root / "evaluation", cfg, checkpoint)
+                if manifest.get("rq3_auxiliary") != cfg["rq3_auxiliary"]:
+                    raise ValueError("RQ3 evaluation lost strategy/cache provenance")
+                (root / "complete.json").write_text(json.dumps({
+                    "teacher": model, "strategy": strategy, "shift": shift, "seed": 6,
+                    "single_seed_stage_result": True, "code_commit": args.expected_head,
+                    "baseline_root": str(baseline_root(args.baseline_parent, shift)),
+                    "cache_sha256": cfg["rq3_auxiliary"]["cache_sha256"],
+                    "checkpoint_sha256": sha256_file(checkpoint),
+                    "manifest_sha256": sha256_file(root / "evaluation/manifest.json"),
+                }, sort_keys=True))
+    finally:
+        os.chdir(previous)
+
+
+if __name__ == "__main__":
+    main()
