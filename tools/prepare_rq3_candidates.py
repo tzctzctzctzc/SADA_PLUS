@@ -34,7 +34,7 @@ def video_paths_by_id(video_root):
 
 
 def exact_rgb_frames(path, indices, recovery_root=None):
-    """按PTS核对帧号，从头顺序解码；损坏/缺失帧不得被seek误返邻帧替代。"""
+    """按稀疏区间seek再逐帧核对PTS；不解码长空隙，也不拿邻帧替代。"""
     import av
     recovered, result = {}, {}
     if recovery_root:
@@ -56,26 +56,31 @@ def exact_rgb_frames(path, indices, recovery_root=None):
         rate = float(stream.average_rate)
         time_base = float(stream.time_base)
         origin = (stream.start_time or 0) * time_base
-        first_requested_sec = origin + min(wanted) / rate
-        container.seek(
-            int(round(first_requested_sec / time_base)),
-            stream=stream,
-            backward=True,
-            any_frame=False,
-        )
-        for frame in container.decode(stream):
-            if frame.pts is None:
-                raise ValueError("video lacks frame timestamps")
-            position = (frame.pts * time_base - origin) * rate
-            index = round(position)
-            if abs(position - index) > .05:
-                raise ValueError("video PTS does not match the canonical frame grid")
-            if index in wanted:
-                if index in result:
-                    raise ValueError("video has duplicate requested frame timestamps")
-                result[index] = frame.to_ndarray(format="rgb24")
-            if not wanted or index > max(wanted):
-                break
+        groups = []
+        for index in sorted(wanted):
+            if not groups or index - groups[-1][-1] > 2 * rate:
+                groups.append([])
+            groups[-1].append(index)
+        for group in groups:
+            first_requested_sec = origin + group[0] / rate
+            container.seek(int(round(first_requested_sec / time_base)), stream=stream,
+                           backward=True, any_frame=False)
+            requested = set(group)
+            for frame in container.decode(stream):
+                if frame.pts is None:
+                    raise ValueError("video lacks frame timestamps")
+                position = (frame.pts * time_base - origin) * rate
+                index = round(position)
+                if abs(position - index) > .05:
+                    raise ValueError("video PTS does not match the canonical frame grid")
+                if index in requested:
+                    if index in result:
+                        raise ValueError("video has duplicate requested frame timestamps")
+                    result[index] = frame.to_ndarray(format="rgb24")
+                if index > group[-1]:
+                    break
+            if not requested.issubset(result):
+                raise ValueError("exact requested video frames are missing; no neighboring-frame substitution")
     result.update(recovered)
     if set(result) != set(indices):
         raise ValueError("exact requested video frames are missing; no neighboring-frame substitution")
