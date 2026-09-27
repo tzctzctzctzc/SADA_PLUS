@@ -56,6 +56,13 @@ def exact_rgb_frames(path, indices, recovery_root=None):
         rate = float(stream.average_rate)
         time_base = float(stream.time_base)
         origin = (stream.start_time or 0) * time_base
+        first_requested_sec = origin + min(wanted) / rate
+        container.seek(
+            int(round(first_requested_sec / time_base)),
+            stream=stream,
+            backward=True,
+            any_frame=False,
+        )
         for frame in container.decode(stream):
             if frame.pts is None:
                 raise ValueError("video lacks frame timestamps")
