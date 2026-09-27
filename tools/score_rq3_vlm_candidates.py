@@ -13,9 +13,9 @@ import numpy as np
 from PIL import Image
 
 from tools.build_rq3_cache import paired_text_probabilities
-from tools.rq2_dense_protocol import protocol_sha256, sha256_file
+from tools.rq2_dense_protocol import sha256_file
 from tools.rq3_protocol import (FRAME_PROTOCOL, FROZEN_PROTOCOLS, INTERN_TEXT_SHA256,
-                                MODELS, content_hash)
+                                MODELS, content_hash, read_frozen_protocol)
 from tools.run_clip_target_adapter import ACTION_PHRASES
 
 
@@ -164,9 +164,7 @@ def main():
     args = parser.parse_args()
     from tools.run_rq2_matched_control import check_code, idle_gpu_uuid
     check_code(args.expected_head)
-    frozen = json.loads(args.frozen_protocol.read_text())
-    if protocol_sha256(frozen) != FROZEN_PROTOCOLS[args.model] or frozen["model_name"] != args.model:
-        raise ValueError("unknown official RQ2 teacher checkpoint anchor")
+    frozen = read_frozen_protocol(args.frozen_protocol, args.model)
     settings = json.loads(args.settings.read_text())
     files = checkpoint_files(args.model, settings, frozen)
     # 每个构造器实际加载的文件也必须在已审计的列表内。

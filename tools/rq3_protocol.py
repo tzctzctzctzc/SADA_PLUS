@@ -7,7 +7,7 @@ import math
 from pathlib import Path
 import numpy as np
 
-from tools.rq2_dense_protocol import sha256_file
+from tools.rq2_dense_protocol import read_protocol, sha256_file
 from tools.run_clip_target_adapter import LABELS as TARGET_CLASS_NAMES
 
 
@@ -28,6 +28,15 @@ FROZEN_PROTOCOLS = {
 
 def content_hash(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def read_frozen_protocol(path, model):
+    if model not in FROZEN_PROTOCOLS:
+        raise ValueError("unknown official RQ2 teacher model")
+    payload = read_protocol(path)
+    if payload["protocol_sha256"] != FROZEN_PROTOCOLS[model] or payload["model_name"] != model:
+        raise ValueError("unknown official RQ2 teacher checkpoint anchor")
+    return payload
 
 
 def members_for(cfg, domain):
@@ -134,11 +143,7 @@ def validate_interface_audit(protocol, model, verify_files=True):
             or audit.get("processor_sha256") != protocol["processor_sha256"]
             or audit.get("readout") != protocol["readout"]):
         raise ValueError("RQ3 teacher does not match the approved real-model interface")
-    frozen = Path(audit["frozen_protocol_path"])
-    from tools.rq2_dense_protocol import protocol_sha256
-    original = json.loads(frozen.read_text(encoding="utf-8"))
-    if protocol_sha256(original) != FROZEN_PROTOCOLS[model] or original["model_name"] != model:
-        raise ValueError("RQ3 official checkpoint anchor is unknown")
+    original = read_frozen_protocol(audit["frozen_protocol_path"], model)
     for name, digest in original["checkpoint_sha256"].items():
         if audit["checkpoint_sha256"].get(name) != digest:
             raise ValueError("RQ3 teacher differs from the audited RQ2 official checkpoint")

@@ -260,10 +260,13 @@ def bind_test_interface(tmp_path, payload, monkeypatch):
     from tools.rq2_dense_protocol import protocol_sha256, sha256_file
     weight = tmp_path / "test_weights"
     weight.write_bytes(b"identity-gate-test-only")
-    frozen = {"model_name": "qwen3_vl_8b", "checkpoint_sha256": {"model": sha256_file(weight)}}
+    frozen = {"schema": "rq2-dense-vlm-feature-v1", "model_name": "qwen3_vl_8b",
+              "checkpoint_sha256": {"model": sha256_file(weight)}}
+    signature = protocol_sha256(frozen)
+    frozen["protocol_sha256"] = signature
     frozen_path = tmp_path / "frozen.json"
     frozen_path.write_text(json.dumps(frozen))
-    monkeypatch.setitem(protocol.FROZEN_PROTOCOLS, "qwen3_vl_8b", protocol_sha256(frozen))
+    monkeypatch.setitem(protocol.FROZEN_PROTOCOLS, "qwen3_vl_8b", signature)
     payload["input_protocol"]["checkpoint_sha256"] = frozen["checkpoint_sha256"]
     rows = [{"candidate_id": "P01_01-p0000004", "frame_sha256": "0" * 64,
              "class_probabilities": payload["entries"][0]["class_probabilities"]}]
@@ -271,7 +274,7 @@ def bind_test_interface(tmp_path, payload, monkeypatch):
     predictions.write_text("".join(json.dumps(row) + "\n" for row in rows))
     payload["predictions_sha256"] = content_hash(rows)
     audit = {"schema": "rq3-vlm-interface-audit-v1", "teacher_model": "qwen3_vl_8b", "smoke_status": "passed",
-             "frozen_protocol_path": str(frozen_path), "frozen_protocol_sha256": protocol_sha256(frozen),
+             "frozen_protocol_path": str(frozen_path), "frozen_protocol_sha256": signature,
              "checkpoint_files": {"model": str(weight)},
              "processor_files": {str(weight): sha256_file(weight)},
              "predictions_path": str(predictions), "predictions_sha256": content_hash(rows),
