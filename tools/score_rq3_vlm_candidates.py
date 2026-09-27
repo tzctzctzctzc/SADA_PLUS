@@ -129,6 +129,40 @@ def attribute_config(value):
     return AttributeConfig({k: attribute_config(v) for k, v in value.items()}) if isinstance(value, dict) else value
 
 
+def import_internvideo_teacher(root):
+    """保留官方相对导入层级，只加载所需模型，避免__init__导入无关6B/MobileCLIP。"""
+    package_name = "_rq3_official_intern"
+    for suffix, relative in (("", ""), (".models", "models"),
+                             (".models.backbones", "models/backbones"),
+                             (".models.backbones.internvideo2", "models/backbones/internvideo2"),
+                             (".utils", "utils")):
+        package = types.ModuleType(package_name + suffix)
+        package.__path__ = [str(root / relative)]
+        sys.modules[package.__name__] = package
+    # 与已审计RQ2接口一致：不启用缺失的融合RMSNorm；禁止静默替换其运算。
+    try:
+        importlib.import_module("flash_attn.ops.rms_norm")
+    except ModuleNotFoundError as error:
+        if error.name not in ("dropout_layer_norm", "flash_attn", "flash_attn.ops.rms_norm"):
+            raise
+        import torch.nn as nn
+
+        class UnavailableFusedRMSNorm(nn.Module):
+            def __init__(self, *args, **kwargs):
+                super().__init__()
+                raise RuntimeError("RQ3 InternVideo requires non-fused RMSNorm")
+
+        module = types.ModuleType("flash_attn.ops.rms_norm")
+        module.DropoutAddRMSNorm = UnavailableFusedRMSNorm
+        sys.modules[module.__name__] = module
+    backbone_name = package_name + ".models.backbones.internvideo2"
+    vision = importlib.import_module(backbone_name + ".internvideo2_clip_vision")
+    text = importlib.import_module(backbone_name + ".internvideo2_clip_text")
+    backbone = sys.modules[backbone_name]
+    backbone.InternVideo2, backbone.LLaMA, backbone.Tokenizer = vision.InternVideo2, text.LLaMA, text.Tokenizer
+    return importlib.import_module(package_name + ".models.internvideo2_clip")
+
+
 def load_teacher(model, settings, frozen):
     """只加载官方配对语义接口；dense隐藏向量从不作为十类logits。"""
     import torch
@@ -146,10 +180,7 @@ def load_teacher(model, settings, frozen):
     if model == "internvideo2_clip_1b":
         root = native_repository(settings, frozen, "internvideo_root") / "multi_modality"
         sys.path.insert(0, str(root))
-        package = types.ModuleType("_rq3_official_intern_models")
-        package.__path__ = [str(root / "models")]
-        sys.modules[package.__name__] = package
-        official = importlib.import_module(package.__name__ + ".internvideo2_clip")
+        official = import_internvideo_teacher(root)
 
         class CheckedInternVideo(official.InternVideo2_CLIP):
             def load_state_dict(self, state, strict=True):
@@ -161,6 +192,9 @@ def load_teacher(model, settings, frozen):
                 return result
 
         config = attribute_config(json.loads(Path(settings["official_config"]).read_text()))
+        if any(config.model.vision_encoder.get(key, False) for key in
+               ("use_flash_attn", "use_fused_rmsnorm", "use_fused_mlp")):
+            raise ValueError("RQ3 InternVideo uses the audited official non-fused vision path")
         if (config.model.vision_encoder.num_frames != 8 or config.model.vision_encoder.img_size != 224
                 or config.model.vision_encoder.clip_embed_dim != 768
                 or Path(config.model.text_ckpt_path).resolve() != Path(settings["text_checkpoint"]).resolve()):

@@ -1,4 +1,6 @@
 import subprocess
+import sys
+import types
 
 import pytest
 
@@ -51,3 +53,31 @@ def test_ego_requires_exact_clean_openai_clip_revision(monkeypatch, tmp_path):
     )
     with pytest.raises(ValueError, match="pinned clean OpenAI CLIP"):
         score.openai_clip_root({"clip_root": str(tmp_path)})
+
+
+def test_intern_import_preserves_parent_for_official_relative_utils(monkeypatch, tmp_path):
+    calls = []
+
+    def load(name):
+        calls.append(name)
+        module = types.SimpleNamespace()
+        if name.endswith('internvideo2_clip_vision'):
+            module.InternVideo2 = object()
+        if name.endswith('internvideo2_clip_text'):
+            module.LLaMA, module.Tokenizer = object(), object()
+        return module
+
+    monkeypatch.setattr(score.importlib, 'import_module', load)
+    # namespace初始化本身不执行官方__init__；只有这四个确切模块被请求。
+    existing = set(sys.modules)
+    try:
+        score.import_internvideo_teacher(tmp_path)
+        assert calls == ['flash_attn.ops.rms_norm',
+                         '_rq3_official_intern.models.backbones.internvideo2.internvideo2_clip_vision',
+                         '_rq3_official_intern.models.backbones.internvideo2.internvideo2_clip_text',
+                         '_rq3_official_intern.models.internvideo2_clip']
+        assert sys.modules['_rq3_official_intern.utils'].__path__ == [str(tmp_path / 'utils')]
+    finally:
+        for name in set(sys.modules) - existing:
+            if name.startswith('_rq3_official_intern'):
+                del sys.modules[name]
