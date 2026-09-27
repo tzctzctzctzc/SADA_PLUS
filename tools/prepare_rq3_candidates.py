@@ -87,6 +87,46 @@ def exact_rgb_frames(path, indices, recovery_root=None):
     return result
 
 
+def validate_existing_candidates(root, expected, grouped, video_paths):
+    """仅复用来源、候选集合、准确帧号及像素hash全部一致的完整产物。"""
+    import av
+    manifest = json.loads((root / "manifest.json").read_text())
+    if any(manifest.get(key) != value for key, value in expected.items()):
+        raise ValueError("existing candidate manifest provenance differs")
+    candidates = manifest.get("candidates", [])
+    by_id = {row["candidate_id"]: row for row in candidates}
+    if not candidates or len(by_id) != len(candidates):
+        raise ValueError("existing candidate set is empty or duplicated")
+    fields = ("candidate_id", "video_id", "absolute_feature_index", "source_fpn_levels",
+              "proposal_start_sec", "proposal_end_sec")
+    seen, expected_pngs, rejected = set(), set(), 0
+    for video, proposals in grouped.items():
+        with av.open(str(video_paths[video])) as container:
+            fps = float(container.streams.video[0].average_rate)
+        for proposal in proposals:
+            indices = proposal_frame_indices(proposal["proposal_start_sec"], proposal["proposal_end_sec"], fps)
+            if len(set(indices)) != 8:
+                rejected += 1
+                continue
+            identity = proposal["candidate_id"]
+            row = by_id.get(identity)
+            if (row is None or set(row) != set(fields) | {"frames", "frame_sha256"}
+                    or any(row[key] != proposal[key] for key in fields)
+                    or row["frames"] != indices or len(row["frame_sha256"]) != 8):
+                raise ValueError("existing candidate differs from frozen proposal: " + identity)
+            seen.add(identity)
+            for index, digest in zip(indices, row["frame_sha256"]):
+                path = root / "frames" / identity / (str(index) + ".png")
+                with Image.open(path) as image:
+                    if pixel_hash(np.asarray(image.convert("RGB"))) != digest:
+                        raise ValueError("existing candidate frame hash differs: " + str(path))
+                expected_pngs.add(path)
+    if (seen != set(by_id) or manifest.get("rejected_short_duplicate_frames") != rejected
+            or set((root / "frames").rglob("*.png")) != expected_pngs):
+        raise ValueError("existing candidate/frame coverage differs")
+    return manifest
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--proposals", type=Path, required=True, help="export_vlm_target_adapter_proposals的target/train/EMA输出")
@@ -95,6 +135,7 @@ def main():
     parser.add_argument("--video-root", type=Path, required=True)
     parser.add_argument("--recovery-root", type=Path)
     parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--reuse-verified", action="store_true", help="完整校验已有候选及帧后跳过；部分产物保留并报错")
     args = parser.parse_args()
     if args.recovery_root and sha256_file(args.recovery_root / "manifest.json") != "5a8041d6355e1e5b9d9f1e268f903c58dd604efa906d780f69268d8996483b90":
         raise ValueError("frame recovery manifest is not the audited exact 131-frame source")
@@ -102,6 +143,7 @@ def main():
     meta = json.loads(Path(str(args.proposals) + ".meta.json").read_text())
     if (meta["domain"] != "target" or meta["split"] != "train" or meta["selection_uses_gt"] is not False
             or meta["video_filter_applied"] or meta["seed"] != 6
+            or meta.get("max_per_video") != 30 or meta.get("max_proposals") != 200
             or meta["selection_teacher_provenance"]["selection_teacher_weights"] != "ema"
             or meta["selection_teacher_provenance"]["selection_teacher_checkpoint_sha256"] != sha256_file(teacher)):
         raise ValueError("proposals are not the complete source-selected SO/EMA target-train protocol")
@@ -118,13 +160,30 @@ def main():
             lengths[video] = int(features["feats"].shape[0])
     video_paths = video_paths_by_id(args.video_root)
     grouped = defaultdict(list)
+    identities = set()
     for row in (json.loads(line) for line in args.proposals.read_text().splitlines() if line.strip()):
         if row["video_id"] not in members or any("gt_" in key for key in row):
             raise ValueError("proposal contains GT or a non-target-train video")
         if (type(row["absolute_feature_index"]) is not int or not 0 <= row["absolute_feature_index"] < lengths[row["video_id"]]
                 or not row["source_fpn_levels"] or any(level not in ACTIVE_LEVELS for level in row["source_fpn_levels"])):
             raise ValueError("proposal grid coordinate or level differs")
+        identity = "{}-p{:07d}".format(row["video_id"], row["absolute_feature_index"])
+        if row["candidate_id"] != identity or identity in identities:
+            raise ValueError("proposal identity is invalid or duplicated")
+        identities.add(identity)
         grouped[row["video_id"]].append(row)
+    if (len(identities) != meta.get("selected_proposals") or not 0 < len(identities) <= 200
+            or any(len(rows) > 30 for rows in grouped.values())):
+        raise ValueError("proposal count differs from the frozen budget")
+    expected = {"schema": "rq3-common-candidates-v1", "shift": args.shift, "seed": 6,
+                "target_gt_used": False, "target_video_ids": members, "feature_lengths": lengths,
+                "teacher_selection": "source-validation-only", "teacher_checkpoint_sha256": sha256_file(teacher),
+                "frame_protocol": FRAME_PROTOCOL, "source_proposals_sha256": sha256_file(args.proposals)}
+    if args.output_root.exists() and args.reuse_verified:
+        manifest = validate_existing_candidates(args.output_root, expected, grouped, video_paths)
+        print("REUSED_VERIFIED_CANDIDATES", args.shift, len(manifest["candidates"]),
+              sha256_file(args.output_root / "manifest.json"), flush=True)
+        return
     args.output_root.mkdir(parents=True, exist_ok=False)
     candidates, rejected_short = [], 0
     import av
@@ -156,10 +215,7 @@ def main():
             candidates.append(candidate)
     if not candidates:
         raise ValueError("common candidate set is empty")
-    manifest = {"schema": "rq3-common-candidates-v1", "shift": args.shift, "seed": 6,
-                "target_gt_used": False, "target_video_ids": members, "feature_lengths": lengths,
-                "teacher_selection": "source-validation-only", "teacher_checkpoint_sha256": sha256_file(teacher),
-                "frame_protocol": FRAME_PROTOCOL, "source_proposals_sha256": sha256_file(args.proposals),
+    manifest = {**expected,
                 "rejected_short_duplicate_frames": rejected_short, "candidates": candidates}
     (args.output_root / "manifest.json").write_text(json.dumps(manifest, sort_keys=True))
     print("shared real candidates frozen: {}; short proposals rejected: {}".format(len(candidates), rejected_short))

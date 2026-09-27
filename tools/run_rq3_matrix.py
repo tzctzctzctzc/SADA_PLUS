@@ -10,6 +10,7 @@ import sys
 import yaml
 
 from tools.rq2_dense_protocol import sha256_file
+from tools.rq3_gpu import gpu_argument, gpu_slot
 from tools.rq3_protocol import (MODELS, STRATEGIES, audit_baseline, load_cache, members_for,
                                 audit_cache_predictions, validate_interface_audit, validate_reference_lengths)
 
@@ -67,7 +68,8 @@ def completed_baseline(root, shift):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--gpu", type=int, choices=(3,), default=3)
+    parser.add_argument("--gpu", type=gpu_argument, default="auto")
+    parser.add_argument("--wait-gpu", action="store_true")
     parser.add_argument("--cache-root", type=Path, required=True,
                         help="<root>/<teacher>/<shift>.json；三策略复用同一缓存")
     parser.add_argument("--output-root", type=Path, required=True)
@@ -76,17 +78,18 @@ def main():
     parser.add_argument("--manifest-root", type=Path, default=Path("/vepfs/vlms/rq2_uda_target_manifests_0924"))
     parser.add_argument("--expected-head", required=True)
     parser.add_argument("--audit-only", action="store_true", help="真实train_da CPU预检，不创建GPU任务")
-    parser.add_argument("--execute", action="store_true", help="显式执行54项；只使用GPU3")
+    parser.add_argument("--execute", action="store_true", help="显式执行54项；同时只用一张空闲卡")
     args = parser.parse_args()
     if args.audit_only and args.execute:
         parser.error("--audit-only and --execute are exclusive")
     if not args.audit_only and not args.execute:
         for model, strategy, shift in matrix():
-            print("{} {} {} seed6 gpu3 cache={}".format(model, strategy, shift, args.cache_root / model / (shift + ".json")))
+            print("{} {} {} seed6 gpu={} cache={}".format(model, strategy, shift, args.gpu,
+                                                        args.cache_root / model / (shift + ".json")))
         return
     from tools.run_rq2_matched_control import (
         check_code, check_new_protocol, checked_evaluation, checked_train_result,
-        idle_gpu_uuid, run_command,
+        run_command,
     )
     # 后面会切换到数据工作树；相对路径只在调用目录解释一次。
     for key in ("cache_root", "output_root", "baseline_parent", "data_root", "manifest_root"):
@@ -119,9 +122,9 @@ def main():
                     raise ValueError("RQ3 VLMs use different candidate/frame/teacher inputs")
                 shared[shift] = identity
         (args.output_root / "cache_snapshot.json").write_text(json.dumps(snapshot, sort_keys=True))
-        # 同一物理卡锁覆盖整个训练/评估队列；从不干预外部任务。
+        # 防止重复矩阵；每个GPU阶段另外取得跨RQ3入口的单卡锁。
         import fcntl
-        with (args.data_root / ".rq2_gpu3.lock").open("a") as lock:
+        with (args.data_root / ".rq3_matrix.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             for model, strategy, shift in matrix():
                 check_cache_snapshot(args.cache_root, snapshot)
@@ -153,18 +156,22 @@ def main():
                     continue
                 check_code(args.expected_head)
                 check_cache_snapshot(args.cache_root, snapshot)
-                uuid = idle_gpu_uuid(3)
-                run_command(command, root / "logs/uda.train.log", args.data_root, uuid)
+                with gpu_slot(args.gpu, args.data_root, args.wait_gpu) as training_gpu:
+                    check_code(args.expected_head)
+                    check_cache_snapshot(args.cache_root, snapshot)
+                    run_command(command, root / "logs/uda.train.log", args.data_root, training_gpu["uuid"])
                 config_path, checkpoint = checked_train_result(args.data_root / "model_results" / name,
                                                               root / "logs/uda.train.log", cfg)
                 audit_baseline(baselines[shift][0], json.loads(config_path.read_text()))
                 check_code(args.expected_head)
                 check_cache_snapshot(args.cache_root, snapshot)
-                uuid = idle_gpu_uuid(3)
                 evaluation = [sys.executable, "-B", str(CODE_ROOT / "evaluate_da.py"), *common,
                               "-n", name + "_eval", "-r", str(checkpoint), "--rq2-formal",
                               "--rq2-output-dir", str(root / "evaluation")]
-                run_command(evaluation, root / "logs/uda.eval.log", args.data_root, uuid)
+                with gpu_slot(args.gpu, args.data_root, args.wait_gpu) as evaluation_gpu:
+                    check_code(args.expected_head)
+                    check_cache_snapshot(args.cache_root, snapshot)
+                    run_command(evaluation, root / "logs/uda.eval.log", args.data_root, evaluation_gpu["uuid"])
                 manifest = checked_evaluation(root / "evaluation", cfg, checkpoint)
                 if manifest.get("rq3_auxiliary") != cfg["rq3_auxiliary"]:
                     raise ValueError("RQ3 evaluation lost strategy/cache provenance")
@@ -176,6 +183,7 @@ def main():
                 (root / "complete.json").write_text(json.dumps({
                     "teacher": model, "strategy": strategy, "shift": shift, "seed": 6,
                     "single_seed_stage_result": True, "code_commit": args.expected_head,
+                    "training_gpu": training_gpu, "evaluation_gpu": evaluation_gpu,
                     "baseline_root": str(baseline_root(args.baseline_parent, shift)),
                     "cache_sha256": cfg["rq3_auxiliary"]["cache_sha256"],
                     "checkpoint_sha256": sha256_file(checkpoint),

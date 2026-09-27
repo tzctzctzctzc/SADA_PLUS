@@ -58,3 +58,46 @@ def test_sparse_seek_preserves_exact_indices_and_rejects_missing(monkeypatch, mi
         assert frames[1000][0, 0, 0] == 1000 % 256
     assert container.seeks == [10, 1000]
     assert len(container.decoded) < 12
+
+
+@pytest.mark.parametrize("damage", [None, "pixel", "coordinate", "coverage", "provenance"])
+def test_reuse_checks_proposals_exact_frames_and_existing_contents(monkeypatch, tmp_path, damage):
+    import json
+    from PIL import Image
+    from tools.prepare_rq3_candidates import validate_existing_candidates
+    from tools.score_rq3_vlm_candidates import pixel_hash
+
+    class Container:
+        streams = SimpleNamespace(video=[SimpleNamespace(average_rate=1)])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setitem(sys.modules, "av", SimpleNamespace(open=lambda _: Container()))
+    proposal = {"candidate_id": "P01-p0000001", "video_id": "P01", "absolute_feature_index": 1,
+                "source_fpn_levels": [0], "proposal_start_sec": 0, "proposal_end_sec": 8}
+    image = np.zeros((2, 2, 3), dtype=np.uint8)
+    root = tmp_path / "frames" / proposal["candidate_id"]
+    root.mkdir(parents=True)
+    for index in range(8):
+        Image.fromarray(image).save(root / (str(index) + ".png"))
+    candidate = dict(proposal, frames=list(range(8)), frame_sha256=[pixel_hash(image)] * 8)
+    manifest = {"shift": "S1", "rejected_short_duplicate_frames": 0, "candidates": [candidate]}
+    if damage == "pixel":
+        Image.fromarray(image + 1).save(root / "0.png")
+    if damage == "coordinate":
+        candidate["absolute_feature_index"] = 2
+    if damage == "coverage":
+        manifest["candidates"] = []
+    if damage == "provenance":
+        manifest["shift"] = "S2"
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+    if damage:
+        with pytest.raises(ValueError):
+            validate_existing_candidates(tmp_path, {"shift": "S1"}, {"P01": [proposal]}, {"P01": "P01.MP4"})
+    else:
+        assert validate_existing_candidates(tmp_path, {"shift": "S1"}, {"P01": [proposal]},
+                                            {"P01": "P01.MP4"}) == manifest

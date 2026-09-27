@@ -9,7 +9,8 @@ from pathlib import Path
 import runpy
 import sys
 
-from tools.score_rq3_vlm_candidates import check_code, idle_gpu_uuid
+from tools.score_rq3_vlm_candidates import check_code
+from tools.rq3_gpu import gpu_argument, gpu_slot
 from tools.rq3_protocol import audit_baseline
 from tools.run_rq3_matrix import completed_baseline
 
@@ -42,6 +43,8 @@ def main():
     parser.add_argument('--expected-head', required=True)
     parser.add_argument('--baseline-root', type=Path, required=True)
     parser.add_argument('--report', type=Path, required=True)
+    parser.add_argument('--gpu', type=gpu_argument, default='auto')
+    parser.add_argument('--wait-gpu', action='store_true')
     parser.add_argument('training_args', nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if args.report.exists():
@@ -54,10 +57,9 @@ def main():
     check_code(args.expected_head)
     complete = json.loads((args.baseline_root / 'complete.json').read_text())
     baseline, checkpoint = completed_baseline(args.baseline_root, complete['shift'])
-    import fcntl
-    with Path('/vepfs/vlms/SADA_PLUS/.rq2_gpu3.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        os.environ['CUDA_VISIBLE_DEVICES'] = idle_gpu_uuid(3)
+    with gpu_slot(args.gpu, wait=args.wait_gpu) as selected_gpu:
+        check_code(args.expected_head)
+        os.environ['CUDA_VISIBLE_DEVICES'] = selected_gpu['uuid']
         import torch
         import libs.trainer.da_trainer as trainer_module
         original_train = trainer_module.Trainer.train
@@ -67,7 +69,7 @@ def main():
             cfg = trainer.cfg.config
             audit_baseline(baseline, cfg)
             if str(trainer.model.device) != 'cuda:0':
-                raise ValueError('smoke must use only the mapped physical GPU3')
+                raise ValueError('smoke must use only the selected physical GPU mapped to cuda:0')
             # 只为验收加载已核验SO EMA；正式54项仍fresh训练，禁止复用此状态。
             state = torch.load(checkpoint, map_location='cpu', weights_only=False)['ema_state_dict']
             loaded = trainer.model.load_state_dict(state, strict=False)
@@ -107,7 +109,7 @@ def main():
                       'initialization': str(checkpoint), 'initialization_kind': 'audited-so-ema-smoke-only',
                       'source_video': source['metadata']['video_id'], 'target_video': video,
                       'target_crop': target['metadata'], 'epoch_for_branch_test': epoch,
-                      'steps': 2, 'batch_size': 2, 'gpu': 3, 'metrics': metrics,
+                      'steps': 2, 'batch_size': 2, 'gpu': selected_gpu['index'], 'metrics': metrics,
                       'updated_parameter_count': len(changed), 'auxiliary_effective': effective,
                       'status': 'passed' if effective else 'verify-rejected-all-real-candidates'}
             args.report.parent.mkdir(parents=True, exist_ok=True)

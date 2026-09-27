@@ -20,6 +20,7 @@ from tools.rq2_dense_protocol import sha256_file
 from tools.rq3_protocol import (FRAME_PROTOCOL, FROZEN_PROTOCOLS, INTERN_TEXT_SHA256,
                                 MODELS, content_hash, read_frozen_protocol)
 from tools.run_clip_target_adapter import ACTION_PHRASES
+from tools.rq3_gpu import gpu_argument, gpu_slot, idle_gpu_uuid
 
 CODE_ROOT = Path(__file__).resolve().parents[1]
 OPENAI_CLIP_REVISION = "d05afc436d78f1c48dc0dbf8e5980a9d471f35f6"
@@ -30,20 +31,6 @@ def check_code(expected_head):
     status = subprocess.check_output(["git", "status", "--porcelain"], cwd=CODE_ROOT, text=True)
     if head != expected_head or status.strip():
         raise ValueError("RQ3 interface requires the audited clean code commit")
-
-
-def idle_gpu_uuid(gpu):
-    row = subprocess.check_output([
-        "nvidia-smi", "-i", str(gpu), "--query-gpu=uuid,memory.used,utilization.gpu",
-        "--format=csv,noheader,nounits",
-    ], text=True).strip().split(",")
-    uuid, memory, utilization = (part.strip() for part in row)
-    processes = subprocess.check_output([
-        "nvidia-smi", "--query-compute-apps=gpu_uuid,pid", "--format=csv,noheader",
-    ], text=True)
-    if int(memory) >= 2048 or int(utilization) > 5 or any(uuid in line for line in processes.splitlines()):
-        raise RuntimeError("selected physical GPU is occupied; external jobs are not interrupted")
-    return uuid
 
 
 def openai_clip_root(settings):
@@ -266,7 +253,11 @@ def main():
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--full", action="store_true", help="完整缓存预测；默认只有单候选接口smoke")
     parser.add_argument("--expected-head", required=True)
+    parser.add_argument("--gpu", type=gpu_argument, default="auto")
+    parser.add_argument("--wait-gpu", action="store_true")
     args = parser.parse_args()
+    if args.output_root.exists():
+        raise FileExistsError("teacher output exists; preserve it and audit before reuse")
     check_code(args.expected_head)
     frozen = read_frozen_protocol(args.frozen_protocol, args.model)
     settings = json.loads(args.settings.read_text())
@@ -293,11 +284,9 @@ def main():
                                      "runtime_versions": runtime_versions(),
                                      "frozen_protocol": FROZEN_PROTOCOLS[args.model],
                                      "qwen_classifier": sha256_file(Path(__file__).with_name("run_qwen3_vl_classification.py"))})
-    # 锁和实际空闲检查在模型加载前；只用一张物理GPU3。
-    import fcntl
-    with Path("/vepfs/vlms/SADA_PLUS/.rq2_gpu3.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        os.environ["CUDA_VISIBLE_DEVICES"] = idle_gpu_uuid(3)
+    with gpu_slot(args.gpu, wait=args.wait_gpu) as selected_gpu:
+        check_code(args.expected_head)
+        os.environ["CUDA_VISIBLE_DEVICES"] = selected_gpu["uuid"]
         scorer = load_teacher(args.model, settings, frozen)
         predictions = []
         for row in candidates if args.full else candidates[:1]:
@@ -323,6 +312,7 @@ def main():
              "predictions_path": str((args.output_root / "predictions.jsonl").resolve()),
              "single_token_semantics": args.model == "qwen3_vl_8b", "code_commit": args.expected_head}
     audit["runtime_versions"] = runtime_versions()
+    audit["physical_gpu"] = selected_gpu
     path = args.output_root / "interface_audit.json"
     path.write_text(json.dumps(audit, sort_keys=True))
     protocol = {key: audit[key] for key in ("readout", "checkpoint_sha256", "prompt_sha256", "processor_sha256",
