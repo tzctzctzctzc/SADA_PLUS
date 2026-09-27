@@ -1,4 +1,4 @@
-"""为RQ3串行任务选择实际空闲的物理卡；跨入口共享单卡锁。"""
+"""为RQ3选择实际空闲的物理卡；跨入口最多使用两张卡。"""
 
 from contextlib import contextmanager
 from pathlib import Path
@@ -40,11 +40,28 @@ def idle_gpu_uuid(gpu):
 
 @contextmanager
 def gpu_slot(request="auto", lock_root=Path("/vepfs/vlms/SADA_PLUS"), wait=False):
-    """全局锁限制RQ3最多一张卡；每卡锁兼容已有RQ2脚本。"""
+    """两个容量锁限制最多两张卡；第一个锁兼容旧单卡队列。"""
     import fcntl
     lock_root = Path(lock_root)
-    with (lock_root / ".rq3_single_gpu.lock").open("a") as queue_lock:
-        fcntl.flock(queue_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    queue_lock = None
+    announced_capacity = False
+    while queue_lock is None:
+        for name in (".rq3_single_gpu.lock", ".rq3_second_gpu.lock"):
+            candidate = (lock_root / name).open("a")
+            try:
+                fcntl.flock(candidate, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                queue_lock = candidate
+                break
+            except BlockingIOError:
+                candidate.close()
+        if queue_lock is None:
+            if not wait:
+                raise BlockingIOError("RQ3 already has two active GPU stages")
+            if not announced_capacity:
+                print("RQ3_WAITING_FOR_GPU_CAPACITY limit=2", flush=True)
+                announced_capacity = True
+            time.sleep(30)
+    with queue_lock:
         announced = False
         while True:
             for index in gpu_indices(request):

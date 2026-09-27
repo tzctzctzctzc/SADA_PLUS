@@ -17,9 +17,12 @@ from tools.rq3_protocol import (MODELS, STRATEGIES, audit_baseline, load_cache, 
 CODE_ROOT = Path(__file__).resolve().parents[1]
 
 
-def matrix():
-    return [(model, strategy, "S" + str(shift))
-            for model in MODELS for strategy in STRATEGIES for shift in range(1, 7)]
+def matrix(shard_index=0, shard_count=1):
+    if shard_count not in (1, 2) or not 0 <= shard_index < shard_count:
+        raise ValueError("RQ3 matrix supports one or two non-overlapping shards")
+    entries = [(model, strategy, "S" + str(shift))
+               for model in MODELS for strategy in STRATEGIES for shift in range(1, 7)]
+    return entries[shard_index::shard_count]
 
 
 def baseline_root(parent, shift):
@@ -70,6 +73,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gpu", type=gpu_argument, default="auto")
     parser.add_argument("--wait-gpu", action="store_true")
+    parser.add_argument("--shard-index", type=int, default=0)
+    parser.add_argument("--shard-count", type=int, choices=(1, 2), default=1)
     parser.add_argument("--cache-root", type=Path, required=True,
                         help="<root>/<teacher>/<shift>.json；三策略复用同一缓存")
     parser.add_argument("--output-root", type=Path, required=True)
@@ -78,12 +83,13 @@ def main():
     parser.add_argument("--manifest-root", type=Path, default=Path("/vepfs/vlms/rq2_uda_target_manifests_0924"))
     parser.add_argument("--expected-head", required=True)
     parser.add_argument("--audit-only", action="store_true", help="真实train_da CPU预检，不创建GPU任务")
-    parser.add_argument("--execute", action="store_true", help="显式执行54项；同时只用一张空闲卡")
+    parser.add_argument("--execute", action="store_true", help="执行本分片；两个分片可用两张空闲卡并行")
     args = parser.parse_args()
+    entries = matrix(args.shard_index, args.shard_count)
     if args.audit_only and args.execute:
         parser.error("--audit-only and --execute are exclusive")
     if not args.audit_only and not args.execute:
-        for model, strategy, shift in matrix():
+        for model, strategy, shift in entries:
             print("{} {} {} seed6 gpu={} cache={}".format(model, strategy, shift, args.gpu,
                                                         args.cache_root / model / (shift + ".json")))
         return
@@ -122,11 +128,11 @@ def main():
                     raise ValueError("RQ3 VLMs use different candidate/frame/teacher inputs")
                 shared[shift] = identity
         (args.output_root / "cache_snapshot.json").write_text(json.dumps(snapshot, sort_keys=True))
-        # 防止重复矩阵；每个GPU阶段另外取得跨RQ3入口的单卡锁。
+        # 防止重复分片；两个分片成员互斥，每个GPU阶段再取得共享容量与卡锁。
         import fcntl
-        with (args.data_root / ".rq3_matrix.lock").open("a") as lock:
+        with (args.data_root / (".rq3_matrix_%d_of_%d.lock" % (args.shard_index, args.shard_count))).open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            for model, strategy, shift in matrix():
+            for model, strategy, shift in entries:
                 check_cache_snapshot(args.cache_root, snapshot)
                 root = args.output_root / model / strategy / (shift + "_seed6")
                 (root / "logs").mkdir(parents=True, exist_ok=False)
