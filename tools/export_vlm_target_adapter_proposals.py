@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import json
+import pickle
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -74,6 +75,23 @@ def trident_neighbour_logits(boundary_logits, num_bins, side):
     return padded.as_strided(size=size, stride=stride)
 
 
+def load_checkpoint(torch, checkpoint_path, device, trusted_legacy_pickle=False):
+    """Prefer safe loading; allow legacy pickle only after matched-baseline audit."""
+    try:
+        return torch.load(
+            checkpoint_path, map_location=device, weights_only=True
+        )
+    except pickle.UnpicklingError as exc:
+        if not trusted_legacy_pickle:
+            raise RuntimeError(
+                "checkpoint needs legacy pickle loading; verify it against a "
+                "completed matched baseline before opting in"
+            ) from exc
+        return torch.load(
+            checkpoint_path, map_location=device, weights_only=False
+        )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
@@ -98,6 +116,10 @@ def main():
     parser.add_argument("--max-per-video", type=int, default=30)
     parser.add_argument("--max-proposals", type=int, default=200)
     parser.add_argument("--seed", type=int, default=20260823)
+    parser.add_argument(
+        "--trusted-matched-baseline-root",
+        help="completed SlowFast matched baseline; required only for legacy checkpoint pickle fallback",
+    )
     args = parser.parse_args()
 
     import torch
@@ -107,6 +129,31 @@ def main():
     from libs.models.SADA.stage1_calibration import model_state_sha256
     from libs.models.SADA.vlm_routing import file_sha256
     from libs.utils.utils import _update_config, read_yaml
+
+    trusted_legacy_pickle = False
+    trusted_baseline = None
+    if args.trusted_matched_baseline_root:
+        if args.domain != "target" or args.split != "train":
+            raise ValueError("matched-baseline trust is only for target-train proposal export")
+        baseline_root = Path(args.trusted_matched_baseline_root).resolve()
+        complete = json.loads((baseline_root / "complete.json").read_text())
+        if complete.get("model") != "slowfast" or complete.get("seed") != 6:
+            raise ValueError("trusted baseline must be a completed SlowFast seed6 run")
+        from tools.run_rq3_matrix import completed_baseline
+
+        _, audited_checkpoint = completed_baseline(
+            baseline_root, complete["shift"]
+        )
+        if Path(audited_checkpoint).resolve() != Path(args.checkpoint).resolve():
+            raise ValueError("checkpoint is not the source-val-selected baseline SO checkpoint")
+        if Path(complete["so"]).resolve() != Path(args.config).resolve():
+            raise ValueError("config is not the audited baseline SO config")
+        trusted_legacy_pickle = True
+        trusted_baseline = {
+            "root": str(baseline_root),
+            "shift": complete["shift"],
+            "seed": 6,
+        }
 
     if args.max_per_video <= 0 or args.max_proposals <= 0:
         raise ValueError("proposal limits must be positive")
@@ -142,13 +189,10 @@ def main():
         raise RuntimeError("no dataset video has a matching MP4")
 
     model = make_meta_arch(cfg["model_name"], cfg, device=args.device).to(args.device)
-    try:
-        checkpoint = torch.load(
-            args.checkpoint, map_location=args.device, weights_only=True
-        )
-    except Exception:
-        # Older checkpoints may contain optimizer objects from legacy modules.
-        checkpoint = torch.load(args.checkpoint, map_location=args.device)
+    checkpoint = load_checkpoint(
+        torch, args.checkpoint, args.device,
+        trusted_legacy_pickle=trusted_legacy_pickle,
+    )
     state_key = "ema_state_dict" if args.weights == "ema" else "state_dict"
     state_dict = checkpoint.get(state_key, checkpoint)
     model.load_state_dict(state_dict)
@@ -159,6 +203,7 @@ def main():
         "selection_teacher_weights": args.weights,
         "selection_alpha": float(cfg["model"].get("pl_threshold", 0.7)),
         "selection_levels": list(levels),
+        "trusted_matched_baseline": trusted_baseline,
     }
     database = json.loads(
         Path(cfg["dataset"]["json_file"]).read_text(encoding="utf-8")
