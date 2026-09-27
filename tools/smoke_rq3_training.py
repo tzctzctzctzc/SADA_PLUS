@@ -1,4 +1,4 @@
-"""隔离验收真实train_da/Trainer一步更新；不产正式checkpoint或实验成绩。"""
+"""隔离验收真实train_da/Trainer两步更新；不产正式checkpoint或实验成绩。"""
 
 import argparse
 import copy
@@ -83,7 +83,8 @@ def main():
             # 同一真实样本复制到batch2，仅用于执行路径验收；不记为正式数据采样。
             trainer.train_loader_src = [[copy.deepcopy(source), copy.deepcopy(source)]]
             trainer.train_loader_tgt = [[copy.deepcopy(target), copy.deepcopy(target)]]
-            trainer_module.epoch_length_from_config = lambda *unused: 1
+            # 原scheduler从lr=0开始；第二步才会产生权重更新，不篡改学习率。
+            trainer_module.epoch_length_from_config = lambda *unused: 2
             epoch = max(1, trainer.model.warmup_adv)
             before = {name: p.detach().clone() for name, p in trainer.model.named_parameters() if p.requires_grad}
             trainer._train_epoch(epoch)
@@ -96,7 +97,8 @@ def main():
             changed = [name for name, p in trainer.model.named_parameters()
                        if name in before and not torch.equal(p, before[name])]
             if not changed or metrics['t_rq3_eligible'] <= 0:
-                raise ValueError('real trainer did not update or candidate did not reach the model')
+                raise ValueError('real trainer smoke failed: ' + json.dumps({
+                    'changed': len(changed), 'metrics': metrics, 'crop': target['metadata']}))
             effective = metrics['t_rq3_selected'] > 0 and metrics['t_rq3_loss'] > 0 and metrics['t_rq3_gradient_norm'] > 0
             if auxiliary.strategy != 'verify' and not effective:
                 raise ValueError('hard/prototype auxiliary gradient did not activate')
@@ -105,7 +107,7 @@ def main():
                       'initialization': str(checkpoint), 'initialization_kind': 'audited-so-ema-smoke-only',
                       'source_video': source['metadata']['video_id'], 'target_video': video,
                       'target_crop': target['metadata'], 'epoch_for_branch_test': epoch,
-                      'steps': 1, 'batch_size': 2, 'gpu': 3, 'metrics': metrics,
+                      'steps': 2, 'batch_size': 2, 'gpu': 3, 'metrics': metrics,
                       'updated_parameter_count': len(changed), 'auxiliary_effective': effective,
                       'status': 'passed' if effective else 'verify-rejected-all-real-candidates'}
             args.report.parent.mkdir(parents=True, exist_ok=True)
