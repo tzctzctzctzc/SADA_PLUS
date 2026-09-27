@@ -4,6 +4,7 @@ import argparse
 from collections import defaultdict
 import json
 import math
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -130,6 +131,38 @@ def validate_existing_candidates(root, expected, grouped, video_paths):
     return manifest
 
 
+def prepare_video_candidates(video, rows, video_paths, recovery_root, output_root):
+    """各视频独立解码；候选顺序由调用者固定，不影响帧号或像素内容。"""
+    import av
+    path = video_paths.get(video)
+    if path is None:
+        raise ValueError("raw MP4 is missing for candidate video: " + video)
+    with av.open(str(path)) as container:
+        fps = float(container.streams.video[0].average_rate)
+    kept, rejected = [], 0
+    for row in rows:
+        indices = proposal_frame_indices(row["proposal_start_sec"], row["proposal_end_sec"], fps)
+        if len(set(indices)) != 8:
+            rejected += 1
+        else:
+            kept.append((row, indices))
+    if not kept:
+        return [], rejected
+    images = exact_rgb_frames(path, {i for _, indices in kept for i in indices}, recovery_root)
+    candidates = []
+    for row, indices in kept:
+        candidate = {key: row[key] for key in ("candidate_id", "video_id", "absolute_feature_index",
+                                               "source_fpn_levels", "proposal_start_sec", "proposal_end_sec")}
+        directory = output_root / "frames" / row["candidate_id"]
+        directory.mkdir(parents=True, exist_ok=False)
+        for index in indices:
+            Image.fromarray(images[index]).save(directory / (str(index) + ".png"))
+        candidate.update(frames=indices, frame_sha256=[pixel_hash(images[index]) for index in indices])
+        candidates.append(candidate)
+    print("EXACT_VIDEO_FRAMES_READY", video, len(candidates), flush=True)
+    return candidates, rejected
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--proposals", type=Path, required=True, help="export_vlm_target_adapter_proposals的target/train/EMA输出")
@@ -139,7 +172,10 @@ def main():
     parser.add_argument("--recovery-root", type=Path)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--reuse-verified", action="store_true", help="完整校验已有候选及帧后跳过；部分产物保留并报错")
+    parser.add_argument("--decode-workers", type=int, default=8, help="独立视频CPU并行解码数")
     args = parser.parse_args()
+    if args.decode_workers <= 0:
+        parser.error("--decode-workers must be positive")
     if args.recovery_root and sha256_file(args.recovery_root / "manifest.json") != "5a8041d6355e1e5b9d9f1e268f903c58dd604efa906d780f69268d8996483b90":
         raise ValueError("frame recovery manifest is not the audited exact 131-frame source")
     cfg, teacher = completed_baseline(args.baseline_root, args.shift)
@@ -189,33 +225,13 @@ def main():
         return
     args.output_root.mkdir(parents=True, exist_ok=False)
     candidates, rejected_short = [], 0
-    import av
-    for video, rows in grouped.items():
-        path = video_paths.get(video)
-        if path is None:
-            raise ValueError("raw MP4 is missing for candidate video: " + video)
-        with av.open(str(path)) as container:
-            fps = float(container.streams.video[0].average_rate)
-        kept = []
-        for row in rows:
-            indices = proposal_frame_indices(row["proposal_start_sec"], row["proposal_end_sec"], fps)
-            if len(set(indices)) != 8:
-                rejected_short += 1
-                continue
-            kept.append((row, indices))
-        if not kept:
-            continue
-        images = exact_rgb_frames(path, {i for _, indices in kept for i in indices}, args.recovery_root)
-        for row, indices in kept:
-            # 故意只复制白名单字段，不把TAL类别/分数或任何target GT传给VLM。
-            candidate = {key: row[key] for key in ("candidate_id", "video_id", "absolute_feature_index",
-                                                   "source_fpn_levels", "proposal_start_sec", "proposal_end_sec")}
-            directory = args.output_root / "frames" / row["candidate_id"]
-            directory.mkdir(parents=True, exist_ok=False)
-            for index in indices:
-                Image.fromarray(images[index]).save(directory / (str(index) + ".png"))
-            candidate.update(frames=indices, frame_sha256=[pixel_hash(images[index]) for index in indices])
-            candidates.append(candidate)
+    with ThreadPoolExecutor(max_workers=args.decode_workers) as pool:
+        futures = [pool.submit(prepare_video_candidates, video, rows, video_paths,
+                               args.recovery_root, args.output_root) for video, rows in grouped.items()]
+        for future in futures:
+            prepared, rejected = future.result()
+            candidates.extend(prepared)
+            rejected_short += rejected
     if not candidates:
         raise ValueError("common candidate set is empty")
     manifest = {**expected,
