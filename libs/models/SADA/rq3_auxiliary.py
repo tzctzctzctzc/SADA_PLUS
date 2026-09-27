@@ -1,6 +1,7 @@
 """RQ3三种接入方式；只加辅助损失，不改检测头、边界或原SADA路由。"""
 
 import torch
+import math
 from torch import nn
 from torch.nn import functional as F
 
@@ -11,29 +12,44 @@ STRATEGIES = ("hard", "verify", "prototype")
 
 
 def candidate_routes(videos, points, masks, logits, cache, levels):
-    """缓存是绝对SlowFast坐标；仅命中本次crop内、原FPN网格上的点。"""
+    """按连续绝对坐标取FPN值；不改基线crop、不把候选挪到邻近锚点。"""
     routes = []
     for level, (grid, valid, output) in enumerate(zip(points, masks, logits)):
         valid = valid.reshape(output.shape[:2]).bool()
-        eligible = torch.zeros_like(valid)
-        labels = torch.zeros_like(valid, dtype=torch.long)
+        queries = []
         if level in levels:
             coordinates = grid[:, 0].detach().cpu().tolist()
             if any(abs(value - round(value)) > 1e-6 for value in coordinates):
                 raise ValueError("RQ3 requires integer FPN feature coordinates")
-            index_for = {int(round(value)): index for index, value in enumerate(coordinates)}
+            stride = float(grid[0, 3])
+            if stride <= 0 or any(abs(value - (coordinates[0] + i * stride)) > 1e-6
+                                  for i, value in enumerate(coordinates)):
+                raise ValueError("RQ3 requires a regular FPN grid")
             for batch, video in enumerate(videos):
                 metadata = video["metadata"]
                 crop = int(metadata.get("crop_start", 0))
                 for entry in cache.get(str(metadata["video_id"]), ()):
                     if level not in entry["source_fpn_levels"]:
                         continue
-                    index = index_for.get(entry["absolute_feature_index"] - crop)
-                    if index is not None and valid[batch, index]:
-                        eligible[batch, index] = True
-                        labels[batch, index] = entry["class_id"]
-        routes.append((eligible, labels))
+                    local = entry["absolute_feature_index"] - crop
+                    crop_length = metadata.get("crop_feat_len", coordinates[-1] + stride)
+                    if not 0 <= local < crop_length:
+                        continue
+                    position = (local - coordinates[0]) / stride
+                    left, right = math.floor(position), math.ceil(position)
+                    if 0 <= left <= right < len(coordinates) and valid[batch, left] and valid[batch, right]:
+                        queries.append((batch, left, right, position - left, entry["class_id"]))
+        # 每个候选独立保留；多个候选落在同一区间不会互相覆盖。
+        routes.append(queries)
     return routes
+
+
+def query_values(values, queries):
+    """values为B,T,C，插值权重固定；反传同时进入两端，不改变视频读帧。"""
+    batch, left, right, weights, labels = zip(*queries)
+    weight = values.new_tensor(weights).unsqueeze(-1)
+    sampled = values[list(batch), list(left)] * (1 - weight) + values[list(batch), list(right)] * weight
+    return sampled, torch.tensor(labels, device=values.device, dtype=torch.long)
 
 
 class RQ3Auxiliary(nn.Module):
@@ -80,38 +96,45 @@ class RQ3Auxiliary(nn.Module):
                     "agreement": 0, "budget": zero.detach(), "scale": zero.detach(),
                     "gradient_norm": zero.detach()}
         routes = candidate_routes(videos, points, target_masks, target_logits, self.cache, self.levels)
-        terms, gradient_inputs = [], []
+        terms, reference_terms, gradient_inputs = [], [], []
         eligible_count = selected_count = agreement_count = 0
-        for level, (eligible, labels) in enumerate(routes):
-            eligible_count += int(eligible.sum())
-            if not eligible.any():
+        for level, queries in enumerate(routes):
+            eligible_count += len(queries)
+            if not queries:
                 continue
             logits = target_logits[level]
-            confidence, predicted = logits.detach().sigmoid().max(dim=-1)
-            agrees = eligible & (predicted == labels)
+            sampled_logits, labels = query_values(logits, queries)
+            confidence, predicted = sampled_logits.detach().sigmoid().max(dim=-1)
+            agrees = predicted == labels
             agreement_count += int(agrees.sum())
-            selected = eligible
+            selected = torch.ones_like(labels, dtype=torch.bool)
             if self.strategy == "verify":
                 selected = agrees & (confidence >= alpha)
             elif self.strategy == "prototype":
-                selected = eligible & self.ready[level, labels]
+                selected = self.ready[level, labels]
+            if self.strategy != "prototype":
+                targets = F.one_hot(labels, logits.shape[-1]).to(logits.dtype)
+                focal = sigmoid_focal_loss(sampled_logits, targets, alpha=0.25,
+                                           gamma=gamma, reduction="none").sum(dim=-1)
+                reference_terms.append(focal.sum())
             selected_count += int(selected.sum())
             if not selected.any():
                 continue
             if self.strategy == "prototype":
-                values = target_features[level].transpose(1, 2)[selected].float()
+                values, _ = query_values(target_features[level].transpose(1, 2), queries)
+                values = values[selected].float()
                 centers = self.prototypes[level, labels[selected]].detach().clone()
                 terms.append((1 - F.cosine_similarity(values, centers, dim=-1)).clamp_min(0).sum())
                 gradient_inputs.append(target_features[level])
             else:
-                targets = F.one_hot(labels[selected], logits.shape[-1]).to(logits.dtype)
-                terms.append(sigmoid_focal_loss(logits[selected], targets, alpha=0.25,
-                                               gamma=gamma, reduction="sum"))
+                terms.append(focal[selected].sum())
                 gradient_inputs.append(logits)
         # Verify拒绝项和缺失原型项为零；分母始终是共同基础候选数。
         raw = sum(terms, zero) / max(eligible_count, 1)
+        # Hard/Verify由同一未筛选Hard参考量封顶，拒绝项不被重新放大。
+        reference = raw if self.strategy == "prototype" else sum(reference_terms, zero) / max(eligible_count, 1)
         cap = self.budget * source_loss.detach().clamp_min(0)
-        scale = torch.minimum(torch.ones_like(cap), cap / raw.detach().clamp_min(1e-12))
+        scale = torch.minimum(torch.ones_like(cap), cap / reference.detach().clamp_min(1e-12))
         loss = raw * scale.detach()
         # 记录接入张量的实际梯度范数；不宣称不同策略梯度预算完全相同。
         norm = zero.detach()

@@ -45,6 +45,10 @@ def build_cache(manifest, predictions, protocol, model, shift, teacher_hash):
     if manifest.get("frame_protocol") != FRAME_PROTOCOL:
         raise ValueError("RQ3 candidate frame protocol differs")
     predicted = {row["candidate_id"]: row for row in predictions}
+    if protocol.get("interface_audit_path"):
+        audit = json.loads(Path(protocol["interface_audit_path"]).read_text())
+        if audit["common_manifest_sha256"] != content_hash(manifest) or audit["predictions_sha256"] != content_hash(predictions):
+            raise ValueError("RQ3 predictions/manifest differ from real VLM interface audit")
     candidates = manifest["candidates"]
     if len(predicted) != len(predictions) or len({row["candidate_id"] for row in candidates}) != len(candidates):
         raise ValueError("duplicate RQ3 candidate/prediction")
@@ -76,8 +80,10 @@ def build_cache(manifest, predictions, protocol, model, shift, teacher_hash):
     payload = {"schema": SCHEMA, "teacher_model": model, "shift": shift, "seed": 6,
             "labels": list(TARGET_CLASS_NAMES), "target_gt_used": False,
             "target_video_ids": manifest["target_video_ids"], "input_protocol": protocol,
+            "feature_lengths": manifest["feature_lengths"],
             "teacher_selection": "source-validation-only", "teacher_checkpoint_sha256": teacher_hash,
             "candidate_sha256": content_hash(manifest), "frames_sha256": content_hash(frame_rows),
+            "predictions_sha256": content_hash(predictions),
             "entries": entries}
     validate_cache(payload, model, shift)
     return payload
@@ -93,9 +99,12 @@ def main():
     parser.add_argument("--shift", choices=["S" + str(i) for i in range(1, 7)], required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    from tools.rq3_protocol import validate_interface_audit
+    protocol = json.loads(args.input_protocol.read_text(encoding="utf-8"))
+    validate_interface_audit(protocol, args.model)
     payload = build_cache(json.loads(args.manifest.read_text(encoding="utf-8")),
                           [json.loads(line) for line in args.predictions.read_text(encoding="utf-8").splitlines() if line.strip()],
-                          json.loads(args.input_protocol.read_text(encoding="utf-8")), args.model, args.shift,
+                          protocol, args.model, args.shift,
                           sha256_file(args.teacher_checkpoint))
     # 内存核验通过才落盘，不留下已知不合格的正式缓存。
     args.output.parent.mkdir(parents=True, exist_ok=True)

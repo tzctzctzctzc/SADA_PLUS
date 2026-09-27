@@ -3,13 +3,15 @@
 import argparse
 import json
 import os
+import math
 from pathlib import Path
 import sys
 
 import yaml
 
 from tools.rq2_dense_protocol import sha256_file
-from tools.rq3_protocol import MODELS, STRATEGIES, audit_baseline, load_cache, members_for
+from tools.rq3_protocol import (MODELS, STRATEGIES, audit_baseline, load_cache, members_for,
+                                audit_cache_predictions, validate_interface_audit, validate_reference_lengths)
 
 CODE_ROOT = Path(__file__).resolve().parents[1]
 
@@ -21,6 +23,25 @@ def matrix():
 
 def baseline_root(parent, shift):
     return parent / ("rq2_matched_slowfast_{}_seed6_7067306_0927".format(shift))
+
+
+def check_cache_snapshot(cache_root, snapshot):
+    for identity, digest in snapshot.items():
+        if sha256_file(cache_root / identity) != digest:
+            raise ValueError("RQ3 semantic cache changed between strategies: " + identity)
+
+
+def supervision_audit(path):
+    """只检查辅助监督实际生效，不按target增益筛选；零覆盖结果也保留评估。"""
+    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    totals = {}
+    for key in ("eligible", "selected", "loss", "gradient_norm"):
+        values = [row.get("t_rq3_" + key, 0) for row in rows]
+        if any(not math.isfinite(value) or value < 0 for value in values):
+            raise ValueError("RQ3 auxiliary metrics are nonfinite")
+        totals[key + "_epoch_mean_sum"] = sum(values)
+    totals["effective"] = all(value > 0 for value in totals.values())
+    return totals
 
 
 def completed_baseline(root, shift):
@@ -82,22 +103,28 @@ def main():
         baselines = {shift: completed_baseline(baseline_root(args.baseline_parent, shift), shift)
                      for shift in ("S" + str(index) for index in range(1, 7))}
         # 三模型每shift必须实际使用同一候选、SO teacher和帧；不按增益筛选。
-        shared = {}
+        shared, snapshot = {}, {}
         for model in MODELS:
             for shift, (cfg, teacher_checkpoint) in baselines.items():
                 path = args.cache_root / model / (shift + ".json")
                 payload, _ = load_cache(path, model, shift, members_for(cfg, "tgt"))
+                interface = validate_interface_audit(payload["input_protocol"], model)
+                audit_cache_predictions(payload, interface)
+                validate_reference_lengths(payload, cfg)
+                snapshot[str(path.relative_to(args.cache_root))] = sha256_file(path)
                 if payload["teacher_checkpoint_sha256"] != sha256_file(teacher_checkpoint):
                     raise ValueError("RQ3 cache does not use the completed source-selected SO teacher")
                 identity = (payload["candidate_sha256"], payload["frames_sha256"], payload["teacher_checkpoint_sha256"])
                 if shift in shared and shared[shift] != identity:
                     raise ValueError("RQ3 VLMs use different candidate/frame/teacher inputs")
                 shared[shift] = identity
+        (args.output_root / "cache_snapshot.json").write_text(json.dumps(snapshot, sort_keys=True))
         # 同一物理卡锁覆盖整个训练/评估队列；从不干预外部任务。
         import fcntl
         with (args.data_root / ".rq2_gpu3.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             for model, strategy, shift in matrix():
+                check_cache_snapshot(args.cache_root, snapshot)
                 root = args.output_root / model / strategy / (shift + "_seed6")
                 (root / "logs").mkdir(parents=True, exist_ok=False)
                 name = "rq3_{}_{}_{}_seed6_{}".format(model, strategy, shift, args.output_root.name)
@@ -118,16 +145,21 @@ def main():
                 cfg = json.loads(preflight.read_text())
                 check_new_protocol(cfg)
                 pairing = audit_baseline(baselines[shift][0], cfg)
+                identity = str(Path(model) / (shift + ".json"))
+                if cfg["rq3_auxiliary"]["cache_sha256"] != snapshot[identity]:
+                    raise ValueError("RQ3 preflight used a different semantic cache")
                 (root / "baseline_pair.json").write_text(json.dumps(pairing, sort_keys=True))
                 if args.audit_only:
                     continue
                 check_code(args.expected_head)
+                check_cache_snapshot(args.cache_root, snapshot)
                 uuid = idle_gpu_uuid(3)
                 run_command(command, root / "logs/uda.train.log", args.data_root, uuid)
                 config_path, checkpoint = checked_train_result(args.data_root / "model_results" / name,
                                                               root / "logs/uda.train.log", cfg)
                 audit_baseline(baselines[shift][0], json.loads(config_path.read_text()))
                 check_code(args.expected_head)
+                check_cache_snapshot(args.cache_root, snapshot)
                 uuid = idle_gpu_uuid(3)
                 evaluation = [sys.executable, "-B", str(CODE_ROOT / "evaluate_da.py"), *common,
                               "-n", name + "_eval", "-r", str(checkpoint), "--rq2-formal",
@@ -136,6 +168,11 @@ def main():
                 manifest = checked_evaluation(root / "evaluation", cfg, checkpoint)
                 if manifest.get("rq3_auxiliary") != cfg["rq3_auxiliary"]:
                     raise ValueError("RQ3 evaluation lost strategy/cache provenance")
+                check_cache_snapshot(args.cache_root, snapshot)
+                coverage = supervision_audit(config_path.parent / "benchmark_epoch_metrics.jsonl")
+                (root / "supervision_audit.json").write_text(json.dumps(coverage, sort_keys=True))
+                if not coverage["effective"]:
+                    raise ValueError("RQ3 auxiliary supervision never activated; outputs retained, queue stopped")
                 (root / "complete.json").write_text(json.dumps({
                     "teacher": model, "strategy": strategy, "shift": shift, "seed": 6,
                     "single_seed_stage_result": True, "code_commit": args.expected_head,

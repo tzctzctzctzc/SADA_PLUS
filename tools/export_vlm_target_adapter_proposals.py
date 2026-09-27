@@ -130,6 +130,7 @@ def main():
     )
     available = video_ids_in(args.video_root)
     expected_videos = len(dataset.data_list)
+    expected_video_ids = sorted(item['id'] for item in dataset.data_list)
     available_dataset_videos = sum(
         item["id"] in available for item in dataset.data_list
     )
@@ -316,6 +317,7 @@ def main():
         ],
         "selection_teacher_provenance": provenance,
         "expected_videos": expected_videos,
+        "expected_video_ids": expected_video_ids,
         "available_videos": available_dataset_videos,
         "video_filter_applied": not args.include_missing_videos,
         "proposals_before_budget": before_limit,
