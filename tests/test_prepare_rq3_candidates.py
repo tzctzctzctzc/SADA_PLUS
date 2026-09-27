@@ -60,6 +60,34 @@ def test_sparse_seek_preserves_exact_indices_and_rejects_missing(monkeypatch, mi
     assert len(container.decoded) < 12
 
 
+def test_exact_frame_number_uses_pts_grid_not_file_average_rate(monkeypatch):
+    from fractions import Fraction
+
+    class Container:
+        streams = SimpleNamespace(video=[SimpleNamespace(
+            average_rate=Fraction(900660000, 15026219), base_rate=Fraction(60000, 1001),
+            time_base=Fraction(1, 60000), start_time=0)])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def seek(self, offset, **kwargs):
+            self.first = offset // 1001
+
+        def decode(self, stream):
+            for index in range(self.first - 1, self.first + 3):
+                yield SimpleNamespace(pts=index * 1001, to_ndarray=lambda format, i=index:
+                                      np.full((2, 2, 3), i % 256, dtype=np.uint8))
+
+    monkeypatch.setitem(sys.modules, 'av', SimpleNamespace(open=lambda _: Container()))
+    frames = exact_rgb_frames(Path('P02_03.MP4'), [20026])
+    assert set(frames) == {20026}
+    assert frames[20026][0, 0, 0] == 20026 % 256
+
+
 @pytest.mark.parametrize("damage", [None, "pixel", "coordinate", "coverage", "provenance"])
 def test_reuse_checks_proposals_exact_frames_and_existing_contents(monkeypatch, tmp_path, damage):
     import json

@@ -53,7 +53,8 @@ def exact_rgb_frames(path, indices, recovery_root=None):
         return recovered
     with av.open(str(path)) as container:
         stream = container.streams.video[0]
-        rate = float(stream.average_rate)
+        # 文件平均帧率可能受损坏/缺帧影响；PTS转准确帧号应使用编码流的固定帧率。
+        rate = float(getattr(stream, "base_rate", None) or stream.average_rate)
         time_base = float(stream.time_base)
         origin = (stream.start_time or 0) * time_base
         groups = []
@@ -72,7 +73,7 @@ def exact_rgb_frames(path, indices, recovery_root=None):
                 position = (frame.pts * time_base - origin) * rate
                 index = round(position)
                 if abs(position - index) > .05:
-                    raise ValueError("video PTS does not match the canonical frame grid")
+                    raise ValueError("video PTS does not match the canonical frame grid: " + str(path))
                 if index in requested:
                     if index in result:
                         raise ValueError("video has duplicate requested frame timestamps")
