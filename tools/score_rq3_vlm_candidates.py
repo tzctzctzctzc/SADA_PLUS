@@ -3,12 +3,14 @@
 import argparse
 import hashlib
 import importlib
+import importlib.metadata
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import types
+import platform
 
 import numpy as np
 from PIL import Image
@@ -129,6 +131,25 @@ def attribute_config(value):
     return AttributeConfig({k: attribute_config(v) for k, v in value.items()}) if isinstance(value, dict) else value
 
 
+def runtime_versions():
+    versions = {"python": platform.python_version()}
+    for name in ("torch", "torchvision", "transformers", "peft", "tokenizers", "timm", "sentencepiece"):
+        try:
+            versions[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            versions[name] = None
+    return versions
+
+
+def check_intern_runtime():
+    # 新PEFT改变q/v_proj.weight键名，新Transformers移除了每层rotary缓存。
+    # 使用官方旧接口的配套环境，不以strict=False吞掉缺失文本参数。
+    versions = runtime_versions()
+    expected = {"torch": "1.13.1", "transformers": "4.28.1", "peft": "0.3.0", "tokenizers": "0.13.3"}
+    if any((versions.get(key) or "").split("+")[0] != value for key, value in expected.items()):
+        raise ValueError("InternVideo2 needs its isolated legacy runtime: " + str(expected))
+
+
 def import_internvideo_teacher(root):
     """保留官方相对导入层级，只加载所需模型，避免__init__导入无关6B/MobileCLIP。"""
     package_name = "_rq3_official_intern"
@@ -155,6 +176,14 @@ def import_internvideo_teacher(root):
         module = types.ModuleType("flash_attn.ops.rms_norm")
         module.DropoutAddRMSNorm = UnavailableFusedRMSNorm
         sys.modules[module.__name__] = module
+        if error.name == "flash_attn":
+            # 官方视觉文件无条件import这些类，但非融合路径从不实例化它们。
+            # 这里只让import成立；若误启用任一融合分支，立即报错而非伪造计算。
+            for name, attribute in ((package_name + ".models.backbones.internvideo2.flash_attention_class", "FlashAttention"),
+                                    ("flash_attn.modules.mlp", "FusedMLP")):
+                unavailable = types.ModuleType(name)
+                setattr(unavailable, attribute, UnavailableFusedRMSNorm)
+                sys.modules[name] = unavailable
     backbone_name = package_name + ".models.backbones.internvideo2"
     vision = importlib.import_module(backbone_name + ".internvideo2_clip_vision")
     text = importlib.import_module(backbone_name + ".internvideo2_clip_text")
@@ -178,6 +207,7 @@ def load_teacher(model, settings, frozen):
         scale = float(encoder.model.logit_scale.exp().detach().cpu())
         return lambda frames, paths, row: paired_text_probabilities(encoder.encode(frames, 1), text, scale)[0]
     if model == "internvideo2_clip_1b":
+        check_intern_runtime()
         root = native_repository(settings, frozen, "internvideo_root") / "multi_modality"
         sys.path.insert(0, str(root))
         official = import_internvideo_teacher(root)
@@ -260,6 +290,7 @@ def main():
     prompt_digest = content_hash(prompts)
     assets = processor_files(args.model, settings)
     processor_digest = content_hash({"settings": settings, "processor_files": assets,
+                                     "runtime_versions": runtime_versions(),
                                      "frozen_protocol": FROZEN_PROTOCOLS[args.model],
                                      "qwen_classifier": sha256_file(Path(__file__).with_name("run_qwen3_vl_classification.py"))})
     # 锁和实际空闲检查在模型加载前；只用一张物理GPU3。
@@ -291,6 +322,7 @@ def main():
              "processor_files": assets, "predictions_sha256": content_hash(predictions),
              "predictions_path": str((args.output_root / "predictions.jsonl").resolve()),
              "single_token_semantics": args.model == "qwen3_vl_8b", "code_commit": args.expected_head}
+    audit["runtime_versions"] = runtime_versions()
     path = args.output_root / "interface_audit.json"
     path.write_text(json.dumps(audit, sort_keys=True))
     protocol = {key: audit[key] for key in ("readout", "checkpoint_sha256", "prompt_sha256", "processor_sha256",
