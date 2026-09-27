@@ -6,6 +6,7 @@ import importlib
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import types
 
@@ -17,6 +18,39 @@ from tools.rq2_dense_protocol import sha256_file
 from tools.rq3_protocol import (FRAME_PROTOCOL, FROZEN_PROTOCOLS, INTERN_TEXT_SHA256,
                                 MODELS, content_hash, read_frozen_protocol)
 from tools.run_clip_target_adapter import ACTION_PHRASES
+
+CODE_ROOT = Path(__file__).resolve().parents[1]
+OPENAI_CLIP_REVISION = "d05afc436d78f1c48dc0dbf8e5980a9d471f35f6"
+
+
+def check_code(expected_head):
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=CODE_ROOT, text=True).strip()
+    status = subprocess.check_output(["git", "status", "--porcelain"], cwd=CODE_ROOT, text=True)
+    if head != expected_head or status.strip():
+        raise ValueError("RQ3 interface requires the audited clean code commit")
+
+
+def idle_gpu_uuid(gpu):
+    row = subprocess.check_output([
+        "nvidia-smi", "-i", str(gpu), "--query-gpu=uuid,memory.used,utilization.gpu",
+        "--format=csv,noheader,nounits",
+    ], text=True).strip().split(",")
+    uuid, memory, utilization = (part.strip() for part in row)
+    processes = subprocess.check_output([
+        "nvidia-smi", "--query-compute-apps=gpu_uuid,pid", "--format=csv,noheader",
+    ], text=True)
+    if int(memory) >= 2048 or int(utilization) > 5 or any(uuid in line for line in processes.splitlines()):
+        raise RuntimeError("selected physical GPU is occupied; external jobs are not interrupted")
+    return uuid
+
+
+def openai_clip_root(settings):
+    root = Path(settings["clip_root"]).resolve()
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+    status = subprocess.check_output(["git", "status", "--porcelain"], cwd=root, text=True)
+    if head != OPENAI_CLIP_REVISION or status.strip() or not (root / "clip" / "__init__.py").is_file():
+        raise ValueError("EgoVideo requires the pinned clean OpenAI CLIP tokenizer source")
+    return root
 
 
 def pixel_hash(image):
@@ -67,6 +101,10 @@ def processor_files(model, settings):
     directories = []
     if model == "qwen3_vl_8b":
         directories.append(Path(settings["model_path"]))
+        import qwen_vl_utils
+        qwen_utils_root = Path(qwen_vl_utils.__file__).resolve().parent
+        paths.extend(path for path in qwen_utils_root.rglob("*.py") if path.is_file())
+        directories.append(qwen_utils_root)
     elif model == "internvideo2_clip_1b":
         config_path = Path(settings["official_config"])
         paths.append(config_path)
@@ -74,8 +112,9 @@ def processor_files(model, settings):
         directories.extend(Path(config[key]) for key in ("tokenizer_path",))
         directories.append(Path(config["text_encoder"]["llama_path"]))
     else:
-        import clip
-        paths.append(Path(clip.__file__).parent / "bpe_simple_vocab_16e6.txt.gz")
+        root = openai_clip_root(settings)
+        paths.extend(path for path in (root / "clip").rglob("*.py") if path.is_file())
+        paths.append(root / "clip" / "bpe_simple_vocab_16e6.txt.gz")
     for directory in directories:
         paths.extend(path for path in directory.iterdir() if path.is_file() and path.suffix in (".json", ".model", ".txt", ".jinja"))
     return {str(path.resolve()): sha256_file(path) for path in paths}
@@ -94,8 +133,10 @@ def load_teacher(model, settings, frozen):
     """只加载官方配对语义接口；dense隐藏向量从不作为十类logits。"""
     import torch
     if model == "egovideo_hod":
-        from tools.extract_rq2_dense_vlm_features import EgoVideoEncoder
+        clip_root = openai_clip_root(settings)
+        sys.path.insert(0, str(clip_root))
         import clip
+        from tools.extract_rq2_dense_vlm_features import EgoVideoEncoder
         native_repository(settings, frozen, "egohod_root")
         encoder = EgoVideoEncoder(types.SimpleNamespace(**dict(settings, device="cuda:0")))
         with torch.inference_mode():
@@ -162,7 +203,6 @@ def main():
     parser.add_argument("--full", action="store_true", help="完整缓存预测；默认只有单候选接口smoke")
     parser.add_argument("--expected-head", required=True)
     args = parser.parse_args()
-    from tools.run_rq2_matched_control import check_code, idle_gpu_uuid
     check_code(args.expected_head)
     frozen = read_frozen_protocol(args.frozen_protocol, args.model)
     settings = json.loads(args.settings.read_text())
