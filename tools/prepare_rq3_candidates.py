@@ -22,6 +22,17 @@ def proposal_frame_indices(start, end, fps):
     return [math.floor((start + (end - start) * (i + .5) / 8) * fps) for i in range(8)]
 
 
+def video_paths_by_id(video_root):
+    paths = {}
+    for path in video_root.iterdir():
+        if not path.is_file() or path.suffix.lower() != ".mp4":
+            continue
+        if path.stem in paths:
+            raise ValueError("video ID has multiple raw MP4 files: " + path.stem)
+        paths[path.stem] = path
+    return paths
+
+
 def exact_rgb_frames(path, indices, recovery_root=None):
     """按PTS核对帧号，从头顺序解码；损坏/缺失帧不得被seek误返邻帧替代。"""
     import av
@@ -92,6 +103,7 @@ def main():
             if features["feats"].ndim != 2 or features["feats"].shape[1] != 2304:
                 raise ValueError("teacher reference is not SlowFast")
             lengths[video] = int(features["feats"].shape[0])
+    video_paths = video_paths_by_id(args.video_root)
     grouped = defaultdict(list)
     for row in (json.loads(line) for line in args.proposals.read_text().splitlines() if line.strip()):
         if row["video_id"] not in members or any("gt_" in key for key in row):
@@ -104,7 +116,9 @@ def main():
     candidates, rejected_short = [], 0
     import av
     for video, rows in grouped.items():
-        path = args.video_root / (video + ".mp4")
+        path = video_paths.get(video)
+        if path is None:
+            raise ValueError("raw MP4 is missing for candidate video: " + video)
         with av.open(str(path)) as container:
             fps = float(container.streams.video[0].average_rate)
         kept = []
