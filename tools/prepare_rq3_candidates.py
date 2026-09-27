@@ -53,27 +53,29 @@ def exact_rgb_frames(path, indices, recovery_root=None):
         return recovered
     with av.open(str(path)) as container:
         stream = container.streams.video[0]
-        # 文件平均帧率可能受损坏/缺帧影响；PTS转准确帧号应使用编码流的固定帧率。
         rate = float(getattr(stream, "base_rate", None) or stream.average_rate)
-        time_base = float(stream.time_base)
-        origin = (stream.start_time or 0) * time_base
+        # MP4帧号是显示顺序的样本序号。时间戳允许不连续，不能用固定fps倒推帧号。
+        # 仅对H264/MP4一帧一个样本且帧数/唯一PTS完整的文件建立精确索引。
+        timestamps = sorted(packet.pts for packet in container.demux(stream) if packet.pts is not None)
+        if (len(timestamps) != stream.frames or len(set(timestamps)) != len(timestamps)
+                or not timestamps or min(wanted) < 0 or max(wanted) >= len(timestamps)):
+            raise ValueError("MP4 frame sample index is incomplete or ambiguous: " + str(path))
+        positions = {pts: index for index, pts in enumerate(timestamps)}
         groups = []
         for index in sorted(wanted):
             if not groups or index - groups[-1][-1] > 2 * rate:
                 groups.append([])
             groups[-1].append(index)
         for group in groups:
-            first_requested_sec = origin + group[0] / rate
-            container.seek(int(round(first_requested_sec / time_base)), stream=stream,
+            container.seek(timestamps[group[0]], stream=stream,
                            backward=True, any_frame=False)
             requested = set(group)
             for frame in container.decode(stream):
                 if frame.pts is None:
                     raise ValueError("video lacks frame timestamps")
-                position = (frame.pts * time_base - origin) * rate
-                index = round(position)
-                if abs(position - index) > .05:
-                    raise ValueError("video PTS does not match the canonical frame grid: " + str(path))
+                if frame.pts not in positions:
+                    raise ValueError("decoded frame differs from the exact MP4 sample index: " + str(path))
+                index = positions[frame.pts]
                 if index in requested:
                     if index in result:
                         raise ValueError("video has duplicate requested frame timestamps")
