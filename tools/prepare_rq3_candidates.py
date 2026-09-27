@@ -54,11 +54,12 @@ def exact_rgb_frames(path, indices, recovery_root=None):
     with av.open(str(path)) as container:
         stream = container.streams.video[0]
         rate = float(stream.average_rate)
-        origin = (stream.start_time or 0) * stream.time_base
+        time_base = float(stream.time_base)
+        origin = (stream.start_time or 0) * time_base
         for frame in container.decode(stream):
             if frame.pts is None:
                 raise ValueError("video lacks frame timestamps")
-            position = float(frame.pts * stream.time_base - origin) * rate
+            position = (frame.pts * time_base - origin) * rate
             index = round(position)
             if abs(position - index) > .05:
                 raise ValueError("video PTS does not match the canonical frame grid")
