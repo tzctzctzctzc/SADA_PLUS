@@ -214,6 +214,8 @@ def main(cfg, resume, project_name='sada', debug=False):
         persistent_workers=not bool(cfg.get('rq2_formal')))
     
     # Initialize the device
+    from tools.rq3_gpu import guard_before_cuda
+    guard_before_cuda()
     gpu = cfg["gpu"]
     device = "cuda:" + str(gpu) if gpu != -1 else "cpu"
     print("device: ", device)

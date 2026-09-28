@@ -129,10 +129,14 @@ def checked_evaluation(root, cfg, checkpoint):
     return manifest
 
 
-def run_command(command, log, data_root, gpu_uuid=None):
+def run_command(command, log, data_root, gpu_uuid=None, gpu_index=None):
     env = dict(os.environ, PYTHONPATH=str(CODE_ROOT), PYTHONDONTWRITEBYTECODE="1",
                PYTHONUNBUFFERED="1", CUDA_VISIBLE_DEVICES=gpu_uuid or "",
                OMP_NUM_THREADS="8", MKL_NUM_THREADS="8")
+    env.pop("RQ3_GPU_INDEX", None)
+    env.pop("RQ3_GPU_UUID", None)
+    if gpu_index is not None:
+        env.update(RQ3_GPU_INDEX=str(gpu_index), RQ3_GPU_UUID=gpu_uuid)
     with log.open("x", encoding="utf-8") as stream:
         subprocess.run(command, cwd=data_root, env=env, stdout=stream,
                        stderr=subprocess.STDOUT, check=True)

@@ -143,6 +143,8 @@ def evaluate(cfg, ckpt_path, config_path, output_dir, device, feature_protocol=N
         # 推理时保留buffer/配置身份以strict加载；forward不使用教师或辅助损失。
         cfg["rq3_auxiliary"] = deepcopy(saved_config["rq3_auxiliary"])
     model_cfg = ConfigParser(cfg, save=False)
+    from tools.rq3_gpu import guard_before_cuda
+    guard_before_cuda()
     model = make_meta_arch(cfg["model_name"], model_cfg, device=device).to(device)
     model.load_state_dict(state, strict=True)
     model.eval()

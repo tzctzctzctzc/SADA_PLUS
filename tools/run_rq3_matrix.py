@@ -10,7 +10,7 @@ import sys
 import yaml
 
 from tools.rq2_dense_protocol import sha256_file
-from tools.rq3_gpu import gpu_argument, gpu_slot
+from tools.rq3_gpu import GpuLease, gpu_argument, gpu_slot
 from tools.rq3_protocol import (MODELS, STRATEGIES, audit_baseline, load_cache, members_for,
                                 audit_cache_predictions, validate_interface_audit, validate_reference_lengths)
 
@@ -33,6 +33,49 @@ def check_cache_snapshot(cache_root, snapshot):
     for identity, digest in snapshot.items():
         if sha256_file(cache_root / identity) != digest:
             raise ValueError("RQ3 semantic cache changed between strategies: " + identity)
+
+
+def completed_entries(roots):
+    """仅complete.json代表完成；旧部分目录保留，未完成项使用全新输出根。"""
+    completed = {}
+    allowed = set(matrix())
+    for root in roots:
+        for path in sorted(root.rglob("complete.json")):
+            record = json.loads(path.read_text())
+            key = (record["teacher"], record["strategy"], record["shift"])
+            if key not in allowed or record["seed"] != 6 or key in completed:
+                raise ValueError("RQ3 completed roots contain unknown or duplicate experiment: " + str(path))
+            completed[key] = path
+    return completed
+
+
+def checked_completed_entry(path, args, baselines, snapshot):
+    from tools.run_rq2_matched_control import check_new_protocol, checked_evaluation, checked_train_result
+    record = json.loads(path.read_text())
+    root = path.parent
+    model, strategy, shift = record["teacher"], record["strategy"], record["shift"]
+    cfg = json.loads((root / "preflight.json").read_text())
+    check_new_protocol(cfg)
+    if record["baseline_root"] != str(baseline_root(args.baseline_parent, shift)):
+        raise ValueError("completed RQ3 result uses another baseline")
+    identity = str(Path(model) / (shift + ".json"))
+    if record["cache_sha256"] != snapshot[identity] or cfg["rq3_auxiliary"]["cache_sha256"] != snapshot[identity]:
+        raise ValueError("completed RQ3 result uses another semantic cache")
+    if (cfg["rq3_auxiliary"]["strategy"] != strategy
+            or cfg["rq3_auxiliary"]["teacher_model"] != model
+            or cfg["rq2_formal"]["shift"] != shift or cfg["seed"] != 6):
+        raise ValueError("completed RQ3 strategy/teacher differs from preflight")
+    name = "rq3_{}_{}_{}_seed6_{}".format(model, strategy, shift, path.parents[3].name)
+    config, checkpoint = checked_train_result(args.data_root / "model_results" / name,
+                                             root / "logs/uda.train.log", cfg)
+    audit_baseline(baselines[shift][0], json.loads(config.read_text()))
+    checked_evaluation(root / "evaluation", cfg, checkpoint)
+    if (sha256_file(checkpoint) != record["checkpoint_sha256"]
+            or sha256_file(root / "evaluation/manifest.json") != record["manifest_sha256"]):
+        raise ValueError("completed RQ3 checkpoint or manifest changed")
+    coverage = supervision_audit(config.parent / "benchmark_epoch_metrics.jsonl")
+    if coverage != json.loads((root / "supervision_audit.json").read_text()) or not coverage["effective"]:
+        raise ValueError("completed RQ3 auxiliary supervision was ineffective")
 
 
 def supervision_audit(path):
@@ -82,14 +125,23 @@ def main():
     parser.add_argument("--data-root", type=Path, default=Path("/vepfs/vlms/SADA_PLUS"))
     parser.add_argument("--manifest-root", type=Path, default=Path("/vepfs/vlms/rq2_uda_target_manifests_0924"))
     parser.add_argument("--expected-head", required=True)
+    parser.add_argument("--completed-root", type=Path, action="append", default=[],
+                        help="只读审计并跳过已完成实验；可重复传入原分片根")
+    parser.add_argument("--gpu-idle-minutes", type=float, default=0,
+                        help="首次占卡前连续空闲时长；取得卡后本分片复用同卡")
     parser.add_argument("--audit-only", action="store_true", help="真实train_da CPU预检，不创建GPU任务")
     parser.add_argument("--execute", action="store_true", help="执行本分片；两个分片可用两张空闲卡并行")
     args = parser.parse_args()
     entries = matrix(args.shard_index, args.shard_count)
+    completed = completed_entries([root.resolve() for root in args.completed_root])
+    if args.gpu_idle_minutes < 0:
+        parser.error("--gpu-idle-minutes cannot be negative")
     if args.audit_only and args.execute:
         parser.error("--audit-only and --execute are exclusive")
     if not args.audit_only and not args.execute:
         for model, strategy, shift in entries:
+            if (model, strategy, shift) in completed:
+                continue
             print("{} {} {} seed6 gpu={} cache={}".format(model, strategy, shift, args.gpu,
                                                         args.cache_root / model / (shift + ".json")))
         return
@@ -107,6 +159,8 @@ def main():
         raise ValueError("RQ3 code/data registries differ")
     shifts = yaml.safe_load(registry.read_text())["shifts"]
     previous = Path.cwd()
+    lease = (GpuLease(args.gpu, args.data_root, args.gpu_idle_minutes * 60)
+             if args.gpu_idle_minutes and args.execute else None)
     os.chdir(args.data_root)
     try:
         baselines = {shift: completed_baseline(baseline_root(args.baseline_parent, shift), shift)
@@ -134,6 +188,12 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             for model, strategy, shift in entries:
                 check_cache_snapshot(args.cache_root, snapshot)
+                if (model, strategy, shift) in completed:
+                    path = completed[(model, strategy, shift)]
+                    checked_completed_entry(path, args, baselines, snapshot)
+                    print("RQ3_COMPLETED_SKIPPED " + str(path), flush=True)
+                    continue
+                print("RQ3_PENDING_ENTRY {} {} {} seed6".format(model, strategy, shift), flush=True)
                 root = args.output_root / model / strategy / (shift + "_seed6")
                 (root / "logs").mkdir(parents=True, exist_ok=False)
                 name = "rq3_{}_{}_{}_seed6_{}".format(model, strategy, shift, args.output_root.name)
@@ -162,10 +222,11 @@ def main():
                     continue
                 check_code(args.expected_head)
                 check_cache_snapshot(args.cache_root, snapshot)
-                with gpu_slot(args.gpu, args.data_root, args.wait_gpu) as training_gpu:
+                with (lease.stage() if lease else gpu_slot(args.gpu, args.data_root, args.wait_gpu)) as training_gpu:
                     check_code(args.expected_head)
                     check_cache_snapshot(args.cache_root, snapshot)
-                    run_command(command, root / "logs/uda.train.log", args.data_root, training_gpu["uuid"])
+                    run_command(command, root / "logs/uda.train.log", args.data_root,
+                                training_gpu["uuid"], gpu_index=training_gpu["index"])
                 config_path, checkpoint = checked_train_result(args.data_root / "model_results" / name,
                                                               root / "logs/uda.train.log", cfg)
                 audit_baseline(baselines[shift][0], json.loads(config_path.read_text()))
@@ -174,10 +235,11 @@ def main():
                 evaluation = [sys.executable, "-B", str(CODE_ROOT / "evaluate_da.py"), *common,
                               "-n", name + "_eval", "-r", str(checkpoint), "--rq2-formal",
                               "--rq2-output-dir", str(root / "evaluation")]
-                with gpu_slot(args.gpu, args.data_root, args.wait_gpu) as evaluation_gpu:
+                with (lease.stage() if lease else gpu_slot(args.gpu, args.data_root, args.wait_gpu)) as evaluation_gpu:
                     check_code(args.expected_head)
                     check_cache_snapshot(args.cache_root, snapshot)
-                    run_command(evaluation, root / "logs/uda.eval.log", args.data_root, evaluation_gpu["uuid"])
+                    run_command(evaluation, root / "logs/uda.eval.log", args.data_root,
+                                evaluation_gpu["uuid"], gpu_index=evaluation_gpu["index"])
                 manifest = checked_evaluation(root / "evaluation", cfg, checkpoint)
                 if manifest.get("rq3_auxiliary") != cfg["rq3_auxiliary"]:
                     raise ValueError("RQ3 evaluation lost strategy/cache provenance")
@@ -196,6 +258,8 @@ def main():
                     "manifest_sha256": sha256_file(root / "evaluation/manifest.json"),
                 }, sort_keys=True))
     finally:
+        if lease is not None:
+            lease.close()
         os.chdir(previous)
 
 
