@@ -77,8 +77,10 @@ def main():
         initial = copy.deepcopy((trainer.model, trainer.model_ema))
         rng = (random.getstate(), np.random.get_state(), torch.get_rng_state())
         outputs, baseline_state = {}, None
-        for variant in ('baseline', args.strategy):
+        for variant in ('baseline', 'baseline_repeat', args.strategy):
             trainer.model, trainer.model_ema = copy.deepcopy(initial)
+            trainer.train_loader_src = [[copy.deepcopy(source), copy.deepcopy(source)]]
+            trainer.train_loader_tgt = [[copy.deepcopy(target), copy.deepcopy(target)]]
             opt_cfg = trainer.cfg['opt']
             exclude = ['disc_dom_adv', 'disc_dom_conditional_adv', 'learnable_embeddings']
             for oname, sname, discriminator in (
@@ -90,7 +92,7 @@ def main():
                                            opt_cfg['disc_learning_rate' if discriminator else 'learning_rate'], **kwargs)
                 setattr(trainer, oname, optimizer)
                 setattr(trainer, sname, make_scheduler(optimizer, opt_cfg, scheduler_length))
-            if variant == 'baseline':
+            if variant.startswith('baseline'):
                 trainer.model.rq3_prototype = None
                 trainer.model.rq3_verify_cache = None
                 trainer.model_ema.module.rq3_prototype = None
@@ -117,7 +119,9 @@ def main():
             changed = {n: float((p - baseline_state[n]).abs().max()) for n, p in current.items()
                        if n in baseline_state and not torch.equal(p, baseline_state[n])}
             outputs[variant] = {'metrics': metrics, 'changed_base_parameters': changed}
-            print('RQ3_REVISED_CPU_VARIANT', variant, len(changed), flush=True)
+            print('RQ3_REVISED_CPU_VARIANT', variant, len(changed),
+                  json.dumps(sorted(changed.items(), key=lambda pair: -pair[1])[:5]), flush=True)
+        assert not outputs['baseline_repeat']['changed_base_parameters'], 'CPU baseline itself is not reproducible'
         tested = outputs[args.strategy]
         if args.strategy == 'verify':
             assert tested['metrics']['t_rq3_verify_observed'] > 0, 'fixture did not exercise actual SADA foreground verification'
