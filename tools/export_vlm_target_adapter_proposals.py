@@ -133,8 +133,8 @@ def main():
     trusted_legacy_pickle = False
     trusted_baseline = None
     if args.trusted_matched_baseline_root:
-        if args.domain != "target" or args.split != "train":
-            raise ValueError("matched-baseline trust is only for target-train proposal export")
+        if (args.domain, args.split) not in (('target', 'train'), ('source', 'val')):
+            raise ValueError("matched-baseline export supports target-train and source-validation calibration only")
         baseline_root = Path(args.trusted_matched_baseline_root).resolve()
         complete = json.loads((baseline_root / "complete.json").read_text())
         if complete.get("model") != "slowfast" or complete.get("seed") != 6:
@@ -188,6 +188,9 @@ def main():
     if not dataset.data_list:
         raise RuntimeError("no dataset video has a matching MP4")
 
+    if str(args.device).startswith('cuda'):
+        from tools.rq3_gpu import guard_before_cuda
+        guard_before_cuda()
     model = make_meta_arch(cfg["model_name"], cfg, device=args.device).to(args.device)
     checkpoint = load_checkpoint(
         torch, args.checkpoint, args.device,

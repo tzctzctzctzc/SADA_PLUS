@@ -191,6 +191,8 @@ def main():
                         help="只读审计并跳过已完成实验；可重复传入原分片根")
     parser.add_argument("--gpu-idle-minutes", type=float, default=0,
                         help="首次占卡前连续空闲时长；取得卡后本分片复用同卡")
+    parser.add_argument('--immediate-gpu', action='store_true',
+                        help='用户明确授权本次直接启动；仍须锁内实际空闲核验')
     parser.add_argument("--audit-only", action="store_true", help="真实train_da CPU预检，不创建GPU任务")
     parser.add_argument("--execute", action="store_true", help="执行本分片；两个分片可用两张空闲卡并行")
     args = parser.parse_args()
@@ -199,8 +201,10 @@ def main():
         if not all((args.entry_plan, args.candidate_root, args.verify_cache_root,
                     args.verify_candidate_root, args.calibration_root)) or args.completed_root:
             parser.error('revised reruns require explicit plan, proposal/local inputs and source calibrations; no completed-root')
-        if args.execute and args.gpu_idle_minutes < 60:
+        if args.execute and args.gpu_idle_minutes < 60 and not args.immediate_gpu:
             parser.error('revised GPU runs must observe at least 60 continuous idle minutes')
+        if args.immediate_gpu and args.gpu_idle_minutes:
+            parser.error('immediate-gpu and continuous idle timer are mutually exclusive')
         args.entry_plan = args.entry_plan.resolve()
         args.candidate_root = args.candidate_root.resolve()
         args.verify_cache_root = args.verify_cache_root.resolve()
