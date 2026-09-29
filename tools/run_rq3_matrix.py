@@ -115,6 +115,9 @@ def load_entry_plan(path):
         original = Path(row['original_complete'])
         if sha256_file(original) != row['original_complete_sha256']:
             raise ValueError('original RQ3 result identity changed')
+        for artifact, digest in row.get('artifact_sha256', {}).items():
+            if sha256_file(artifact) != digest:
+                raise ValueError('original RQ3 artifact changed: ' + artifact)
         record = json.loads(original.read_text())
         if (record['teacher'], record['strategy'], record['shift']) != entry or record['seed'] != 6:
             raise ValueError('rerun entry differs from original complete result')
@@ -172,6 +175,8 @@ def main():
     if args.revision == 'revised':
         if not args.entry_plan or not args.candidate_root or args.completed_root:
             parser.error('revised fresh reruns require --entry-plan/--candidate-root; no completed-root')
+        if args.execute and args.gpu_idle_minutes < 60:
+            parser.error('revised GPU runs must observe at least 60 continuous idle minutes')
         args.entry_plan = args.entry_plan.resolve()
         args.candidate_root = args.candidate_root.resolve()
         entries = load_entry_plan(args.entry_plan)[args.shard_index::args.shard_count]
@@ -267,6 +272,10 @@ def main():
                 run_command(command + ["--rq2-audit-output", str(preflight)], root / "logs/preflight.log", args.data_root)
                 cfg = json.loads(preflight.read_text())
                 check_new_protocol(cfg)
+                if args.revision == 'revised':
+                    from tools.rq3_protocol import REVISION
+                    if cfg['rq3_auxiliary']['schema'] != REVISION:
+                        raise ValueError('revised queue reached legacy strategy entry')
                 pairing = audit_baseline(baselines[shift][0], cfg)
                 identity = str(Path(model) / (shift + ".json"))
                 if cfg["rq3_auxiliary"]["cache_sha256"] != snapshot[identity]:
