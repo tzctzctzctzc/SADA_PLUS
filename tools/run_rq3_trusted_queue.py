@@ -150,12 +150,12 @@ def main():
                 audit = validate_interface_audit(protocol, model)
                 predictions = [json.loads(line) for line in (output / 'predictions.jsonl').read_text().splitlines()]
                 payload = build_cache(common, predictions, protocol, model, shift, common['teacher_checkpoint_sha256'])
+                audit_cache_predictions(payload, audit)
             cache = args.output_root / 'caches' / kind / model / (shift + '.json')
             cache.parent.mkdir(parents=True, exist_ok=True)
             with cache.open('x') as stream:
                 json.dump(payload, stream, sort_keys=True)
             load_cache(cache, model, shift, common['target_video_ids'])
-            audit_cache_predictions(payload, audit)
             return cache
 
         try:
