@@ -36,6 +36,7 @@ def main():
     torch.set_num_threads(1)
     torch.use_deterministic_algorithms(True)
     torch.autograd.set_multithreading_enabled(False)
+    torch.backends.mkldnn.enabled = False
     root = Path(__file__).resolve().parents[1]
     os.chdir('/vepfs/vlms/SADA_PLUS')
 
