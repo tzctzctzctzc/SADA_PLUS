@@ -1,0 +1,144 @@
+import copy
+import importlib.util
+import json
+from pathlib import Path
+import sys
+import types
+
+import pytest
+import torch
+
+PACKAGE = types.ModuleType('rq3_revised_cpu')
+PACKAGE.__path__ = [str(Path(__file__).resolve().parents[1] / 'libs/models/SADA')]
+sys.modules[PACKAGE.__name__] = PACKAGE
+SPEC = importlib.util.spec_from_file_location(PACKAGE.__name__ + '.rq3_revised',
+                                             Path(PACKAGE.__path__[0]) / 'rq3_revised.py')
+MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(MODULE)
+
+
+def video():
+    return {'metadata': {'video_id': 'v', 'crop_start': 2, 'crop_feat_len': 6,
+                         'feat_stride': 2, 'feat_num_frames': 2, 'fps': 2},
+            'feats': torch.zeros(4, 6)}
+
+
+def entry(label=1, start=2.5, end=4.5):
+    return {'class_id': label, 'proposal_start_sec': start, 'proposal_end_sec': end,
+            'source_fpn_levels': [0], 'candidate_id': 'v-p0000003',
+            'semantic_label': ('TAKE', 'PUT')[label],
+            'class_probabilities': [1. if i == label else 0. for i in range(10)]}
+
+
+def verify(cache=None, level=0):
+    pseudo = torch.tensor([[0., 1.], [1., 0.], [0., 0.], [1., 0.], [0., 1.]])
+    grid = torch.tensor([[i, 0, 9, 1] for i in range(6)], dtype=torch.float)
+    valid = torch.tensor([[True, True, True, True, True, False]])
+    keep, stats = MODULE.verify_sada_targets(pseudo, [video()], grid, valid,
+                                             cache if cache is not None else {'v': [entry()]}, level)
+    return pseudo, keep, stats
+
+
+def test_verify_rejects_actual_foreground_without_relabel_or_background_conversion():
+    pseudo, keep, stats = verify()
+    # proposal绝对[2,4)，crop_start=2：仅本地0、1覆盖。
+    assert keep.tolist() == [True, False, True, True, True]
+    assert stats['verify_eligible'] == 2 and stats['verify_rejected'] == 1
+    assert (pseudo.sum(-1).eq(0) & keep).tolist() == [False, False, True, False, False]
+    features = torch.randn(5, 4, requires_grad=True)
+    # 与SADA相同：按实际pseudo class拆分，在进入判别器前AND keep。
+    discriminator = torch.nn.Linear(4, 1)
+    loss = sum(discriminator(features[pseudo[:, c].eq(1) & keep]).square().sum() for c in range(2))
+    loss.backward()
+    assert features.grad[1].abs().sum() == 0
+    assert features.grad[[0, 3, 4]].abs().sum() > 0
+
+
+@pytest.mark.parametrize('cache,level', [({}, 0), ({'v': [entry()]}, 1),
+                                       ({'v': [entry(0), entry(1)]}, 0)])
+def test_uncovered_other_level_or_conflicting_evidence_does_not_change_baseline(cache, level):
+    _, keep, _ = verify(cache, level)
+    assert keep.all()
+
+
+def test_verify_never_reads_target_gt():
+    v = video()
+    v['segments'], v['labels'] = object(), object()
+    pseudo = torch.tensor([[1., 0.]])
+    keep, _ = MODULE.verify_sada_targets(pseudo, [v], torch.tensor([[0., 0, 9, 1]]),
+                                         torch.ones(1, 1, dtype=torch.bool), {'v': [entry()]}, 0)
+    assert not keep.item()
+
+
+def prototype_data():
+    source = video()
+    source.update(segments=torch.tensor([[0., 3.], [3., 5.]]), labels=torch.tensor([0, 1]))
+    target = video()  # 没有target GT字段，完整forward必须成功。
+    source_features = [torch.randn(1, 4, 6, requires_grad=True)]
+    target_features = [torch.randn(1, 4, 6, requires_grad=True)]
+    return [source], [target], source_features, target_features
+
+
+def test_prototype_old_embedding_branch_updates_source_and_target_and_roundtrips():
+    torch.manual_seed(6)
+    state = torch.random.get_rng_state().clone()
+    model = MODULE.RQ3ProposalPrototype(4, 10, {'v': [entry()]}, [1], [(0, 99)])
+    assert torch.equal(state, torch.random.get_rng_state())
+    data = prototype_data()
+    before = model.branch.input_projection.weight.detach().clone()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    out = model(*data, epoch=5)
+    assert out['selected'] == 1 and out['aligned_classes'] == 1
+    assert out['source_loss'] > 0 and out['alignment_loss'] > 0
+    assert out['target_gradient_norm'] > 0
+    out['loss'].backward()
+    assert data[2][0].grad.abs().sum() > 0 and data[3][0].grad.abs().sum() > 0
+    optimizer.step()
+    assert not torch.equal(before, model.branch.input_projection.weight)
+    restored = MODULE.RQ3ProposalPrototype(4, 10, {}, [1], [(0, 99)])
+    restored.load_state_dict(model.state_dict(), strict=True)
+    assert restored.branch.source_prototype_ready[:2].all()
+    for key, value in model.state_dict().items():
+        assert torch.equal(value, restored.state_dict()[key])
+
+
+def test_prototype_numerically_matches_historical_cotrain_objective():
+    model = MODULE.RQ3ProposalPrototype(4, 10, {'v': [entry()]}, [1], [(0, 99)])
+    original = copy.deepcopy(model.branch)
+    src, tgt, sf, tf = prototype_data()
+    source = MODULE.source_gt_proposals(src, 10, 1, [(0, 99)])
+    target = MODULE.cached_proposals_for_videos(model.cache, tgt, 10, 1, tf[0].device, tf[0].dtype)
+    es, et = original.encode(sf, source, [1]), original.encode(tf, target, [1])
+    alignment, _, _ = original.prototype_alignment(es, original.flatten_field(source, 'targets'),
+                                                  et, original.select_vlm_target(target))
+    expected = original.source_loss(es, source) + 0.1 * alignment
+    actual = model(src, tgt, sf, tf, epoch=1)['loss']
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+
+def test_revised_verify_audit_does_not_require_fictitious_auxiliary_loss(tmp_path):
+    from tools.rq3_protocol import REVISION
+    from tools.run_rq3_matrix import supervision_audit
+    path = tmp_path / 'metrics.jsonl'
+    path.write_text(json.dumps({'t_rq3_verify_eligible': 3, 't_rq3_verify_accepted': 3}))
+    result = supervision_audit(path, {'rq3_auxiliary': {'schema': REVISION, 'strategy': 'verify'}})
+    assert result['effective'] and not result['intervened']
+
+
+def test_rerun_plan_excludes_hard_and_changed_original(tmp_path):
+    from tools.run_rq3_matrix import load_entry_plan
+    from tools.rq2_dense_protocol import sha256_file
+    original = tmp_path / 'complete.json'
+    original.write_text(json.dumps(dict(teacher='egovideo_hod', strategy='verify', shift='S1', seed=6)))
+    row = dict(teacher='egovideo_hod', strategy='verify', shift='S1',
+               original_complete=str(original), original_complete_sha256=sha256_file(original))
+    plan = tmp_path / 'plan.json'
+    plan.write_text(json.dumps(dict(schema='rq3-revised-completed-only-v1', entries=[row])))
+    assert load_entry_plan(plan) == [('egovideo_hod', 'verify', 'S1')]
+    original.write_text('{}')
+    with pytest.raises(ValueError, match='identity changed'):
+        load_entry_plan(plan)
+    row['strategy'] = 'hard'
+    plan.write_text(json.dumps(dict(schema='rq3-revised-completed-only-v1', entries=[row])))
+    with pytest.raises(ValueError, match='Hard'):
+        load_entry_plan(plan)

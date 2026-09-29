@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 
-from tools.run_rq3_matrix import CODE_ROOT, completed_entries, matrix
+from tools.run_rq3_matrix import CODE_ROOT, completed_entries, matrix, load_entry_plan
 
 
 def main():
@@ -19,6 +19,9 @@ def main():
     parser.add_argument("--completed-root", type=Path, action="append", default=[])
     parser.add_argument("--data-root", type=Path, default=Path("/vepfs/vlms/SADA_PLUS"))
     parser.add_argument("--expected-head", required=True)
+    parser.add_argument('--entry-plan', type=Path)
+    parser.add_argument('--candidate-root', type=Path)
+    parser.add_argument('--revision', choices=('legacy', 'revised'), default='legacy')
     parser.add_argument("--idle-minutes", type=float, default=60)
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
@@ -26,7 +29,16 @@ def main():
         parser.error("GPU必须连续空闲至少60分钟")
     args.completed_root = [p.resolve() for p in args.completed_root]
     completed = completed_entries(args.completed_root)
-    remaining = [entry for entry in matrix() if entry not in completed]
+    entries = matrix()
+    if args.revision == 'revised':
+        if not args.entry_plan or not args.candidate_root or args.completed_root:
+            parser.error('revised fresh reruns require entry-plan/candidate-root; no completed-root')
+        args.entry_plan = args.entry_plan.resolve()
+        args.candidate_root = args.candidate_root.resolve()
+        entries = load_entry_plan(args.entry_plan)
+    elif args.entry_plan or args.candidate_root:
+        parser.error('entry-plan/candidate-root require revised protocol')
+    remaining = [entry for entry in entries if entry not in completed]
     print("RQ3_IDLE_MONITOR_PLAN completed=%d remaining=%d max_gpus=2 idle_minutes=%g" %
           (len(completed), len(remaining), args.idle_minutes), flush=True)
     if not args.execute or not remaining:
@@ -64,6 +76,9 @@ def main():
                            "--gpu-idle-minutes", str(args.idle_minutes)]
                 for completed_root in args.completed_root:
                     command.extend(["--completed-root", str(completed_root)])
+                if args.revision == 'revised':
+                    command.extend(['--revision', 'revised', '--entry-plan', str(args.entry_plan),
+                                    '--candidate-root', str(args.candidate_root)])
                 stream = (args.output_root / ("shard%d.log" % shard)).open("x")
                 streams.append(stream)
                 env = dict(os.environ, CUDA_VISIBLE_DEVICES="", PYTHONDONTWRITEBYTECODE="1",

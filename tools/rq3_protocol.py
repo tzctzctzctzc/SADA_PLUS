@@ -179,7 +179,46 @@ def audit_cache_predictions(payload, audit):
             raise ValueError("RQ3 cached classes/probabilities were edited after official inference")
 
 
-def configure(cfg, strategy, cache_path, model, shift):
+REVISION = 'rq3-sada-verify-proposal-prototype-v3'
+REVISED_FIXED = {
+    'verify_scope': 'original-proposal-interval-and-fpn-consensus-v1',
+    'verify_action': 'reject-disagreed-foreground-only-no-relabel-no-background-conversion',
+    'prototype_implementation': 'VLMProposalCoAdaptationBranch@24b5dfbe7cd445988d28e400f38a5240be8b1ba0',
+    'prototype_source_weight': 1.0, 'prototype_alignment_weight': 0.1,
+    'prototype_direct_weight': 0.0, 'prototype_target_start_epoch': 1,
+    'prototype_hidden_dim': 256, 'prototype_embedding_dim': 128,
+    'prototype_confidence': 0.1, 'prototype_momentum': 0.9,
+    'prototype_max_proposals': 256, 'target_gt_used': False,
+}
+
+
+def proposal_evidence(payload, manifest_path):
+    """把已核验概率与同一教师所见的原始proposal区间精确绑定，不重新推理。"""
+    manifest = json.loads(Path(manifest_path).read_text(encoding='utf-8'))
+    if (content_hash(manifest) != payload['candidate_sha256']
+            or manifest.get('target_gt_used') is not False
+            or manifest['target_video_ids'] != payload['target_video_ids']
+            or manifest['feature_lengths'] != payload['feature_lengths']):
+        raise ValueError('RQ3 proposal manifest identity differs')
+    candidates = {(row['video_id'], row['absolute_feature_index']): row for row in manifest['candidates']}
+    if len(candidates) != len(manifest['candidates']) or len(candidates) != len(payload['entries']):
+        raise ValueError('RQ3 proposal coverage/uniqueness differs')
+    by_video = {}
+    for entry in payload['entries']:
+        candidate = candidates[(entry['video_id'], entry['absolute_feature_index'])]
+        start, end = candidate['proposal_start_sec'], candidate['proposal_end_sec']
+        if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end):
+            raise ValueError('RQ3 proposal interval invalid')
+        if candidate['source_fpn_levels'] != entry['source_fpn_levels']:
+            raise ValueError('RQ3 proposal FPN identity differs')
+        row = dict(entry, proposal_start_sec=start, proposal_end_sec=end,
+                   candidate_id=candidate['candidate_id'],
+                   semantic_label=TARGET_CLASS_NAMES[entry['class_id']])
+        by_video.setdefault(entry['video_id'], []).append(row)
+    return by_video
+
+
+def configure(cfg, strategy, cache_path, model, shift, revision='legacy', manifest_path=None):
     if strategy == "off":
         if cache_path or model:
             raise ValueError("off RQ3 must not load a teacher/cache")
@@ -202,13 +241,27 @@ def configure(cfg, strategy, cache_path, model, shift):
         "activation": "sada-adaptation-phase", "target_gt_used": False,
         "coordinate_mapping": "continuous-fpn-linear-v1", "cap_reference": "unfiltered-hard-for-hard-verify-v1",
     }
+    if revision == 'revised':
+        if strategy not in ('verify', 'prototype') or not manifest_path:
+            raise ValueError('revised RQ3 requires Verify/Prototype and original candidate manifest')
+        proposal_evidence(payload, manifest_path)
+        legacy = cfg['rq3_auxiliary']
+        cfg['rq3_auxiliary'] = {key: legacy[key] for key in (
+            'strategy', 'teacher_model', 'cache_path', 'cache_sha256', 'candidate_sha256',
+            'frames_sha256', 'teacher_checkpoint_sha256', 'input_protocol')}
+        cfg['rq3_auxiliary'].update(REVISED_FIXED, schema=REVISION,
+                                   manifest_path=str(Path(manifest_path).resolve()),
+                                   manifest_sha256=sha256_file(manifest_path))
+    elif revision != 'legacy':
+        raise ValueError('unknown RQ3 revision')
 
 
 def validate_config(cfg, regime):
     auxiliary = cfg.get("rq3_auxiliary")
     if not auxiliary:
         return
-    if (regime != "uda" or auxiliary.get("schema") != "rq3-three-strategies-v2"
+    revised = auxiliary.get('schema') == REVISION
+    if (regime != "uda" or auxiliary.get("schema") not in ("rq3-three-strategies-v2", REVISION)
             or auxiliary.get("strategy") not in STRATEGIES or int(cfg["init_rand_seed"]) != 6
             or int(cfg["dataset"]["input_dim"]) != 2304
             or int(cfg["opt"]["epochs"]) != 50 or int(cfg["loader"]["batch_size"]) != 2):
@@ -216,6 +269,12 @@ def validate_config(cfg, regime):
     fixed = {"levels": [0, 1, 2], "budget": 0.05, "prototype_momentum": 0.9,
              "normalizer": "common-eligible-count", "activation": "sada-adaptation-phase", "target_gt_used": False,
              "coordinate_mapping": "continuous-fpn-linear-v1", "cap_reference": "unfiltered-hard-for-hard-verify-v1"}
+    if revised:
+        fixed = REVISED_FIXED
+        if auxiliary['strategy'] not in ('verify', 'prototype'):
+            raise ValueError('Hard must remain on the original protocol')
+        if sha256_file(auxiliary['manifest_path']) != auxiliary['manifest_sha256']:
+            raise ValueError('RQ3 original proposal manifest changed')
     if any(auxiliary.get(key) != value for key, value in fixed.items()):
         raise ValueError("RQ3 common strategy protocol changed")
     path = auxiliary["cache_path"]
@@ -223,6 +282,8 @@ def validate_config(cfg, regime):
         raise ValueError("RQ3 cache changed after audit")
     payload, _ = load_cache(path, auxiliary["teacher_model"], cfg["rq2_formal"]["shift"]
                             if cfg.get("rq2_formal") else None, members_for(cfg, "tgt"))
+    if revised:
+        proposal_evidence(payload, auxiliary['manifest_path'])
     interface = validate_interface_audit(payload["input_protocol"], auxiliary["teacher_model"])
     audit_cache_predictions(payload, interface)
     validate_reference_lengths(payload, cfg)

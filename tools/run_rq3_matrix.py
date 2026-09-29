@@ -73,22 +73,55 @@ def checked_completed_entry(path, args, baselines, snapshot):
     if (sha256_file(checkpoint) != record["checkpoint_sha256"]
             or sha256_file(root / "evaluation/manifest.json") != record["manifest_sha256"]):
         raise ValueError("completed RQ3 checkpoint or manifest changed")
-    coverage = supervision_audit(config.parent / "benchmark_epoch_metrics.jsonl")
+    coverage = supervision_audit(config.parent / "benchmark_epoch_metrics.jsonl", cfg)
     if coverage != json.loads((root / "supervision_audit.json").read_text()) or not coverage["effective"]:
         raise ValueError("completed RQ3 auxiliary supervision was ineffective")
 
 
-def supervision_audit(path):
+def supervision_audit(path, cfg=None):
     """只检查辅助监督实际生效，不按target增益筛选；零覆盖结果也保留评估。"""
     rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     totals = {}
-    for key in ("eligible", "selected", "loss", "gradient_norm"):
+    from tools.rq3_protocol import REVISION
+    auxiliary = (cfg or {}).get('rq3_auxiliary', {})
+    revised = auxiliary.get('schema') == REVISION
+    keys = ('eligible', 'selected', 'loss', 'gradient_norm')
+    if revised and auxiliary['strategy'] == 'verify':
+        keys = ('verify_eligible', 'verify_accepted', 'verify_rejected', 'verify_ambiguous')
+    elif revised:
+        keys += ('source_loss', 'alignment_loss', 'target_gradient_norm', 'aligned_classes')
+    for key in keys:
         values = [row.get("t_rq3_" + key, 0) for row in rows]
         if any(not math.isfinite(value) or value < 0 for value in values):
             raise ValueError("RQ3 auxiliary metrics are nonfinite")
         totals[key + "_epoch_mean_sum"] = sum(values)
     totals["effective"] = all(value > 0 for value in totals.values())
+    if revised and auxiliary['strategy'] == 'verify':
+        # Verify没有新增辅助loss；全体一致时是有效核验但零干预，不强迫拒绝。
+        totals['effective'] = totals['verify_eligible_epoch_mean_sum'] > 0
+        totals['intervened'] = totals['verify_rejected_epoch_mean_sum'] > 0
     return totals
+
+
+def load_entry_plan(path):
+    plan = json.loads(Path(path).read_text())
+    if plan.get('schema') != 'rq3-revised-completed-only-v1':
+        raise ValueError('unknown RQ3 rerun plan')
+    entries = []
+    for row in plan['entries']:
+        entry = (row['teacher'], row['strategy'], row['shift'])
+        if entry not in matrix() or entry[1] not in ('verify', 'prototype') or entry in entries:
+            raise ValueError('invalid/duplicate RQ3 revised entry; Hard is excluded')
+        original = Path(row['original_complete'])
+        if sha256_file(original) != row['original_complete_sha256']:
+            raise ValueError('original RQ3 result identity changed')
+        record = json.loads(original.read_text())
+        if (record['teacher'], record['strategy'], record['shift']) != entry or record['seed'] != 6:
+            raise ValueError('rerun entry differs from original complete result')
+        entries.append(entry)
+    if not entries:
+        raise ValueError('empty RQ3 rerun plan')
+    return entries
 
 
 def completed_baseline(root, shift):
@@ -125,6 +158,9 @@ def main():
     parser.add_argument("--data-root", type=Path, default=Path("/vepfs/vlms/SADA_PLUS"))
     parser.add_argument("--manifest-root", type=Path, default=Path("/vepfs/vlms/rq2_uda_target_manifests_0924"))
     parser.add_argument("--expected-head", required=True)
+    parser.add_argument('--entry-plan', type=Path)
+    parser.add_argument('--candidate-root', type=Path)
+    parser.add_argument('--revision', choices=('legacy', 'revised'), default='legacy')
     parser.add_argument("--completed-root", type=Path, action="append", default=[],
                         help="只读审计并跳过已完成实验；可重复传入原分片根")
     parser.add_argument("--gpu-idle-minutes", type=float, default=0,
@@ -133,6 +169,14 @@ def main():
     parser.add_argument("--execute", action="store_true", help="执行本分片；两个分片可用两张空闲卡并行")
     args = parser.parse_args()
     entries = matrix(args.shard_index, args.shard_count)
+    if args.revision == 'revised':
+        if not args.entry_plan or not args.candidate_root or args.completed_root:
+            parser.error('revised fresh reruns require --entry-plan/--candidate-root; no completed-root')
+        args.entry_plan = args.entry_plan.resolve()
+        args.candidate_root = args.candidate_root.resolve()
+        entries = load_entry_plan(args.entry_plan)[args.shard_index::args.shard_count]
+    elif args.entry_plan or args.candidate_root:
+        parser.error('entry-plan/candidate-root require revised protocol')
     completed = completed_entries([root.resolve() for root in args.completed_root])
     if args.gpu_idle_minutes < 0:
         parser.error("--gpu-idle-minutes cannot be negative")
@@ -154,6 +198,8 @@ def main():
         setattr(args, key, getattr(args, key).resolve())
     check_code(args.expected_head)
     args.output_root.mkdir(parents=True, exist_ok=False)
+    if args.entry_plan:
+        (args.output_root / 'entry_plan.json').write_bytes(args.entry_plan.read_bytes())
     registry = args.data_root / "configs/rq2/shift_registry.yaml"
     if sha256_file(registry) != sha256_file(CODE_ROOT / "configs/rq2/shift_registry.yaml"):
         raise ValueError("RQ3 code/data registries differ")
@@ -182,6 +228,11 @@ def main():
                     raise ValueError("RQ3 VLMs use different candidate/frame/teacher inputs")
                 shared[shift] = identity
         (args.output_root / "cache_snapshot.json").write_text(json.dumps(snapshot, sort_keys=True))
+        if args.entry_plan:
+            for row in json.loads(args.entry_plan.read_text())['entries']:
+                if (row['teacher'], row['strategy'], row['shift']) in entries:
+                    checked_completed_entry(Path(row['original_complete']), args, baselines, snapshot)
+            print('RQ3_ORIGINAL_RESULTS_REAUDITED', len(entries), flush=True)
         # 防止重复分片；两个分片成员互斥，每个GPU阶段再取得共享容量与卡锁。
         import fcntl
         with (args.data_root / (".rq3_matrix_%d_of_%d.lock" % (args.shard_index, args.shard_count))).open("a") as lock:
@@ -208,6 +259,9 @@ def main():
                            "--supervised-upper-bound", "off", "--rq2-target-manifest",
                            str(args.manifest_root / (shift + ".json")), "--rq3-strategy", strategy,
                            "--rq3-teacher", model, "--rq3-cache", str(args.cache_root / model / (shift + ".json"))]
+                if args.revision == 'revised':
+                    command += ['--rq3-revision', 'revised', '--rq3-candidate-manifest',
+                                str(args.candidate_root / shift / 'manifest.json')]
                 check_code(args.expected_head)
                 preflight = root / "preflight.json"
                 run_command(command + ["--rq2-audit-output", str(preflight)], root / "logs/preflight.log", args.data_root)
@@ -244,7 +298,7 @@ def main():
                 if manifest.get("rq3_auxiliary") != cfg["rq3_auxiliary"]:
                     raise ValueError("RQ3 evaluation lost strategy/cache provenance")
                 check_cache_snapshot(args.cache_root, snapshot)
-                coverage = supervision_audit(config_path.parent / "benchmark_epoch_metrics.jsonl")
+                coverage = supervision_audit(config_path.parent / "benchmark_epoch_metrics.jsonl", cfg)
                 (root / "supervision_audit.json").write_text(json.dumps(coverage, sort_keys=True))
                 if not coverage["effective"]:
                     raise ValueError("RQ3 auxiliary supervision never activated; outputs retained, queue stopped")

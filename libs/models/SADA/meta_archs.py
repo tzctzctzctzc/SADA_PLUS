@@ -48,6 +48,7 @@ from .target_adapter import (
     load_vlm_target_adapter_cache,
 )
 from .rq3_auxiliary import RQ3Auxiliary
+from .rq3_revised import RQ3ProposalPrototype, verify_sada_targets
 from .oracle_task import (
     ORACLE_TARGET_TASK_MODES,
     compose_oracle_target_task_loss,
@@ -1510,14 +1511,24 @@ class SADA(nn.Module):
 
         self.proposal_semantic_branch = None
         self.rq3_auxiliary = None
+        self.rq3_prototype = None
+        self.rq3_verify_cache = None
         if cfg.get('rq3_auxiliary'):
-            from tools.rq3_protocol import load_cache
+            from tools.rq3_protocol import load_cache, proposal_evidence, REVISION
             rq3 = cfg['rq3_auxiliary']
-            _, rq3_cache = load_cache(rq3['cache_path'], rq3['teacher_model'])
-            self.rq3_auxiliary = RQ3Auxiliary(
-                rq3['strategy'], rq3['levels'], [fpn_dim] * self.n_levels,
-                self.num_class_orig, rq3_cache, rq3['budget'], rq3['prototype_momentum'],
-            )
+            payload, rq3_cache = load_cache(rq3['cache_path'], rq3['teacher_model'])
+            if rq3['schema'] == REVISION:
+                evidence = proposal_evidence(payload, rq3['manifest_path'])
+                if rq3['strategy'] == 'verify':
+                    self.rq3_verify_cache = evidence
+                else:
+                    self.rq3_prototype = RQ3ProposalPrototype(
+                        fpn_dim, self.num_class_orig, evidence, self.fpn_strides, self.reg_range)
+            else:
+                self.rq3_auxiliary = RQ3Auxiliary(
+                    rq3['strategy'], rq3['levels'], [fpn_dim] * self.n_levels,
+                    self.num_class_orig, rq3_cache, rq3['budget'], rq3['prototype_momentum'],
+                )
         self.proposal_target_adapters = nn.ModuleList()
         self.proposal_logit_adapters = nn.ModuleList()
         if self.proposal_semantic_enabled:
@@ -3226,6 +3237,13 @@ class SADA(nn.Module):
                     losses['rq3_' + key] = torch.as_tensor(value, device=self.device).detach()
                 losses['downstream_loss'] = losses['downstream_loss'] + rq3_output['loss']
 
+            if mode == 'train' and self.rq3_prototype is not None:
+                rq3_output = self.rq3_prototype(video_list_src, video_list_tgt,
+                                               fpn_feats_src, fpn_feats_tgt, curr_epoch)
+                for key, value in rq3_output.items():
+                    losses['rq3_' + key] = torch.as_tensor(value, device=self.device).detach()
+                losses['downstream_loss'] = losses['downstream_loss'] + rq3_output['loss']
+
             # Return the GTs of the target domain as well, to be used to compute the anchors
             gt_tgt_cls = torch.stack(gt_cls_labels[bs:])   # shape: List of B elements B x FT x C
             gt_tgt_cls = gt_tgt_cls[valid_mask_tgt_pl]  # T' x C
@@ -4496,6 +4514,15 @@ class SADA(nn.Module):
                     max_cls_prob_src, max_cls_idx_src = torch.max(out_cls_logits_src2, dim=1)  # shape: B(T_i)
                     
                     # Apply thresholding to the maximum class probability
+                    rq3_target_keep = None
+                    if self.rq3_verify_cache is not None and l in semantic_alignment_levels:
+                        rq3_target_keep, verification = verify_sada_targets(
+                            pseudo_gt_cls_target, video_list_tgt, points[l],
+                            valid_mask_l_tgt, self.rq3_verify_cache, l)
+                        for key, value in verification.items():
+                            name = 'rq3_' + key
+                            losses[name] = losses.get(name, value.new_zeros(())) + value
+
                     pseudo_gt_cls_source = torch.zeros_like(out_cls_logits_src2).detach()  # shape: B(T_l) x C or B(T_l) x C+1
                     selected_anchors_mask = max_cls_prob_src >= threshold[max_cls_idx_src]
                     pseudo_gt_cls_source[selected_anchors_mask] = F.one_hot(max_cls_idx_src[selected_anchors_mask], num_classes=self.num_classes).float()
@@ -4580,6 +4607,9 @@ class SADA(nn.Module):
                             class_c_mask_src = source_labels[:, c] == 1   # shape: T' (subtract start_idx to to adapt to the no-class)   
                             class_c_mask_tgt = pseudo_gt_cls_target[:, c] == 1   # shape: T''
                             
+                        if rq3_target_keep is not None:
+                            # 在真正进入条件域判别器前屏蔽；被拒绝前景不进入背景类。
+                            class_c_mask_tgt = class_c_mask_tgt & rq3_target_keep
                         source_class_samples = int(class_c_mask_src.sum().item())
                         rescue_candidate_mask = torch.zeros_like(
                             class_c_mask_tgt, dtype=torch.bool
