@@ -127,10 +127,45 @@ def load_calibration(path, cfg, target_payload, target_manifest, strategy):
         raise ValueError('source/target proposals use different SO checkpoints')
     for key in ('checkpoint_sha256', 'processor_sha256', 'readout', 'frame_protocol', 'input_frames'):
         if report['input_protocol'][key] != target_payload['input_protocol'][key]:
+            if key == 'processor_sha256':
+                check_relocated_processor(report['input_protocol'], target_payload['input_protocol'], report['teacher_model'])
+                continue
             raise ValueError('source/target scoring interface differs: ' + key)
     # Qwen prompt hash含候选ID的选项置换，不能直接跨候选比较；模板代码已绑定processor hash。
     check_time_evidence(target_manifest, cfg, strategy)
     return report
+
+
+def check_relocated_processor(source, target, model, settings=None):
+    """旧签名包含工作树绝对路径；仅在完整重验后允许相同代码的路径搬迁。"""
+    from tools.rq3_protocol import content_hash, validate_interface_audit, FROZEN_PROTOCOLS
+    if settings is None:
+        names = {'egovideo_hod': 'ego', 'internvideo2_clip_1b': 'intern', 'qwen3_vl_8b': 'qwen'}
+        settings = json.loads((Path('/vepfs/vlms/cache/rq3_runtime_0928') / (names[model] + '_settings.json')).read_text())
+    code_names = {'score_rq3_vlm_candidates.py', 'run_qwen3_vl_classification.py',
+                  'extract_rq2_dense_vlm_features.py', 'extract_rq1_egovideo_features.py'}
+    identities = []
+    for protocol in (source, target):
+        audit = validate_interface_audit(protocol, model)
+        assets = audit['processor_files']
+        code = {Path(path).name: digest for path, digest in assets.items()
+                if Path(path).parent.name == 'tools' and Path(path).name in code_names}
+        if set(code) != code_names:
+            raise ValueError('processor audit misses scoring code')
+        # 用当前冻结settings重建旧签名，避免把settings变化误当成路径变化。
+        raw = content_hash(dict(settings=settings, processor_files=assets,
+                                runtime_versions=audit['runtime_versions'],
+                                frozen_protocol=FROZEN_PROTOCOLS[model],
+                                qwen_classifier=code['run_qwen3_vl_classification.py']))
+        if raw != protocol['processor_sha256']:
+            raise ValueError('processor settings/signature cannot be reproduced')
+        normalized = {('tools/' + Path(path).name if Path(path).parent.name == 'tools'
+                       and Path(path).name in code_names else path): digest for path, digest in assets.items()}
+        if len(normalized) != len(assets):
+            raise ValueError('ambiguous processor code paths')
+        identities.append((normalized, audit['runtime_versions'], audit['frozen_protocol_sha256']))
+    if identities[0] != identities[1]:
+        raise ValueError('source/target scoring processor content or runtime differs')
 
 
 def main():

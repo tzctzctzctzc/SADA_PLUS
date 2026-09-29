@@ -90,9 +90,42 @@ def test_calibration_replay_and_teacher_binding(tmp_path, monkeypatch):
         confidence.load_calibration(path, {}, target, {}, 'prototype')
     target['teacher_checkpoint_sha256'] = 'so'
     target['input_protocol']['processor_sha256'] = 'other-processor'
+    def reject_processor(*args):
+        raise ValueError('source/target scoring interface differs: processor_sha256')
+    monkeypatch.setattr(confidence, 'check_relocated_processor', reject_processor)
     with pytest.raises(ValueError, match='interface differs'):
         confidence.load_calibration(path, {}, target, {}, 'prototype')
     altered = dict(report, threshold=.1)
     path.write_text(json.dumps(altered))
     with pytest.raises(ValueError, match='reproduced'):
         confidence.load_calibration(path, {}, target, {}, 'prototype')
+
+
+def test_processor_relocation_requires_same_content_settings_and_runtime(monkeypatch):
+    from tools import rq3_protocol as protocol
+    from tools.rq3_confidence import check_relocated_processor
+    names = ('score_rq3_vlm_candidates.py', 'run_qwen3_vl_classification.py',
+             'extract_rq2_dense_vlm_features.py', 'extract_rq1_egovideo_features.py')
+    settings = {'model_path': '/weights/official'}
+    audits = {}
+    def create(root, changed_code=False, versions=None):
+        assets = {root + '/tools/' + name: name for name in names}
+        assets['/official/tokenizer.json'] = 'tokenizer'
+        if changed_code:
+            assets[root + '/tools/score_rq3_vlm_candidates.py'] = 'different'
+        versions = versions or {'torch': 'same'}
+        digest = protocol.content_hash(dict(settings=settings, processor_files=assets,
+                      runtime_versions=versions, frozen_protocol=protocol.FROZEN_PROTOCOLS['egovideo_hod'],
+                      qwen_classifier='run_qwen3_vl_classification.py'))
+        audits[digest] = dict(processor_files=assets, runtime_versions=versions,
+                             frozen_protocol_sha256=protocol.FROZEN_PROTOCOLS['egovideo_hod'])
+        return {'processor_sha256': digest}
+    monkeypatch.setattr(protocol, 'validate_interface_audit', lambda value, model: audits[value['processor_sha256']])
+    source, target = create('/old'), create('/new')
+    assert source != target
+    check_relocated_processor(source, target, 'egovideo_hod', settings)
+    for changed in (create('/other', True), create('/other', versions={'torch': 'changed'})):
+        with pytest.raises(ValueError, match='content or runtime'):
+            check_relocated_processor(source, changed, 'egovideo_hod', settings)
+    with pytest.raises(ValueError, match='settings/signature'):
+        check_relocated_processor(source, target, 'egovideo_hod', {'model_path': '/other'})
