@@ -41,12 +41,15 @@ def main():
     parser.add_argument('--output-root', type=Path, required=True)
     parser.add_argument('--expected-head', required=True)
     parser.add_argument('--gpu', type=int, required=True)
+    parser.add_argument('--prepared-root', type=Path, help='只复用先前完整候选/精确帧，重新核验；不复用部分教师或训练产物')
     args = parser.parse_args()
     if args.gpu < 0:
         parser.error('physical GPU index must be nonnegative')
     check_code(args.expected_head)
     args.entry_plan = args.entry_plan.resolve()
     args.output_root = args.output_root.resolve()
+    if args.prepared_root:
+        args.prepared_root = args.prepared_root.resolve()
     load_entry_plan(args.entry_plan)
     plan = json.loads(args.entry_plan.read_text())
     rows = ordered_rows(plan)
@@ -97,7 +100,9 @@ def main():
                            RQ3_GPU_UUID=selected['uuid'])
             print('RQ3_TRUSTED_PHASE', name, str(log), flush=True)
             with log.open('x') as stream:
-                child = subprocess.Popen([python or sys.executable, '-B', *command], cwd=DATA, env=env,
+                # -m的sys.path首项来自cwd；必须优先固定代码，不能导入DATA/tools中的旧模块。
+                child = subprocess.Popen([python or sys.executable, '-B', *command],
+                                         cwd=CODE_ROOT if command[0] == '-m' else DATA, env=env,
                                          stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
                 children.append(child)
                 code = child.wait()
@@ -107,10 +112,15 @@ def main():
 
         def frames(shift, domain, scope, proposals):
             destination = args.output_root / (domain + '_' + scope) / shift
+            if args.prepared_root:
+                previous = args.prepared_root / (domain + '_' + scope) / shift
+                if (previous / 'manifest.json').is_file():
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.symlink_to(previous, target_is_directory=True)
             run([str(CODE_ROOT / 'tools/prepare_rq3_candidates.py'), '--proposals', str(proposals),
                  '--baseline-root', str(baseline_root(Path('/vepfs/vlms'), shift)), '--shift', shift,
                  '--video-root', str(VIDEO), '--recovery-root', str(RECOVERY), '--output-root', str(destination),
-                 '--domain', domain, '--evidence-scope', scope, '--decode-workers', '4'],
+                 '--domain', domain, '--evidence-scope', scope, '--decode-workers', '4', '--reuse-verified'],
                 shift + '.' + domain + '.' + scope + '.frames')
             return destination / 'manifest.json'
 
@@ -152,14 +162,19 @@ def main():
                 complete = json.loads((baseline / 'complete.json').read_text())
                 proposals = args.output_root / 'proposals' / (shift + '.jsonl')
                 proposals.parent.mkdir(exist_ok=True)
-                with gpu_slot(str(args.gpu), DATA, wait=True) as selected:
-                    run([str(CODE_ROOT / 'tools/export_vlm_target_adapter_proposals.py'),
+                previous = (args.prepared_root / 'proposals' / (shift + '.jsonl')) if args.prepared_root else None
+                if previous and previous.is_file() and Path(str(previous) + '.meta.json').is_file():
+                    proposals.symlink_to(previous)
+                    Path(str(proposals) + '.meta.json').symlink_to(Path(str(previous) + '.meta.json'))
+                else:
+                    with gpu_slot(str(args.gpu), DATA, wait=True) as selected:
+                        run([str(CODE_ROOT / 'tools/export_vlm_target_adapter_proposals.py'),
                          '--config', complete['so'], '--checkpoint', str(baselines[shift][1]),
                          '--trusted-matched-baseline-root', str(baseline), '--video-root', str(VIDEO),
                          '--include-missing-videos', '--output', str(proposals), '--domain', 'source',
                          '--split', 'val', '--device', 'cuda:0', '--weights', 'ema', '--levels', '0', '1', '2',
                          '--max-per-video', '30', '--max-proposals', '200', '--seed', '6'],
-                        shift + '.source.proposals', selected=selected)
+                            shift + '.source.proposals', selected=selected)
                 with ThreadPoolExecutor(max_workers=3) as pool:
                     work = {kind: pool.submit(frames, shift, domain, scope, source)
                             for kind, domain, scope, source in (
