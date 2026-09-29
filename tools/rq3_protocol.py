@@ -179,6 +179,26 @@ def audit_cache_predictions(payload, audit):
             raise ValueError("RQ3 cached classes/probabilities were edited after official inference")
 
 
+def rebuild_verified_cache(cache_path, manifest_path, model, shift):
+    """从缓存绑定的原始接口审计定位预测文件，校验后重建缓存用于迁移复用。"""
+    cached, _ = load_cache(cache_path, model, shift)
+    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    if (cached["candidate_sha256"] != content_hash(manifest)
+            or cached["target_video_ids"] != manifest["target_video_ids"]
+            or cached["feature_lengths"] != manifest["feature_lengths"]):
+        raise ValueError("reused RQ3 cache differs from the selected candidate manifest")
+    audit = validate_interface_audit(cached["input_protocol"], model)
+    audit_cache_predictions(cached, audit)
+    predictions = [json.loads(line) for line in Path(audit["predictions_path"]).read_text().splitlines()
+                   if line.strip()]
+    from tools.build_rq3_cache import build_cache
+    rebuilt = build_cache(manifest, predictions, cached["input_protocol"], model, shift,
+                          cached["teacher_checkpoint_sha256"])
+    if rebuilt != cached:
+        raise ValueError("reused RQ3 cache cannot be reproduced from its audited predictions")
+    return rebuilt
+
+
 REVISION = 'rq3-fixed-participation-time-matched-v5'
 REVISED_FIXED = {
     'verify_scope': 'anchor-local-center-only-v1',

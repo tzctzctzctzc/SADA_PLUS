@@ -129,7 +129,12 @@ def main():
             output = args.output_root / 'teachers' / kind / model / shift
             previous_cache = (args.prepared_root / 'caches' / kind / model / (shift + '.json')) if args.prepared_root else None
             if previous_cache and previous_cache.is_file():
-                output = args.prepared_root / 'teachers' / kind / model / shift
+                from tools.rq3_protocol import rebuild_verified_cache, content_hash
+                common = json.loads(manifest.read_text())
+                payload = rebuild_verified_cache(previous_cache, manifest, model, shift)
+                if payload['candidate_sha256'] != content_hash(common):
+                    raise ValueError('reused RQ3 cache candidate hash differs')
+                print('RQ3_TEACHER_REUSE_VERIFIED', str(previous_cache), flush=True)
             else:
                 run(['-m', 'tools.score_rq3_vlm_candidates', '--model', model,
                  '--settings', str(RUNTIME / settings), '--frozen-protocol', frozen,
@@ -139,16 +144,12 @@ def main():
                     shift + '.' + model + '.' + kind + '.score', python=python, teacher=model)
             from tools.build_rq3_cache import build_cache
             from tools.rq3_protocol import load_cache, validate_interface_audit, audit_cache_predictions
-            common = json.loads(manifest.read_text())
-            protocol = json.loads((output / 'input_protocol.json').read_text())
-            audit = validate_interface_audit(protocol, model)
-            predictions = [json.loads(line) for line in (output / 'predictions.jsonl').read_text().splitlines()]
-            payload = build_cache(common, predictions, protocol, model, shift, common['teacher_checkpoint_sha256'])
-            if previous_cache and previous_cache.is_file():
-                previous, _ = load_cache(previous_cache, model, shift, common['target_video_ids'])
-                if previous != payload:
-                    raise ValueError('previous complete teacher cache differs from audited predictions/manifest')
-                print('RQ3_TEACHER_REUSE_VERIFIED', str(previous_cache), flush=True)
+            if not previous_cache or not previous_cache.is_file():
+                common = json.loads(manifest.read_text())
+                protocol = json.loads((output / 'input_protocol.json').read_text())
+                audit = validate_interface_audit(protocol, model)
+                predictions = [json.loads(line) for line in (output / 'predictions.jsonl').read_text().splitlines()]
+                payload = build_cache(common, predictions, protocol, model, shift, common['teacher_checkpoint_sha256'])
             cache = args.output_root / 'caches' / kind / model / (shift + '.json')
             cache.parent.mkdir(parents=True, exist_ok=True)
             with cache.open('x') as stream:
