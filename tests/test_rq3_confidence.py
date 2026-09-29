@@ -4,7 +4,26 @@ import json
 import pytest
 
 from tools.rq3_confidence import (choose_threshold, check_time_evidence, _source_correct,
-                                 calibrate, LOCAL_SCOPE)
+                                 calibrate, LOCAL_SCOPE, select_budget)
+
+
+def test_budget_is_exact_deterministic_and_independent_of_labels():
+    entries = [dict(video_id='v', absolute_feature_index=i, class_probabilities=[.8, .2],
+                    labels=object()) for i in range(200)]
+    expected = [['v', i] for i in range(40)]
+    assert select_budget(entries) == expected
+    assert select_budget(list(reversed(entries))) == expected
+    assert len(select_budget(entries[:95])) == 19
+    entries[0]['class_probabilities'] = [.5, .5]
+    assert select_budget(entries) == [['v', i] for i in range(1, 41)]
+    with pytest.raises(ValueError, match='fraction'):
+        select_budget(entries, .5)
+
+
+def test_budget_does_not_invent_a_class_for_top1_ties():
+    entries = [dict(video_id='v', absolute_feature_index=i, class_probabilities=[.5, .5])
+               for i in range(200)]
+    assert select_budget(entries) == []
 
 
 def test_source_precision_selects_largest_qualified_coverage_and_can_abstain():

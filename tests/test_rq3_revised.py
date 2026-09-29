@@ -76,6 +76,36 @@ def test_verify_never_reads_target_gt():
     assert not keep.item()
 
 
+def test_budget_mask_controls_real_verify_rejection_and_prototype_gradient():
+    _, keep, stats = verify({'v': [dict(local_entry(), participation_selected=False)]})
+    assert keep.all() and stats['verify_eligible'] == 0
+    _, keep, stats = verify({'v': [dict(local_entry(), participation_selected=True)]})
+    assert not keep[1] and stats['verify_rejected'] == 1
+    for selected in (False, True):
+        model = MODULE.RQ3ProposalPrototype(4, 10,
+            {'v': [dict(entry(), participation_selected=selected)]}, [1], [(0, 99)], 0.)
+        out = model(*prototype_data(), epoch=5)
+        assert (out['target_gradient_norm'] > 0) == selected
+        assert out['selected'] == int(selected)
+
+
+def test_fixed_budget_audit_requires_participation_but_not_forced_rejection(tmp_path):
+    from tools.rq3_protocol import REVISION
+    from tools.run_rq3_matrix import supervision_audit
+    path = tmp_path/'metrics.jsonl'
+    cfg = {'rq3_auxiliary': {'schema': REVISION, 'strategy': 'verify', 'participation_fraction': .2}}
+    path.write_text(json.dumps({'t_rq3_verify_observed': 5}))
+    assert not supervision_audit(path, cfg)['effective']
+    path.write_text(json.dumps({'t_rq3_verify_observed': 5, 't_rq3_verify_eligible': 2,
+                                't_rq3_verify_accepted': 2}))
+    assert supervision_audit(path, cfg)['effective']
+    assert not supervision_audit(path, cfg)['intervened']
+    cfg['rq3_auxiliary']['strategy'] = 'prototype'
+    path.write_text(json.dumps({'t_rq3_source_loss': 1, 't_rq3_gradient_norm': 1,
+                                't_rq3_fully_visible_count': 2}))
+    assert not supervision_audit(path, cfg)['effective']
+
+
 def prototype_data():
     source = video()
     source.update(segments=torch.tensor([[0., 3.], [3., 5.]]), labels=torch.tensor([0, 1]))
@@ -212,6 +242,10 @@ def test_proposal_evidence_uses_only_hash_bound_original_interval(tmp_path):
     result = proposal_evidence(payload, path)['v'][0]
     assert result['semantic_label'] == 'PUT'
     assert result['proposal_start_sec'] == 2.5 and result['proposal_end_sec'] == 4.5
+    assert proposal_evidence(payload, path, [['v', 3]])['v'][0]['participation_selected']
+    assert not proposal_evidence(payload, path, [])['v'][0]['participation_selected']
+    with pytest.raises(ValueError, match='selected candidate'):
+        proposal_evidence(payload, path, [['v', 4]])
     manifest['candidates'][0]['proposal_end_sec'] = 5.0
     path.write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match='identity differs'):

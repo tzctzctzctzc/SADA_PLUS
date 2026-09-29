@@ -120,6 +120,12 @@ def supervision_audit(path, cfg=None):
                      if totals['intervened'] else all(totals[key + '_epoch_mean_sum'] == 0 for key in target_keys))
         # 可信门槛没有放行样本时允许诚实记录零VLM干预，不能为通过门禁降低阈值。
         totals['effective'] = visible_source and target_ok
+    if revised and auxiliary.get('participation_fraction') == .2:
+        # 新协议必须实际使用已选证据；Verify全体同意可以不拒绝。
+        if auxiliary['strategy'] == 'verify':
+            totals['effective'] = totals['verify_eligible_epoch_mean_sum'] > 0
+        else:
+            totals['effective'] = totals['effective'] and totals['intervened']
     return totals
 
 

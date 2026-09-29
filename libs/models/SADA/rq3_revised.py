@@ -57,6 +57,8 @@ def feature_interval(entry, metadata):
 
 
 def confident(entry, threshold):
+    if not entry.get('participation_selected', True):
+        return False
     # null表示源域未找到合格门槛；保持SADA，不强行选最好的坏门槛。
     if threshold is None:
         return False

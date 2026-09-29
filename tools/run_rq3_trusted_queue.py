@@ -1,4 +1,4 @@
-"""已完成旧项的新协议对比：逐shift准备、校准、验收和fresh重跑，固定一张物理卡。"""
+"""旧完整项的固定20%参与对比：逐shift准备、源域诊断、验收和单卡fresh重跑。"""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -66,7 +66,7 @@ def main():
         stopped = False
         state = dict(pid=os.getpid(), gpu=args.gpu, max_gpus=1, expected_head=args.expected_head,
                      plan_sha256=sha256_file(args.entry_plan), total=len(rows), completed=0,
-                     min_precision=.9, min_support=20, status='running')
+                     participation_fraction=.2, confidence_policy='fixed-top20-percent-per-shift-v1', status='running')
 
         def save(**values):
             state.update(values)
@@ -204,14 +204,18 @@ def main():
                         manifest = OLD_CANDIDATES / shift / 'manifest.json'
                     from tools.rq3_confidence import calibrate, load_calibration
                     from tools.rq3_protocol import load_cache
-                    report = calibrate(baselines[shift][0], source_cache, manifests[source_kind], strategy, .9, 20)
+                    report = calibrate(baselines[shift][0], source_cache, manifests[source_kind], strategy, None, None, .2)
                     calibration = args.output_root / 'calibrations' / strategy / model / (shift + '.json')
                     calibration.parent.mkdir(parents=True, exist_ok=True)
                     with calibration.open('x') as stream:
                         json.dump(report, stream, sort_keys=True)
                     payload, _ = load_cache(cache, model, shift)
                     load_calibration(calibration, baselines[shift][0], payload, json.loads(manifest.read_text()), strategy)
-                    print('RQ3_SOURCE_CALIBRATION', shift, model, strategy, report['threshold'], report['selected_count'], flush=True)
+                    from tools.rq3_confidence import select_budget
+                    print('RQ3_FIXED_PARTICIPATION', shift, model, strategy,
+                          'target_selected', len(select_budget(payload['entries'])),
+                          'source_selected', report['selected_count'],
+                          'source_precision', report['empirical_precision'], flush=True)
                     if (model, strategy) not in cpu_tested:
                         save(phase='real-trainer-cpu-audit')
                         audit = args.output_root / ('cpu_' + model + '_' + strategy + '.json')

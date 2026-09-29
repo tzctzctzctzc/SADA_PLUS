@@ -179,7 +179,7 @@ def audit_cache_predictions(payload, audit):
             raise ValueError("RQ3 cached classes/probabilities were edited after official inference")
 
 
-REVISION = 'rq3-trusted-time-matched-v4'
+REVISION = 'rq3-fixed-participation-time-matched-v5'
 REVISED_FIXED = {
     'verify_scope': 'anchor-local-center-only-v1',
     'verify_action': 'reject-disagreed-foreground-only-no-relabel-no-background-conversion',
@@ -187,13 +187,13 @@ REVISED_FIXED = {
     'prototype_source_weight': 1.0, 'prototype_alignment_weight': 0.1,
     'prototype_direct_weight': 0.0, 'prototype_target_start_epoch': 1,
     'prototype_hidden_dim': 256, 'prototype_embedding_dim': 128,
-    'confidence_policy': 'source-validation-precision-coverage-v1',
+    'confidence_policy': 'fixed-top20-percent-per-shift-v1', 'participation_fraction': 0.2,
     'prototype_crop_policy': 'complete-proposal-only-no-clipping', 'prototype_momentum': 0.9,
     'prototype_max_proposals': 256, 'target_gt_used': False,
 }
 
 
-def proposal_evidence(payload, manifest_path):
+def proposal_evidence(payload, manifest_path, selected_coordinates=None):
     """把已核验概率与同一教师所见的原始proposal区间精确绑定，不重新推理。"""
     manifest = json.loads(Path(manifest_path).read_text(encoding='utf-8'))
     if (content_hash(manifest) != payload['candidate_sha256']
@@ -204,6 +204,9 @@ def proposal_evidence(payload, manifest_path):
     candidates = {(row['video_id'], row['absolute_feature_index']): row for row in manifest['candidates']}
     if len(candidates) != len(manifest['candidates']) or len(candidates) != len(payload['entries']):
         raise ValueError('RQ3 proposal coverage/uniqueness differs')
+    selected = None if selected_coordinates is None else {tuple(key) for key in selected_coordinates}
+    if selected is not None and (len(selected) != len(selected_coordinates) or not selected.issubset(candidates)):
+        raise ValueError('RQ3 selected candidate identities differ')
     by_video = {}
     for entry in payload['entries']:
         candidate = candidates[(entry['video_id'], entry['absolute_feature_index'])]
@@ -216,6 +219,8 @@ def proposal_evidence(payload, manifest_path):
                    candidate_id=candidate['candidate_id'],
                    evidence_scope=manifest.get('evidence_scope', 'proposal-whole-v1'),
                    semantic_label=TARGET_CLASS_NAMES[entry['class_id']])
+        if selected is not None:
+            row['participation_selected'] = (entry['video_id'], entry['absolute_feature_index']) in selected
         by_video.setdefault(entry['video_id'], []).append(row)
     return by_video
 
@@ -246,9 +251,14 @@ def configure(cfg, strategy, cache_path, model, shift, revision='legacy', manife
     if revision == 'revised':
         if strategy not in ('verify', 'prototype') or not manifest_path or not calibration_path:
             raise ValueError('revised RQ3 requires Verify/Prototype, matched manifest and source calibration')
-        from tools.rq3_confidence import load_calibration
+        from tools.rq3_confidence import load_calibration, select_budget, BUDGET_SCHEMA
         calibration = load_calibration(calibration_path, cfg, payload,
                                        json.loads(Path(manifest_path).read_text()), strategy)
+        if calibration['schema'] != BUDGET_SCHEMA:
+            raise ValueError('fixed participation requires new source diagnostics')
+        selected = select_budget(payload['entries'])
+        if not selected:
+            raise ValueError('fixed participation has no unambiguous target candidates')
         proposal_evidence(payload, manifest_path)
         legacy = cfg['rq3_auxiliary']
         cfg['rq3_auxiliary'] = {key: legacy[key] for key in (
@@ -259,7 +269,8 @@ def configure(cfg, strategy, cache_path, model, shift, revision='legacy', manife
                                    manifest_sha256=sha256_file(manifest_path),
                                    calibration_path=str(Path(calibration_path).resolve()),
                                    calibration_sha256=sha256_file(calibration_path),
-                                   confidence_threshold=calibration['threshold'])
+                                   confidence_threshold=calibration['threshold'],
+                                   selected_coordinates=selected)
     elif revision != 'legacy':
         raise ValueError('unknown RQ3 revision')
     elif calibration_path:
@@ -294,13 +305,16 @@ def validate_config(cfg, regime):
                             if cfg.get("rq2_formal") else None, members_for(cfg, "tgt"))
     if revised:
         proposal_evidence(payload, auxiliary['manifest_path'])
-        from tools.rq3_confidence import load_calibration
+        from tools.rq3_confidence import load_calibration, select_budget, BUDGET_SCHEMA
         if sha256_file(auxiliary['calibration_path']) != auxiliary['calibration_sha256']:
             raise ValueError('RQ3 source calibration changed')
         calibrated = load_calibration(auxiliary['calibration_path'], cfg, payload,
                                       json.loads(Path(auxiliary['manifest_path']).read_text()), auxiliary['strategy'])
         if auxiliary['confidence_threshold'] != calibrated['threshold']:
             raise ValueError('RQ3 threshold differs from source calibration')
+        if (calibrated['schema'] != BUDGET_SCHEMA
+                or auxiliary['selected_coordinates'] != select_budget(payload['entries'])):
+            raise ValueError('RQ3 fixed participation selection changed')
     interface = validate_interface_audit(payload["input_protocol"], auxiliary["teacher_model"])
     audit_cache_predictions(payload, interface)
     validate_reference_lengths(payload, cfg)

@@ -53,7 +53,7 @@ def main():
         trainer.model_ema.set(trainer.model)
         cfg = trainer.cfg['rq3_auxiliary']
         payload, _ = load_cache(cfg['cache_path'])
-        evidence = proposal_evidence(payload, cfg['manifest_path'])
+        evidence = proposal_evidence(payload, cfg['manifest_path'], cfg['selected_coordinates'])
         from libs.models.SADA.rq3_revised import confident, feature_interval
         fixture = None
         candidates = [(video, entry) for video, entries in evidence.items() for entry in entries]

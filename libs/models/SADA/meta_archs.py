@@ -1518,7 +1518,7 @@ class SADA(nn.Module):
             rq3 = cfg['rq3_auxiliary']
             payload, rq3_cache = load_cache(rq3['cache_path'], rq3['teacher_model'])
             if rq3['schema'] == REVISION:
-                evidence = proposal_evidence(payload, rq3['manifest_path'])
+                evidence = proposal_evidence(payload, rq3['manifest_path'], rq3['selected_coordinates'])
                 if rq3['strategy'] == 'verify':
                     self.rq3_verify_cache = evidence
                     self.rq3_verify_threshold = rq3['confidence_threshold']

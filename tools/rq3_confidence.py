@@ -1,4 +1,4 @@
-"""从真实源域验证预测选择门槛；正式入口重算并绑定数据、教师和时间证据。"""
+"""固定候选参与预算及源域诊断；保留旧精确率门槛的只读重现。"""
 import argparse
 import json
 import math
@@ -7,8 +7,25 @@ from pathlib import Path
 from tools.rq2_dense_protocol import sha256_file
 
 SCHEMA = 'rq3-source-confidence-v1'
+BUDGET_SCHEMA = 'rq3-fixed-participation-v1'
+PARTICIPATION_FRACTION = 0.2
 LOCAL_SCOPE = 'anchor-local-center-only-v1'
 PROPOSAL_SCOPE = 'proposal-whole-v1'
+
+
+def select_budget(entries, fraction=PARTICIPATION_FRACTION):
+    """每shift候选按概率排名取固定20%；并列置信度用身份排序，不读取GT。
+
+    类别top1平票没有可用类别，跳过且不保证填满预算。95条取19、200条取40。
+    """
+    if fraction != PARTICIPATION_FRACTION:
+        raise ValueError('fixed participation requires fraction=0.2')
+    ranked = [entry for entry in entries
+              if entry['class_probabilities'].count(max(entry['class_probabilities'])) == 1]
+    ranked.sort(key=lambda entry: (-max(entry['class_probabilities']), entry['video_id'],
+                                   entry['absolute_feature_index']))
+    count = len(entries) // 5
+    return [[entry['video_id'], entry['absolute_feature_index']] for entry in ranked[:count]]
 
 
 def scope_for(strategy):
@@ -76,7 +93,7 @@ def _source_correct(row, entry, database, cfg, strategy):
     return covered > .5 * (end - start)
 
 
-def calibrate(cfg, cache_path, manifest_path, strategy, min_precision, min_support):
+def calibrate(cfg, cache_path, manifest_path, strategy, min_precision, min_support, participation_fraction=None):
     from tools.rq3_protocol import load_cache, proposal_evidence, validate_interface_audit, audit_cache_predictions
     manifest = json.loads(Path(manifest_path).read_text(encoding='utf-8'))
     if manifest.get('calibration_domain') != 'source-validation':
@@ -94,7 +111,7 @@ def calibrate(cfg, cache_path, manifest_path, strategy, min_precision, min_suppo
     proposal_evidence(payload, manifest_path)
     by_coordinate = {(row['video_id'], row['absolute_feature_index']): row for row in manifest['candidates']}
     database = json.loads(Path(cfg['dataset']['json_file']).read_text(encoding='utf-8'))['database']
-    scores, correct = [], []
+    scores, correct, correctness = [], [], {}
     for entry in payload['entries']:
         probs = entry['class_probabilities']
         if probs.count(max(probs)) != 1:
@@ -102,7 +119,22 @@ def calibrate(cfg, cache_path, manifest_path, strategy, min_precision, min_suppo
         row = by_coordinate[entry['video_id'], entry['absolute_feature_index']]
         scores.append(max(probs))
         correct.append(_source_correct(row, entry, database, cfg, strategy))
-    return dict(schema=SCHEMA, strategy=strategy, teacher_model=payload['teacher_model'], shift=payload['shift'],
+        correctness[(entry['video_id'], entry['absolute_feature_index'])] = correct[-1]
+    if participation_fraction is None:
+        selection = choose_threshold(scores, correct, min_precision, min_support)
+        schema = SCHEMA
+    else:
+        if min_precision is not None or min_support is not None:
+            raise ValueError('fixed participation does not use a precision/support gate')
+        selected = select_budget(payload['entries'], participation_fraction)
+        selection = dict(threshold=0.0, selected_count=len(selected),
+                         empirical_precision=(sum(correctness[tuple(key)] for key in selected) / len(selected)
+                                              if selected else None),
+                         participation_fraction=participation_fraction,
+                         source_selected_coordinates=selected,
+                         confidence_policy='fixed-top20-percent-per-shift-v1')
+        schema = BUDGET_SCHEMA
+    return dict(schema=schema, strategy=strategy, teacher_model=payload['teacher_model'], shift=payload['shift'],
                 source_cache_path=str(Path(cache_path).resolve()), source_cache_sha256=sha256_file(cache_path),
                 source_manifest_path=str(Path(manifest_path).resolve()), source_manifest_sha256=sha256_file(manifest_path),
                 annotations_sha256=sha256_file(cfg['dataset']['json_file']),
@@ -110,15 +142,17 @@ def calibrate(cfg, cache_path, manifest_path, strategy, min_precision, min_suppo
                 proposal_teacher_sha256=payload['teacher_checkpoint_sha256'],
                 gt_view=('single-class-at-anchor-center' if strategy == 'verify' else 'predicted-class-majority-of-interval'),
                 input_protocol=payload['input_protocol'], min_precision=min_precision, min_support=min_support,
-                evaluated_count=len(scores), **choose_threshold(scores, correct, min_precision, min_support))
+                evaluated_count=len(scores), **selection)
 
 
 def load_calibration(path, cfg, target_payload, target_manifest, strategy):
     report = json.loads(Path(path).read_text(encoding='utf-8'))
-    if report.get('schema') != SCHEMA or report.get('strategy') != strategy:
+    if report.get('schema') not in (SCHEMA, BUDGET_SCHEMA) or report.get('strategy') != strategy:
         raise ValueError('unknown confidence calibration/strategy')
-    reproduced = calibrate(cfg, report['source_cache_path'], report['source_manifest_path'], strategy,
-                           report['min_precision'], report['min_support'])
+    arguments = (cfg, report['source_cache_path'], report['source_manifest_path'], strategy,
+                 report['min_precision'], report['min_support'])
+    reproduced = (calibrate(*arguments, report['participation_fraction']) if report['schema'] == BUDGET_SCHEMA
+                  else calibrate(*arguments))
     if report != reproduced:
         raise ValueError('source confidence calibration changed or cannot be reproduced')
     if report['teacher_model'] != target_payload['teacher_model'] or report['shift'] != target_payload['shift']:
@@ -174,13 +208,16 @@ def main():
     parser.add_argument('--source-cache', type=Path, required=True)
     parser.add_argument('--source-manifest', type=Path, required=True)
     parser.add_argument('--strategy', choices=('verify', 'prototype'), required=True)
-    # 必须显式冻结策略；没有暗设0.7门槛或用目标mAP挑门槛的入口。
-    parser.add_argument('--min-precision', type=float, required=True)
-    parser.add_argument('--min-support', type=int, required=True)
+    parser.add_argument('--min-precision', type=float)
+    parser.add_argument('--min-support', type=int)
+    parser.add_argument('--participation-fraction', type=float, choices=[PARTICIPATION_FRACTION])
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
+    if args.participation_fraction is None and (args.min_precision is None or args.min_support is None):
+        parser.error('specify fixed participation, or both legacy precision and support')
     cfg = json.loads(args.config.read_text(encoding='utf-8'))
-    report = calibrate(cfg, args.source_cache, args.source_manifest, args.strategy, args.min_precision, args.min_support)
+    report = calibrate(cfg, args.source_cache, args.source_manifest, args.strategy,
+                       args.min_precision, args.min_support, args.participation_fraction)
     with args.output.open('x', encoding='utf-8') as stream:
         json.dump(report, stream, sort_keys=True)
     print(json.dumps({key: report[key] for key in ('threshold', 'selected_count', 'empirical_precision')}))
