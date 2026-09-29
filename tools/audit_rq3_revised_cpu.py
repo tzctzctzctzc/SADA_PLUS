@@ -32,7 +32,9 @@ def main():
     from tools.smoke_rq3_training import crop_with_candidate, source_with_class
     from tools.run_rq3_matrix import completed_baseline
     from tools.rq3_protocol import audit_baseline, load_cache, proposal_evidence
-    torch.set_num_threads(4)
+    # 反事实验收要求逐位复现，避免CPU并行归约的浮点顺序差异。
+    torch.set_num_threads(1)
+    torch.use_deterministic_algorithms(True)
     root = Path(__file__).resolve().parents[1]
     os.chdir('/vepfs/vlms/SADA_PLUS')
 
