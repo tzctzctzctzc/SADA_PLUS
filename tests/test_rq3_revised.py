@@ -142,3 +142,24 @@ def test_rerun_plan_excludes_hard_and_changed_original(tmp_path):
     plan.write_text(json.dumps(dict(schema='rq3-revised-completed-only-v1', entries=[row])))
     with pytest.raises(ValueError, match='Hard'):
         load_entry_plan(plan)
+
+
+def test_proposal_evidence_uses_only_hash_bound_original_interval(tmp_path):
+    from tools.rq3_protocol import content_hash, proposal_evidence
+    manifest = dict(target_gt_used=False, target_video_ids=['v'], feature_lengths={'v': 6},
+                    candidates=[dict(video_id='v', absolute_feature_index=3,
+                                     source_fpn_levels=[0], candidate_id='v-p0000003',
+                                     proposal_start_sec=2.5, proposal_end_sec=4.5)])
+    payload = dict(candidate_sha256=content_hash(manifest), target_video_ids=['v'],
+                   feature_lengths={'v': 6}, entries=[dict(video_id='v', absolute_feature_index=3,
+                                                          source_fpn_levels=[0], class_id=1,
+                                                          class_probabilities=[0., 1.] + [0.] * 8)])
+    path = tmp_path / 'manifest.json'
+    path.write_text(json.dumps(manifest))
+    result = proposal_evidence(payload, path)['v'][0]
+    assert result['semantic_label'] == 'PUT'
+    assert result['proposal_start_sec'] == 2.5 and result['proposal_end_sec'] == 4.5
+    manifest['candidates'][0]['proposal_end_sec'] = 5.0
+    path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match='identity differs'):
+        proposal_evidence(payload, path)
