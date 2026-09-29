@@ -41,7 +41,7 @@ def main():
     parser.add_argument('--output-root', type=Path, required=True)
     parser.add_argument('--expected-head', required=True)
     parser.add_argument('--gpu', type=int, required=True)
-    parser.add_argument('--prepared-root', type=Path, help='只复用先前完整候选/精确帧，重新核验；不复用部分教师或训练产物')
+    parser.add_argument('--prepared-root', type=Path, help='重验并复用完整候选/帧和教师缓存；不复用部分产物或训练')
     args = parser.parse_args()
     if args.gpu < 0:
         parser.error('physical GPU index must be nonnegative')
@@ -127,12 +127,16 @@ def main():
         def score(shift, model, kind, manifest):
             python, settings, frozen = TEACHERS[model]
             output = args.output_root / 'teachers' / kind / model / shift
-            run(['-m', 'tools.score_rq3_vlm_candidates', '--model', model,
+            previous_cache = (args.prepared_root / 'caches' / kind / model / (shift + '.json')) if args.prepared_root else None
+            if previous_cache and previous_cache.is_file():
+                output = args.prepared_root / 'teachers' / kind / model / shift
+            else:
+                run(['-m', 'tools.score_rq3_vlm_candidates', '--model', model,
                  '--settings', str(RUNTIME / settings), '--frozen-protocol', frozen,
                  '--manifest', str(manifest), '--frame-root', str(manifest.parent / 'frames'),
                  '--output-root', str(output), '--expected-head', args.expected_head,
                  '--gpu', str(args.gpu), '--wait-gpu', '--full'],
-                shift + '.' + model + '.' + kind + '.score', python=python, teacher=model)
+                    shift + '.' + model + '.' + kind + '.score', python=python, teacher=model)
             from tools.build_rq3_cache import build_cache
             from tools.rq3_protocol import load_cache, validate_interface_audit, audit_cache_predictions
             common = json.loads(manifest.read_text())
@@ -140,6 +144,11 @@ def main():
             audit = validate_interface_audit(protocol, model)
             predictions = [json.loads(line) for line in (output / 'predictions.jsonl').read_text().splitlines()]
             payload = build_cache(common, predictions, protocol, model, shift, common['teacher_checkpoint_sha256'])
+            if previous_cache and previous_cache.is_file():
+                previous, _ = load_cache(previous_cache, model, shift, common['target_video_ids'])
+                if previous != payload:
+                    raise ValueError('previous complete teacher cache differs from audited predictions/manifest')
+                print('RQ3_TEACHER_REUSE_VERIFIED', str(previous_cache), flush=True)
             cache = args.output_root / 'caches' / kind / model / (shift + '.json')
             cache.parent.mkdir(parents=True, exist_ok=True)
             with cache.open('x') as stream:

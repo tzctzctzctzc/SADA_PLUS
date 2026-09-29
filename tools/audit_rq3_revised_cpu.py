@@ -35,6 +35,7 @@ def main():
     # 反事实验收要求逐位复现，避免CPU并行归约的浮点顺序差异。
     torch.set_num_threads(1)
     torch.use_deterministic_algorithms(True)
+    torch.autograd.set_multithreading_enabled(False)
     root = Path(__file__).resolve().parents[1]
     os.chdir('/vepfs/vlms/SADA_PLUS')
 
