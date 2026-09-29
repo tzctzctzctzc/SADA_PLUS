@@ -179,15 +179,16 @@ def audit_cache_predictions(payload, audit):
             raise ValueError("RQ3 cached classes/probabilities were edited after official inference")
 
 
-REVISION = 'rq3-sada-verify-proposal-prototype-v3'
+REVISION = 'rq3-trusted-time-matched-v4'
 REVISED_FIXED = {
-    'verify_scope': 'original-proposal-interval-and-fpn-consensus-v1',
+    'verify_scope': 'anchor-local-center-only-v1',
     'verify_action': 'reject-disagreed-foreground-only-no-relabel-no-background-conversion',
     'prototype_implementation': 'VLMProposalCoAdaptationBranch@24b5dfbe7cd445988d28e400f38a5240be8b1ba0',
     'prototype_source_weight': 1.0, 'prototype_alignment_weight': 0.1,
     'prototype_direct_weight': 0.0, 'prototype_target_start_epoch': 1,
     'prototype_hidden_dim': 256, 'prototype_embedding_dim': 128,
-    'prototype_confidence': 0.1, 'prototype_momentum': 0.9,
+    'confidence_policy': 'source-validation-precision-coverage-v1',
+    'prototype_crop_policy': 'complete-proposal-only-no-clipping', 'prototype_momentum': 0.9,
     'prototype_max_proposals': 256, 'target_gt_used': False,
 }
 
@@ -213,12 +214,13 @@ def proposal_evidence(payload, manifest_path):
             raise ValueError('RQ3 proposal FPN identity differs')
         row = dict(entry, proposal_start_sec=start, proposal_end_sec=end,
                    candidate_id=candidate['candidate_id'],
+                   evidence_scope=manifest.get('evidence_scope', 'proposal-whole-v1'),
                    semantic_label=TARGET_CLASS_NAMES[entry['class_id']])
         by_video.setdefault(entry['video_id'], []).append(row)
     return by_video
 
 
-def configure(cfg, strategy, cache_path, model, shift, revision='legacy', manifest_path=None):
+def configure(cfg, strategy, cache_path, model, shift, revision='legacy', manifest_path=None, calibration_path=None):
     if strategy == "off":
         if cache_path or model:
             raise ValueError("off RQ3 must not load a teacher/cache")
@@ -242,8 +244,11 @@ def configure(cfg, strategy, cache_path, model, shift, revision='legacy', manife
         "coordinate_mapping": "continuous-fpn-linear-v1", "cap_reference": "unfiltered-hard-for-hard-verify-v1",
     }
     if revision == 'revised':
-        if strategy not in ('verify', 'prototype') or not manifest_path:
-            raise ValueError('revised RQ3 requires Verify/Prototype and original candidate manifest')
+        if strategy not in ('verify', 'prototype') or not manifest_path or not calibration_path:
+            raise ValueError('revised RQ3 requires Verify/Prototype, matched manifest and source calibration')
+        from tools.rq3_confidence import load_calibration
+        calibration = load_calibration(calibration_path, cfg, payload,
+                                       json.loads(Path(manifest_path).read_text()), strategy)
         proposal_evidence(payload, manifest_path)
         legacy = cfg['rq3_auxiliary']
         cfg['rq3_auxiliary'] = {key: legacy[key] for key in (
@@ -251,9 +256,14 @@ def configure(cfg, strategy, cache_path, model, shift, revision='legacy', manife
             'frames_sha256', 'teacher_checkpoint_sha256', 'input_protocol')}
         cfg['rq3_auxiliary'].update(REVISED_FIXED, schema=REVISION,
                                    manifest_path=str(Path(manifest_path).resolve()),
-                                   manifest_sha256=sha256_file(manifest_path))
+                                   manifest_sha256=sha256_file(manifest_path),
+                                   calibration_path=str(Path(calibration_path).resolve()),
+                                   calibration_sha256=sha256_file(calibration_path),
+                                   confidence_threshold=calibration['threshold'])
     elif revision != 'legacy':
         raise ValueError('unknown RQ3 revision')
+    elif calibration_path:
+        raise ValueError('legacy/Hard cannot load revised confidence calibration')
 
 
 def validate_config(cfg, regime):
@@ -284,6 +294,13 @@ def validate_config(cfg, regime):
                             if cfg.get("rq2_formal") else None, members_for(cfg, "tgt"))
     if revised:
         proposal_evidence(payload, auxiliary['manifest_path'])
+        from tools.rq3_confidence import load_calibration
+        if sha256_file(auxiliary['calibration_path']) != auxiliary['calibration_sha256']:
+            raise ValueError('RQ3 source calibration changed')
+        calibrated = load_calibration(auxiliary['calibration_path'], cfg, payload,
+                                      json.loads(Path(auxiliary['manifest_path']).read_text()), auxiliary['strategy'])
+        if auxiliary['confidence_threshold'] != calibrated['threshold']:
+            raise ValueError('RQ3 threshold differs from source calibration')
     interface = validate_interface_audit(payload["input_protocol"], auxiliary["teacher_model"])
     audit_cache_predictions(payload, interface)
     validate_reference_lengths(payload, cfg)

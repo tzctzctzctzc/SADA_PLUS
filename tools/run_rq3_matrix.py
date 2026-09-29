@@ -35,6 +35,14 @@ def check_cache_snapshot(cache_root, snapshot):
             raise ValueError("RQ3 semantic cache changed between strategies: " + identity)
 
 
+def revised_inputs(args, model, strategy, shift):
+    local = strategy == 'verify'
+    cache = (args.verify_cache_root if local else args.cache_root) / model / (shift + '.json')
+    manifest = (args.verify_candidate_root if local else args.candidate_root) / shift / 'manifest.json'
+    calibration = args.calibration_root / strategy / model / (shift + '.json')
+    return cache, manifest, calibration
+
+
 def completed_entries(roots):
     """仅complete.json代表完成；旧部分目录保留，未完成项使用全新输出根。"""
     completed = {}
@@ -87,9 +95,11 @@ def supervision_audit(path, cfg=None):
     revised = auxiliary.get('schema') == REVISION
     keys = ('eligible', 'selected', 'loss', 'gradient_norm')
     if revised and auxiliary['strategy'] == 'verify':
-        keys = ('verify_eligible', 'verify_accepted', 'verify_rejected', 'verify_ambiguous')
+        keys = ('verify_eligible', 'verify_accepted', 'verify_rejected', 'verify_ambiguous',
+                'verify_observed', 'verify_uncertain')
     elif revised:
-        keys += ('source_loss', 'alignment_loss', 'target_gradient_norm', 'aligned_classes')
+        keys += ('source_loss', 'alignment_loss', 'target_gradient_norm', 'aligned_classes',
+                 'candidate_count', 'fully_visible_count')
     for key in keys:
         values = [row.get("t_rq3_" + key, 0) for row in rows]
         if any(not math.isfinite(value) or value < 0 for value in values):
@@ -98,8 +108,18 @@ def supervision_audit(path, cfg=None):
     totals["effective"] = all(value > 0 for value in totals.values())
     if revised and auxiliary['strategy'] == 'verify':
         # Verify没有新增辅助loss；全体一致时是有效核验但零干预，不强迫拒绝。
-        totals['effective'] = totals['verify_eligible_epoch_mean_sum'] > 0
+        # 有局部证据但全部不可信时保持原SADA，也是合法的零干预；不为通过门禁降阈值。
+        totals['effective'] = totals['verify_observed_epoch_mean_sum'] > 0
         totals['intervened'] = totals['verify_rejected_epoch_mean_sum'] > 0
+    elif revised:
+        totals['intervened'] = totals['selected_epoch_mean_sum'] > 0
+        visible_source = all(totals[key + '_epoch_mean_sum'] > 0
+                             for key in ('source_loss', 'gradient_norm', 'fully_visible_count'))
+        target_keys = ('alignment_loss', 'target_gradient_norm', 'aligned_classes')
+        target_ok = (all(totals[key + '_epoch_mean_sum'] > 0 for key in target_keys)
+                     if totals['intervened'] else all(totals[key + '_epoch_mean_sum'] == 0 for key in target_keys))
+        # 可信门槛没有放行样本时允许诚实记录零VLM干预，不能为通过门禁降低阈值。
+        totals['effective'] = visible_source and target_ok
     return totals
 
 
@@ -163,6 +183,9 @@ def main():
     parser.add_argument("--expected-head", required=True)
     parser.add_argument('--entry-plan', type=Path)
     parser.add_argument('--candidate-root', type=Path)
+    parser.add_argument('--verify-cache-root', type=Path, help='重新打分的局部窗口缓存，不能复用整段概率')
+    parser.add_argument('--verify-candidate-root', type=Path)
+    parser.add_argument('--calibration-root', type=Path, help='<strategy>/<teacher>/<shift>.json，源域校准')
     parser.add_argument('--revision', choices=('legacy', 'revised'), default='legacy')
     parser.add_argument("--completed-root", type=Path, action="append", default=[],
                         help="只读审计并跳过已完成实验；可重复传入原分片根")
@@ -173,14 +196,18 @@ def main():
     args = parser.parse_args()
     entries = matrix(args.shard_index, args.shard_count)
     if args.revision == 'revised':
-        if not args.entry_plan or not args.candidate_root or args.completed_root:
-            parser.error('revised fresh reruns require --entry-plan/--candidate-root; no completed-root')
+        if not all((args.entry_plan, args.candidate_root, args.verify_cache_root,
+                    args.verify_candidate_root, args.calibration_root)) or args.completed_root:
+            parser.error('revised reruns require explicit plan, proposal/local inputs and source calibrations; no completed-root')
         if args.execute and args.gpu_idle_minutes < 60:
             parser.error('revised GPU runs must observe at least 60 continuous idle minutes')
         args.entry_plan = args.entry_plan.resolve()
         args.candidate_root = args.candidate_root.resolve()
+        args.verify_cache_root = args.verify_cache_root.resolve()
+        args.verify_candidate_root = args.verify_candidate_root.resolve()
+        args.calibration_root = args.calibration_root.resolve()
         entries = load_entry_plan(args.entry_plan)[args.shard_index::args.shard_count]
-    elif args.entry_plan or args.candidate_root:
+    elif any((args.entry_plan, args.candidate_root, args.verify_cache_root, args.verify_candidate_root, args.calibration_root)):
         parser.error('entry-plan/candidate-root require revised protocol')
     completed = completed_entries([root.resolve() for root in args.completed_root])
     if args.gpu_idle_minutes < 0:
@@ -191,8 +218,9 @@ def main():
         for model, strategy, shift in entries:
             if (model, strategy, shift) in completed:
                 continue
-            print("{} {} {} seed6 gpu={} cache={}".format(model, strategy, shift, args.gpu,
-                                                        args.cache_root / model / (shift + ".json")))
+            cache = (revised_inputs(args, model, strategy, shift)[0] if args.revision == 'revised'
+                     else args.cache_root / model / (shift + '.json'))
+            print("{} {} {} seed6 gpu={} cache={}".format(model, strategy, shift, args.gpu, cache))
         return
     from tools.run_rq2_matched_control import (
         check_code, check_new_protocol, checked_evaluation, checked_train_result,
@@ -233,6 +261,32 @@ def main():
                     raise ValueError("RQ3 VLMs use different candidate/frame/teacher inputs")
                 shared[shift] = identity
         (args.output_root / "cache_snapshot.json").write_text(json.dumps(snapshot, sort_keys=True))
+        trusted_snapshot, scoped_shared = {}, {}
+        if args.revision == 'revised':
+            from tools.rq3_protocol import proposal_evidence
+            from tools.rq3_confidence import load_calibration
+            for model, strategy, shift in entries:
+                cache, manifest, calibration = revised_inputs(args, model, strategy, shift)
+                cfg, so_checkpoint = baselines[shift]
+                payload, _ = load_cache(cache, model, shift, members_for(cfg, 'tgt'))
+                interface = validate_interface_audit(payload['input_protocol'], model)
+                audit_cache_predictions(payload, interface)
+                validate_reference_lengths(payload, cfg)
+                proposal_evidence(payload, manifest)
+                report = load_calibration(calibration, cfg, payload, json.loads(manifest.read_text()), strategy)
+                old, _ = load_cache(args.cache_root / model / (shift + '.json'))
+                coordinates = lambda value: [(r['video_id'], r['absolute_feature_index'], r['source_fpn_levels'])
+                                              for r in value['entries']]
+                if coordinates(payload) != coordinates(old) or payload['teacher_checkpoint_sha256'] != sha256_file(so_checkpoint):
+                    raise ValueError('trusted rerun changed frozen candidate identities or SO teacher')
+                identity = (payload['candidate_sha256'], payload['frames_sha256'])
+                key = (strategy, shift)
+                if key in scoped_shared and scoped_shared[key] != identity:
+                    raise ValueError('teachers scored different evidence within revised strategy/shift')
+                scoped_shared[key] = identity
+                for file in (cache, manifest, calibration, Path(report['source_cache_path']), Path(report['source_manifest_path'])):
+                    trusted_snapshot[str(file.resolve())] = sha256_file(file)
+            (args.output_root / 'trusted_input_snapshot.json').write_text(json.dumps(trusted_snapshot, sort_keys=True))
         if args.entry_plan:
             for row in json.loads(args.entry_plan.read_text())['entries']:
                 if (row['teacher'], row['strategy'], row['shift']) in entries:
@@ -244,6 +298,7 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             for model, strategy, shift in entries:
                 check_cache_snapshot(args.cache_root, snapshot)
+                check_cache_snapshot(Path('.'), trusted_snapshot)
                 if (model, strategy, shift) in completed:
                     path = completed[(model, strategy, shift)]
                     checked_completed_entry(path, args, baselines, snapshot)
@@ -265,8 +320,10 @@ def main():
                            str(args.manifest_root / (shift + ".json")), "--rq3-strategy", strategy,
                            "--rq3-teacher", model, "--rq3-cache", str(args.cache_root / model / (shift + ".json"))]
                 if args.revision == 'revised':
+                    cache, manifest, calibration = revised_inputs(args, model, strategy, shift)
+                    command[command.index('--rq3-cache') + 1] = str(cache)
                     command += ['--rq3-revision', 'revised', '--rq3-candidate-manifest',
-                                str(args.candidate_root / shift / 'manifest.json')]
+                                str(manifest), '--rq3-confidence-calibration', str(calibration)]
                 check_code(args.expected_head)
                 preflight = root / "preflight.json"
                 run_command(command + ["--rq2-audit-output", str(preflight)], root / "logs/preflight.log", args.data_root)
@@ -278,16 +335,19 @@ def main():
                         raise ValueError('revised queue reached legacy strategy entry')
                 pairing = audit_baseline(baselines[shift][0], cfg)
                 identity = str(Path(model) / (shift + ".json"))
-                if cfg["rq3_auxiliary"]["cache_sha256"] != snapshot[identity]:
+                expected_cache_hash = (sha256_file(cache) if args.revision == 'revised' else snapshot[identity])
+                if cfg["rq3_auxiliary"]["cache_sha256"] != expected_cache_hash:
                     raise ValueError("RQ3 preflight used a different semantic cache")
                 (root / "baseline_pair.json").write_text(json.dumps(pairing, sort_keys=True))
                 if args.audit_only:
                     continue
                 check_code(args.expected_head)
                 check_cache_snapshot(args.cache_root, snapshot)
+                check_cache_snapshot(Path('.'), trusted_snapshot)
                 with (lease.stage() if lease else gpu_slot(args.gpu, args.data_root, args.wait_gpu)) as training_gpu:
                     check_code(args.expected_head)
                     check_cache_snapshot(args.cache_root, snapshot)
+                    check_cache_snapshot(Path('.'), trusted_snapshot)
                     run_command(command, root / "logs/uda.train.log", args.data_root,
                                 training_gpu["uuid"], gpu_index=training_gpu["index"])
                 config_path, checkpoint = checked_train_result(args.data_root / "model_results" / name,
@@ -301,12 +361,14 @@ def main():
                 with (lease.stage() if lease else gpu_slot(args.gpu, args.data_root, args.wait_gpu)) as evaluation_gpu:
                     check_code(args.expected_head)
                     check_cache_snapshot(args.cache_root, snapshot)
+                    check_cache_snapshot(Path('.'), trusted_snapshot)
                     run_command(evaluation, root / "logs/uda.eval.log", args.data_root,
                                 evaluation_gpu["uuid"], gpu_index=evaluation_gpu["index"])
                 manifest = checked_evaluation(root / "evaluation", cfg, checkpoint)
                 if manifest.get("rq3_auxiliary") != cfg["rq3_auxiliary"]:
                     raise ValueError("RQ3 evaluation lost strategy/cache provenance")
                 check_cache_snapshot(args.cache_root, snapshot)
+                check_cache_snapshot(Path('.'), trusted_snapshot)
                 coverage = supervision_audit(config_path.parent / "benchmark_epoch_metrics.jsonl", cfg)
                 (root / "supervision_audit.json").write_text(json.dumps(coverage, sort_keys=True))
                 if not coverage["effective"]:

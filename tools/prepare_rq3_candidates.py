@@ -173,6 +173,9 @@ def main():
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--reuse-verified", action="store_true", help="完整校验已有候选及帧后跳过；部分产物保留并报错")
     parser.add_argument("--decode-workers", type=int, default=8, help="独立视频CPU并行解码数")
+    parser.add_argument('--domain', choices=('source', 'target'), default='target')
+    parser.add_argument('--evidence-scope', choices=('proposal', 'local'), default='proposal',
+                        help='local重新抽取锚点局部窗口，不能沿用整段教师评分')
     args = parser.parse_args()
     if args.decode_workers <= 0:
         parser.error("--decode-workers must be positive")
@@ -180,13 +183,15 @@ def main():
         raise ValueError("frame recovery manifest is not the audited exact 131-frame source")
     cfg, teacher = completed_baseline(args.baseline_root, args.shift)
     meta = json.loads(Path(str(args.proposals) + ".meta.json").read_text())
-    if (meta["domain"] != "target" or meta["split"] != "train" or meta["selection_uses_gt"] is not False
+    if (meta["domain"] != args.domain or meta["split"] != ('val' if args.domain == 'source' else 'train')
+            or meta["selection_uses_gt"] is not False
             or meta["video_filter_applied"] or meta["seed"] != 6
             or meta.get("max_per_video") != 30 or meta.get("max_proposals") != 200
             or meta["selection_teacher_provenance"]["selection_teacher_weights"] != "ema"
             or meta["selection_teacher_provenance"]["selection_teacher_checkpoint_sha256"] != sha256_file(teacher)):
         raise ValueError("proposals are not the complete source-selected SO/EMA target-train protocol")
-    members = members_for(cfg, "tgt")
+    from tools.rq3_confidence import members as split_members, LOCAL_SCOPE, PROPOSAL_SCOPE
+    members = (split_members(cfg, 'src', 'val') if args.domain == 'source' else members_for(cfg, 'tgt'))
     if meta.get("expected_video_ids") != members or meta["expected_videos"] != len(members):
         raise ValueError("proposal target-train membership differs")
     lengths = {}
@@ -201,7 +206,7 @@ def main():
     grouped = defaultdict(list)
     identities = set()
     for row in (json.loads(line) for line in args.proposals.read_text().splitlines() if line.strip()):
-        if row["video_id"] not in members or any("gt_" in key for key in row):
+        if row["video_id"] not in members or (args.domain == 'target' and any("gt_" in key for key in row)):
             raise ValueError("proposal contains GT or a non-target-train video")
         if (type(row["absolute_feature_index"]) is not int or not 0 <= row["absolute_feature_index"] < lengths[row["video_id"]]
                 or not row["source_fpn_levels"] or any(level not in ACTIVE_LEVELS for level in row["source_fpn_levels"])):
@@ -210,6 +215,16 @@ def main():
         if row["candidate_id"] != identity or identity in identities:
             raise ValueError("proposal identity is invalid or duplicated")
         identities.add(identity)
+        # 源域导出含GT供离线审计；只把无标签白名单送给教师。
+        row = {key: row[key] for key in ('candidate_id', 'video_id', 'absolute_feature_index',
+                                       'source_fpn_levels', 'proposal_start_sec', 'proposal_end_sec')}
+        if args.evidence_scope == 'local':
+            dataset = cfg['dataset']
+            fps = dataset['default_fps']
+            if fps is None or fps <= 0:
+                raise ValueError('local queries require the frozen reference fps')
+            row['proposal_start_sec'] = row['absolute_feature_index'] * dataset['feat_stride'] / fps
+            row['proposal_end_sec'] = row['proposal_start_sec'] + dataset['num_frames'] / fps
         grouped[row["video_id"]].append(row)
     if (len(identities) != meta.get("selected_proposals") or not 0 < len(identities) <= 200
             or any(len(rows) > 30 for rows in grouped.values())):
@@ -218,6 +233,14 @@ def main():
                 "target_gt_used": False, "target_video_ids": members, "feature_lengths": lengths,
                 "teacher_selection": "source-validation-only", "teacher_checkpoint_sha256": sha256_file(teacher),
                 "frame_protocol": FRAME_PROTOCOL, "source_proposals_sha256": sha256_file(args.proposals)}
+    if args.domain == 'source' or args.evidence_scope == 'local':
+        expected['evidence_scope'] = LOCAL_SCOPE if args.evidence_scope == 'local' else PROPOSAL_SCOPE
+        expected['reference_grid'] = {'fps': cfg['dataset']['default_fps'],
+                                     'feat_stride': cfg['dataset']['feat_stride'],
+                                     'num_frames': cfg['dataset']['num_frames']}
+    if args.domain == 'source':
+        # 公共缓存target_video_ids字段表示本次输入集合；正式训练入口另强制目标成员。
+        expected['calibration_domain'] = 'source-validation'
     if args.output_root.exists() and args.reuse_verified:
         manifest = validate_existing_candidates(args.output_root, expected, grouped, video_paths)
         print("REUSED_VERIFIED_CANDIDATES", args.shift, len(manifest["candidates"]),

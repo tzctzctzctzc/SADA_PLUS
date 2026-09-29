@@ -1521,9 +1521,11 @@ class SADA(nn.Module):
                 evidence = proposal_evidence(payload, rq3['manifest_path'])
                 if rq3['strategy'] == 'verify':
                     self.rq3_verify_cache = evidence
+                    self.rq3_verify_threshold = rq3['confidence_threshold']
                 else:
                     self.rq3_prototype = RQ3ProposalPrototype(
-                        fpn_dim, self.num_class_orig, evidence, self.fpn_strides, self.reg_range)
+                        fpn_dim, self.num_class_orig, evidence, self.fpn_strides, self.reg_range,
+                        rq3['confidence_threshold'])
             else:
                 self.rq3_auxiliary = RQ3Auxiliary(
                     rq3['strategy'], rq3['levels'], [fpn_dim] * self.n_levels,
@@ -4518,7 +4520,7 @@ class SADA(nn.Module):
                     if self.rq3_verify_cache is not None and l in semantic_alignment_levels:
                         rq3_target_keep, verification = verify_sada_targets(
                             pseudo_gt_cls_target, video_list_tgt, points[l],
-                            valid_mask_l_tgt, self.rq3_verify_cache, l)
+                            valid_mask_l_tgt, self.rq3_verify_cache, l, self.rq3_verify_threshold)
                         for key, value in verification.items():
                             name = 'rq3_' + key
                             losses[name] = losses.get(name, value.new_zeros(())) + value

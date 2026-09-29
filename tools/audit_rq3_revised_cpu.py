@@ -13,8 +13,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--strategy', choices=('verify', 'prototype'), required=True)
     parser.add_argument('--report', type=Path, required=True)
+    parser.add_argument('--cache', type=Path, required=True)
+    parser.add_argument('--candidate-manifest', type=Path, required=True)
+    parser.add_argument('--confidence-calibration', type=Path, required=True)
+    parser.add_argument('--teacher', choices=('egovideo_hod', 'internvideo2_clip_1b', 'qwen3_vl_8b'), default='egovideo_hod')
     args = parser.parse_args()
     args.report = args.report.resolve()
+    args.cache = args.cache.resolve()
+    args.candidate_manifest = args.candidate_manifest.resolve()
+    args.confidence_calibration = args.confidence_calibration.resolve()
     if args.report.exists():
         raise FileExistsError(args.report)
     os.environ['CUDA_VISIBLE_DEVICES'] = ''
@@ -43,10 +50,24 @@ def main():
         cfg = trainer.cfg['rq3_auxiliary']
         payload, _ = load_cache(cfg['cache_path'])
         evidence = proposal_evidence(payload, cfg['manifest_path'])
-        video = next(iter(evidence))
-        entry = evidence[video][0]
+        from libs.models.SADA.rq3_revised import confident, feature_interval
+        fixture = None
+        for video, entries in evidence.items():
+            for entry in entries:
+                if not confident(entry, cfg['confidence_threshold']):
+                    continue
+                target = crop_with_candidate(trainer.train_loader_tgt.dataset, video, entry['absolute_feature_index'])
+                start, end = feature_interval(entry, target['metadata'])
+                crop_start = target['metadata']['crop_start']
+                if crop_start <= start < end <= crop_start + target['feats'].shape[-1]:
+                    fixture = (video, entry, target)
+                    break
+            if fixture is not None:
+                break
+        if fixture is None:
+            raise ValueError('no trusted complete-window CPU fixture; do not lower thresholds to force activation')
+        video, entry, target = fixture
         source = source_with_class(trainer.train_loader_src.dataset, entry['class_id'])
-        target = crop_with_candidate(trainer.train_loader_tgt.dataset, video, entry['absolute_feature_index'])
         trainer.train_loader_src = [[copy.deepcopy(source), copy.deepcopy(source)]]
         trainer.train_loader_tgt = [[copy.deepcopy(target), copy.deepcopy(target)]]
         scheduler_length = trainer.cfg['rq2_formal']['epoch_budget']['iterations_per_epoch']
@@ -96,7 +117,7 @@ def main():
             outputs[variant] = {'metrics': metrics, 'changed_base_parameters': changed}
             print('RQ3_REVISED_CPU_VARIANT', variant, len(changed), flush=True)
         tested = outputs[args.strategy]
-        assert tested['changed_base_parameters'], 'strategy did not affect original student'
+        assert tested['changed_base_parameters'], 'no intervention observed on this fixture; not a full implementation verdict'
         if args.strategy == 'verify':
             assert tested['metrics']['t_rq3_verify_eligible'] > 0
             assert tested['metrics']['t_rq3_verify_rejected'] > 0
@@ -119,10 +140,9 @@ def main():
                 '/vepfs/vlms/SADA_PLUS/data/ek100_slowfast/features', '-n', args.report.stem,
                 '--debug', '--benchmark-audit-log', '--rq2-regime', 'uda', '--supervised-upper-bound', 'off',
                 '--rq2-target-manifest', '/vepfs/vlms/rq2_uda_target_manifests_0924/S1.json',
-                '--rq3-strategy', args.strategy, '--rq3-teacher', 'egovideo_hod', '--rq3-cache',
-                '/vepfs/vlms/rq3_semantic_caches_434f630_0928/egovideo_hod/S1.json',
-                '--rq3-revision', 'revised', '--rq3-candidate-manifest',
-                '/vepfs/vlms/rq3_shared_candidates_1b6e669_0928/S1/manifest.json']
+                '--rq3-strategy', args.strategy, '--rq3-teacher', args.teacher, '--rq3-cache', str(args.cache),
+                '--rq3-revision', 'revised', '--rq3-candidate-manifest', str(args.candidate_manifest),
+                '--rq3-confidence-calibration', str(args.confidence_calibration)]
     runpy.run_path(str(root / 'train_da.py'), run_name='__main__')
 
 

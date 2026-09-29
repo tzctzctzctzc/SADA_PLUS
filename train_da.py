@@ -1118,6 +1118,7 @@ def create_argparser():
     parser.add_argument('--rq3-strategy', choices=('off', 'hard', 'verify', 'prototype'), default='off')
     parser.add_argument('--rq3-revision', choices=('legacy', 'revised'), default='legacy')
     parser.add_argument('--rq3-candidate-manifest', default=None)
+    parser.add_argument('--rq3-confidence-calibration', default=None)
     parser.add_argument('--rq3-cache', default=None)
     parser.add_argument('--rq3-teacher', choices=('egovideo_hod', 'internvideo2_clip_1b', 'qwen3_vl_8b'))
     parser.add_argument(
@@ -2667,7 +2668,8 @@ if __name__ == '__main__':
     # 原YAML的seed是123；必须在CLI覆盖为实际运行seed之后绑定RQ3缓存。
     from tools.rq3_protocol import configure as configure_rq3
     configure_rq3(config_dict, args.rq3_strategy, args.rq3_cache,
-                  args.rq3_teacher, args.rq2_shift, args.rq3_revision, args.rq3_candidate_manifest)
+                  args.rq3_teacher, args.rq2_shift, args.rq3_revision, args.rq3_candidate_manifest,
+                  args.rq3_confidence_calibration)
 
     if args.rq2_regime:
         from tools.rq2_formal import build_formal_run_signature
