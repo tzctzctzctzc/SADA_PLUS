@@ -80,7 +80,9 @@ def main():
         tm.epoch_length_from_config = lambda *unused: 2
         initial = copy.deepcopy((trainer.model, trainer.model_ema))
         rng = (random.getstate(), np.random.get_state(), torch.get_rng_state())
-        outputs, baseline_state = {}, None
+        outputs, baseline_state, repeat_state = {}, None, None
+        # FP32两步优化的数值验收界限；保留全部逐位差异，不把末位舍入计为策略效应。
+        parameter_atol = 1e-8
         for variant in ('baseline', 'baseline_repeat', args.strategy):
             trainer.model, trainer.model_ema = copy.deepcopy(initial)
             trainer.train_loader_src = [[copy.deepcopy(source), copy.deepcopy(source)]]
@@ -123,16 +125,26 @@ def main():
             changed = {n: float((p - baseline_state[n]).abs().max()) for n, p in current.items()
                        if n in baseline_state and not torch.equal(p, baseline_state[n])}
             outputs[variant] = {'metrics': metrics, 'changed_base_parameters': changed}
+            if variant == 'baseline_repeat':
+                repeat_state = current
+            elif variant == args.strategy:
+                outputs[variant]['changed_repeat_parameters'] = {
+                    n: float((p - repeat_state[n]).abs().max()) for n, p in current.items()
+                    if n in repeat_state and not torch.equal(p, repeat_state[n])}
             print('RQ3_REVISED_CPU_VARIANT', variant, len(changed),
                   json.dumps(sorted(changed.items(), key=lambda pair: -pair[1])[:5]), flush=True)
-        assert not outputs['baseline_repeat']['changed_base_parameters'], 'CPU baseline itself is not reproducible'
+        assert max(outputs['baseline_repeat']['changed_base_parameters'].values(), default=0) <= parameter_atol, 'CPU baseline exceeds FP32 reproducibility tolerance'
         tested = outputs[args.strategy]
+        meaningful_change = max(tested['changed_base_parameters'].values(), default=0) > parameter_atol
         if args.strategy == 'verify':
             assert tested['metrics']['t_rq3_verify_observed'] > 0, 'fixture did not exercise actual SADA foreground verification'
             intervened = tested['metrics']['t_rq3_verify_rejected'] > 0
-            assert bool(tested['changed_base_parameters']) == intervened, 'Verify intervention/student update mismatch'
+            assert meaningful_change == intervened, 'Verify intervention/student update mismatch'
+            if not intervened:
+                # 第二次独立基线是直接控制；不干预Verify仍要求与其逐位一致。
+                assert not tested['changed_repeat_parameters'], 'no-op Verify differs from repeated baseline'
         else:
-            assert tested['changed_base_parameters'], 'source prototype branch did not update original student'
+            assert meaningful_change, 'source prototype branch did not update original student beyond roundoff'
             intervened = tested['metrics']['t_rq3_selected'] > 0
             assert (tested['metrics']['t_rq3_target_gradient_norm'] > 0) == intervened
             assert (tested['metrics']['t_rq3_alignment_loss'] > 0) == intervened
@@ -140,6 +152,7 @@ def main():
                       vlm_intervened=intervened, confidence_threshold=cfg['confidence_threshold'],
                       fixture='audited SO EMA; two duplicated real crops; two actual Trainer steps',
                       initialization=str(checkpoint), source_video=source['metadata']['video_id'],
+                      parameter_atol=parameter_atol, no_op_vs_repeat='bitwise-exact',
                       target_crop=target['metadata'], results=outputs,
                       cpu_shim='nonleaf scalar clone for original inplace CPU loss addition')
         with args.report.open('x') as stream:
