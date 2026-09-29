@@ -227,6 +227,26 @@ def test_rerun_plan_excludes_hard_and_changed_original(tmp_path):
         load_entry_plan(plan)
 
 
+def test_priority_queue_checkpoint_names_do_not_collide_with_old_or_other_runs(tmp_path):
+    from tools.run_rq3_trusted_queue import entry_output_root
+    item = 'S1_egovideo_hod_verify'
+    old_name = 'rq3_egovideo_hod_verify_S1_seed6_formal_' + item
+    model_results = tmp_path / 'model_results'
+    (model_results / old_name).mkdir(parents=True)
+    names = set()
+    for queue in ('rq3_old_queue', 'rq3_new_queue'):
+        for stage in ('audit', 'formal'):
+            root = entry_output_root(tmp_path / queue, stage, item)
+            name = 'rq3_egovideo_hod_verify_S1_seed6_' + root.name
+            assert name != old_name and not (model_results / name).exists()
+            names.add(name)
+            # 完成项的matrix重审从parents[3]恢复同一checkpoint命名。
+            complete = root / 'egovideo_hod/verify/S1_seed6/complete.json'
+            assert complete.parents[3].name == root.name
+    assert len(names) == 4
+    assert (model_results / old_name).is_dir()
+
+
 def test_proposal_evidence_uses_only_hash_bound_original_interval(tmp_path):
     from tools.rq3_protocol import content_hash, proposal_evidence
     manifest = dict(target_gt_used=False, target_video_ids=['v'], feature_lengths={'v': 6},

@@ -35,6 +35,11 @@ def ordered_rows(plan):
                                                  ('verify', 'prototype').index(r['strategy'])))
 
 
+def entry_output_root(queue_root, stage, name):
+    # matrix以输出根末级目录命名checkpoint；必须包含本次队列身份，避免与旧实验重名。
+    return queue_root / (queue_root.name + '_' + stage + '_' + name)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--entry-plan', type=Path, required=True)
@@ -237,9 +242,9 @@ def main():
                             '--calibration-root', str(args.output_root / 'calibrations'),
                             '--expected-head', args.expected_head, '--gpu', str(args.gpu), '--wait-gpu']
                     save(phase='formal-cpu-preflight')
-                    run(base + ['--output-root', str(args.output_root / ('audit_' + name)), '--audit-only'], name + '.preflight')
+                    run(base + ['--output-root', str(entry_output_root(args.output_root, 'audit', name)), '--audit-only'], name + '.preflight')
                     save(phase='training-evaluation')
-                    destination = args.output_root / ('formal_' + name)
+                    destination = entry_output_root(args.output_root, 'formal', name)
                     run(base + ['--output-root', str(destination), '--immediate-gpu', '--execute'], name + '.formal')
                     record = destination / model / strategy / (shift + '_seed6') / 'complete.json'
                     if not record.is_file():
