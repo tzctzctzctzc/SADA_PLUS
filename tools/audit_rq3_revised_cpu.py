@@ -9,6 +9,16 @@ import runpy
 import sys
 
 
+def audit_shift_inputs(cache_path, code_root):
+    """CPU反事实测试必须使用当前缓存所属shift，不能固定成S1。"""
+    import yaml
+    shift = json.loads(Path(cache_path).read_text())['shift']
+    registry = yaml.safe_load((code_root / 'configs/rq2/shift_registry.yaml').read_text())
+    if shift not in registry['shifts']:
+        raise ValueError('unknown cache shift')
+    return shift, code_root / registry['shifts'][shift]['config']
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--strategy', choices=('verify', 'prototype'), required=True)
@@ -38,12 +48,13 @@ def main():
     torch.autograd.set_multithreading_enabled(False)
     torch.backends.mkldnn.enabled = False
     root = Path(__file__).resolve().parents[1]
+    shift, config = audit_shift_inputs(args.cache, root)
     os.chdir('/vepfs/vlms/SADA_PLUS')
 
     def audit(trainer):
         assert str(trainer.model.device) == 'cpu'
         baseline, checkpoint = completed_baseline(
-            Path('/vepfs/vlms/rq2_matched_slowfast_S1_seed6_7067306_0927'), 'S1')
+            Path('/vepfs/vlms/rq2_matched_slowfast_%s_seed6_7067306_0927' % shift), shift)
         audit_baseline(baseline, trainer.cfg.config)
         state = torch.load(checkpoint, map_location='cpu', weights_only=False)['ema_state_dict']
         loaded = trainer.model.load_state_dict(state, strict=False)
@@ -148,7 +159,7 @@ def main():
             intervened = tested['metrics']['t_rq3_selected'] > 0
             assert (tested['metrics']['t_rq3_target_gradient_norm'] > 0) == intervened
             assert (tested['metrics']['t_rq3_alignment_loss'] > 0) == intervened
-        report = dict(status='passed', formal_result=False, device='cpu', strategy=args.strategy,
+        report = dict(status='passed', formal_result=False, device='cpu', strategy=args.strategy, shift=shift,
                       vlm_intervened=intervened, confidence_threshold=cfg['confidence_threshold'],
                       fixture='audited SO EMA; two duplicated real crops; two actual Trainer steps',
                       initialization=str(checkpoint), source_video=source['metadata']['video_id'],
@@ -160,12 +171,12 @@ def main():
         print('RQ3_REVISED_CPU_PASS', args.report, flush=True)
 
     tm.Trainer.train = audit
-    sys.argv = ['train_da.py', '-c', str(root / 'configs/dark_vs_all_new_videos_full/version_final_ckpt.yaml'),
-                '-s', '6', '-i', '-1', '--rq2-shift', 'S1', '--rq2-registry',
+    sys.argv = ['train_da.py', '-c', str(config),
+                '-s', '6', '-i', '-1', '--rq2-shift', shift, '--rq2-registry',
                 '/vepfs/vlms/SADA_PLUS/configs/rq2/shift_registry.yaml', '--rq2-reference-root',
                 '/vepfs/vlms/SADA_PLUS/data/ek100_slowfast/features', '-n', args.report.stem,
                 '--debug', '--benchmark-audit-log', '--rq2-regime', 'uda', '--supervised-upper-bound', 'off',
-                '--rq2-target-manifest', '/vepfs/vlms/rq2_uda_target_manifests_0924/S1.json',
+                '--rq2-target-manifest', '/vepfs/vlms/rq2_uda_target_manifests_0924/%s.json' % shift,
                 '--rq3-strategy', args.strategy, '--rq3-teacher', args.teacher, '--rq3-cache', str(args.cache),
                 '--rq3-revision', 'revised', '--rq3-candidate-manifest', str(args.candidate_manifest),
                 '--rq3-confidence-calibration', str(args.confidence_calibration)]

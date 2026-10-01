@@ -47,10 +47,14 @@ def main():
     parser.add_argument('--expected-head', required=True)
     parser.add_argument('--gpu', type=int, required=True)
     parser.add_argument('--prepared-root', type=Path, help='重验并复用完整候选/帧和教师缓存；不复用部分产物或训练')
+    parser.add_argument('--recovery-root', type=Path, default=RECOVERY)
+    parser.add_argument('--recovery-manifest-sha256', default='5a8041d6355e1e5b9d9f1e268f903c58dd604efa906d780f69268d8996483b90')
     args = parser.parse_args()
     if args.gpu < 0:
         parser.error('physical GPU index must be nonnegative')
     check_code(args.expected_head)
+    if sha256_file(args.recovery_root / 'manifest.json') != args.recovery_manifest_sha256:
+        raise ValueError('exact frame recovery manifest hash differs')
     args.entry_plan = args.entry_plan.resolve()
     args.output_root = args.output_root.resolve()
     if args.prepared_root:
@@ -72,6 +76,7 @@ def main():
         state = dict(pid=os.getpid(), gpu=args.gpu, max_gpus=1, expected_head=args.expected_head,
                      plan_sha256=sha256_file(args.entry_plan), total=len(rows), completed=0,
                      participation_fraction=.2, confidence_policy='fixed-top20-percent-per-shift-v1', status='running')
+        state.update(recovery_root=str(args.recovery_root), recovery_manifest_sha256=args.recovery_manifest_sha256)
 
         def save(**values):
             state.update(values)
@@ -124,7 +129,8 @@ def main():
                     destination.symlink_to(previous, target_is_directory=True)
             run([str(CODE_ROOT / 'tools/prepare_rq3_candidates.py'), '--proposals', str(proposals),
                  '--baseline-root', str(baseline_root(Path('/vepfs/vlms'), shift)), '--shift', shift,
-                 '--video-root', str(VIDEO), '--recovery-root', str(RECOVERY), '--output-root', str(destination),
+                 '--video-root', str(VIDEO), '--recovery-root', str(args.recovery_root),
+                 '--recovery-manifest-sha256', args.recovery_manifest_sha256, '--output-root', str(destination),
                  '--domain', domain, '--evidence-scope', scope, '--decode-workers', '4', '--reuse-verified'],
                 shift + '.' + domain + '.' + scope + '.frames')
             return destination / 'manifest.json'

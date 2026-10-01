@@ -170,6 +170,8 @@ def main():
     parser.add_argument("--shift", choices=["S" + str(i) for i in range(1, 7)], required=True)
     parser.add_argument("--video-root", type=Path, required=True)
     parser.add_argument("--recovery-root", type=Path)
+    parser.add_argument("--recovery-manifest-sha256", default="5a8041d6355e1e5b9d9f1e268f903c58dd604efa906d780f69268d8996483b90",
+                        help="本次经审计的不可变精确恢复清单SHA256")
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--reuse-verified", action="store_true", help="完整校验已有候选及帧后跳过；部分产物保留并报错")
     parser.add_argument("--decode-workers", type=int, default=8, help="独立视频CPU并行解码数")
@@ -179,8 +181,8 @@ def main():
     args = parser.parse_args()
     if args.decode_workers <= 0:
         parser.error("--decode-workers must be positive")
-    if args.recovery_root and sha256_file(args.recovery_root / "manifest.json") != "5a8041d6355e1e5b9d9f1e268f903c58dd604efa906d780f69268d8996483b90":
-        raise ValueError("frame recovery manifest is not the audited exact 131-frame source")
+    if args.recovery_root and sha256_file(args.recovery_root / "manifest.json") != args.recovery_manifest_sha256:
+        raise ValueError("frame recovery manifest is not the audited exact source")
     cfg, teacher = completed_baseline(args.baseline_root, args.shift)
     meta = json.loads(Path(str(args.proposals) + ".meta.json").read_text())
     if (meta["domain"] != args.domain or meta["split"] != ('val' if args.domain == 'source' else 'train')
