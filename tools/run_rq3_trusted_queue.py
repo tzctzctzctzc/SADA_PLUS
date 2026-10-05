@@ -46,12 +46,16 @@ def main():
     parser.add_argument('--output-root', type=Path, required=True)
     parser.add_argument('--expected-head', required=True)
     parser.add_argument('--gpu', type=int, required=True)
+    parser.add_argument('--queue-slot', type=int, choices=(0, 1),
+                        help='由两卡监控分配的互斥工作队列槽位')
     parser.add_argument('--prepared-root', type=Path, help='重验并复用完整候选/帧和教师缓存；不复用部分产物或训练')
     parser.add_argument('--recovery-root', type=Path, default=RECOVERY)
     parser.add_argument('--recovery-manifest-sha256', default='5a8041d6355e1e5b9d9f1e268f903c58dd604efa906d780f69268d8996483b90')
     args = parser.parse_args()
     if args.gpu < 0:
         parser.error('physical GPU index must be nonnegative')
+    if args.queue_slot is not None and os.environ.get('RQ3_QUEUE_SLOT') != str(args.queue_slot):
+        parser.error('managed queue-slot must be supplied by the RQ3 monitor')
     check_code(args.expected_head)
     if sha256_file(args.recovery_root / 'manifest.json') != args.recovery_manifest_sha256:
         raise ValueError('exact frame recovery manifest hash differs')
@@ -65,7 +69,9 @@ def main():
     if any(row['teacher'] not in TEACHERS for row in rows):
         raise ValueError('this priority queue only supports teachers with completed old revised-strategy results')
     import fcntl
-    with (DATA / '.rq3_idle_monitor.lock').open('a') as queue_lock:
+    lock_name = ('.rq3_idle_monitor.lock' if args.queue_slot is None
+                 else '.rq3_trusted_queue_slot%d.lock' % args.queue_slot)
+    with (DATA / lock_name).open('a') as queue_lock:
         fcntl.flock(queue_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         args.output_root.mkdir(parents=True, exist_ok=False)
         logs = args.output_root / 'logs'
@@ -77,6 +83,7 @@ def main():
                      plan_sha256=sha256_file(args.entry_plan), total=len(rows), completed=0,
                      participation_fraction=.2, confidence_policy='fixed-top20-percent-per-shift-v1', status='running')
         state.update(recovery_root=str(args.recovery_root), recovery_manifest_sha256=args.recovery_manifest_sha256)
+        state['queue_slot'] = args.queue_slot
 
         def save(**values):
             state.update(values)

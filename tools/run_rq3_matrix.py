@@ -25,6 +25,15 @@ def matrix(shard_index=0, shard_count=1):
     return entries[shard_index::shard_count]
 
 
+def matrix_lock_name(shard_index, shard_count):
+    slot = os.environ.get('RQ3_QUEUE_SLOT')
+    if slot is None:
+        return '.rq3_matrix_%d_of_%d.lock' % (shard_index, shard_count)
+    if slot not in ('0', '1') or not os.environ.get('RQ3_MONITOR_PID'):
+        raise ValueError('invalid managed RQ3 queue slot')
+    return '.rq3_matrix_managed_slot%s.lock' % slot
+
+
 def baseline_root(parent, shift):
     return parent / ("rq2_matched_slowfast_{}_seed6_7067306_0927".format(shift))
 
@@ -304,7 +313,7 @@ def main():
             print('RQ3_ORIGINAL_RESULTS_REAUDITED', len(entries), flush=True)
         # 防止重复分片；两个分片成员互斥，每个GPU阶段再取得共享容量与卡锁。
         import fcntl
-        with (args.data_root / (".rq3_matrix_%d_of_%d.lock" % (args.shard_index, args.shard_count))).open("a") as lock:
+        with (args.data_root / matrix_lock_name(args.shard_index, args.shard_count)).open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             for model, strategy, shift in entries:
                 check_cache_snapshot(args.cache_root, snapshot)
