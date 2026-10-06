@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from tools.run_rq3_trusted_monitor import observe_idle, partition_rows, gpu_start_race
+from tools.run_rq3_trusted_monitor import observe_idle, eligible_cards, partition_rows, gpu_start_race
 from tools.run_rq3_matrix import matrix_lock_name
 
 
@@ -22,6 +22,14 @@ def test_uuid_change_and_locked_card_clear_previous_idle_time():
     assert observe_idle(timers, {0: 'GPU-C'}, 1800, 1800) == []
     assert set(timers) == {0}
     assert observe_idle(timers, {0: 'GPU-C'}, 3600, 1800) == [0]
+
+
+def test_explicit_immediate_start_uses_only_idle_cards_and_retry_waits_again():
+    timers = {2: dict(uuid='GPU-C', since=100), 3: dict(uuid='GPU-D', since=100)}
+    assert eligible_cards(timers, 100, 1800, True) == [2, 3]
+    assert eligible_cards(timers, 100, 1800, False) == []
+    assert eligible_cards(timers, 1900, 1800, False) == [2, 3]
+    assert eligible_cards({}, 1900, 1800, True) == []
 
 
 def test_two_partitions_skip_completed_without_overlap_or_hard():

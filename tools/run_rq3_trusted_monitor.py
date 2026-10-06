@@ -38,6 +38,11 @@ def observe_idle(timers, observations, now, required_seconds):
             if now - timers[index]['since'] >= required_seconds]
 
 
+def eligible_cards(timers, now, idle_seconds, immediate_first_start):
+    return [index for index in sorted(timers)
+            if immediate_first_start or now - timers[index]['since'] >= idle_seconds]
+
+
 def probe_idle(index):
     import fcntl
     with (DATA / ('.rq2_gpu%d.lock' % index)).open('a') as lock:
@@ -106,6 +111,8 @@ def main():
     parser.add_argument('--recovery-manifest-sha256', required=True)
     parser.add_argument('--expected-head', required=True)
     parser.add_argument('--idle-minutes', type=float, default=30)
+    parser.add_argument('--immediate-gpu', action='store_true',
+                        help='用户明确授权本次首次直接启动；启动冲突后的重试仍重新观察30分钟')
     args = parser.parse_args()
     if args.idle_minutes < 30:
         parser.error('continuous idle time must be at least 30 minutes')
@@ -134,7 +141,8 @@ def main():
         fcntl.flock(monitor_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         args.output_root.mkdir(parents=True, exist_ok=False)
         state = dict(pid=os.getpid(), status='cpu-audit', expected_head=args.expected_head,
-                     idle_minutes=args.idle_minutes, max_gpus=2, workers={}, gpu_timers={})
+                     idle_minutes=args.idle_minutes, immediate_first_start=args.immediate_gpu,
+                     max_gpus=2, workers={}, gpu_timers={})
 
         def save(**values):
             state.update(values)
@@ -187,8 +195,10 @@ def main():
                         if uuid:
                             observations[index] = uuid
                 now = time.monotonic()
-                ready = observe_idle(timers, observations, now, args.idle_minutes * 60)
+                observe_idle(timers, observations, now, args.idle_minutes * 60)
                 for slot, worker in enumerate(workers):
+                    ready = eligible_cards(timers, now, args.idle_minutes * 60,
+                                           args.immediate_gpu and worker['attempt'] == 0)
                     if worker['status'] != 'waiting' or not ready:
                         continue
                     gpu = ready.pop(0)
