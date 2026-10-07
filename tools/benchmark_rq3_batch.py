@@ -17,7 +17,7 @@ def main():
         measurements = []
         original_progress = trainer_module.tqdm
         try:
-            # warmup和适配两阶段都测；每阶段3步预热、12步计时。
+            # 每阶段3步预热、最多12步计时；大batch的单epoch可能不足15步。
             for epoch in (1, 50):
                 durations = []
 
@@ -37,8 +37,8 @@ def main():
                 torch.cuda.reset_peak_memory_stats()
                 self._train_epoch(epoch, ad_lambda=self.adaptation_factor(epoch / 30),
                                   cls_static_anchors=None, mean_class_conf=None)
-                if len(durations) != 12:
-                    raise ValueError('batch benchmark needs 15 real iterations')
+                if len(durations) < 3:
+                    raise ValueError('batch benchmark needs at least 3 measured iterations after warmup')
                 batch = self.cfg['loader']['batch_size']
                 measurements.append(dict(epoch=epoch, measured_steps=len(durations),
                     seconds_per_step=sum(durations)/len(durations),
