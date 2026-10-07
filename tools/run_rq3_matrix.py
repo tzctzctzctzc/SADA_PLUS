@@ -72,7 +72,11 @@ def checked_completed_entry(path, args, baselines, snapshot):
     root = path.parent
     model, strategy, shift = record["teacher"], record["strategy"], record["shift"]
     cfg = json.loads((root / "preflight.json").read_text())
-    check_new_protocol(cfg)
+    accelerated = bool(cfg.get('rq3_auxiliary', {}).get('acceleration'))
+    if accelerated and (record.get('batch_size') != cfg['loader']['batch_size']
+                        or record.get('batch_matched_baseline') is not False):
+        raise ValueError('completed accelerated result lost its batch provenance')
+    check_new_protocol(cfg, allow_accelerated=accelerated)
     if record["baseline_root"] != str(baseline_root(args.baseline_parent, shift)):
         raise ValueError("completed RQ3 result uses another baseline")
     identity = str(Path(model) / (shift + ".json"))
@@ -84,7 +88,7 @@ def checked_completed_entry(path, args, baselines, snapshot):
         raise ValueError("completed RQ3 strategy/teacher differs from preflight")
     name = "rq3_{}_{}_{}_seed6_{}".format(model, strategy, shift, path.parents[3].name)
     config, checkpoint = checked_train_result(args.data_root / "model_results" / name,
-                                             root / "logs/uda.train.log", cfg)
+                                             root / "logs/uda.train.log", cfg, allow_accelerated=accelerated)
     audit_baseline(baselines[shift][0], json.loads(config.read_text()))
     checked_evaluation(root / "evaluation", cfg, checkpoint)
     if (sha256_file(checkpoint) != record["checkpoint_sha256"]

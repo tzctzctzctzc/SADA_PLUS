@@ -23,8 +23,12 @@ def valid_batch(cfg):
     marker = cfg.get('rq3_auxiliary', {}).get('acceleration')
     if marker is None:
         return batch == 2
-    return batch in (4, 8) and marker == dict(schema=SCHEMA, batch_size=batch, reference_batch_size=2,
+    from tools.rq3_protocol import REVISION
+    aux = cfg['rq3_auxiliary']
+    return (aux.get('schema') == REVISION and aux.get('strategy') in ('verify', 'prototype')
+            and batch in (4, 8) and marker == dict(schema=SCHEMA, batch_size=batch, reference_batch_size=2,
                                              comparison='exploratory-unmatched-batch', learning_rate='unchanged')
+            )
 
 
 def reference_config(candidate, baseline):
