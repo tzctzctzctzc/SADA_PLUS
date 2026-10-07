@@ -140,26 +140,34 @@ def supervision_audit(path, cfg=None):
 
 def load_entry_plan(path):
     plan = json.loads(Path(path).read_text())
-    if plan.get('schema') != 'rq3-revised-completed-only-v1':
+    fresh_matrix = plan.get('schema') == 'rq3-revised-fresh-matrix-v1'
+    if plan.get('schema') not in ('rq3-revised-completed-only-v1', 'rq3-revised-fresh-matrix-v1'):
         raise ValueError('unknown RQ3 rerun plan')
+    if fresh_matrix and (plan.get('seed') != 6 or plan.get('fresh') is not True):
+        raise ValueError('fresh RQ3 matrix requires seed6 and fresh=true')
     entries = []
     for row in plan['entries']:
         entry = (row['teacher'], row['strategy'], row['shift'])
         if entry not in matrix() or entry[1] not in ('verify', 'prototype') or entry in entries:
             raise ValueError('invalid/duplicate RQ3 revised entry; Hard is excluded')
-        original = Path(row['original_complete'])
-        if sha256_file(original) != row['original_complete_sha256']:
-            raise ValueError('original RQ3 result identity changed')
-        for artifact, digest in row.get('artifact_sha256', {}).items():
-            if sha256_file(artifact) != digest:
-                raise ValueError('original RQ3 artifact changed: ' + artifact)
-        record = json.loads(original.read_text())
-        if (record['teacher'], record['strategy'], record['shift']) != entry or record['seed'] != 6:
-            raise ValueError('rerun entry differs from original complete result')
+        if not fresh_matrix:
+            original = Path(row['original_complete'])
+            if sha256_file(original) != row['original_complete_sha256']:
+                raise ValueError('original RQ3 result identity changed')
+            for artifact, digest in row.get('artifact_sha256', {}).items():
+                if sha256_file(artifact) != digest:
+                    raise ValueError('original RQ3 artifact changed: ' + artifact)
+            record = json.loads(original.read_text())
+            if (record['teacher'], record['strategy'], record['shift']) != entry or record['seed'] != 6:
+                raise ValueError('rerun entry differs from original complete result')
         entries.append(entry)
     if not entries:
         raise ValueError('empty RQ3 rerun plan')
     return entries
+
+
+def audit_shifts(entries, fresh_matrix):
+    return sorted({row[2] for row in entries}) if fresh_matrix else ['S' + str(i) for i in range(1, 7)]
 
 
 def completed_baseline(root, shift):
@@ -249,6 +257,7 @@ def main():
     for key in ("cache_root", "output_root", "baseline_parent", "data_root", "manifest_root"):
         setattr(args, key, getattr(args, key).resolve())
     check_code(args.expected_head)
+    fresh_matrix = bool(args.entry_plan and json.loads(args.entry_plan.read_text())['schema'] == 'rq3-revised-fresh-matrix-v1')
     args.output_root.mkdir(parents=True, exist_ok=False)
     if args.entry_plan:
         (args.output_root / 'entry_plan.json').write_bytes(args.entry_plan.read_bytes())
@@ -262,16 +271,20 @@ def main():
     os.chdir(args.data_root)
     try:
         baselines = {shift: completed_baseline(baseline_root(args.baseline_parent, shift), shift)
-                     for shift in ("S" + str(index) for index in range(1, 7))}
+                     for shift in audit_shifts(entries, fresh_matrix)}
+        executing_models = {row[0] for row in entries}
         # 三模型每shift必须实际使用同一候选、SO teacher和帧；不按增益筛选。
         shared, snapshot = {}, {}
         for model in MODELS:
             for shift, (cfg, teacher_checkpoint) in baselines.items():
                 path = args.cache_root / model / (shift + ".json")
                 payload, _ = load_cache(path, model, shift, members_for(cfg, "tgt"))
-                interface = validate_interface_audit(payload["input_protocol"], model)
+                # 非本次执行教师仍比较候选/像素/预测身份；大权重只重验实际执行教师。
+                interface = validate_interface_audit(payload["input_protocol"], model,
+                                                     verify_files=not fresh_matrix or model in executing_models)
                 audit_cache_predictions(payload, interface)
-                validate_reference_lengths(payload, cfg)
+                if not fresh_matrix or model in executing_models:
+                    validate_reference_lengths(payload, cfg)
                 snapshot[str(path.relative_to(args.cache_root))] = sha256_file(path)
                 if payload["teacher_checkpoint_sha256"] != sha256_file(teacher_checkpoint):
                     raise ValueError("RQ3 cache does not use the completed source-selected SO teacher")
@@ -306,7 +319,7 @@ def main():
                 for file in (cache, manifest, calibration, Path(report['source_cache_path']), Path(report['source_manifest_path'])):
                     trusted_snapshot[str(file.resolve())] = sha256_file(file)
             (args.output_root / 'trusted_input_snapshot.json').write_text(json.dumps(trusted_snapshot, sort_keys=True))
-        if args.entry_plan:
+        if args.entry_plan and not fresh_matrix:
             for row in json.loads(args.entry_plan.read_text())['entries']:
                 if (row['teacher'], row['strategy'], row['shift']) in entries:
                     checked_completed_entry(Path(row['original_complete']), args, baselines, snapshot)

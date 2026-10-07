@@ -1,4 +1,4 @@
-"""旧完整项的固定20%参与对比：逐shift准备、源域诊断、验收和单卡fresh重跑。"""
+"""固定20%参与：逐shift准备、源域诊断、验收和单卡fresh实验。"""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -65,6 +65,7 @@ def main():
         args.prepared_root = args.prepared_root.resolve()
     load_entry_plan(args.entry_plan)
     plan = json.loads(args.entry_plan.read_text())
+    fresh_matrix = plan['schema'] == 'rq3-revised-fresh-matrix-v1'
     rows = ordered_rows(plan)
     if any(row['teacher'] not in TEACHERS for row in rows):
         raise ValueError('this priority queue only supports teachers with completed old revised-strategy results')
@@ -254,8 +255,10 @@ def main():
                             '--verify-candidate-root', str(args.output_root / 'target_local'),
                             '--calibration-root', str(args.output_root / 'calibrations'),
                             '--expected-head', args.expected_head, '--gpu', str(args.gpu), '--wait-gpu']
-                    save(phase='formal-cpu-preflight')
-                    run(base + ['--output-root', str(entry_output_root(args.output_root, 'audit', name)), '--audit-only'], name + '.preflight')
+                    if not fresh_matrix:
+                        save(phase='formal-cpu-preflight')
+                        run(base + ['--output-root', str(entry_output_root(args.output_root, 'audit', name)), '--audit-only'], name + '.preflight')
+                    # 新完整矩阵直接进入execute：内部仍先实际train_da CPU预检/配对，再取得GPU锁。
                     save(phase='training-evaluation')
                     destination = entry_output_root(args.output_root, 'formal', name)
                     run(base + ['--output-root', str(destination), '--immediate-gpu', '--execute'], name + '.formal')
