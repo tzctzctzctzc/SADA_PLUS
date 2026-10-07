@@ -298,6 +298,7 @@ def configure(cfg, strategy, cache_path, model, shift, revision='legacy', manife
 
 
 def validate_config(cfg, regime):
+    from tools.rq3_accelerated import valid_batch
     auxiliary = cfg.get("rq3_auxiliary")
     if not auxiliary:
         return
@@ -305,7 +306,7 @@ def validate_config(cfg, regime):
     if (regime != "uda" or auxiliary.get("schema") not in ("rq3-three-strategies-v2", REVISION)
             or auxiliary.get("strategy") not in STRATEGIES or int(cfg["init_rand_seed"]) != 6
             or int(cfg["dataset"]["input_dim"]) != 2304
-            or int(cfg["opt"]["epochs"]) != 50 or int(cfg["loader"]["batch_size"]) != 2):
+            or int(cfg["opt"]["epochs"]) != 50 or not valid_batch(cfg)):
         raise ValueError("RQ3 requires original matched SADA-UDA, SlowFast, seed6/50epoch/batch2")
     fixed = {"levels": [0, 1, 2], "budget": 0.05, "prototype_momentum": 0.9,
              "normalizer": "common-eligible-count", "activation": "sada-adaptation-phase", "target_gt_used": False,
@@ -353,6 +354,13 @@ def baseline_signature(cfg):
 def audit_baseline(baseline, candidate):
     if baseline.get("rq3_auxiliary") or baseline.get("rq2_formal", {}).get("regime") != "uda":
         raise ValueError("RQ3 baseline must be the completed no-VLM matched UDA")
-    if baseline_signature(baseline) != baseline_signature(candidate):
+    acceleration = candidate.get('rq3_auxiliary', {}).get('acceleration')
+    if acceleration:
+        from tools.rq3_accelerated import reference_config
+        normalized = reference_config(candidate, baseline)
+    else:
+        normalized = candidate
+    if baseline_signature(baseline) != baseline_signature(normalized):
         raise ValueError("RQ3 changed the baseline beyond the auxiliary strategy")
-    return {"baseline_signature": baseline_signature(baseline), "only_auxiliary_changed": True}
+    return {"baseline_signature": baseline_signature(baseline), "only_auxiliary_changed": not bool(acceleration),
+            **({'acceleration': acceleration, 'batch_matched': False} if acceleration else {})}

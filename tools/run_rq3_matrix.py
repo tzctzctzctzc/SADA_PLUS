@@ -205,6 +205,8 @@ def main():
     parser.add_argument("--manifest-root", type=Path, default=Path("/vepfs/vlms/rq2_uda_target_manifests_0924"))
     parser.add_argument("--expected-head", required=True)
     parser.add_argument('--entry-plan', type=Path)
+    parser.add_argument('--batch-size', type=int, choices=(2, 4, 8), default=2)
+    parser.add_argument('--benchmark-only', action='store_true', help='真实短程吞吐测试，不生成complete')
     parser.add_argument('--candidate-root', type=Path)
     parser.add_argument('--verify-cache-root', type=Path, help='重新打分的局部窗口缓存，不能复用整段概率')
     parser.add_argument('--verify-candidate-root', type=Path)
@@ -350,7 +352,8 @@ def main():
                            "--debug", "--benchmark-audit-log", "--rq2-regime", "uda",
                            "--supervised-upper-bound", "off", "--rq2-target-manifest",
                            str(args.manifest_root / (shift + ".json")), "--rq3-strategy", strategy,
-                           "--rq3-teacher", model, "--rq3-cache", str(args.cache_root / model / (shift + ".json"))]
+                           "--rq3-teacher", model, "--rq3-cache", str(args.cache_root / model / (shift + ".json")),
+                           '--rq3-batch-size', str(args.batch_size)]
                 if args.revision == 'revised':
                     cache, manifest, calibration = revised_inputs(args, model, strategy, shift)
                     command[command.index('--rq3-cache') + 1] = str(cache)
@@ -360,7 +363,7 @@ def main():
                 preflight = root / "preflight.json"
                 run_command(command + ["--rq2-audit-output", str(preflight)], root / "logs/preflight.log", args.data_root)
                 cfg = json.loads(preflight.read_text())
-                check_new_protocol(cfg)
+                check_new_protocol(cfg, allow_accelerated=args.batch_size != 2)
                 if args.revision == 'revised':
                     from tools.rq3_protocol import REVISION
                     if cfg['rq3_auxiliary']['schema'] != REVISION:
@@ -373,6 +376,16 @@ def main():
                 (root / "baseline_pair.json").write_text(json.dumps(pairing, sort_keys=True))
                 if args.audit_only:
                     continue
+                if args.benchmark_only:
+                    if len(entries) != 1 or args.batch_size not in (4, 8):
+                        raise ValueError('benchmark needs one accelerated entry')
+                    report = args.output_root / 'batch_benchmark.json'
+                    benchmark_command = [sys.executable, '-B', str(CODE_ROOT / 'tools/benchmark_rq3_batch.py'),
+                                         str(report), *command[2:]]
+                    with gpu_slot(args.gpu, args.data_root, args.wait_gpu) as selected:
+                        run_command(benchmark_command, root / 'logs/batch_benchmark.log', args.data_root,
+                                    selected['uuid'], gpu_index=selected['index'])
+                    continue
                 check_code(args.expected_head)
                 check_cache_snapshot(args.cache_root, snapshot)
                 check_cache_snapshot(Path('.'), trusted_snapshot)
@@ -383,7 +396,7 @@ def main():
                     run_command(command, root / "logs/uda.train.log", args.data_root,
                                 training_gpu["uuid"], gpu_index=training_gpu["index"])
                 config_path, checkpoint = checked_train_result(args.data_root / "model_results" / name,
-                                                              root / "logs/uda.train.log", cfg)
+                                                              root / "logs/uda.train.log", cfg, allow_accelerated=args.batch_size != 2)
                 audit_baseline(baselines[shift][0], json.loads(config_path.read_text()))
                 check_code(args.expected_head)
                 check_cache_snapshot(args.cache_root, snapshot)
@@ -408,6 +421,7 @@ def main():
                 (root / "complete.json").write_text(json.dumps({
                     "teacher": model, "strategy": strategy, "shift": shift, "seed": 6,
                     "single_seed_stage_result": True, "code_commit": args.expected_head,
+                    "batch_size": args.batch_size, "batch_matched_baseline": args.batch_size == 2,
                     "training_gpu": training_gpu, "evaluation_gpu": evaluation_gpu,
                     "baseline_root": str(baseline_root(args.baseline_parent, shift)),
                     "cache_sha256": cfg["rq3_auxiliary"]["cache_sha256"],

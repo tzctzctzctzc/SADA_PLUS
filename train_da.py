@@ -1117,6 +1117,7 @@ def create_argparser():
     parser.add_argument('--rq2-reference-root', default='./data/ek100_slowfast/features')
     parser.add_argument('--rq3-strategy', choices=('off', 'hard', 'verify', 'prototype'), default='off')
     parser.add_argument('--rq3-revision', choices=('legacy', 'revised'), default='legacy')
+    parser.add_argument('--rq3-batch-size', type=int, choices=(2, 4, 8), default=2)
     parser.add_argument('--rq3-candidate-manifest', default=None)
     parser.add_argument('--rq3-confidence-calibration', default=None)
     parser.add_argument('--rq3-cache', default=None)
@@ -2670,6 +2671,8 @@ if __name__ == '__main__':
     configure_rq3(config_dict, args.rq3_strategy, args.rq3_cache,
                   args.rq3_teacher, args.rq2_shift, args.rq3_revision, args.rq3_candidate_manifest,
                   args.rq3_confidence_calibration)
+    from tools.rq3_accelerated import apply_batch
+    apply_batch(config_dict, args.rq3_batch_size)
 
     if args.rq2_regime:
         from tools.rq2_formal import build_formal_run_signature

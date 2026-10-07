@@ -63,26 +63,28 @@ def idle_gpu_uuid(gpu):
     return uuid
 
 
-def check_new_protocol(cfg):
+def check_new_protocol(cfg, allow_accelerated=False):
     formal = cfg["rq2_formal"]
     if (formal.get("training_budget") != TRAINING_BUDGET_PROTOCOL
             or formal.get("source_optimization") != SOURCE_OPTIMIZATION_PROTOCOL
             or formal.get("rng_protocol") != RNG_PROTOCOL
             or not formal.get("data_provenance")):
         raise ValueError("legacy SO/UDA results cannot enter the new matched control")
-    if int(cfg["opt"]["epochs"]) != 50 or int(cfg["loader"]["batch_size"]) != 2:
+    from tools.rq3_accelerated import valid_batch
+    batch_ok = valid_batch(cfg) if allow_accelerated else int(cfg['loader']['batch_size']) == 2
+    if int(cfg["opt"]["epochs"]) != 50 or not batch_ok:
         raise ValueError("matched control requires 50 epochs and batch2")
     validate_formal_runtime(cfg)
 
 
-def checked_train_result(run_root, train_log, expected_cfg):
+def checked_train_result(run_root, train_log, expected_cfg, allow_accelerated=False):
     configs = list(run_root.glob("*/config.json"))
     best = list(run_root.glob("*/saved_ckpt/best_ckpt/*.pt"))
     latest = list(run_root.glob("*/saved_ckpt/latest_ckpt/checkpoint-epoch50.pt"))
     if len(configs) != 1 or len(best) != 1 or len(latest) != 1:
         raise ValueError("training did not finish with unique config/best/epoch50 checkpoints")
     cfg = json.loads(configs[0].read_text())
-    check_new_protocol(cfg)
+    check_new_protocol(cfg, allow_accelerated=allow_accelerated)
     signature = expected_cfg["rq2_formal"]["run_signature"]
     for path in (best[0], latest[0]):
         checkpoint = load_checkpoint(path)

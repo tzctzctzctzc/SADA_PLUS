@@ -26,6 +26,8 @@ TEACHERS = {
                      '/vepfs/vlms/rq2_features_staging_3b7/egovideo_hod/protocol.json'),
     'internvideo2_clip_1b': ('/vepfs/vlms/envs/sada_py39/bin/python', 'intern_settings.json',
                             '/vepfs/vlms/rq2_features_staging_3b7/internvideo2_clip_1b/protocol.json'),
+    'qwen3_vl_8b': ('/vepfs/vlms/envs/rq1-cu121/bin/python', 'qwen_settings.json',
+                     '/vepfs/vlms/rq2_qwen_staging_5a8041d_0925/qwen3_vl_8b/protocol.json'),
 }
 
 
@@ -46,6 +48,8 @@ def main():
     parser.add_argument('--output-root', type=Path, required=True)
     parser.add_argument('--expected-head', required=True)
     parser.add_argument('--gpu', type=int, required=True)
+    parser.add_argument('--batch-size', type=int, choices=(2, 4, 8), default=2)
+    parser.add_argument('--benchmark-batches', action='store_true', help='先实测batch4/8再固定吞吐更高者')
     parser.add_argument('--queue-slot', type=int, choices=(0, 1),
                         help='由两卡监控分配的互斥工作队列槽位')
     parser.add_argument('--prepared-root', type=Path, help='重验并复用完整候选/帧和教师缓存；不复用部分产物或训练')
@@ -82,8 +86,10 @@ def main():
         stopped = False
         state = dict(pid=os.getpid(), gpu=args.gpu, max_gpus=1, expected_head=args.expected_head,
                      plan_sha256=sha256_file(args.entry_plan), total=len(rows), completed=0,
-                     participation_fraction=.2, confidence_policy='fixed-top20-percent-per-shift-v1', status='running')
+                     participation_fraction=.2, batch_size=args.batch_size,
+                     confidence_policy='fixed-top20-percent-per-shift-v1', status='running')
         state.update(recovery_root=str(args.recovery_root), recovery_manifest_sha256=args.recovery_manifest_sha256)
+        benchmark_pending = args.benchmark_batches
         state['queue_slot'] = args.queue_slot
 
         def save(**values):
@@ -254,10 +260,30 @@ def main():
                             '--verify-cache-root', str(args.output_root / 'caches/target_local'),
                             '--verify-candidate-root', str(args.output_root / 'target_local'),
                             '--calibration-root', str(args.output_root / 'calibrations'),
-                            '--expected-head', args.expected_head, '--gpu', str(args.gpu), '--wait-gpu']
+                            '--expected-head', args.expected_head, '--gpu', str(args.gpu), '--wait-gpu',
+                            '--batch-size', str(args.batch_size)]
                     if not fresh_matrix:
                         save(phase='formal-cpu-preflight')
                         run(base + ['--output-root', str(entry_output_root(args.output_root, 'audit', name)), '--audit-only'], name + '.preflight')
+                    if benchmark_pending:
+                        save(phase='batch-throughput-benchmark')
+                        results = []
+                        for batch in (4, 8):
+                            bench_base = list(base)
+                            bench_base[bench_base.index('--batch-size') + 1] = str(batch)
+                            bench_root = entry_output_root(args.output_root, 'benchmark%d' % batch, name)
+                            run(bench_base + ['--output-root', str(bench_root), '--immediate-gpu',
+                                             '--execute', '--benchmark-only'], name + '.benchmark%d' % batch)
+                            results.append(json.loads((bench_root / 'batch_benchmark.json').read_text()))
+                        # 同数目的源/目标视频吞吐决定选择，不读取target mAP。
+                        chosen = max(results, key=lambda r: min(m['source_target_videos_per_second'] for m in r['measurements']))
+                        args.batch_size = chosen['batch_size']
+                        (args.output_root / 'batch_selection.json').write_text(json.dumps(dict(
+                            selected_batch=args.batch_size, criterion='max-worst-phase-videos-per-second',
+                            benchmarks=results), sort_keys=True))
+                        base[base.index('--batch-size') + 1] = str(args.batch_size)
+                        save(batch_size=args.batch_size)
+                        benchmark_pending = False
                     # 新完整矩阵直接进入execute：内部仍先实际train_da CPU预检/配对，再取得GPU锁。
                     save(phase='training-evaluation')
                     destination = entry_output_root(args.output_root, 'formal', name)
