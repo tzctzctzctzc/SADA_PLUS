@@ -39,3 +39,12 @@ def reference_config(candidate, baseline):
     normalized['loader']['batch_size'] = baseline['loader']['batch_size']
     normalized['rq2_formal']['epoch_budget'] = deepcopy(baseline['rq2_formal']['epoch_budget'])
     return normalized
+
+
+def evaluation_audit_config(candidate):
+    """仅对带完整加速身份的checkpoint归一化训练batch，推理仍逐视频。"""
+    if not valid_batch(candidate):
+        raise ValueError('invalid accelerated batch provenance')
+    normalized = deepcopy(candidate)
+    normalized['loader']['batch_size'] = 2
+    return normalized

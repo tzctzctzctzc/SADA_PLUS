@@ -115,6 +115,9 @@ def evaluate(cfg, ckpt_path, config_path, output_dir, device, feature_protocol=N
             if saved_signature != build_formal_run_signature(saved_config):
                 raise ValueError("checkpoint saved configuration violates its run signature")
             validate_formal_resume(checkpoint, saved_signature)
+        if saved_config.get('rq3_auxiliary', {}).get('acceleration') is not None:
+            from tools.rq3_accelerated import evaluation_audit_config
+            audited_config = evaluation_audit_config(audited_config)
         check_frozen_runtime_values(frozen_config, audited_config)
         for key in ("src_val_split", "tgt_val_split"):
             if list(saved_config[key]) != list(cfg[key]):

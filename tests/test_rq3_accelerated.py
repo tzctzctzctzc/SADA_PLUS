@@ -31,3 +31,21 @@ def test_original_batch_is_untouched():
     expected = deepcopy(cfg)
     apply_batch(cfg, 2)
     assert cfg == expected and valid_batch(cfg)
+
+
+def test_evaluation_normalizes_only_authorized_batch(monkeypatch):
+    from tools.rq3_accelerated import evaluation_audit_config
+    from tools.rq2_formal import check_frozen_runtime_values
+    frozen = dict(loader=dict(batch_size=2), opt=dict(learning_rate=.001))
+    cfg = deepcopy(frozen)
+    cfg.update(rq3_auxiliary=dict(schema=REVISION, strategy='prototype'), rq2_formal={})
+    monkeypatch.setattr('tools.rq2_formal.build_epoch_budget', lambda cfg: {})
+    apply_batch(cfg, 8)
+    check_frozen_runtime_values(frozen, evaluation_audit_config(cfg))
+    assert cfg['loader']['batch_size'] == 8
+    cfg['opt']['learning_rate'] = .002
+    with pytest.raises(ValueError, match='learning_rate'):
+        check_frozen_runtime_values(frozen, evaluation_audit_config(cfg))
+    cfg['rq3_auxiliary']['acceleration']['batch_size'] = 4
+    with pytest.raises(ValueError, match='provenance'):
+        evaluation_audit_config(cfg)
