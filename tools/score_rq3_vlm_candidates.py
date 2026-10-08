@@ -232,7 +232,8 @@ def load_teacher(model, settings, frozen):
     args = types.SimpleNamespace(model_path=settings["model_path"], device="cuda:0", offline=True,
                                  dtype="bfloat16", attn_implementation="sdpa", device_map="none",
                                  frame_count=8, prompt_mode="baseline", input_mode="native_video",
-                                 min_pixels=224 * 224, max_pixels=448 * 448, score_temperature=1.)
+                                 min_pixels=224 * 224, max_pixels=448 * 448, score_temperature=1.,
+                                 uniform_mixed_frame_grid=True)
     runtime = load_qwen3(args)
 
     def score(frames, paths, row):

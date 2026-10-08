@@ -306,6 +306,22 @@ def proposal_sample_fps(row, args):
     return max((int(args.frame_count) - 1) / duration, 1e-6)
 
 
+def mixed_frame_grid(paths, min_pixels, max_pixels):
+    """混合恢复分辨率使用同一官方网格；不写回、替换或裁剪任何源帧。"""
+    from PIL import Image
+    sizes = []
+    for path in paths:
+        with Image.open(path) as image:
+            sizes.append(image.size)
+    if len(set(sizes)) <= 1:
+        return {}
+    from qwen_vl_utils.vision_process import smart_resize
+    width, height = min(sizes, key=lambda size: size[0] * size[1])
+    height, width = smart_resize(height, width, factor=32,
+                                 min_pixels=min_pixels, max_pixels=max_pixels)
+    return dict(resized_height=height, resized_width=width)
+
+
 def infer_one(runtime, paths, candidate_id, args, sample_fps=None):
     torch = runtime["torch"]
     prompt_mode = getattr(args, "prompt_mode", "baseline")
@@ -318,6 +334,8 @@ def infer_one(runtime, paths, candidate_id, args, sample_fps=None):
         messages = build_native_video_messages(
             paths, prompt, args.min_pixels, args.max_pixels, sample_fps
         )
+        if getattr(args, 'uniform_mixed_frame_grid', False):
+            messages[0]['content'][0].update(mixed_frame_grid(paths, args.min_pixels, args.max_pixels))
     else:
         messages = build_messages(paths, prompt, args.min_pixels, args.max_pixels)
     chat_template_kwargs = runtime.get("chat_template_kwargs", {})
