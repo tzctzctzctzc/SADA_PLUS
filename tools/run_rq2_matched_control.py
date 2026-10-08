@@ -80,7 +80,10 @@ def check_new_protocol(cfg, allow_accelerated=False):
 def checked_train_result(run_root, train_log, expected_cfg, allow_accelerated=False):
     configs = list(run_root.glob("*/config.json"))
     best = list(run_root.glob("*/saved_ckpt/best_ckpt/*.pt"))
-    latest = list(run_root.glob("*/saved_ckpt/latest_ckpt/checkpoint-epoch50.pt"))
+    from tools.rq3_early_stop import enabled, audit_termination
+    early = enabled(expected_cfg)
+    latest = list(run_root.glob("*/saved_ckpt/latest_ckpt/checkpoint-epoch*.pt" if early else
+                                "*/saved_ckpt/latest_ckpt/checkpoint-epoch50.pt"))
     if len(configs) != 1 or len(best) != 1 or len(latest) != 1:
         raise ValueError("training did not finish with unique config/best/epoch50 checkpoints")
     cfg = json.loads(configs[0].read_text())
@@ -94,6 +97,8 @@ def checked_train_result(run_root, train_log, expected_cfg, allow_accelerated=Fa
             raise ValueError("checkpoint lacks full model/scheduler control state")
         if path == best[0]:
             selected_checkpoint_state(checkpoint, cfg, require_provenance=True)
+        elif early:
+            audit_termination(checkpoint)
         elif checkpoint.get("epoch") != 50:
             raise ValueError("latest checkpoint is not epoch50")
         del checkpoint

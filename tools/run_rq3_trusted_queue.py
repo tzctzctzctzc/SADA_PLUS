@@ -61,6 +61,7 @@ def main():
     parser.add_argument('--expected-head', required=True)
     parser.add_argument('--gpu', type=int, required=True)
     parser.add_argument('--batch-size', type=int, choices=(2, 4, 8), default=2)
+    parser.add_argument('--early-stop-patience', type=int, choices=(0, 15), default=0)
     parser.add_argument('--benchmark-batches', action='store_true', help='先实测batch4/8再固定吞吐更高者')
     parser.add_argument('--queue-slot', type=int, choices=(0, 1),
                         help='由两卡监控分配的互斥工作队列槽位')
@@ -108,6 +109,7 @@ def main():
         benchmark_pending = args.benchmark_batches
         state['queue_slot'] = args.queue_slot
         state['refresh_teacher_caches'] = args.refresh_teacher_caches
+        state['early_stop_patience_epochs'] = args.early_stop_patience
 
         def save(**values):
             state.update(values)
@@ -283,6 +285,7 @@ def main():
                             '--calibration-root', str(args.output_root / 'calibrations'),
                             '--expected-head', args.expected_head, '--gpu', str(args.gpu), '--wait-gpu',
                             '--batch-size', str(args.batch_size)]
+                    base += ['--early-stop-patience', str(args.early_stop_patience)]
                     if not fresh_matrix:
                         save(phase='formal-cpu-preflight')
                         run(base + ['--output-root', str(entry_output_root(args.output_root, 'audit', name)), '--audit-only'], name + '.preflight')

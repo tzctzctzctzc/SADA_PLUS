@@ -72,6 +72,8 @@ def checked_completed_entry(path, args, baselines, snapshot):
     root = path.parent
     model, strategy, shift = record["teacher"], record["strategy"], record["shift"]
     cfg = json.loads((root / "preflight.json").read_text())
+    if record.get('early_stopping') != cfg.get('rq3_auxiliary', {}).get('early_stopping'):
+        raise ValueError('completed result lost stopping-policy provenance')
     accelerated = bool(cfg.get('rq3_auxiliary', {}).get('acceleration'))
     if accelerated and (record.get('batch_size') != cfg['loader']['batch_size']
                         or record.get('batch_matched_baseline') is not False):
@@ -210,6 +212,7 @@ def main():
     parser.add_argument("--expected-head", required=True)
     parser.add_argument('--entry-plan', type=Path)
     parser.add_argument('--batch-size', type=int, choices=(2, 4, 8), default=2)
+    parser.add_argument('--early-stop-patience', type=int, choices=(0, 15), default=0)
     parser.add_argument('--benchmark-only', action='store_true', help='真实短程吞吐测试，不生成complete')
     parser.add_argument('--candidate-root', type=Path)
     parser.add_argument('--verify-cache-root', type=Path, help='重新打分的局部窗口缓存，不能复用整段概率')
@@ -358,6 +361,7 @@ def main():
                            str(args.manifest_root / (shift + ".json")), "--rq3-strategy", strategy,
                            "--rq3-teacher", model, "--rq3-cache", str(args.cache_root / model / (shift + ".json")),
                            '--rq3-batch-size', str(args.batch_size)]
+                command += ['--rq3-early-stop-patience', str(args.early_stop_patience)]
                 if args.revision == 'revised':
                     cache, manifest, calibration = revised_inputs(args, model, strategy, shift)
                     command[command.index('--rq3-cache') + 1] = str(cache)
@@ -426,6 +430,8 @@ def main():
                     "teacher": model, "strategy": strategy, "shift": shift, "seed": 6,
                     "single_seed_stage_result": True, "code_commit": args.expected_head,
                     "batch_size": args.batch_size, "batch_matched_baseline": args.batch_size == 2,
+                    "early_stopping": cfg['rq3_auxiliary'].get('early_stopping'),
+                    "stopping_budget_matched_baseline": not bool(args.early_stop_patience),
                     "training_gpu": training_gpu, "evaluation_gpu": evaluation_gpu,
                     "baseline_root": str(baseline_root(args.baseline_parent, shift)),
                     "cache_sha256": cfg["rq3_auxiliary"]["cache_sha256"],

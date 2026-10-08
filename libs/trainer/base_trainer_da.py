@@ -257,6 +257,11 @@ class BaseTrainerDA:
             )
 
         # Iterate over each of the epochs
+        from tools.rq3_early_stop import enabled, decision
+        rq3_early_stop = enabled(self.cfg)
+        if rq3_early_stop and self.start_epoch != 1:
+            raise ValueError('RQ3 early-stop runs must start fresh; validation history cannot be reset on resume')
+        source_validation_history = []
         for epoch in range(self.start_epoch, final_epoch + 1):
             t0 = time.time()
             ad_lambda = self.adaptation_factor(epoch/MAX_STEPS)
@@ -332,6 +337,10 @@ class BaseTrainerDA:
                 metric_src = self._valid_epoch(epoch, self.val_loader_src, domain='src') # Evaluate on the test set of the source domain
 
                 selection_metric = metric_tgt if select_with_target_loss else metric_src
+                if rq3_early_stop:
+                    if select_with_target_loss:
+                        raise ValueError('RQ3 early stopping cannot select with target loss')
+                    source_validation_history.append([int(epoch), float(metric_src)])
                 if selection_metric < self.best_metric:
                     print("Updating the best early stopping metric")
                     print("Previous best metric: " + str(self.best_metric))
@@ -607,6 +616,15 @@ class BaseTrainerDA:
             if rq2_formal and epoch % self.save_period == 0:
                 self.save_ckpt(mode='latest', epoch=epoch)
 
+            # 在本轮指标/审计记录落盘后退出，末尾正常保存latest，不用中断模拟早停。
+            if rq3_early_stop and epoch % self.valid_freq == 0:
+                stop_decision = decision(source_validation_history)
+                if stop_decision['reason'] != 'running':
+                    self.rq3_termination = dict(source_validation_history=source_validation_history,
+                                                decision=stop_decision)
+                    self.logger.info('RQ3_EARLY_STOP %s', stop_decision)
+                    break
+
         # Save the last model
         self.save_ckpt(mode='latest', epoch=epoch)
 
@@ -667,6 +685,8 @@ class BaseTrainerDA:
         if self.cfg.get('rq2_formal'):
             state['rq2_run_signature'] = self.cfg['rq2_formal']['run_signature']
             state['rq2_training_state'] = self.get_formal_training_state()
+        if hasattr(self, 'rq3_termination'):
+            state['rq3_termination'] = self.rq3_termination
         if self.cfg.get('stage1', {}).get('enabled', False):
             state['stage1'] = {
                 'enabled': True,

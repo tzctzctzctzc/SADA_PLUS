@@ -1118,6 +1118,7 @@ def create_argparser():
     parser.add_argument('--rq3-strategy', choices=('off', 'hard', 'verify', 'prototype'), default='off')
     parser.add_argument('--rq3-revision', choices=('legacy', 'revised'), default='legacy')
     parser.add_argument('--rq3-batch-size', type=int, choices=(2, 4, 8), default=2)
+    parser.add_argument('--rq3-early-stop-patience', type=int, choices=(0, 15), default=0)
     parser.add_argument('--rq3-candidate-manifest', default=None)
     parser.add_argument('--rq3-confidence-calibration', default=None)
     parser.add_argument('--rq3-cache', default=None)
@@ -2673,6 +2674,8 @@ if __name__ == '__main__':
                   args.rq3_confidence_calibration)
     from tools.rq3_accelerated import apply_batch
     apply_batch(config_dict, args.rq3_batch_size)
+    from tools.rq3_early_stop import apply_policy
+    apply_policy(config_dict, args.rq3_early_stop_patience)
 
     if args.rq2_regime:
         from tools.rq2_formal import build_formal_run_signature

@@ -352,6 +352,8 @@ def baseline_signature(cfg):
 
 
 def audit_baseline(baseline, candidate):
+    from tools.rq3_early_stop import enabled
+    early = enabled(candidate)
     if baseline.get("rq3_auxiliary") or baseline.get("rq2_formal", {}).get("regime") != "uda":
         raise ValueError("RQ3 baseline must be the completed no-VLM matched UDA")
     acceleration = candidate.get('rq3_auxiliary', {}).get('acceleration')
@@ -362,5 +364,6 @@ def audit_baseline(baseline, candidate):
         normalized = candidate
     if baseline_signature(baseline) != baseline_signature(normalized):
         raise ValueError("RQ3 changed the baseline beyond the auxiliary strategy")
-    return {"baseline_signature": baseline_signature(baseline), "only_auxiliary_changed": not bool(acceleration),
+    return {"baseline_signature": baseline_signature(baseline), "only_auxiliary_changed": not bool(acceleration or early),
+            **({'stopping_budget_matched': False, 'early_stopping': candidate['rq3_auxiliary']['early_stopping']} if early else {}),
             **({'acceleration': acceleration, 'batch_matched': False} if acceleration else {})}
