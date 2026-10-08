@@ -42,6 +42,18 @@ def entry_output_root(queue_root, stage, name):
     return queue_root / (queue_root.name + '_' + stage + '_' + name)
 
 
+def prepare_cache_overlay(destination, original, rows):
+    """保留同候选跨教师审计；本次教师/shift的槽位只允许新打分填入。"""
+    refreshed = {(row['teacher'], row['shift']) for row in rows}
+    destination.mkdir(parents=True, exist_ok=False)
+    for source in original.glob('*/*.json'):
+        if (source.parent.name, source.stem) not in refreshed:
+            target = destination / source.parent.name / source.name
+            target.parent.mkdir(exist_ok=True)
+            target.symlink_to(source.resolve())
+    return destination
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--entry-plan', type=Path, required=True)
@@ -53,6 +65,8 @@ def main():
     parser.add_argument('--queue-slot', type=int, choices=(0, 1),
                         help='由两卡监控分配的互斥工作队列槽位')
     parser.add_argument('--prepared-root', type=Path, help='重验并复用完整候选/帧和教师缓存；不复用部分产物或训练')
+    parser.add_argument('--refresh-teacher-caches', action='store_true',
+                        help='仅复用精确候选帧；源域和目标域教师均用当前代码重新打分')
     parser.add_argument('--recovery-root', type=Path, default=RECOVERY)
     parser.add_argument('--recovery-manifest-sha256', default='5a8041d6355e1e5b9d9f1e268f903c58dd604efa906d780f69268d8996483b90')
     args = parser.parse_args()
@@ -81,6 +95,8 @@ def main():
         args.output_root.mkdir(parents=True, exist_ok=False)
         logs = args.output_root / 'logs'
         logs.mkdir()
+        cache_root = (prepare_cache_overlay(args.output_root / 'caches/target_proposal', OLD_CACHES, rows)
+                      if args.refresh_teacher_caches else OLD_CACHES)
         (args.output_root / 'entry_plan.json').write_bytes(args.entry_plan.read_bytes())
         children = []
         stopped = False
@@ -91,6 +107,7 @@ def main():
         state.update(recovery_root=str(args.recovery_root), recovery_manifest_sha256=args.recovery_manifest_sha256)
         benchmark_pending = args.benchmark_batches
         state['queue_slot'] = args.queue_slot
+        state['refresh_teacher_caches'] = args.refresh_teacher_caches
 
         def save(**values):
             state.update(values)
@@ -152,7 +169,8 @@ def main():
         def score(shift, model, kind, manifest):
             python, settings, frozen = TEACHERS[model]
             output = args.output_root / 'teachers' / kind / model / shift
-            previous_cache = (args.prepared_root / 'caches' / kind / model / (shift + '.json')) if args.prepared_root else None
+            previous_cache = ((args.prepared_root / 'caches' / kind / model / (shift + '.json'))
+                              if args.prepared_root and not args.refresh_teacher_caches else None)
             if previous_cache and previous_cache.is_file():
                 from tools.rq3_protocol import rebuild_verified_cache, content_hash
                 common = json.loads(manifest.read_text())
@@ -220,13 +238,16 @@ def main():
                 for row in group:
                     model, strategy = row['teacher'], row['strategy']
                     save(phase='teacher-calibration', teacher=model, strategy=strategy)
+                    if args.refresh_teacher_caches and not (cache_root / model / (shift + '.json')).exists():
+                        # Prototype必须与源proposal同版；Verify也保留统一候选快照供matrix审计。
+                        score(shift, model, 'target_proposal', OLD_CANDIDATES / shift / 'manifest.json')
                     source_kind = 'source_local' if strategy == 'verify' else 'source_proposal'
                     source_cache = score(shift, model, source_kind, manifests[source_kind])
                     if strategy == 'verify':
                         cache = score(shift, model, 'target_local', manifests['target_local'])
                         manifest = manifests['target_local']
                     else:
-                        cache = OLD_CACHES / model / (shift + '.json')
+                        cache = cache_root / model / (shift + '.json')
                         manifest = OLD_CANDIDATES / shift / 'manifest.json'
                     from tools.rq3_confidence import calibrate, load_calibration
                     from tools.rq3_protocol import load_cache
@@ -256,7 +277,7 @@ def main():
                     subplan.write_text(json.dumps(dict(plan, entries=[row]), sort_keys=True))
                     name = shift + '_' + model + '_' + strategy
                     base = ['-m', 'tools.run_rq3_matrix', '--revision', 'revised', '--entry-plan', str(subplan),
-                            '--cache-root', str(OLD_CACHES), '--candidate-root', str(OLD_CANDIDATES),
+                            '--cache-root', str(cache_root), '--candidate-root', str(OLD_CANDIDATES),
                             '--verify-cache-root', str(args.output_root / 'caches/target_local'),
                             '--verify-candidate-root', str(args.output_root / 'target_local'),
                             '--calibration-root', str(args.output_root / 'calibrations'),
