@@ -142,6 +142,9 @@ def main():
                        CUDA_VISIBLE_DEVICES='', PYTHONPATH=str(CODE_ROOT))
             if teacher == 'internvideo2_clip_1b':
                 env['PYTHONPATH'] = '/vepfs/vlms/cache/rq3_intern_legacy_deps_0928:' + str(CODE_ROOT)
+            elif teacher == 'moss_vl_instruct_0708':
+                # TorchCodec/系统FFmpeg需要较新ABI；不修改共享Conda环境。
+                env['LD_PRELOAD'] = '/usr/lib/x86_64-linux-gnu/libstdc++.so.6:/usr/lib/x86_64-linux-gnu/libgcc_s.so.1'
             elif teacher is None:
                 env['PYTHONPATH'] += ':/vepfs/vlms/cache/rq3_preparation_deps_0928'
             if selected is not None:

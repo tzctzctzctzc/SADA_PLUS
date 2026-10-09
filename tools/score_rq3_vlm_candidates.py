@@ -100,6 +100,9 @@ def processor_files(model, settings):
         paths.extend(path for path in root.glob('*.py') if path.is_file())
         paths.extend(Path(__file__).with_name(name) for name in ('rq3_extra_teachers.py', 'extract_rq1_videochat3_features.py', 'extract_rq1_moss_vl_features.py'))
         directories.append(root)
+        if model == 'moss_vl_instruct_0708':
+            paths.extend(Path(path) for path in ('/usr/lib/x86_64-linux-gnu/libstdc++.so.6',
+                                                 '/usr/lib/x86_64-linux-gnu/libgcc_s.so.1'))
     elif model == "qwen3_vl_8b":
         directories.append(Path(settings["model_path"]))
         import qwen_vl_utils
@@ -132,7 +135,7 @@ def attribute_config(value):
 
 def runtime_versions():
     versions = {"python": platform.python_version()}
-    for name in ("torch", "torchvision", "transformers", "peft", "tokenizers", "timm", "sentencepiece"):
+    for name in ("torch", "torchvision", "transformers", "peft", "tokenizers", "timm", "sentencepiece", "av", "torchcodec"):
         try:
             versions[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
