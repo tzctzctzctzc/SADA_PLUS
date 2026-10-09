@@ -114,3 +114,18 @@ def test_output_batches_do_not_share_training_names(tmp_path):
     b = unique_run_name('slowfast', 'S1', 6, 'so', tmp_path/'batch_b'/'S1')
     assert a != b
     assert a == unique_run_name('slowfast', 'S1', 6, 'so', tmp_path/'batch_a'/'S1')
+
+
+@pytest.mark.parametrize('regime', ['so', 'uda'])
+def test_seed123_changes_only_seed_fields(regime):
+    a = config(regime); apply_policy(a)
+    b = deepcopy(a); b['seed'] = b['init_rand_seed'] = 123
+    assert validate(b) and enabled(b)
+    assert {k for k in a if a[k] != b[k]} == {'seed', 'init_rand_seed'}
+    b['init_rand_seed'] = 6
+    with pytest.raises(ValueError): validate(b)
+
+
+def test_seed123_termination():
+    c = checkpoint(); c['config']['seed'] = c['config']['init_rand_seed'] = 123
+    assert audit_termination(c)

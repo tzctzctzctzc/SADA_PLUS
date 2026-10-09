@@ -171,7 +171,7 @@ def main():
     parser.add_argument("--feature-root", type=Path,
                         help="complete frozen VLM features with protocol.json and video_ids.txt")
     parser.add_argument("--shift", choices=["S" + str(i) for i in range(1, 7)], default="S1")
-    parser.add_argument("--seed", type=int, choices=(6, 7, 8), default=6)
+    parser.add_argument("--seed", type=int, choices=(6, 7, 8, 123), default=6)
     parser.add_argument("--gpu", type=int, choices=range(4), required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--expected-head", required=True)

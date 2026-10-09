@@ -2608,7 +2608,7 @@ if __name__ == '__main__':
         check_registry_config(
             args.config_path, args.rq2_registry, args.rq2_shift, config_dict
         )
-        if args.seed not in (6, 7, 8):
+        if args.seed not in (6, 7, 8) and not (args.sada_unified_baseline and args.seed == 123):
             raise ValueError('formal RQ2 seeds are fixed to 6/7/8')
         manifest = check_formal_config(
             config_dict, args.rq2_regime, args.rq2_target_manifest

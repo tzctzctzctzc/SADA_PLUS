@@ -19,13 +19,14 @@ def main():
     p.add_argument('--output-root', type=Path, required=True)
     p.add_argument('--expected-head', required=True)
     p.add_argument('--audit-only', action='store_true')
+    p.add_argument('--seed', type=int, choices=(6, 123), default=6)
     args = p.parse_args()
     check_code(args.expected_head)
     root = args.output_root.resolve()
     root.mkdir(parents=True, exist_ok=False)
     child = None
     stopping = False
-    state = dict(schema='sada-unified-baseline-queue-v1', gpu=args.gpu, seed=6,
+    state = dict(schema='sada-unified-baseline-queue-v1', gpu=args.gpu, seed=args.seed,
                  shifts=list(SHARDS[args.gpu]), code_commit=args.expected_head,
                  pid=os.getpid(), status='preparing', completed=[])
 
@@ -54,7 +55,7 @@ def main():
                     break
                 check_code(args.expected_head)
                 command = [sys.executable, '-B', '-m', 'tools.run_rq2_matched_control',
-                           '--model', 'slowfast', '--shift', shift, '--seed', '6',
+                           '--model', 'slowfast', '--shift', shift, '--seed', str(args.seed),
                            '--gpu', str(args.gpu), '--output-root', str(root / shift),
                            '--expected-head', args.expected_head, '--unified-baseline']
                 if args.audit_only:

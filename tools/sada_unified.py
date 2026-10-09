@@ -22,10 +22,10 @@ def validate(cfg):
     train = cfg['train_cfg']
     if (cfg.get('rq2_formal', {}).get('regime') not in ('so', 'uda')
             or cfg['loader']['batch_size'] != 2 or cfg['opt']['epochs'] != 50
-            or cfg.get('seed') != 6 or cfg.get('init_rand_seed') != 6
+            or cfg.get('seed') not in (6, 123) or cfg.get('init_rand_seed') != cfg.get('seed')
             or train['valid_freq'] != 5 or train['early_stop'] > 0
             or not train.get('ema_active') or train.get('evaluate_student', False)):
-        raise ValueError('unified SADA requires matched batch2/seed6/max50/source-EMA/valid5')
+        raise ValueError('unified SADA requires matched batch2/seed6-or-123/max50/source-EMA/valid5')
     if cfg.get('rq3_auxiliary', {}).get('early_stopping'):
         raise ValueError('cannot combine legacy RQ3 and unified stopping policies')
     return True
