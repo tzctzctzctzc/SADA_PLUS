@@ -158,7 +158,7 @@ def load_entry_plan(path):
         allowed = ((entry[0] in MODELS and entry[1] in STRATEGIES and entry[2] in ['S'+str(i) for i in range(1,7)])
                    if expanded else entry in matrix() and entry[1] in ('verify', 'prototype'))
         if not allowed or entry in entries:
-            raise ValueError('invalid/duplicate entry for the explicit RQ3 plan schema')
+            raise ValueError('invalid/duplicate entry; Hard requires an explicit expanded RQ3 plan')
         if not fresh_matrix:
             original = Path(row['original_complete'])
             if sha256_file(original) != row['original_complete_sha256']:
