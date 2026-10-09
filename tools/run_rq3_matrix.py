@@ -11,7 +11,7 @@ import yaml
 
 from tools.rq2_dense_protocol import sha256_file
 from tools.rq3_gpu import GpuLease, gpu_argument, gpu_slot
-from tools.rq3_protocol import (MODELS, STRATEGIES, audit_baseline, load_cache, members_for,
+from tools.rq3_protocol import (MODELS, LEGACY_MODELS, STRATEGIES, audit_baseline, load_cache, members_for,
                                 audit_cache_predictions, validate_interface_audit, validate_reference_lengths)
 
 CODE_ROOT = Path(__file__).resolve().parents[1]
@@ -21,7 +21,7 @@ def matrix(shard_index=0, shard_count=1):
     if shard_count not in (1, 2) or not 0 <= shard_index < shard_count:
         raise ValueError("RQ3 matrix supports one or two non-overlapping shards")
     entries = [(model, strategy, "S" + str(shift))
-               for model in MODELS for strategy in STRATEGIES for shift in range(1, 7)]
+               for model in LEGACY_MODELS for strategy in STRATEGIES for shift in range(1, 7)]
     return entries[shard_index::shard_count]
 
 
@@ -55,7 +55,7 @@ def revised_inputs(args, model, strategy, shift):
 def completed_entries(roots):
     """仅complete.json代表完成；旧部分目录保留，未完成项使用全新输出根。"""
     completed = {}
-    allowed = set(matrix())
+    allowed = {(m, s, 'S' + str(i)) for m in MODELS for s in STRATEGIES for i in range(1, 7)}
     for root in roots:
         for path in sorted(root.rglob("complete.json")):
             record = json.loads(path.read_text())
@@ -146,16 +146,19 @@ def supervision_audit(path, cfg=None):
 
 def load_entry_plan(path):
     plan = json.loads(Path(path).read_text())
-    fresh_matrix = plan.get('schema') == 'rq3-revised-fresh-matrix-v1'
-    if plan.get('schema') not in ('rq3-revised-completed-only-v1', 'rq3-revised-fresh-matrix-v1'):
+    expanded = plan.get('schema') == 'rq3-expanded-fresh-matrix-v1'
+    fresh_matrix = plan.get('schema') in ('rq3-revised-fresh-matrix-v1', 'rq3-expanded-fresh-matrix-v1')
+    if plan.get('schema') not in ('rq3-revised-completed-only-v1', 'rq3-revised-fresh-matrix-v1', 'rq3-expanded-fresh-matrix-v1'):
         raise ValueError('unknown RQ3 rerun plan')
     if fresh_matrix and (plan.get('seed') != 6 or plan.get('fresh') is not True):
         raise ValueError('fresh RQ3 matrix requires seed6 and fresh=true')
     entries = []
     for row in plan['entries']:
         entry = (row['teacher'], row['strategy'], row['shift'])
-        if entry not in matrix() or entry[1] not in ('verify', 'prototype') or entry in entries:
-            raise ValueError('invalid/duplicate RQ3 revised entry; Hard is excluded')
+        allowed = ((entry[0] in MODELS and entry[1] in STRATEGIES and entry[2] in ['S'+str(i) for i in range(1,7)])
+                   if expanded else entry in matrix() and entry[1] in ('verify', 'prototype'))
+        if not allowed or entry in entries:
+            raise ValueError('invalid/duplicate entry for the explicit RQ3 plan schema')
         if not fresh_matrix:
             original = Path(row['original_complete'])
             if sha256_file(original) != row['original_complete_sha256']:
@@ -266,7 +269,7 @@ def main():
     for key in ("cache_root", "output_root", "baseline_parent", "data_root", "manifest_root"):
         setattr(args, key, getattr(args, key).resolve())
     check_code(args.expected_head)
-    fresh_matrix = bool(args.entry_plan and json.loads(args.entry_plan.read_text())['schema'] == 'rq3-revised-fresh-matrix-v1')
+    fresh_matrix = bool(args.entry_plan and json.loads(args.entry_plan.read_text())['schema'] in ('rq3-revised-fresh-matrix-v1', 'rq3-expanded-fresh-matrix-v1'))
     args.output_root.mkdir(parents=True, exist_ok=False)
     if args.entry_plan:
         (args.output_root / 'entry_plan.json').write_bytes(args.entry_plan.read_bytes())
@@ -284,7 +287,7 @@ def main():
         executing_models = {row[0] for row in entries}
         # 三模型每shift必须实际使用同一候选、SO teacher和帧；不按增益筛选。
         shared, snapshot = {}, {}
-        for model in MODELS:
+        for model in sorted(set(LEGACY_MODELS) | executing_models):
             for shift, (cfg, teacher_checkpoint) in baselines.items():
                 path = args.cache_root / model / (shift + ".json")
                 payload, _ = load_cache(path, model, shift, members_for(cfg, "tgt"))
@@ -307,6 +310,11 @@ def main():
             from tools.rq3_protocol import proposal_evidence
             from tools.rq3_confidence import load_calibration
             for model, strategy, shift in entries:
+                if strategy == 'hard':
+                    # Hard保持旧全候选硬标签辅助；上面的缓存/帧/权重审计同样适用。
+                    if json.loads(args.entry_plan.read_text())['schema'] != 'rq3-expanded-fresh-matrix-v1':
+                        raise ValueError('Hard requires explicit expanded plan')
+                    continue
                 cache, manifest, calibration = revised_inputs(args, model, strategy, shift)
                 cfg, so_checkpoint = baselines[shift]
                 payload, _ = load_cache(cache, model, shift, members_for(cfg, 'tgt'))
@@ -362,7 +370,7 @@ def main():
                            "--rq3-teacher", model, "--rq3-cache", str(args.cache_root / model / (shift + ".json")),
                            '--rq3-batch-size', str(args.batch_size)]
                 command += ['--rq3-early-stop-patience', str(args.early_stop_patience)]
-                if args.revision == 'revised':
+                if args.revision == 'revised' and strategy != 'hard':
                     cache, manifest, calibration = revised_inputs(args, model, strategy, shift)
                     command[command.index('--rq3-cache') + 1] = str(cache)
                     command += ['--rq3-revision', 'revised', '--rq3-candidate-manifest',
@@ -372,13 +380,13 @@ def main():
                 run_command(command + ["--rq2-audit-output", str(preflight)], root / "logs/preflight.log", args.data_root)
                 cfg = json.loads(preflight.read_text())
                 check_new_protocol(cfg, allow_accelerated=args.batch_size != 2)
-                if args.revision == 'revised':
+                if args.revision == 'revised' and strategy != 'hard':
                     from tools.rq3_protocol import REVISION
                     if cfg['rq3_auxiliary']['schema'] != REVISION:
                         raise ValueError('revised queue reached legacy strategy entry')
                 pairing = audit_baseline(baselines[shift][0], cfg)
                 identity = str(Path(model) / (shift + ".json"))
-                expected_cache_hash = (sha256_file(cache) if args.revision == 'revised' else snapshot[identity])
+                expected_cache_hash = (sha256_file(cache) if args.revision == 'revised' and strategy != 'hard' else snapshot[identity])
                 if cfg["rq3_auxiliary"]["cache_sha256"] != expected_cache_hash:
                     raise ValueError("RQ3 preflight used a different semantic cache")
                 (root / "baseline_pair.json").write_text(json.dumps(pairing, sort_keys=True))

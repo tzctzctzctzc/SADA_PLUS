@@ -1122,7 +1122,8 @@ def create_argparser():
     parser.add_argument('--rq3-candidate-manifest', default=None)
     parser.add_argument('--rq3-confidence-calibration', default=None)
     parser.add_argument('--rq3-cache', default=None)
-    parser.add_argument('--rq3-teacher', choices=('egovideo_hod', 'internvideo2_clip_1b', 'qwen3_vl_8b'))
+    from tools.rq3_protocol import MODELS as rq3_models
+    parser.add_argument('--rq3-teacher', choices=rq3_models)
     parser.add_argument(
         '--trident-head', action='store_true',
         help='use the TriDet class-conditioned boundary and offset heads',

@@ -175,9 +175,14 @@ def check_relocated_processor(source, target, model, settings=None):
     from tools.rq3_protocol import content_hash, validate_interface_audit, FROZEN_PROTOCOLS
     if settings is None:
         names = {'egovideo_hod': 'ego', 'internvideo2_clip_1b': 'intern', 'qwen3_vl_8b': 'qwen'}
+        from tools.rq3_extra_teachers import EXTRA
+        names.update({name: name for name in EXTRA})
         settings = json.loads((Path('/vepfs/vlms/cache/rq3_runtime_0928') / (names[model] + '_settings.json')).read_text())
     code_names = {'score_rq3_vlm_candidates.py', 'run_qwen3_vl_classification.py',
                   'extract_rq2_dense_vlm_features.py', 'extract_rq1_egovideo_features.py'}
+    from tools.rq3_extra_teachers import EXTRA
+    if model in EXTRA:
+        code_names.update(('rq3_extra_teachers.py', 'extract_rq1_videochat3_features.py', 'extract_rq1_moss_vl_features.py'))
     identities = []
     for protocol in (source, target):
         audit = validate_interface_audit(protocol, model)

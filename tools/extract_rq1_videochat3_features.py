@@ -74,8 +74,15 @@ def load_videochat3(args):
         local_files_only=local_only,
         dtype=dtype,
         attn_implementation="sdpa",
+        output_loading_info=bool(getattr(args, 'pre_cuda_guard', None)),
     )
+    if getattr(args, 'pre_cuda_guard', None):
+        model, info = model
+        if any(info.get(key) for key in ('missing_keys', 'unexpected_keys', 'mismatched_keys', 'error_msgs')):
+            raise ValueError('RQ3 official VideoChat3 load incomplete: ' + str(info))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if getattr(args, 'pre_cuda_guard', None):
+        args.pre_cuda_guard()
     model.to(device).eval()
     return {
         "torch": torch,

@@ -29,12 +29,15 @@ TEACHERS = {
     'qwen3_vl_8b': ('/vepfs/vlms/envs/rq1-cu121/bin/python', 'qwen_settings.json',
                      '/vepfs/vlms/rq2_qwen_staging_5a8041d_0925/qwen3_vl_8b/protocol.json'),
 }
+from tools.rq3_extra_teachers import EXTRA
+TEACHERS.update({model: ('/vepfs/vlms/envs/rq1-cu121/bin/python', model + '_settings.json',
+                         str(RUNTIME / (model + '_anchor.json'))) for model in EXTRA})
 
 
 def ordered_rows(plan):
-    """按shift交错两个新策略，让早期结果即可同旧项对比；无mAP筛选。"""
+    """固定按shift、教师、策略排序，不按mAP筛选。"""
     return sorted(plan['entries'], key=lambda r: (int(r['shift'][1:]), r['teacher'],
-                                                 ('verify', 'prototype').index(r['strategy'])))
+                                                 ('hard', 'verify', 'prototype').index(r['strategy'])))
 
 
 def entry_output_root(queue_root, stage, name):
@@ -84,10 +87,12 @@ def main():
         args.prepared_root = args.prepared_root.resolve()
     load_entry_plan(args.entry_plan)
     plan = json.loads(args.entry_plan.read_text())
-    fresh_matrix = plan['schema'] == 'rq3-revised-fresh-matrix-v1'
+    fresh_matrix = plan['schema'] in ('rq3-revised-fresh-matrix-v1', 'rq3-expanded-fresh-matrix-v1')
     rows = ordered_rows(plan)
     if any(row['teacher'] not in TEACHERS for row in rows):
-        raise ValueError('this priority queue only supports teachers with completed old revised-strategy results')
+        raise ValueError('unsupported official RQ3 teacher')
+    if any(row['teacher'] in EXTRA for row in rows) and not args.refresh_teacher_caches:
+        raise ValueError('new teachers require fresh paired caches')
     import fcntl
     lock_name = ('.rq3_idle_monitor.lock' if args.queue_slot is None
                  else '.rq3_trusted_queue_slot%d.lock' % args.queue_slot)
@@ -110,6 +115,7 @@ def main():
         state['queue_slot'] = args.queue_slot
         state['refresh_teacher_caches'] = args.refresh_teacher_caches
         state['early_stop_patience_epochs'] = args.early_stop_patience
+        state['strategy_participation'] = dict(hard='all-common-candidates', verify=.2, prototype=.2)
 
         def save(**values):
             state.update(values)
@@ -243,6 +249,27 @@ def main():
                     if args.refresh_teacher_caches and not (cache_root / model / (shift + '.json')).exists():
                         # Prototype必须与源proposal同版；Verify也保留统一候选快照供matrix审计。
                         score(shift, model, 'target_proposal', OLD_CANDIDATES / shift / 'manifest.json')
+                    if strategy == 'hard':
+                        # 不将旧Hard变成20%筛选策略；只扩模型身份/调度和统一早停。
+                        subplan = args.output_root / ('plan_' + shift + '_' + model + '_hard.json')
+                        subplan.write_text(json.dumps(dict(plan, entries=[row]), sort_keys=True))
+                        name = shift + '_' + model + '_hard'
+                        destination = entry_output_root(args.output_root, 'formal', name)
+                        save(phase='training-evaluation')
+                        run(['-m', 'tools.run_rq3_matrix', '--revision', 'revised', '--entry-plan', str(subplan),
+                             '--cache-root', str(cache_root), '--candidate-root', str(OLD_CANDIDATES),
+                             '--verify-cache-root', str(args.output_root / 'caches/target_local'),
+                             '--verify-candidate-root', str(args.output_root / 'target_local'),
+                             '--calibration-root', str(args.output_root / 'calibrations'),
+                             '--expected-head', args.expected_head, '--gpu', str(args.gpu), '--wait-gpu',
+                             '--batch-size', str(args.batch_size), '--early-stop-patience', str(args.early_stop_patience),
+                             '--output-root', str(destination), '--immediate-gpu', '--execute'], name + '.formal')
+                        record = destination / model / 'hard' / (shift + '_seed6') / 'complete.json'
+                        if not record.is_file():
+                            raise ValueError('Hard runner exited without complete.json')
+                        save(completed=state['completed'] + 1, latest_complete=str(record))
+                        print('RQ3_TRUSTED_ENTRY_COMPLETE', name, state['completed'], flush=True)
+                        continue
                     source_kind = 'source_local' if strategy == 'verify' else 'source_proposal'
                     source_cache = score(shift, model, source_kind, manifests[source_kind])
                     if strategy == 'verify':

@@ -12,7 +12,10 @@ from tools.run_clip_target_adapter import LABELS as TARGET_CLASS_NAMES
 
 
 SCHEMA = "rq3-candidate-class-cache-v2"
-MODELS = ("egovideo_hod", "internvideo2_clip_1b", "qwen3_vl_8b")
+from tools.rq3_extra_teachers import EXTRA, frozen_protocol
+LEGACY_MODELS = ("egovideo_hod", "internvideo2_clip_1b", "qwen3_vl_8b")
+MODELS = LEGACY_MODELS + tuple(EXTRA)
+GENERATIVE_MODELS = ('qwen3_vl_8b',) + tuple(EXTRA)
 STRATEGIES = ("hard", "verify", "prototype")
 FRAME_PROTOCOL = "proposal-interior-eight-midpoints-v1"
 ACTIVE_LEVELS = (0, 1, 2)
@@ -24,6 +27,7 @@ FROZEN_PROTOCOLS = {
     "internvideo2_clip_1b": "e71b91d6d01718b943a806628e25e89730f01ffde4a3aed7635b9d31f3308f76",
     "qwen3_vl_8b": "e5887af04cdb04811a0c35d335411dfb7beb0ca1e30ee14f4a79974d0cc6fa3e",
 }
+FROZEN_PROTOCOLS.update({model: frozen_protocol(model)['protocol_sha256'] for model in EXTRA})
 
 
 def content_hash(value):
@@ -31,6 +35,11 @@ def content_hash(value):
 
 
 def read_frozen_protocol(path, model):
+    if model in EXTRA:
+        payload = json.loads(Path(path).read_text())
+        if payload != frozen_protocol(model):
+            raise ValueError('extra teacher official checkpoint anchor differs')
+        return payload
     if model not in FROZEN_PROTOCOLS:
         raise ValueError("unknown official RQ2 teacher model")
     payload = read_protocol(path)
@@ -63,7 +72,7 @@ def validate_cache(payload, model=None, shift=None, members=None):
         raise ValueError("RQ3 cache must use the common eight-frame proposal protocol")
     if protocol.get("class_blind") is not True or payload.get("target_gt_used") is not False:
         raise ValueError("RQ3 cache is not class-blind/target-GT-free")
-    if protocol.get("readout") != ("closed-class-single-token-log-likelihood" if payload["teacher_model"] == "qwen3_vl_8b"
+    if protocol.get("readout") != ("closed-class-single-token-log-likelihood" if payload["teacher_model"] in GENERATIVE_MODELS
                                   else "official-paired-video-text-cosine"):
         raise ValueError("RQ3 requires the model's audited semantic readout, not dense hidden features")
     if payload.get("target_video_ids") != sorted(set(payload["target_video_ids"])):

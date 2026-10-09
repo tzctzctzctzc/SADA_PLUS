@@ -26,7 +26,8 @@ def main():
     parser.add_argument('--cache', type=Path, required=True)
     parser.add_argument('--candidate-manifest', type=Path, required=True)
     parser.add_argument('--confidence-calibration', type=Path, required=True)
-    parser.add_argument('--teacher', choices=('egovideo_hod', 'internvideo2_clip_1b', 'qwen3_vl_8b'), default='egovideo_hod')
+    from tools.rq3_protocol import MODELS
+    parser.add_argument('--teacher', choices=MODELS, default='egovideo_hod')
     args = parser.parse_args()
     args.report = args.report.resolve()
     args.cache = args.cache.resolve()

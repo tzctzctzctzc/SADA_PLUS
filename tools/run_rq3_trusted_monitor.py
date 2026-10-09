@@ -57,12 +57,14 @@ def audit_complete(path, baselines):
     record = json.loads(path.read_text())
     cfg = json.loads((path.parent / 'preflight.json').read_text())
     aux = cfg['rq3_auxiliary']
-    if aux['schema'] != REVISION or aux['participation_fraction'] != .2 or aux['target_gt_used']:
+    hard = aux['strategy'] == 'hard' and aux['schema'] == 'rq3-three-strategies-v2'
+    if (not hard and (aux['schema'] != REVISION or aux['participation_fraction'] != .2)) or aux['target_gt_used']:
         raise ValueError('completed result belongs to another RQ3 protocol')
     payload, _ = load_cache(aux['cache_path'], record['teacher'], record['shift'])
-    manifest = json.loads(Path(aux['manifest_path']).read_text())
-    proposal_evidence(payload, aux['manifest_path'], aux['selected_coordinates'])
-    load_calibration(Path(aux['calibration_path']), baselines[record['shift']][0], payload, manifest, record['strategy'])
+    if not hard:
+        manifest = json.loads(Path(aux['manifest_path']).read_text())
+        proposal_evidence(payload, aux['manifest_path'], aux['selected_coordinates'])
+        load_calibration(Path(aux['calibration_path']), baselines[record['shift']][0], payload, manifest, record['strategy'])
     args = SimpleNamespace(data_root=DATA, baseline_parent=Path('/vepfs/vlms'))
     checked_completed_entry(path, args, baselines,
                             {record['teacher'] + '/' + record['shift'] + '.json': sha256_file(aux['cache_path'])})

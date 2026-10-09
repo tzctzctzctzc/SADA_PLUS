@@ -11,6 +11,7 @@ import subprocess
 import sys
 import types
 import platform
+import time
 
 import numpy as np
 from PIL import Image
@@ -18,7 +19,8 @@ from PIL import Image
 from tools.build_rq3_cache import paired_text_probabilities
 from tools.rq2_dense_protocol import sha256_file
 from tools.rq3_protocol import (FRAME_PROTOCOL, FROZEN_PROTOCOLS, INTERN_TEXT_SHA256,
-                                MODELS, content_hash, read_frozen_protocol)
+                                MODELS, GENERATIVE_MODELS, content_hash, read_frozen_protocol)
+from tools.rq3_extra_teachers import EXTRA, load_extra_teacher
 from tools.run_clip_target_adapter import ACTION_PHRASES
 from tools.rq3_gpu import gpu_argument, gpu_slot, idle_gpu_uuid
 
@@ -57,8 +59,13 @@ def check_scores(scores):
 def checkpoint_files(model, settings, frozen):
     """逐文件真实SHA；不把软链接文件名、维度或调用者自报hash当官方身份。"""
     paths = {}
+    if model in EXTRA:
+        root = Path(settings['model_path'])
+        index = json.loads((root / 'model.safetensors.index.json').read_text())
+        if set(index['weight_map'].values()) != set(frozen['checkpoint_sha256']):
+            raise ValueError('official model index includes unaudited or missing weight shards')
     for name in frozen["checkpoint_sha256"]:
-        if model == "qwen3_vl_8b":
+        if model in GENERATIVE_MODELS:
             path = Path(settings["model_path"]) / name
         else:
             path = Path(settings["checkpoint_files"][name])
@@ -88,7 +95,12 @@ def processor_files(model, settings):
              Path(__file__).with_name("extract_rq2_dense_vlm_features.py").resolve(),
              Path(__file__).with_name("extract_rq1_egovideo_features.py").resolve()]
     directories = []
-    if model == "qwen3_vl_8b":
+    if model in EXTRA:
+        root = Path(settings['model_path'])
+        paths.extend(path for path in root.glob('*.py') if path.is_file())
+        paths.extend(Path(__file__).with_name(name) for name in ('rq3_extra_teachers.py', 'extract_rq1_videochat3_features.py', 'extract_rq1_moss_vl_features.py'))
+        directories.append(root)
+    elif model == "qwen3_vl_8b":
         directories.append(Path(settings["model_path"]))
         import qwen_vl_utils
         qwen_utils_root = Path(qwen_vl_utils.__file__).resolve().parent
@@ -182,6 +194,8 @@ def import_internvideo_teacher(root):
 def load_teacher(model, settings, frozen):
     """只加载官方配对语义接口；dense隐藏向量从不作为十类logits。"""
     import torch
+    if model in EXTRA:
+        return load_extra_teacher(model, settings)
     if model == "egovideo_hod":
         clip_root = openai_clip_root(settings)
         sys.path.insert(0, str(clip_root))
@@ -278,7 +292,7 @@ def main():
         raise ValueError("no real proposal available for interface smoke")
     from tools.run_qwen3_vl_classification import build_prompt
     prompts = ([build_prompt(row["candidate_id"], 8, "baseline", "native_video") for row in candidates]
-               if args.model == "qwen3_vl_8b" else list(ACTION_PHRASES))
+               if args.model in GENERATIVE_MODELS else list(ACTION_PHRASES))
     prompt_digest = content_hash(prompts)
     assets = processor_files(args.model, settings)
     processor_digest = content_hash({"settings": settings, "processor_files": assets,
@@ -288,7 +302,15 @@ def main():
     with gpu_slot(args.gpu, wait=args.wait_gpu) as selected_gpu:
         check_code(args.expected_head)
         os.environ["CUDA_VISIBLE_DEVICES"] = selected_gpu["uuid"]
+        os.environ['RQ3_GPU_INDEX'] = str(selected_gpu['index'])
+        os.environ['RQ3_GPU_UUID'] = selected_gpu['uuid']
+        started = time.monotonic()
         scorer = load_teacher(args.model, settings, frozen)
+        import torch
+        torch.cuda.synchronize()
+        load_seconds = time.monotonic() - started
+        torch.cuda.reset_peak_memory_stats()
+        scoring_started = time.monotonic()
         predictions = []
         for row in candidates if args.full else candidates[:1]:
             paths = [args.frame_root / row["candidate_id"] / (str(index) + ".png") for index in row["frames"]]
@@ -298,6 +320,9 @@ def main():
             scores = check_scores(scorer(frames, paths, row))
             predictions.append({"candidate_id": row["candidate_id"], "frame_sha256": content_hash(row["frame_sha256"]),
                                 "class_probabilities": scores})
+        torch.cuda.synchronize()
+        cost = dict(model_load_seconds=load_seconds, scoring_seconds=time.monotonic()-scoring_started,
+                    peak_allocated_bytes=torch.cuda.max_memory_allocated(), candidates=len(predictions))
     checkpoint_files(args.model, settings, frozen)
     if processor_files(args.model, settings) != assets:
         raise ValueError("VLM processor/config changed during interface verification")
@@ -305,15 +330,16 @@ def main():
     audit = {"schema": "rq3-vlm-interface-audit-v1", "teacher_model": args.model, "smoke_status": "passed",
              "frozen_protocol_path": str(args.frozen_protocol.resolve()), "frozen_protocol_sha256": FROZEN_PROTOCOLS[args.model],
              "checkpoint_files": files, "checkpoint_sha256": {name: sha256_file(file) for name, file in files.items()},
-             "readout": "closed-class-single-token-log-likelihood" if args.model == "qwen3_vl_8b" else "official-paired-video-text-cosine",
+             "readout": "closed-class-single-token-log-likelihood" if args.model in GENERATIVE_MODELS else "official-paired-video-text-cosine",
              "prompt_sha256": prompt_digest, "processor_sha256": processor_digest,
              "input_frames": 8, "class_blind": True, "frame_protocol": FRAME_PROTOCOL,
              "scored_candidates": len(predictions), "common_manifest_sha256": content_hash(manifest),
              "processor_files": assets, "predictions_sha256": content_hash(predictions),
              "predictions_path": str((args.output_root / "predictions.jsonl").resolve()),
-             "single_token_semantics": args.model == "qwen3_vl_8b", "code_commit": args.expected_head}
+             "single_token_semantics": args.model in GENERATIVE_MODELS, "code_commit": args.expected_head}
     audit["runtime_versions"] = runtime_versions()
     audit["physical_gpu"] = selected_gpu
+    audit['cost'] = cost
     path = args.output_root / "interface_audit.json"
     path.write_text(json.dumps(audit, sort_keys=True))
     protocol = {key: audit[key] for key in ("readout", "checkpoint_sha256", "prompt_sha256", "processor_sha256",

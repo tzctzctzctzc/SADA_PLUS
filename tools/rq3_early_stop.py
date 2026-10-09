@@ -11,8 +11,9 @@ def apply_policy(cfg, patience):
         return
     from tools.rq3_protocol import REVISION
     aux = cfg.get('rq3_auxiliary', {})
-    if (patience != 15 or aux.get('schema') != REVISION
-            or aux.get('strategy') not in ('verify', 'prototype')
+    supported = ((aux.get('schema') == REVISION and aux.get('strategy') in ('verify', 'prototype'))
+                 or (aux.get('schema') == 'rq3-three-strategies-v2' and aux.get('strategy') == 'hard'))
+    if (patience != 15 or not supported
             or cfg['opt']['epochs'] != 50 or cfg['loader']['batch_size'] != 2
             or cfg['train_cfg']['early_stop'] > 0):
         raise ValueError('RQ3 early stopping requires revised batch2/50 and no legacy patience')
