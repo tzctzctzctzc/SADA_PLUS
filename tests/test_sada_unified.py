@@ -106,3 +106,11 @@ def test_exact_finite_shards():
     from tools.run_sada_baseline_queue import SHARDS
     assert set(SHARDS) == {2, 3}
     assert sorted(SHARDS[2] + SHARDS[3]) == ['S1', 'S2', 'S3', 'S4', 'S5', 'S6']
+
+
+def test_output_batches_do_not_share_training_names(tmp_path):
+    from tools.run_rq2_matched_control import unique_run_name
+    a = unique_run_name('slowfast', 'S1', 6, 'so', tmp_path/'batch_a'/'S1')
+    b = unique_run_name('slowfast', 'S1', 6, 'so', tmp_path/'batch_b'/'S1')
+    assert a != b
+    assert a == unique_run_name('slowfast', 'S1', 6, 'so', tmp_path/'batch_a'/'S1')

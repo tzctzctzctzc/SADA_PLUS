@@ -158,6 +158,13 @@ def run_command(command, log, data_root, gpu_uuid=None, gpu_index=None):
                        stderr=subprocess.STDOUT, check=True)
 
 
+def unique_run_name(model, shift, seed, regime, root):
+    # 分片目录均叫S1等；同时绑定完整输出路径，避免新批次撞到旧运行名。
+    import hashlib
+    token = hashlib.sha256(str(root.resolve()).encode()).hexdigest()[:12]
+    return 'rq2_matched_{}_{}_seed{}_{}_{}_{}'.format(model, shift, seed, regime, root.name, token)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", choices=MATCHED_MODELS, default="slowfast")
@@ -191,8 +198,7 @@ def main():
     common += matched_feature_args(args.model, args.feature_root)
     train_commands, audited = {}, {}
     for regime, supervised in (("so", "source_only"), ("uda", "off")):
-        name = "rq2_matched_{}_{}_seed{}_{}_{}".format(
-            args.model, args.shift, args.seed, regime, root.name)
+        name = unique_run_name(args.model, args.shift, args.seed, regime, root)
         if (args.data_root / "model_results" / name).exists():
             raise FileExistsError("new matched run name already exists: " + name)
         command = [sys.executable, "-B", str(CODE_ROOT / "train_da.py"), *common,
