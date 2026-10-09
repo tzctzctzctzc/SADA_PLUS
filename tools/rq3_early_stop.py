@@ -20,6 +20,9 @@ def apply_policy(cfg, patience):
 
 
 def enabled(cfg):
+    if cfg.get('sada_unified') is not None:
+        from tools.sada_unified import validate
+        return validate(cfg)
     policy = cfg.get('rq3_auxiliary', {}).get('early_stopping')
     if policy is not None and policy != POLICY:
         raise ValueError('invalid RQ3 early-stopping policy')
@@ -43,6 +46,11 @@ def decision(history):
 
 
 def audit_termination(checkpoint):
+    cfg = checkpoint.get('config', {})
+    cfg = getattr(cfg, 'config', cfg)
+    if cfg.get('sada_unified') is not None:
+        from tools.sada_unified import audit_termination as audit_unified
+        return audit_unified(checkpoint)
     report = checkpoint.get('rq3_termination', {})
     history = report.get('source_validation_history', [])
     epochs = [row[0] for row in history]

@@ -175,6 +175,8 @@ def evaluate(cfg, ckpt_path, config_path, output_dir, device, feature_protocol=N
         },
     }
     summaries = {}
+    if saved_config.get('sada_unified'):
+        metadata['sada_unified'] = saved_config['sada_unified']
     if saved_config.get("rq3_auxiliary"):
         metadata["rq3_auxiliary"] = saved_config["rq3_auxiliary"]
     for name, split_key, output_path in zip(

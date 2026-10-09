@@ -1119,6 +1119,7 @@ def create_argparser():
     parser.add_argument('--rq3-revision', choices=('legacy', 'revised'), default='legacy')
     parser.add_argument('--rq3-batch-size', type=int, choices=(2, 4, 8), default=2)
     parser.add_argument('--rq3-early-stop-patience', type=int, choices=(0, 15), default=0)
+    parser.add_argument('--sada-unified-baseline', action='store_true')
     parser.add_argument('--rq3-candidate-manifest', default=None)
     parser.add_argument('--rq3-confidence-calibration', default=None)
     parser.add_argument('--rq3-cache', default=None)
@@ -2676,6 +2677,9 @@ if __name__ == '__main__':
     apply_batch(config_dict, args.rq3_batch_size)
     from tools.rq3_early_stop import apply_policy
     apply_policy(config_dict, args.rq3_early_stop_patience)
+    if args.sada_unified_baseline:
+        from tools.sada_unified import apply_policy as apply_unified_policy
+        apply_unified_policy(config_dict)
 
     if args.rq2_regime:
         from tools.rq2_formal import build_formal_run_signature

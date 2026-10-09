@@ -89,6 +89,7 @@ def checked_train_result(run_root, train_log, expected_cfg, allow_accelerated=Fa
     cfg = json.loads(configs[0].read_text())
     check_new_protocol(cfg, allow_accelerated=allow_accelerated)
     signature = expected_cfg["rq2_formal"]["run_signature"]
+    selections = []
     for path in (best[0], latest[0]):
         checkpoint = load_checkpoint(path)
         validate_formal_resume(checkpoint, signature)
@@ -101,7 +102,10 @@ def checked_train_result(run_root, train_log, expected_cfg, allow_accelerated=Fa
             audit_termination(checkpoint)
         elif checkpoint.get("epoch") != 50:
             raise ValueError("latest checkpoint is not epoch50")
+        selections.append(checkpoint.get('selection_provenance'))
         del checkpoint
+    if expected_cfg.get('sada_unified') and selections[0] != selections[1]:
+        raise ValueError('best and latest selected-checkpoint provenance differs')
     content = train_log.read_text(errors="replace")
     if re.search(r"Traceback|out of memory|\bnan\b|\b\w*loss\w*\s*:\s*[-+]?inf\b",
                  content, re.IGNORECASE):
@@ -126,18 +130,23 @@ def checked_evaluation(root, cfg, checkpoint):
     )}
     if manifest["training_protocol"] != policy:
         raise ValueError("evaluation belongs to another training/data protocol")
+    if manifest.get('sada_unified') != cfg.get('sada_unified'):
+        raise ValueError('evaluation unified policy differs')
     for name in ("source_val.json", "target_val.json"):
         path = root / name
         if manifest["outputs"][name] != sha256_file(path):
             raise ValueError("evaluation output hash differs: " + name)
         payload = json.loads(path.read_text())
+        if payload.get('sada_unified') != cfg.get('sada_unified'):
+            raise ValueError('evaluation output unified policy differs')
         if payload["training_protocol"] != policy or not math.isfinite(payload["map_0.1_to_0.5"]):
             raise ValueError("evaluation protocol or mAP is invalid")
     return manifest
 
 
 def run_command(command, log, data_root, gpu_uuid=None, gpu_index=None):
-    env = dict(os.environ, PYTHONPATH=str(CODE_ROOT), PYTHONDONTWRITEBYTECODE="1",
+    pythonpath = os.pathsep.join(filter(None, (str(CODE_ROOT), os.environ.get('PYTHONPATH'))))
+    env = dict(os.environ, PYTHONPATH=pythonpath, PYTHONDONTWRITEBYTECODE="1",
                PYTHONUNBUFFERED="1", CUDA_VISIBLE_DEVICES=gpu_uuid or "",
                OMP_NUM_THREADS="8", MKL_NUM_THREADS="8")
     env.pop("RQ3_GPU_INDEX", None)
@@ -163,6 +172,7 @@ def main():
     parser.add_argument("--manifest-root", type=Path,
                         default=Path("/vepfs/vlms/rq2_uda_target_manifests_0924"))
     parser.add_argument("--audit-only", action="store_true")
+    parser.add_argument("--unified-baseline", action="store_true")
     args = parser.parse_args()
     check_code(args.expected_head)
     root = args.output_root.resolve()
@@ -188,6 +198,8 @@ def main():
         command = [sys.executable, "-B", str(CODE_ROOT / "train_da.py"), *common,
                    "-n", name, "--debug", "--benchmark-audit-log",
                    "--rq2-regime", regime, "--supervised-upper-bound", supervised]
+        if args.unified_baseline:
+            command += ['--sada-unified-baseline']
         if regime == "uda":
             command += ["--rq2-target-manifest", str(args.manifest_root / (args.shift + ".json"))]
         audit_path = root / (regime + "_preflight.json")
@@ -208,10 +220,10 @@ def main():
     if args.audit_only:
         return
 
-    # A local lock prevents our launchers from sharing this physical card.
-    import fcntl
-    with (args.data_root / (".rq2_gpu" + str(args.gpu) + ".lock")).open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    # 共用容量/物理卡锁，后续GPU阶段重新检查；CPU加载后首CUDA再次guard。
+    from tools.rq3_gpu import GpuLease
+    lease = GpuLease(str(args.gpu), args.data_root, idle_seconds=0)
+    try:
         os.chdir(args.data_root)
         actual_configs = {}
         for regime in ("so", "uda"):
@@ -221,11 +233,11 @@ def main():
             if regime == "uda":
                 # Check the completed NEW SO against the exact UDA runtime BEFORE GPU work.
                 audit_so_uda_pair(actual_configs["so"], root / "uda_preflight.json")
-            uuid = idle_gpu_uuid(args.gpu)
             name, command = train_commands[regime]
-            print("start {} on physical GPU{} ({})".format(name, args.gpu, uuid), flush=True)
             train_log = root / "logs" / (regime + ".train.log")
-            run_command(command, train_log, args.data_root, uuid)
+            with lease.stage() as card:
+                print("start {} on physical GPU{} ({})".format(name, args.gpu, card['uuid']), flush=True)
+                run_command(command, train_log, args.data_root, card['uuid'], args.gpu)
             config_path, checkpoint = checked_train_result(
                 args.data_root / "model_results" / name, train_log, audited[regime])
             actual_configs[regime] = config_path
@@ -233,21 +245,25 @@ def main():
                 pair = audit_so_uda_pair(actual_configs["so"], config_path)
                 (root / "pair_audit.json").write_text(json.dumps(pair, sort_keys=True))
             check_code(args.expected_head)
-            uuid = idle_gpu_uuid(args.gpu)
             output = root / regime / (args.shift + "_seed" + str(args.seed))
             evaluation = [sys.executable, "-B", str(CODE_ROOT / "evaluate_da.py"), *common,
                           "-n", name + "_eval", "-r", str(checkpoint),
                           "--rq2-formal", "--rq2-output-dir", str(output)]
-            run_command(evaluation, root / "logs" / (regime + ".eval.log"), args.data_root, uuid)
+            with lease.stage() as card:
+                run_command(evaluation, root / "logs" / (regime + ".eval.log"),
+                            args.data_root, card['uuid'], args.gpu)
             checked_evaluation(output, audited[regime], checkpoint)
-            print(regime + " 50 epochs, checkpoint and source/target evaluation passed", flush=True)
+            print(regime + " termination, checkpoint and source/target evaluation passed", flush=True)
         (root / "complete.json").write_text(json.dumps({
             "model": args.model, "shift": args.shift, "seed": args.seed,
             "gpu": args.gpu, "code_commit": args.expected_head,
             "training_budget": TRAINING_BUDGET_PROTOCOL, "rng_protocol": RNG_PROTOCOL,
             "feature_protocol_sha256": audited["so"].get("rq2_feature_protocol", {}).get("protocol_sha256"),
             "so": str(actual_configs["so"]), "uda": str(actual_configs["uda"]),
+            "sada_unified": audited['so'].get('sada_unified'),
         }, sort_keys=True))
+    finally:
+        lease.close()
 
 
 if __name__ == "__main__":

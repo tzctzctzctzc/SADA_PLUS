@@ -115,6 +115,9 @@ def check_target_manifest(path, target_splits, annotation_path=None):
 
 
 def check_formal_config(cfg, regime, manifest_path=None):
+    if cfg.get('sada_unified') is not None:
+        from tools.sada_unified import validate
+        validate(cfg)
     if regime not in ("so", "uda"):
         raise ValueError("RQ2 regime must be so or uda")
     if cfg.get("rq3_auxiliary"):

@@ -620,9 +620,14 @@ class BaseTrainerDA:
             if rq3_early_stop and epoch % self.valid_freq == 0:
                 stop_decision = decision(source_validation_history)
                 if stop_decision['reason'] != 'running':
-                    self.rq3_termination = dict(source_validation_history=source_validation_history,
-                                                decision=stop_decision)
-                    self.logger.info('RQ3_EARLY_STOP %s', stop_decision)
+                    termination = dict(source_validation_history=source_validation_history,
+                                       decision=stop_decision)
+                    if self.cfg.get('sada_unified'):
+                        self.sada_termination = termination
+                        self.logger.info('SADA_UNIFIED_STOP %s', stop_decision)
+                    else:
+                        self.rq3_termination = termination
+                        self.logger.info('RQ3_EARLY_STOP %s', stop_decision)
                     break
 
         # Save the last model
@@ -687,6 +692,8 @@ class BaseTrainerDA:
             state['rq2_training_state'] = self.get_formal_training_state()
         if hasattr(self, 'rq3_termination'):
             state['rq3_termination'] = self.rq3_termination
+        if hasattr(self, 'sada_termination'):
+            state['sada_termination'] = self.sada_termination
         if self.cfg.get('stage1', {}).get('enabled', False):
             state['stage1'] = {
                 'enabled': True,
