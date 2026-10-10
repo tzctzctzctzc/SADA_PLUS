@@ -313,9 +313,29 @@ def test_actual_sada_full_forward_backward_and_config_gate(tmp_path):
                            duration=128., crop_start=0, crop_feat_len=128))
     t = copy.deepcopy(v); t['metadata']['video_id'] = target_id
     t['segments'] = torch.empty(0, 2); t['labels'] = torch.empty(0, dtype=torch.long)
-    losses = model([v], [t], mode='train', curr_epoch=max(1, model.warmup_adv))[0]
+    losses = model([v, copy.deepcopy(v)], [t, copy.deepcopy(t)], mode='train',
+                   curr_epoch=max(1, model.warmup_adv))[0]
     for key in ('target_gt_cls_loss', 'target_gt_reg_loss', 'target_gt_downstream_loss'):
         assert losses[key] == 0
-    assert losses['rq4_accepted'] == 1 and losses['rq4_gradient_norm'] > 0
+    assert losses['rq4_accepted'] == 2 and losses['rq4_gradient_norm'] > 0
     losses['downstream_loss'].backward()
     assert model.reg_head.offset_head.conv.weight.grad.abs().sum() > 0
+
+
+def test_real_training_argument_parser_accepts_rq4_config():
+    import train_da
+    parser = train_da.create_argparser()
+    assert any(action.dest == 'rq4_config' for action in parser._actions)
+
+
+def test_protocol_rejects_nonmatching_seed_and_off_control_teacher(tmp_path):
+    cfg = dict(seed=6, dataset=dict(input_dim=2304), model={}, loader=dict(batch_size=2),
+               opt=dict(epochs=50), train_cfg=dict(early_stop=-1), rq2_formal=dict(regime='uda'),
+               rq4_boundary=spec(tmp_path))
+    with pytest.raises(ValueError, match='seed123'): p.validate_config(cfg, 'uda')
+    cfg['seed'] = 123
+    cfg['rq4_boundary'] = dict(schema='rq4-boundary-training-v1', strategy='off', weight=0,
+                               early_stop_patience=15, cache_path='wrong.json')
+    with pytest.raises(ValueError, match='control'): p.validate_config(cfg, 'uda')
+    cfg['rq4_boundary'].pop('cache_path')
+    assert p.validate_config(cfg, 'uda') is None

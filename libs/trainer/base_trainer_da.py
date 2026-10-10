@@ -622,7 +622,8 @@ class BaseTrainerDA:
                 if stop_decision['reason'] != 'running':
                     self.rq3_termination = dict(source_validation_history=source_validation_history,
                                                 decision=stop_decision)
-                    self.logger.info('RQ3_EARLY_STOP %s', stop_decision)
+                    self.logger.info('%s_EARLY_STOP %s',
+                                     'RQ4' if self.cfg.get('rq4_boundary') else 'RQ3', stop_decision)
                     break
 
         # Save the last model

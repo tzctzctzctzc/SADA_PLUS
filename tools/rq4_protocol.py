@@ -256,7 +256,8 @@ def configure(cfg, path):
 def validate_config(cfg, regime):
     spec = cfg['rq4_boundary']
     if (spec.get('schema') != 'rq4-boundary-training-v1' or spec.get('strategy') not in ('off', 'direct', 'gated', 'self')
-            or regime != 'uda' or cfg.get('seed') != 123 or cfg.get('rq3_auxiliary')
+            or regime != 'uda' or cfg.get('seed') != 123 or cfg.get('init_rand_seed', 123) != 123
+            or cfg.get('rq3_auxiliary')
             or cfg['dataset']['input_dim'] != 2304 or cfg['model'].get('use_trident_head', False)
             or cfg['loader']['batch_size'] != 2 or cfg['opt']['epochs'] != 50):
         raise ValueError('RQ4 requires isolated seed123 batch2 SlowFast/SADA UDA normal regression head')
