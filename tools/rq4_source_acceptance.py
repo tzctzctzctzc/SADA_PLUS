@@ -108,7 +108,7 @@ def guard_teacher_cuda(selected, teacher):
 
 def score(args):
     from tools.rq3_gpu import gpu_slot
-    from tools.rq4_teachers import TimeLens2Adapter, TimePLEAdapter, score_requests
+    from tools.rq4_teachers import TimeLens2Adapter, TimePLEAdapter, NativeIntervalMissing, score_requests
     from tools.run_clip_target_adapter import ACTION_PHRASES
     manifest = json.loads(Path(args.requests).read_text())
     if manifest.get('diagnostic_only') is not True or manifest.get('split') != 'source_validation':
@@ -163,12 +163,21 @@ def score(args):
         responses = []
         for request in manifest['requests']:
             started = time.monotonic()
-            output = score_requests(adapter, [request], list(ACTION_PHRASES))[0]
+            try:
+                output = score_requests(adapter, [request], list(ACTION_PHRASES))[0]
+            except NativeIntervalMissing as exc:
+                # 仅本源域诊断允许收集无原生区间样本；不做文本回退或训练缓存。
+                row = request['candidate']
+                output = dict(video_id=row['video_id'], candidate_id=row['candidate_id'],
+                    candidate_sha256=digest(row), teacher=args.teacher,
+                    request_sha256=digest(request), class_names_sha256=digest(list(ACTION_PHRASES)),
+                    seconds=time.monotonic()-started, **exc.response)
             responses.append(output)
             save(root/(request['candidate']['candidate_id']+'.json'), output)
             print('SOURCE_RESPONSE', request['candidate']['candidate_id'], round(time.monotonic()-started, 3), flush=True)
         save(root/'responses.json', responses)
-        print('NATIVE_INFERENCE_COMPLETE', args.teacher, len(responses), flush=True)
+        print('SOURCE_DIAGNOSTIC_COMPLETE', args.teacher, len(responses),
+              'native_missing', sum(bool(r.get('error')) for r in responses), flush=True)
 
 
 def summarize(args):

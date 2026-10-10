@@ -9,6 +9,14 @@ TIMELENS_PROMPT = ('Given the query: "{query}", return ALL time spans (in second
                   'Output format MUST be a JSON array of [start, end] pairs.\n')
 
 
+class NativeIntervalMissing(RuntimeError):
+    """保留缺失codec的原始响应供诊断，正式打分仍立即失败。"""
+    def __init__(self, response):
+        super().__init__('official TimePLE codec did not return intervals')
+        self.response = dict(raw_text=response.raw_text, metadata=response.metadata,
+                             error=str(self))
+
+
 class TimeLens2Adapter:
     """官方AutoModelForImageTextToText + processor；不将dense特征当边界。"""
     teacher = 'timelens2_8b'
@@ -78,7 +86,7 @@ class TimePLEAdapter:
             raise RuntimeError(response.error)
         # codec缺失属于接口故障，不允许静默退化为文本解析。
         if response.metadata.get('codec_predictions') is None:
-            raise RuntimeError('official TimePLE codec did not return intervals')
+            raise NativeIntervalMissing(response)
         return dict(raw_text=response.raw_text, metadata=response.metadata, error='')
 
 

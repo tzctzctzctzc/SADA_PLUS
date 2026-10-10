@@ -34,6 +34,15 @@ def test_diagnostics_never_overwrite(tmp_path):
     assert json.loads(path.read_text())['diagnostic_only']
 
 
+def test_missing_native_output_remains_failure_and_keeps_evidence():
+    from types import SimpleNamespace
+    from tools.rq4_teachers import NativeIntervalMissing
+    err = NativeIntervalMissing(SimpleNamespace(raw_text='Temporal span: 3.',metadata={'frames':8}))
+    assert isinstance(err,RuntimeError)
+    assert err.response['raw_text'] == 'Temporal span: 3.'
+    assert err.response['error'] and 'codec_predictions' not in err.response['metadata']
+
+
 @pytest.mark.parametrize('teacher,visible',[('timeple_8b','1'),('timelens2_8b','GPU-test')])
 def test_native_visibility_preserves_single_physical_gpu(monkeypatch,teacher,visible):
     from tools.rq4_source_acceptance import guard_teacher_cuda
