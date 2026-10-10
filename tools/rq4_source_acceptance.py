@@ -137,6 +137,8 @@ def score(args):
             adapter = TimeLens2Adapter(model, processor,
                 dict(fps=2., min_pixels=32*32, max_pixels=480*480, max_frames=200), 256)
         else:
+            # 官方codec运行时注册需与离线引擎同进程，spawn不会继承该注册。
+            os.environ['VLLM_ENABLE_V1_MULTIPROCESSING'] = '0'
             import yaml
             repo = Path(args.official_repo)
             sys.path[:0] = [str(repo/'evaluation/src'), str(repo/'src')]
@@ -147,9 +149,12 @@ def score(args):
             inference.update(model_path=args.model, allowed_local_media_path=str(Path(args.requests).parent))
             # 单条验收降低预分配，不改原生codec、精度或生成规则。
             inference['engine'].update(max_num_seqs=1, enforce_eager=True, seed=123,
-                kv_cache_memory_bytes=2*1024**3)
+                kv_cache_memory_bytes=4*1024**3)
             config = dict(model=dict(name='timeple_8b'), inference=inference, prompt=prompt)
             save(root/'official_config.json', config)
+            save(root/'runtime.json', dict(VLLM_ENABLE_V1_MULTIPROCESSING='0',
+                CUDA_VISIBLE_DEVICES=visible, gpu_uuid=selected['uuid'],
+                note='native codec in-process; 4GiB cache covers official 20480-token context'))
             runner = QwenTimePLERunner(config, config_path=root/'official_config.json')
             adapter = TimePLEAdapter(runner, BenchmarkSample)
             guard_teacher_cuda(selected, args.teacher)
