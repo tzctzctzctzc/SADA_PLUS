@@ -194,5 +194,6 @@ def test_old_completed_monitor_cannot_count_the_new_variant(tmp_path):
     from tools.run_rq3_trusted_monitor import audit_complete
     cfg, entries = fixture()
     (tmp_path/'preflight.json').write_text(json.dumps(planned_config(cfg, entries)))
-    with pytest.raises(ValueError):
+    (tmp_path/'complete.json').write_text('{}')
+    with pytest.raises(ValueError, match='another RQ3 protocol'):
         audit_complete(tmp_path/'complete.json', {})
