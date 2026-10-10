@@ -95,8 +95,19 @@ def weights(root):
     return hashes
 
 
+def guard_teacher_cuda(selected, teacher):
+    from tools.rq3_gpu import idle_gpu_uuid
+    # vLLM 0.19的官方TimePLE路径将CVD解析为int；仍限制为同一物理卡。
+    expected = str(selected['index']) if teacher == 'timeple_8b' else selected['uuid']
+    if os.environ.get('CUDA_VISIBLE_DEVICES') != expected:
+        raise RuntimeError('teacher visibility differs from reserved GPU')
+    if idle_gpu_uuid(selected['index']) != selected['uuid']:
+        raise RuntimeError('reserved GPU identity changed')
+    print('RQ4_PRE_CUDA_IDLE_CHECK_PASS', selected, flush=True)
+
+
 def score(args):
-    from tools.rq3_gpu import gpu_slot, guard_before_cuda
+    from tools.rq3_gpu import gpu_slot
     from tools.rq4_teachers import TimeLens2Adapter, TimePLEAdapter, score_requests
     from tools.run_clip_target_adapter import ACTION_PHRASES
     manifest = json.loads(Path(args.requests).read_text())
@@ -109,13 +120,14 @@ def score(args):
         code_head=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
         diagnostic_only=True, teacher=args.teacher))
     with gpu_slot(args.gpu, wait=False) as selected:
-        os.environ.update(CUDA_VISIBLE_DEVICES=selected['uuid'], RQ3_GPU_INDEX=str(selected['index']),
+        visible = str(selected['index']) if args.teacher == 'timeple_8b' else selected['uuid']
+        os.environ.update(CUDA_VISIBLE_DEVICES=visible, RQ3_GPU_INDEX=str(selected['index']),
             RQ3_GPU_UUID=selected['uuid'], TOKENIZERS_PARALLELISM='false')
         if args.teacher == 'timelens2_8b':
             from transformers import AutoModelForImageTextToText, AutoProcessor
             import torch
             processor = AutoProcessor.from_pretrained(args.model, local_files_only=True)
-            guard_before_cuda()
+            guard_teacher_cuda(selected, args.teacher)
             torch.manual_seed(123)
             model, loading = AutoModelForImageTextToText.from_pretrained(args.model, local_files_only=True,
                 torch_dtype=torch.bfloat16, device_map={'': 0}, attn_implementation='sdpa', output_loading_info=True)
@@ -140,8 +152,9 @@ def score(args):
             save(root/'official_config.json', config)
             runner = QwenTimePLERunner(config, config_path=root/'official_config.json')
             adapter = TimePLEAdapter(runner, BenchmarkSample)
-            guard_before_cuda()
-        print('TEACHER_NATIVE_READY', args.teacher, flush=True)
+            guard_teacher_cuda(selected, args.teacher)
+        # TimePLE在第一次predict时才真正加载模型，不把adapter构造当加载成功。
+        print('TEACHER_ADAPTER_READY', args.teacher, flush=True)
         responses = []
         for request in manifest['requests']:
             started = time.monotonic()

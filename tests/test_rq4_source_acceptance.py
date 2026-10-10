@@ -32,3 +32,18 @@ def test_diagnostics_never_overwrite(tmp_path):
     save(path,dict(diagnostic_only=True))
     with pytest.raises(FileExistsError): save(path,{})
     assert json.loads(path.read_text())['diagnostic_only']
+
+
+@pytest.mark.parametrize('teacher,visible',[('timeple_8b','1'),('timelens2_8b','GPU-test')])
+def test_native_visibility_preserves_single_physical_gpu(monkeypatch,teacher,visible):
+    from tools.rq4_source_acceptance import guard_teacher_cuda
+    from tools import rq3_gpu
+    selected=dict(index=1,uuid='GPU-test')
+    monkeypatch.setattr(rq3_gpu,'idle_gpu_uuid',lambda index:'GPU-test' if index==1 else 'wrong')
+    monkeypatch.setenv('CUDA_VISIBLE_DEVICES',visible)
+    guard_teacher_cuda(selected,teacher)
+    monkeypatch.setenv('CUDA_VISIBLE_DEVICES','0,1')
+    with pytest.raises(RuntimeError,match='visibility'): guard_teacher_cuda(selected,teacher)
+    monkeypatch.setenv('CUDA_VISIBLE_DEVICES',visible)
+    monkeypatch.setattr(rq3_gpu,'idle_gpu_uuid',lambda index:'changed')
+    with pytest.raises(RuntimeError,match='identity'): guard_teacher_cuda(selected,teacher)
