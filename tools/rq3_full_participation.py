@@ -9,9 +9,10 @@ from tools.rq2_dense_protocol import sha256_file
 from tools.rq2_formal import build_formal_run_signature
 from tools.rq3_confidence import select_budget
 from tools.rq3_early_stop import POLICY
-from tools.rq3_protocol import REVISION, REVISED_FIXED, load_cache, proposal_evidence
+from tools.rq3_protocol import (REVISION, REVISED_FIXED, FULL_PARTICIPATION_REVISION,
+                                load_cache, proposal_evidence)
 
-VARIANT = 'rq3-qwen-prototype-full-participation-v1'
+VARIANT = FULL_PARTICIPATION_REVISION
 CONFIDENCE_POLICY = 'all-unambiguous-original-candidates-per-shift-v1'
 
 
@@ -67,9 +68,11 @@ def planned_config(reference, entries):
 def audit_pair(reference, candidate, entries):
     """只允许参与身份/比例/派生名单改变；损失、源诊断和停止规则逐值配对。"""
     expected = planned_config(reference, entries)
-    if candidate['rq3_auxiliary'] != expected['rq3_auxiliary']:
+    normalized = deepcopy(candidate)
+    normalized['rq3_auxiliary'].pop('paired_reference', None)
+    if normalized['rq3_auxiliary'] != expected['rq3_auxiliary']:
         raise ValueError('full-participation auxiliary differs from the paired protocol')
-    if build_formal_run_signature(candidate) != build_formal_run_signature(expected):
+    if build_formal_run_signature(normalized) != build_formal_run_signature(expected):
         raise ValueError('training configuration differs beyond participation')
     if candidate['rq2_formal']['run_signature'] != build_formal_run_signature(candidate):
         raise ValueError('candidate run signature is stale')
@@ -104,12 +107,52 @@ def prepare(complete_path):
     proposal_evidence(payload, aux['manifest_path'], aux['selected_coordinates'])
     candidate = planned_config(reference, payload['entries'])
     pairing = audit_pair(reference, candidate, payload['entries'])
-    # 新schema故意不被旧训练/终审入口接受，防止100%混入20%矩阵。
+    # 这只是配置准备；必须另外绑定原结果，完成正式入口及验收后才可训练。
     return dict(schema='rq3-full-participation-preparation-v1', training_ready=False,
                 requires=['rq4-final-audit-24', 'full-participation-training-entry-and-audit'],
                 reference_artifacts={key: dict(path=value, sha256=sha256_file(value))
                                      for key, value in artifacts.items()},
                 pairing=pairing, planned_config=candidate)
+
+
+def apply_full_participation(cfg, reference_complete):
+    """先按旧CLI生成并配对完整20%配置，再只改变目标参与预算。"""
+    if not reference_complete:
+        return
+    report = prepare(reference_complete)
+    reference = json.loads(Path(report['reference_artifacts']['preflight']['path']).read_text())
+    if (cfg.get('rq4_boundary') or
+            build_formal_run_signature(cfg) != build_formal_run_signature(reference)):
+        raise ValueError('current training configuration does not match the original 20% entry')
+    cfg['rq3_auxiliary'] = deepcopy(report['planned_config']['rq3_auxiliary'])
+    cfg['rq3_auxiliary']['paired_reference'] = report['reference_artifacts']
+    cfg['rq2_formal']['run_signature'] = build_formal_run_signature(cfg)
+
+
+def validate_runtime(cfg, regime):
+    """新身份只能由已绑定原20%工件重建；完整旧缓存/源诊断门禁继续执行。"""
+    from tools.rq3_protocol import validate_config
+    if regime != 'uda' or cfg.get('rq4_boundary'):
+        raise ValueError('full participation requires standalone matched RQ3 UDA')
+    proof = cfg['rq3_auxiliary'].get('paired_reference')
+    if not proof or set(proof) != {'complete', 'preflight', 'cache', 'manifest', 'calibration'}:
+        raise ValueError('full participation requires bound reference artifacts')
+    for artifact in proof.values():
+        if sha256_file(artifact['path']) != artifact['sha256']:
+            raise ValueError('paired reference artifact changed')
+    report = prepare(proof['complete']['path'])
+    if report['reference_artifacts'] != proof:
+        raise ValueError('paired reference artifacts belong to different entries')
+    reference = json.loads(Path(proof['preflight']['path']).read_text())
+    payload, _ = load_cache(reference['rq3_auxiliary']['cache_path'])
+    audit_pair(reference, cfg, payload['entries'])
+    # reference必须仍是旧v5；此调用不会递归进入本函数。
+    validate_config(reference, regime)
+
+
+def assert_launch_ready(cfg):
+    if cfg.get('rq3_auxiliary', {}).get('schema') == VARIANT:
+        raise ValueError('Qwen100 CPU preflight only: independent launch audit and real-data acceptance pending')
 
 
 def main():

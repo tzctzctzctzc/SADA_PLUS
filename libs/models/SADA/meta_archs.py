@@ -1518,10 +1518,12 @@ class SADA(nn.Module):
             from .rq4_boundary import RQ4Boundary
             self.rq4_boundary = RQ4Boundary(cfg['rq4_boundary'])
         if cfg.get('rq3_auxiliary'):
-            from tools.rq3_protocol import load_cache, proposal_evidence, REVISION
+            from tools.rq3_protocol import load_cache, proposal_evidence, REVISION, FULL_PARTICIPATION_REVISION
             rq3 = cfg['rq3_auxiliary']
             payload, rq3_cache = load_cache(rq3['cache_path'], rq3['teacher_model'])
-            if rq3['schema'] == REVISION:
+            if rq3['schema'] in (REVISION, FULL_PARTICIPATION_REVISION):
+                if rq3['schema'] == FULL_PARTICIPATION_REVISION and rq3['strategy'] != 'prototype':
+                    raise ValueError('full participation supports only the paired Qwen Prototype branch')
                 evidence = proposal_evidence(payload, rq3['manifest_path'], rq3['selected_coordinates'])
                 if rq3['strategy'] == 'verify':
                     self.rq3_verify_cache = evidence

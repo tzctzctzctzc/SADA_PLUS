@@ -115,6 +115,10 @@ def evaluate(cfg, ckpt_path, config_path, output_dir, device, feature_protocol=N
             if saved_signature != build_formal_run_signature(saved_config):
                 raise ValueError("checkpoint saved configuration violates its run signature")
             validate_formal_resume(checkpoint, saved_signature)
+        from tools.rq3_protocol import FULL_PARTICIPATION_REVISION
+        if saved_config.get('rq3_auxiliary', {}).get('schema') == FULL_PARTICIPATION_REVISION:
+            from tools.rq3_full_participation import validate_runtime
+            validate_runtime(saved_config, 'uda')
         if saved_config.get('rq3_auxiliary', {}).get('acceleration') is not None:
             from tools.rq3_accelerated import evaluation_audit_config
             audited_config = evaluation_audit_config(audited_config)

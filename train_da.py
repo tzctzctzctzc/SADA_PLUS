@@ -1122,6 +1122,8 @@ def create_argparser():
     parser.add_argument('--rq3-early-stop-patience', type=int, choices=(0, 15), default=0)
     parser.add_argument('--rq3-candidate-manifest', default=None)
     parser.add_argument('--rq3-confidence-calibration', default=None)
+    parser.add_argument('--rq3-full-reference', default=None,
+                        help='original Qwen Prototype20% complete.json; paired 100% CPU preflight')
     parser.add_argument('--rq3-cache', default=None)
     from tools.rq3_protocol import MODELS as rq3_models
     parser.add_argument('--rq3-teacher', choices=rq3_models)
@@ -2678,6 +2680,8 @@ if __name__ == '__main__':
     apply_batch(config_dict, args.rq3_batch_size)
     from tools.rq3_early_stop import apply_policy
     apply_policy(config_dict, args.rq3_early_stop_patience)
+    from tools.rq3_full_participation import apply_full_participation
+    apply_full_participation(config_dict, args.rq3_full_reference)
     from tools.rq4_protocol import configure as configure_rq4
     configure_rq4(config_dict, args.rq4_config)
 
@@ -2704,4 +2708,6 @@ if __name__ == '__main__':
 
     from tools.rq4_protocol import assert_launch_ready
     assert_launch_ready(config_dict)
+    from tools.rq3_full_participation import assert_launch_ready as assert_full_launch_ready
+    assert_full_launch_ready(config_dict)
     main(config_dict, resume=args.resume is not None, debug=args.debug)

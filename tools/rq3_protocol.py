@@ -19,6 +19,7 @@ GENERATIVE_MODELS = ('qwen3_vl_8b',) + tuple(EXTRA)
 STRATEGIES = ("hard", "verify", "prototype")
 FRAME_PROTOCOL = "proposal-interior-eight-midpoints-v1"
 ACTIVE_LEVELS = (0, 1, 2)
+FULL_PARTICIPATION_REVISION = 'rq3-qwen-prototype-full-participation-v1'
 # 官方OpenGVLab/InternVL，revision=851fb933056db175ce98036baec2dd6826cd2c26，LFS实际SHA。
 # 文件及配对来源：https://huggingface.co/OpenGVLab/InternVL/blob/851fb933056db175ce98036baec2dd6826cd2c26/internvl_c_13b_224px.pth
 INTERN_TEXT_SHA256 = "ce5ae86c0dce4fd0eec09577cf9f6aa1471898c619b8062505e098b58248ad74"
@@ -310,6 +311,10 @@ def validate_config(cfg, regime):
     from tools.rq3_accelerated import valid_batch
     auxiliary = cfg.get("rq3_auxiliary")
     if not auxiliary:
+        return
+    if auxiliary.get('schema') == FULL_PARTICIPATION_REVISION:
+        from tools.rq3_full_participation import validate_runtime
+        validate_runtime(cfg, regime)
         return
     revised = auxiliary.get('schema') == REVISION
     if (regime != "uda" or auxiliary.get("schema") not in ("rq3-three-strategies-v2", REVISION)
