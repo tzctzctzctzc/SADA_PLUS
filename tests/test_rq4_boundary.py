@@ -287,6 +287,12 @@ def test_actual_sada_full_forward_backward_and_config_gate(tmp_path):
     from libs.models.SADA import make_meta_arch
     from tools.rq2_formal import check_formal_config
     cfg = json.loads(Path(os.environ['RQ4_BASE_CONFIG']).read_text())
+    annotation = Path(cfg['dataset']['json_file'])
+    if not annotation.is_absolute():
+        cfg['dataset']['json_file'] = str(Path(os.environ['RQ4_DATA_ROOT']) / annotation)
+    import inspect
+    from libs.models.SADA.meta_archs import SADA
+    assert Path(inspect.getfile(SADA)).resolve().parents[3] == Path(__file__).resolve().parents[1]
     database = json.loads(Path(cfg['dataset']['json_file']).read_text())['database']
     target_splits = {s.lower() for s in cfg['tgt_train_split']}
     target_id = next(k for k, v in database.items() if v['subset'].lower() in target_splits)
