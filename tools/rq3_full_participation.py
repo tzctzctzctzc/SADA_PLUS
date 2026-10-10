@@ -152,7 +152,8 @@ def validate_runtime(cfg, regime):
 
 def assert_launch_ready(cfg):
     if cfg.get('rq3_auxiliary', {}).get('schema') == VARIANT:
-        raise ValueError('Qwen100 CPU preflight only: independent launch audit and real-data acceptance pending')
+        from tools.rq3_full_launch import assert_runtime_launch
+        assert_runtime_launch(cfg)
 
 
 def main():

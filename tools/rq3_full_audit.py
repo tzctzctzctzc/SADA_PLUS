@@ -97,6 +97,8 @@ def audit_complete(root):
                 root/'evaluation/manifest.json', root/'evaluation/source_val.json',
                 root/'evaluation/target_val.json']
     required += [Path(item['path']) for item in cfg['rq3_auxiliary']['paired_reference'].values()]
+    from tools.rq3_full_launch import audit_launch_reference
+    required += audit_launch_reference(root, cfg, record['code_commit'])
     if record.get('artifacts') != {str(path): sha256_file(path) for path in required}:
         raise ValueError('full-participation artifact set or SHA changed')
     return record
