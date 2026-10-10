@@ -57,3 +57,10 @@ def test_finite_matrix_no_duplicates():
     entries=matrix_entries()
     assert len(entries)==len(set(entries))==24
     assert {e[2] for e in entries}=={'S1','S2','S3','S4','S5','S6'}
+
+
+def test_smoke_prioritizes_its_code_before_trainer_import():
+    import inspect
+    from tools.smoke_rq4_training import main
+    code=inspect.getsource(main)
+    assert code.index('sys.path.insert') < code.index('import libs.trainer')

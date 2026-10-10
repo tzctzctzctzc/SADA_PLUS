@@ -1,6 +1,7 @@
 """单项RQ4：真实CPU预检、独占GPU训练/评估与可复算complete。"""
 import argparse
 import json
+import hashlib
 import math
 import os
 from pathlib import Path
@@ -148,7 +149,8 @@ def main():
     registry = args.data_root/'configs/rq2/shift_registry.yaml'
     entry = yaml.safe_load(registry.read_text())['shifts'][shift]
     config_path = CODE/entry['config']
-    name = 'rq4_'+teacher+'_'+spec['strategy']+'_'+shift+'_'+root.name
+    # 诊断/正式与不同恢复根永不共享训练目录。
+    name = 'rq4_'+teacher+'_'+spec['strategy']+'_'+shift+'_'+hashlib.sha256(str(root).encode()).hexdigest()[:16]
     run_root = args.data_root/'model_results'/name
     if run_root.exists():
         raise FileExistsError('never overwrite an existing training directory')

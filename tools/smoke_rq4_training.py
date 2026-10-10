@@ -8,6 +8,8 @@ import sys
 def main():
     report,script = Path(sys.argv[1]),sys.argv[2]
     sys.argv = sys.argv[2:]
+    # 数据目录含旧libs；必须像直接执行train_da.py一样优先使用当前验收代码。
+    sys.path.insert(0,str(Path(script).resolve().parent))
     import libs.trainer.da_trainer as module
     from tools.run_rq4_entry import save
 
