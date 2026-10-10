@@ -150,6 +150,8 @@ def score(args):
             # 单条验收降低预分配，不改原生codec、精度或生成规则。
             inference['engine'].update(max_num_seqs=1, enforce_eager=True, seed=123,
                 kv_cache_memory_bytes=4*1024**3)
+            if args.timeple_sync:
+                inference['engine'].setdefault('extra_llm_kwargs', {})['async_scheduling'] = False
             config = dict(model=dict(name='timeple_8b'), inference=inference, prompt=prompt)
             save(root/'official_config.json', config)
             save(root/'runtime.json', dict(VLLM_ENABLE_V1_MULTIPROCESSING='0',
@@ -265,6 +267,7 @@ def main():
     p.add_argument('--teacher', choices=['timelens2_8b','timeple_8b'], required=True)
     p.add_argument('--model', required=True); p.add_argument('--gpu', choices=['0','1'], required=True)
     p.add_argument('--official-repo')
+    p.add_argument('--timeple-sync', action='store_true', help='原生codec单变量同步调度诊断')
     p = sub.add_parser('summarize'); p.add_argument('--requests', required=True)
     p.add_argument('--responses', required=True); p.add_argument('--output', required=True)
     p = sub.add_parser('calibrate'); p.add_argument('--requests', required=True)
