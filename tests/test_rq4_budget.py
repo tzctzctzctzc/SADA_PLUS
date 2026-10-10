@@ -81,3 +81,27 @@ def test_formal_launch_accepts_budgeted_cache(tmp_path):
     path.write_text(json.dumps(cache(rows, p.build_budget(pool(), 'S1'))), encoding='utf-8')
     p.assert_launch_ready({'rq4_boundary': dict(protocol_frozen=True, strategy='direct',
         cache_path=str(path), cache_file_sha256=p.file_sha(path))})
+
+
+def test_target_context_expansion_preserves_original_budget_and_anchor():
+    from tools.prepare_rq4_target_candidates import original_candidate, paired_candidates
+    raw = dict(video_id='v', candidate_id='v-p1', teacher_top1_class=2,
+               proposal_start_sec=2., proposal_end_sec=6., absolute_center_time=3., source_fpn_levels=[1])
+    row = original_candidate(raw, 10., 'S1')
+    pair = paired_candidates(row)
+    assert row['candidate_id'] == 'v-p1'
+    assert [r['candidate_id'] for r in pair] == ['v-p1-context2', 'v-p1-context3']
+    assert all(r['anchor_sec'] == 3. and r['fpn_level'] == 1 and r['class_id'] == 2 for r in pair)
+    assert row['window'] == pair[0]['window']
+
+
+def test_target_manifest_requires_train_prediction_only_pool():
+    from tools.prepare_rq4_target_candidates import check_input
+    rows = pool()
+    meta = dict(domain='target', split='train', seed=6, selection_uses_gt=False,
+                max_per_video=30, max_proposals=200, selected_proposals=20,
+                expected_video_ids=sorted({r['video_id'] for r in rows}))
+    check_input(meta, rows)
+    meta['split'] = 'val'
+    with pytest.raises(ValueError):
+        check_input(meta, rows)
