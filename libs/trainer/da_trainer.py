@@ -741,7 +741,12 @@ class Trainer(BaseTrainerDA):
                         self.valid_metrics_tgt.update(loss_name, loss_val.item())
 
                 # Update the average meter of the losses
-                avg_loss.update(losses['downstream_loss'].item(), 1)  # TODO: Should 1 be the batch size?
+                if self.cfg.get('rq4_boundary'):
+                    from tools.rq4_protocol import selection_loss
+                    loss = selection_loss(losses, domain)
+                else:
+                    loss = losses['downstream_loss']
+                avg_loss.update(loss.item(), 1)
                 
         return avg_loss.avg
 

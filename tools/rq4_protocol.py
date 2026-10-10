@@ -270,6 +270,12 @@ def validate_config(cfg, regime):
         raise ValueError('unsupported patience')
     if cfg['train_cfg'].get('early_stop', 0) > 0:
         raise ValueError('legacy early-stop policy must be disabled')
+    if cfg.get('sada_unified') is not None:
+        train = cfg['train_cfg']
+        if (cfg['sada_unified'] != REUSABLE_BASELINE_POLICY
+                or spec['early_stop_patience'] != 15 or train.get('valid_freq') != 5
+                or not train.get('ema_active') or train.get('evaluate_student', False)):
+            raise ValueError('reused baseline requires identical source-EMA stopping/selection policy')
     if spec['strategy'] == 'off':
         if spec.get('weight') != 0 or spec.get('cache_path') or spec.get('gate_path'):
             raise ValueError('matched SADA control must not load teacher/cache')
@@ -302,6 +308,13 @@ def assert_launch_ready(cfg):
     spec = cfg.get('rq4_boundary')
     if spec and spec.get('protocol_frozen') is not True:
         raise ValueError('RQ4 interface draft: freeze parameters and GPU acceptance before formal training')
+
+
+def selection_loss(losses, domain):
+    """与已完成统一SADA基线同口径，不让新增辅助项参与选模。"""
+    if domain != 'src':
+        raise ValueError('RQ4 model selection must use source validation')
+    return losses['source_gt_downstream_loss']
 
 
 def audit_baseline_pair(baseline, candidate):

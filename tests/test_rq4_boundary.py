@@ -286,6 +286,12 @@ def test_existing_seed6_unified_baseline_reused_without_retraining():
     with pytest.raises(ValueError): p.audit_baseline_pair(cfg, auxiliary)
 
 
+def test_source_selection_excludes_auxiliary_and_target_losses():
+    losses = dict(source_gt_downstream_loss=1., downstream_loss=9., target_gt_downstream_loss=8.)
+    assert p.selection_loss(losses, 'src') == 1.
+    with pytest.raises(ValueError): p.selection_loss(losses, 'tgt')
+
+
 def test_checkpoint_early_stop_evidence_is_not_optional():
     from tools.rq3_early_stop import decision
     history = [[5, 2.], [10, 1.], [15, 1.], [20, 1.], [25, 1.]]
