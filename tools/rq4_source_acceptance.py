@@ -128,12 +128,15 @@ def score(args):
     manifest = json.loads(Path(args.requests).read_text())
     if manifest.get('diagnostic_only') is not True or manifest.get('split') != 'source_validation':
         raise ValueError('source diagnostic input required')
+    seed = manifest['seed']
+    if seed not in (6, 123):
+        raise ValueError('unsupported source diagnostic seed')
     root = Path(args.output)
     root.mkdir(parents=True, exist_ok=False)
     identities = weights(args.model)
     save(root/'identity.json', dict(weights=identities, requests_sha256=file_sha(args.requests),
         code_head=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
-        diagnostic_only=True, teacher=args.teacher))
+        diagnostic_only=True, teacher=args.teacher, seed=seed))
     with gpu_slot(args.gpu, wait=False) as selected:
         visible = str(selected['index']) if args.teacher == 'timeple_8b' else selected['uuid']
         os.environ.update(CUDA_VISIBLE_DEVICES=visible, RQ3_GPU_INDEX=str(selected['index']),
@@ -143,7 +146,7 @@ def score(args):
             import torch
             processor = AutoProcessor.from_pretrained(args.model, local_files_only=True)
             guard_teacher_cuda(selected, args.teacher)
-            torch.manual_seed(123)
+            torch.manual_seed(seed)
             model, loading = AutoModelForImageTextToText.from_pretrained(args.model, local_files_only=True,
                 torch_dtype=torch.bfloat16, device_map={'': 0}, attn_implementation='sdpa', output_loading_info=True)
             if any(loading.get(k) for k in ('missing_keys','unexpected_keys','mismatched_keys','error_msgs')):
@@ -164,7 +167,7 @@ def score(args):
             prompt = timeple_prompt_variant(prompt, args.timeple_prompt)
             inference.update(model_path=args.model, allowed_local_media_path=str(Path(args.requests).parent))
             # 单条验收降低预分配，不改原生codec、精度或生成规则。
-            inference['engine'].update(max_num_seqs=1, enforce_eager=True, seed=123,
+            inference['engine'].update(max_num_seqs=1, enforce_eager=True, seed=seed,
                 kv_cache_memory_bytes=4*1024**3)
             if args.timeple_sync:
                 inference['engine'].setdefault('extra_llm_kwargs', {})['async_scheduling'] = False

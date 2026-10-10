@@ -271,6 +271,21 @@ def test_baseline_requires_identical_nonauxiliary_protocol():
     with pytest.raises(ValueError): p.audit_baseline_pair(cfg, auxiliary)
 
 
+def test_existing_seed6_unified_baseline_reused_without_retraining():
+    cfg = dict(seed=6, init_rand_seed=6, rq2_formal=dict(regime='uda'),
+               sada_unified=dict(p.REUSABLE_BASELINE_POLICY), loader=dict(batch_size=2))
+    auxiliary = copy.deepcopy(cfg)
+    auxiliary['rq4_boundary'] = dict(strategy='direct', early_stop_patience=15)
+    assert p.audit_baseline_pair(cfg, auxiliary)['reused_existing_baseline']
+    wrong = copy.deepcopy(cfg); wrong.pop('sada_unified')
+    with pytest.raises(ValueError): p.audit_baseline_pair(wrong, auxiliary)
+    auxiliary['seed'] = 123
+    with pytest.raises(ValueError): p.audit_baseline_pair(cfg, auxiliary)
+    auxiliary['seed'] = 6
+    auxiliary['rq4_boundary']['early_stop_patience'] = 0
+    with pytest.raises(ValueError): p.audit_baseline_pair(cfg, auxiliary)
+
+
 def test_checkpoint_early_stop_evidence_is_not_optional():
     from tools.rq3_early_stop import decision
     history = [[5, 2.], [10, 1.], [15, 1.], [20, 1.], [25, 1.]]
@@ -305,7 +320,7 @@ def test_actual_sada_full_forward_backward_and_config_gate(tmp_path):
     # 只用synthetic batch核对真实模型接线；不是训练实验或真实数据精度测试。
     cfg['dataset']['max_seq_len'] = 128
     cfg['model']['max_seq_len'] = 128
-    torch.manual_seed(123)
+    torch.manual_seed(cfg['seed'])
     model = make_meta_arch(cfg['model_name'], cfg, device='cpu')
     model.train()
     v = dict(feats=torch.randn(2304, 128), segments=torch.tensor([[2., 6.]]), labels=torch.tensor([1]),
@@ -329,13 +344,24 @@ def test_real_training_argument_parser_accepts_rq4_config():
 
 
 def test_protocol_rejects_nonmatching_seed_and_off_control_teacher(tmp_path):
-    cfg = dict(seed=6, dataset=dict(input_dim=2304), model={}, loader=dict(batch_size=2),
+    cfg = dict(seed=7, dataset=dict(input_dim=2304), model={}, loader=dict(batch_size=2),
                opt=dict(epochs=50), train_cfg=dict(early_stop=-1), rq2_formal=dict(regime='uda'),
                rq4_boundary=spec(tmp_path))
-    with pytest.raises(ValueError, match='seed123'): p.validate_config(cfg, 'uda')
-    cfg['seed'] = 123
+    with pytest.raises(ValueError, match='seed6/123'): p.validate_config(cfg, 'uda')
+    cfg['seed'] = 6
     cfg['rq4_boundary'] = dict(schema='rq4-boundary-training-v1', strategy='off', weight=0,
                                early_stop_patience=15, cache_path='wrong.json')
     with pytest.raises(ValueError, match='control'): p.validate_config(cfg, 'uda')
     cfg['rq4_boundary'].pop('cache_path')
     assert p.validate_config(cfg, 'uda') is None
+
+
+def test_seed6_default_and_legacy_seed123_cache_are_not_interchangeable(tmp_path):
+    cache = payload()
+    assert cache['seed'] == 6
+    cfg = dict(seed=123, dataset=dict(input_dim=2304), model={}, loader=dict(batch_size=2),
+               opt=dict(epochs=50), train_cfg=dict(early_stop=-1), rq2_formal=dict(regime='uda'),
+               rq4_boundary=spec(tmp_path, cache))
+    with pytest.raises(ValueError, match='cache/training seed'): p.validate_config(cfg, 'uda')
+    cfg['seed'] = 6; cfg['init_rand_seed'] = 123
+    with pytest.raises(ValueError, match='matching seed'): p.validate_config(cfg, 'uda')

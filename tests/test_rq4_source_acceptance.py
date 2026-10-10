@@ -9,6 +9,31 @@ def test_context_uses_proposal_only_and_clamps():
     assert context([19,20], 20, 3) == [16.5,20]
 
 
+def test_original_fpn_anchor_and_prediction_only_query():
+    from tools.prepare_rq4_source_candidates import source_candidate
+    row = dict(candidate_id='p1', video_id='v', source_fpn_levels=[2],
+        proposal_start_sec=2., proposal_end_sec=8., absolute_center_time=3.,
+        teacher_top1_class=1, gt_assigned_class_ids=[9], center_all_gt_class_ids=[9])
+    result = source_candidate(row, 20., 'S1', 2)
+    assert result['anchor_sec'] == 3. and result['fpn_level'] == 2
+    assert result['class_id'] == 1 and 'gt_assigned_class_ids' not in result
+    row['gt_assigned_class_ids'] = [0]
+    assert source_candidate(row, 20., 'S1', 2) == result
+    row['absolute_center_time'] = 12.
+    with pytest.raises(ValueError): source_candidate(row, 20., 'S1', 2)
+
+
+def test_source_budget_and_membership_are_not_silently_expanded():
+    from tools.prepare_rq4_source_candidates import check_budget
+    rows = [dict(video_id='v', candidate_id=f'p{i}') for i in range(30)]
+    meta = dict(domain='source', split='val', seed=6, selection_uses_gt=False,
+        max_per_video=30, max_proposals=200, selected_proposals=30, expected_video_ids=['v'])
+    check_budget(meta, rows)
+    with pytest.raises(ValueError): check_budget(meta, rows+rows[:1])
+    meta['seed'] = 123
+    with pytest.raises(ValueError): check_budget(meta, rows)
+
+
 def test_fixed_holdout_candidates_do_not_overlap_or_depend_on_input_order():
     from tools.rq4_source_acceptance import diagnostic_rows
     rows=[(i,{'label':i % 2}) for i in range(12)]

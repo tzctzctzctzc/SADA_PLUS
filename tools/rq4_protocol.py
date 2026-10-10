@@ -7,6 +7,10 @@ from pathlib import Path
 
 SCHEMA = 'rq4-boundary-cache-v1'
 TEACHERS = ('timelens2_8b', 'timeple_8b', 'sada_self')
+SUPPORTED_SEEDS = (6, 123)  # 新实验默认6；123仅保留历史验收兼容。
+REUSABLE_BASELINE_POLICY = dict(schema='sada-unified-source-patience-v1', max_epochs=50,
+    min_delta=0.0, patience_epochs=15, selection_loss='source_gt_downstream_loss',
+    selection_split='source_validation', state_key='ema_state_dict', validation_every_epochs=5)
 CANDIDATE_KEYS = {'candidate_id', 'video_id', 'class_id', 'proposal', 'window',
                   'video_duration', 'anchor_sec', 'fpn_level'}
 
@@ -59,9 +63,9 @@ def validate_candidate(row):
     return row
 
 
-def select_candidates(rows, fraction, seed=123):
+def select_candidates(rows, fraction, seed=6):
     """可选预算实现：视频内SHA排序取floor(N*fraction)，与教师分数无关。"""
-    if not 0 < fraction <= 1 or seed != 123:
+    if not 0 < fraction <= 1 or seed not in SUPPORTED_SEEDS:
         raise ValueError('invalid candidate budget/seed')
     groups, identities = {}, set()
     for row in rows:
@@ -123,7 +127,7 @@ def match_response(row, local_spans, min_iou, ambiguity_margin):
     return list(ranked[0][1]), 'matched'
 
 
-def build_cache(candidates, responses, *, teacher, shift, identity, min_iou, ambiguity_margin):
+def build_cache(candidates, responses, *, teacher, shift, identity, min_iou, ambiguity_margin, seed=6):
     """responses由原生适配器生成；技术错误必须上抛，格式错误单列拒绝。"""
     if teacher not in TEACHERS:
         raise ValueError('unknown teacher')
@@ -161,7 +165,7 @@ def build_cache(candidates, responses, *, teacher, shift, identity, min_iou, amb
                          response_metadata=deepcopy(response.get('metadata', {}))))
     if by_id:
         raise ValueError('extra teacher responses')
-    payload = dict(schema=SCHEMA, teacher=teacher, shift=shift, seed=123, target_gt_used=False,
+    payload = dict(schema=SCHEMA, teacher=teacher, shift=shift, seed=seed, target_gt_used=False,
                    identity=deepcopy(identity), candidates_sha256=digest(candidates),
                    matching=dict(min_iou=min_iou, ambiguity_margin=ambiguity_margin), records=rows)
     payload['payload_sha256'] = digest(payload)
@@ -171,7 +175,7 @@ def build_cache(candidates, responses, *, teacher, shift, identity, min_iou, amb
 
 def validate_cache(payload):
     if (payload.get('schema') != SCHEMA or payload.get('teacher') not in TEACHERS
-            or payload.get('seed') != 123 or payload.get('target_gt_used') is not False
+            or payload.get('seed') not in SUPPORTED_SEEDS or payload.get('target_gt_used') is not False
             or payload.get('shift') not in {'S'+str(i) for i in range(1, 7)}):
         raise ValueError('invalid RQ4 cache identity')
     if digest({k: v for k, v in payload.items() if k != 'payload_sha256'}) != payload.get('payload_sha256'):
@@ -256,11 +260,12 @@ def configure(cfg, path):
 def validate_config(cfg, regime):
     spec = cfg['rq4_boundary']
     if (spec.get('schema') != 'rq4-boundary-training-v1' or spec.get('strategy') not in ('off', 'direct', 'gated', 'self')
-            or regime != 'uda' or cfg.get('seed') != 123 or cfg.get('init_rand_seed', 123) != 123
+            or regime != 'uda' or cfg.get('seed') not in SUPPORTED_SEEDS
+            or cfg.get('init_rand_seed', cfg.get('seed')) != cfg.get('seed')
             or cfg.get('rq3_auxiliary')
             or cfg['dataset']['input_dim'] != 2304 or cfg['model'].get('use_trident_head', False)
             or cfg['loader']['batch_size'] != 2 or cfg['opt']['epochs'] != 50):
-        raise ValueError('RQ4 requires isolated seed123 batch2 SlowFast/SADA UDA normal regression head')
+        raise ValueError('RQ4 requires matching seed6/123 batch2 SlowFast/SADA UDA normal regression head')
     if spec.get('early_stop_patience') not in (0, 15):
         raise ValueError('unsupported patience')
     if cfg['train_cfg'].get('early_stop', 0) > 0:
@@ -275,6 +280,8 @@ def validate_config(cfg, regime):
     if spec.get('normalizer') != 'common-routable-candidates' or spec.get('activation') != 'sada-adaptation-phase':
         raise ValueError('unsupported normalization/activation')
     cache = load_cache(spec['cache_path'], spec['cache_file_sha256'])
+    if cache['seed'] != cfg['seed']:
+        raise ValueError('RQ4 cache/training seed mismatch')
     if cache['shift'] != cfg['rq2_formal']['shift']:
         raise ValueError('RQ4 cache shift mismatch')
     from tools.rq3_protocol import members_for
@@ -298,17 +305,24 @@ def assert_launch_ready(cfg):
 
 
 def audit_baseline_pair(baseline, candidate):
-    """匹配种子和停止预算；不能用旧seed6/固定50轮假充同协议基线。"""
+    """匹配种子和停止预算；不能仅因基线名称相同就视为同协议。"""
     b, c = deepcopy(baseline), deepcopy(candidate)
-    bs, cs = b.pop('rq4_boundary'), c.pop('rq4_boundary')
+    bs, cs = b.pop('rq4_boundary', None), c.pop('rq4_boundary')
+    reused = bs is None
+    if reused:
+        # 只接纳已审计的统一基线协议，不用补造RQ4配置来掩盖旧50轮预算。
+        if b.get('sada_unified') != REUSABLE_BASELINE_POLICY or b.get('rq3_auxiliary'):
+            raise ValueError('existing baseline is not the matched source-patience protocol')
+        bs = dict(strategy='off', early_stop_patience=15)
     if (bs['strategy'] != 'off' or cs['strategy'] not in ('direct', 'gated', 'self')
             or bs['early_stop_patience'] != cs['early_stop_patience']
-            or b['seed'] != 123 or c['seed'] != 123):
+            or b['seed'] not in SUPPORTED_SEEDS or b['seed'] != c['seed']):
         raise ValueError('baseline seed/stopping budget/strategy mismatch')
     from tools.rq2_formal import build_formal_run_signature
     if build_formal_run_signature(b) != build_formal_run_signature(c):
         raise ValueError('non-auxiliary training/evaluation configuration differs')
-    return dict(seed=123, stopping_budget_matched=True, only_boundary_auxiliary_changed=True)
+    return dict(seed=b['seed'], stopping_budget_matched=True,
+                only_boundary_auxiliary_changed=True, reused_existing_baseline=reused)
 
 
 def audit_termination(checkpoint, spec):
