@@ -177,6 +177,9 @@ def evaluate(cfg, ckpt_path, config_path, output_dir, device, feature_protocol=N
     summaries = {}
     if saved_config.get("rq3_auxiliary"):
         metadata["rq3_auxiliary"] = saved_config["rq3_auxiliary"]
+    if saved_config.get('rq4_boundary'):
+        # 仅保存训练身份；推理不加载边界教师或附加任何预测。
+        metadata['rq4_boundary'] = saved_config['rq4_boundary']
     for name, split_key, output_path in zip(
         ("source", "target"), ("src_val_split", "tgt_val_split"), output_paths
     ):
