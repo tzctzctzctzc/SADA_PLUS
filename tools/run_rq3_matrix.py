@@ -26,6 +26,12 @@ def matrix(shard_index=0, shard_count=1):
 
 
 def matrix_lock_name(shard_index, shard_count):
+    if os.environ.get('RQ3_COHORT_LEASE'):
+        from tools.rq3_colocation import current_lease
+        import hashlib
+        root, _, member = current_lease()
+        identity = hashlib.sha256(str(root).encode()).hexdigest()[:16]
+        return '.rq3_matrix_cohort_%s_%s.lock' % (identity, member)
     slot = os.environ.get('RQ3_QUEUE_SLOT')
     if slot is None:
         return '.rq3_matrix_%d_of_%d.lock' % (shard_index, shard_count)
@@ -36,6 +42,13 @@ def matrix_lock_name(shard_index, shard_count):
 
 def baseline_root(parent, shift):
     return parent / ("rq2_matched_slowfast_{}_seed6_7067306_0927".format(shift))
+
+
+def execution_stage(args, lease, stage):
+    if os.environ.get('RQ3_COHORT_LEASE'):
+        from tools.rq3_colocation import shared_stage
+        return shared_stage(args.gpu, stage)
+    return lease.stage() if lease else gpu_slot(args.gpu, args.data_root, args.wait_gpu)
 
 
 def check_cache_snapshot(cache_root, snapshot):
@@ -405,7 +418,7 @@ def main():
                 check_code(args.expected_head)
                 check_cache_snapshot(args.cache_root, snapshot)
                 check_cache_snapshot(Path('.'), trusted_snapshot)
-                with (lease.stage() if lease else gpu_slot(args.gpu, args.data_root, args.wait_gpu)) as training_gpu:
+                with execution_stage(args, lease, 'train') as training_gpu:
                     check_code(args.expected_head)
                     check_cache_snapshot(args.cache_root, snapshot)
                     check_cache_snapshot(Path('.'), trusted_snapshot)
@@ -419,7 +432,7 @@ def main():
                 evaluation = [sys.executable, "-B", str(CODE_ROOT / "evaluate_da.py"), *common,
                               "-n", name + "_eval", "-r", str(checkpoint), "--rq2-formal",
                               "--rq2-output-dir", str(root / "evaluation")]
-                with (lease.stage() if lease else gpu_slot(args.gpu, args.data_root, args.wait_gpu)) as evaluation_gpu:
+                with execution_stage(args, lease, 'evaluation') as evaluation_gpu:
                     check_code(args.expected_head)
                     check_cache_snapshot(args.cache_root, snapshot)
                     check_cache_snapshot(Path('.'), trusted_snapshot)
@@ -437,6 +450,7 @@ def main():
                 (root / "complete.json").write_text(json.dumps({
                     "teacher": model, "strategy": strategy, "shift": shift, "seed": 6,
                     "single_seed_stage_result": True, "code_commit": args.expected_head,
+                    "student_colocation": bool(os.environ.get('RQ3_COHORT_LEASE')),
                     "batch_size": args.batch_size, "batch_matched_baseline": args.batch_size == 2,
                     "early_stopping": cfg['rq3_auxiliary'].get('early_stopping'),
                     "stopping_budget_matched_baseline": not bool(args.early_stop_patience),

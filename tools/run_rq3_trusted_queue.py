@@ -66,6 +66,8 @@ def main():
     parser.add_argument('--batch-size', type=int, choices=(2, 4, 8), default=2)
     parser.add_argument('--early-stop-patience', type=int, choices=(0, 15), default=0)
     parser.add_argument('--benchmark-batches', action='store_true', help='先实测batch4/8再固定吞吐更高者')
+    parser.add_argument('--pair-students', action='store_true',
+                        help='每两个shift准备后，同策略Hard/Prototype两学生共享一卡；Verify和评估独占')
     parser.add_argument('--queue-slot', type=int, choices=(0, 1),
                         help='由两卡监控分配的互斥工作队列槽位')
     parser.add_argument('--prepared-root', type=Path, help='重验并复用完整候选/帧和教师缓存；不复用部分产物或训练')
@@ -76,6 +78,8 @@ def main():
     args = parser.parse_args()
     if args.gpu < 0:
         parser.error('physical GPU index must be nonnegative')
+    if args.pair_students and (args.batch_size != 2 or args.benchmark_batches):
+        parser.error('student colocation only supports fixed batch2, without batch benchmark')
     if args.queue_slot is not None and os.environ.get('RQ3_QUEUE_SLOT') != str(args.queue_slot):
         parser.error('managed queue-slot must be supplied by the RQ3 monitor')
     check_code(args.expected_head)
@@ -116,6 +120,8 @@ def main():
         state['refresh_teacher_caches'] = args.refresh_teacher_caches
         state['early_stop_patience_epochs'] = args.early_stop_patience
         state['strategy_participation'] = dict(hard='all-common-candidates', verify=.2, prototype=.2)
+        state['pair_students'] = args.pair_students
+        pending_students = []
 
         def save(**values):
             state.update(values)
@@ -177,6 +183,90 @@ def main():
                 shift + '.' + domain + '.' + scope + '.frames')
             return destination / 'manifest.json'
 
+        def finish_student(job):
+            if not job['record'].is_file():
+                raise ValueError('student runner exited without complete.json')
+            save(completed=state['completed'] + 1, latest_complete=str(job['record']))
+            print('RQ3_TRUSTED_ENTRY_COMPLETE', job['identity'], state['completed'], flush=True)
+
+        def submit_student(command, name, record, strategy):
+            job = dict(command=command, identity=name, record=record, strategy=strategy)
+            if args.pair_students:
+                pending_students.append(job)
+                save(queued_students=len(pending_students))
+            else:
+                run(command, name + '.formal')
+                finish_student(job)
+
+        def paired_students(jobs):
+            from tools.rq3_colocation import write_json, process_start, compute_pids, owners
+            cohort = args.output_root / ('cohort_' + str(time.time_ns()))
+            cohort.mkdir()
+            group = []
+            with gpu_slot(str(args.gpu), DATA, wait=True) as selected:
+                try:
+                    lease = dict(owner_pid=os.getpid(), owner_start=process_start(os.getpid()),
+                                 selected=selected, members={}, entries=[j['identity'] for j in jobs])
+                    for number, job in enumerate(jobs):
+                        command = job['command']
+                        if command[:2] != ['-m', 'tools.run_rq3_matrix']:
+                            raise ValueError('colocation accepts only audited matrix commands')
+                        env = dict(os.environ, PYTHONPATH=str(CODE_ROOT) + ':/vepfs/vlms/cache/rq3_preparation_deps_0928', PYTHONDONTWRITEBYTECODE='1',
+                                   PYTHONUNBUFFERED='1', CUDA_VISIBLE_DEVICES='',
+                                   RQ3_COHORT_LEASE=str(cohort/'lease.json'), RQ3_COHORT_MEMBER=str(number))
+                        log = logs / (job['identity'] + '.paired.' + str(time.time_ns()) + '.log')
+                        with log.open('x') as stream:
+                            child = subprocess.Popen([sys.executable, '-B', '-m', 'tools.rq3_colocation',
+                                *command[2:]], env=env, cwd=CODE_ROOT, stdout=stream,
+                                stderr=subprocess.STDOUT, start_new_session=True)
+                        children.append(child)
+                        group.append(child)
+                        lease['members'][str(number)] = child.pid
+                    write_json(cohort/'lease.json', lease)
+                    print('RQ3_STUDENT_PAIR_STARTED', json.dumps(lease), flush=True)
+                    while any(child.poll() is None for child in group):
+                        if stopped:
+                            raise InterruptedError('student pair stopped by user')
+                        if any(child.poll() not in (None, 0) for child in group):
+                            raise RuntimeError('student pair failed; partial outputs retained')
+                        # admission期间不观察半登记状态；其余时间拒绝任何未知CUDA进程。
+                        with (cohort/'admission.lock').open('a') as admission:
+                            try:
+                                fcntl.flock(admission, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            except BlockingIOError:
+                                pass
+                            else:
+                                active = compute_pids(selected['uuid'])
+                                if active != owners(cohort, active):
+                                    raise RuntimeError('external CUDA process entered student cohort')
+                        time.sleep(1)
+                    if any(child.returncode != 0 for child in group):
+                        raise RuntimeError('student pair exited unsuccessfully')
+                    for job in jobs:
+                        finish_student(job)
+                    write_json(cohort/'cohort_finished.json', dict(diagnostic=False, entries=lease['entries']))
+                finally:
+                    for child in group:
+                        if child.poll() is None:
+                            os.killpg(child.pid, signal.SIGTERM)
+                    for child in group:
+                        child.wait()
+                        children.remove(child)
+
+        def flush_students():
+            from tools.rq3_colocation import choose_student_groups
+            for group in choose_student_groups(pending_students):
+                save(phase='training-evaluation', student_entries=[j['identity'] for j in group])
+                check_code(args.expected_head)
+                if len(group) == 2:
+                    paired_students(group)
+                else:
+                    job = group[0]
+                    run(job['command'], job['identity'] + '.formal')
+                    finish_student(job)
+            pending_students.clear()
+            save(queued_students=0)
+
         def score(shift, model, kind, manifest):
             python, settings, frozen = TEACHERS[model]
             output = args.output_root / 'teachers' / kind / model / shift
@@ -219,7 +309,7 @@ def main():
             baselines = {shift: completed_baseline(baseline_root(Path('/vepfs/vlms'), shift), shift)
                          for shift in sorted({row['shift'] for row in rows})}
             cpu_tested = set()
-            for shift in sorted(baselines):
+            for shift_number, shift in enumerate(sorted(baselines), 1):
                 group = [row for row in rows if row['shift'] == shift]
                 save(phase='prepare', shift=shift)
                 baseline = baseline_root(Path('/vepfs/vlms'), shift)
@@ -259,19 +349,16 @@ def main():
                         name = shift + '_' + model + '_hard'
                         destination = entry_output_root(args.output_root, 'formal', name)
                         save(phase='training-evaluation')
-                        run(['-m', 'tools.run_rq3_matrix', '--revision', 'revised', '--entry-plan', str(subplan),
+                        command = ['-m', 'tools.run_rq3_matrix', '--revision', 'revised', '--entry-plan', str(subplan),
                              '--cache-root', str(cache_root), '--candidate-root', str(OLD_CANDIDATES),
                              '--verify-cache-root', str(args.output_root / 'caches/target_local'),
                              '--verify-candidate-root', str(args.output_root / 'target_local'),
                              '--calibration-root', str(args.output_root / 'calibrations'),
                              '--expected-head', args.expected_head, '--gpu', str(args.gpu), '--wait-gpu',
                              '--batch-size', str(args.batch_size), '--early-stop-patience', str(args.early_stop_patience),
-                             '--output-root', str(destination), '--immediate-gpu', '--execute'], name + '.formal')
+                             '--output-root', str(destination), '--immediate-gpu', '--execute']
                         record = destination / model / 'hard' / (shift + '_seed6') / 'complete.json'
-                        if not record.is_file():
-                            raise ValueError('Hard runner exited without complete.json')
-                        save(completed=state['completed'] + 1, latest_complete=str(record))
-                        print('RQ3_TRUSTED_ENTRY_COMPLETE', name, state['completed'], flush=True)
+                        submit_student(command, name, record, strategy)
                         continue
                     source_kind = 'source_local' if strategy == 'verify' else 'source_proposal'
                     source_cache = score(shift, model, source_kind, manifests[source_kind])
@@ -341,12 +428,11 @@ def main():
                     # 新完整矩阵直接进入execute：内部仍先实际train_da CPU预检/配对，再取得GPU锁。
                     save(phase='training-evaluation')
                     destination = entry_output_root(args.output_root, 'formal', name)
-                    run(base + ['--output-root', str(destination), '--immediate-gpu', '--execute'], name + '.formal')
                     record = destination / model / strategy / (shift + '_seed6') / 'complete.json'
-                    if not record.is_file():
-                        raise ValueError('formal runner exited without complete.json')
-                    save(completed=state['completed'] + 1, latest_complete=str(record))
-                    print('RQ3_TRUSTED_ENTRY_COMPLETE', name, state['completed'], flush=True)
+                    submit_student(base + ['--output-root', str(destination), '--immediate-gpu', '--execute'],
+                                   name, record, strategy)
+                if args.pair_students and (shift_number % 2 == 0 or shift_number == len(baselines)):
+                    flush_students()
             save(status='complete', phase='complete')
         except BaseException as error:
             save(status='stopped' if stopped else 'failed', error=str(error))

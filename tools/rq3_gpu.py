@@ -154,6 +154,9 @@ def guard_before_cuda():
     index = os.environ.get("RQ3_GPU_INDEX")
     if index is None:
         return
+    if os.environ.get('RQ3_COHORT_LEASE'):
+        from tools.rq3_colocation import shared_guard
+        return shared_guard()
     expected = os.environ["RQ3_GPU_UUID"]
     if os.environ.get("CUDA_VISIBLE_DEVICES") != expected:
         raise RuntimeError("RQ3 CUDA visibility differs from reserved physical GPU")
