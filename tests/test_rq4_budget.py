@@ -75,12 +75,13 @@ def test_formal_launch_rejects_legacy_unbudgeted_cache(tmp_path):
             cache_path=str(path), cache_file_sha256=p.file_sha(path))})
 
 
-def test_formal_launch_accepts_budgeted_cache(tmp_path):
+def test_budget_alone_is_not_full_formal_evidence(tmp_path):
     rows = p.select_candidates(pool(), .2)
     path = tmp_path / 'cache.json'
     path.write_text(json.dumps(cache(rows, p.build_budget(pool(), 'S1'))), encoding='utf-8')
-    p.assert_launch_ready({'rq4_boundary': dict(protocol_frozen=True, strategy='direct',
-        cache_path=str(path), cache_file_sha256=p.file_sha(path))})
+    with pytest.raises(ValueError, match='paired request/source evidence'):
+        p.assert_launch_ready({'rq4_boundary': dict(protocol_frozen=True, strategy='direct',
+            cache_path=str(path), cache_file_sha256=p.file_sha(path))})
 
 
 def test_target_context_expansion_preserves_original_budget_and_anchor():

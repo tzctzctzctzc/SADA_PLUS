@@ -174,13 +174,17 @@ def build_cache(candidates, responses, *, teacher, shift, identity, min_iou, amb
             raise ValueError('response belongs to another candidate/window')
         if response.get('teacher') != teacher:
             raise ValueError('response teacher mismatch')
-        if response.get('error'):
+        missing_native = response.get('output_status') == 'native_interval_missing'
+        if missing_native and (teacher != 'timeple_8b' or '<|TIMESPAN|>' in response.get('raw_text', '')
+                               or response.get('metadata', {}).get('codec_predictions') is not None):
+            raise ValueError('inconsistent native abstention evidence')
+        if response.get('error') and not missing_native:
             raise RuntimeError(response['error'])
         raw = response.get('raw_text', '')
         if teacher == 'sada_self':
             target, reason, decoded = list(candidate['proposal']), 'matched', []
         else:
-            if teacher == 'timeple_8b' and response.get('metadata', {}).get('codec_predictions') is None:
+            if teacher == 'timeple_8b' and response.get('metadata', {}).get('codec_predictions') is None and not missing_native:
                 raise RuntimeError('missing TimePLE codec is an interface error, not a teacher abstention')
             try:
                 decoded = decode_response(teacher, raw, response.get('metadata', {}),
@@ -191,6 +195,8 @@ def build_cache(candidates, responses, *, teacher, shift, identity, min_iou, amb
         rows.append(dict(candidate=deepcopy(candidate), target=target, reason=reason,
                          raw_text=raw, decoded_local=decoded,
                          response_metadata=deepcopy(response.get('metadata', {}))))
+        if missing_native:
+            rows[-1]['output_status'] = 'native_interval_missing'
     if by_id:
         raise ValueError('extra teacher responses')
     payload = dict(schema=SCHEMA, teacher=teacher, shift=shift, seed=seed, target_gt_used=False,
@@ -237,7 +243,11 @@ def validate_cache(payload):
             expected_target, expected_reason = row['proposal'], 'matched'
         else:
             metadata = record['response_metadata']
-            if payload['teacher'] == 'timeple_8b' and metadata.get('codec_predictions') is None:
+            missing_native = record.get('output_status') == 'native_interval_missing'
+            if missing_native and (payload['teacher'] != 'timeple_8b' or '<|TIMESPAN|>' in record['raw_text']
+                                   or metadata.get('codec_predictions') is not None):
+                raise ValueError('inconsistent native abstention evidence')
+            if payload['teacher'] == 'timeple_8b' and metadata.get('codec_predictions') is None and not missing_native:
                 raise ValueError('missing official codec output')
             try:
                 decoded = decode_response(payload['teacher'], record['raw_text'], metadata,
@@ -279,6 +289,9 @@ def validate_gate(gate, cache):
     if set(gate['scores']) != expected or any(not isinstance(s, (int, float)) or not math.isfinite(s)
                                              for s in gate['scores'].values()):
         raise ValueError('missing/nonfinite reliability scores')
+    if 'paired_evidence' in gate:
+        from tools.rq4_artifacts import audit_evidence
+        audit_evidence(gate['paired_evidence'], cache, gate)
     return gate
 
 
@@ -347,6 +360,18 @@ def assert_launch_ready(cfg):
         cache = load_cache(spec['cache_path'], spec['cache_file_sha256'])
         if 'budget' not in cache:
             raise ValueError('formal RQ4 requires a recomputable fixed shift budget')
+        from tools.rq4_artifacts import audit_evidence
+        if not spec.get('evidence_path') or file_sha(spec['evidence_path']) != spec.get('evidence_file_sha256'):
+            raise ValueError('formal RQ4 requires paired request/source evidence')
+        proof = json.loads(Path(spec['evidence_path']).read_text())
+        if spec['weight'] != .1 or spec['early_stop_patience'] != 15:
+            raise ValueError('formal RQ4 differs from frozen weight/stopping policy')
+        gate = None
+        if spec['strategy'] == 'gated':
+            gate = json.loads(Path(spec['gate_path']).read_text())
+            if file_sha(spec['gate_path']) != spec['gate_file_sha256']:
+                raise ValueError('formal gate SHA mismatch')
+        audit_evidence(proof, cache, gate)
 
 
 def selection_loss(losses, domain):

@@ -126,7 +126,11 @@ def score(args):
     from tools.rq4_teachers import TimeLens2Adapter, TimePLEAdapter, NativeIntervalMissing, score_requests
     from tools.run_clip_target_adapter import ACTION_PHRASES
     manifest = json.loads(Path(args.requests).read_text())
-    if manifest.get('diagnostic_only') is not True or manifest.get('split') != 'source_validation':
+    is_target = getattr(args, 'target_input', False)
+    if is_target:
+        from tools.rq4_artifacts import audit_target_requests
+        manifest, _, _ = audit_target_requests(args.requests)
+    elif manifest.get('diagnostic_only') is not True or manifest.get('split') != 'source_validation':
         raise ValueError('source diagnostic input required')
     seed = manifest['seed']
     if seed not in (6, 123):
@@ -136,8 +140,11 @@ def score(args):
     identities = weights(args.model)
     save(root/'identity.json', dict(weights=identities, requests_sha256=file_sha(args.requests),
         code_head=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
-        diagnostic_only=True, teacher=args.teacher, seed=seed))
-    with gpu_slot(args.gpu, wait=False) as selected:
+        diagnostic_only=not is_target, teacher=args.teacher, seed=seed,
+        processor_sha256=digest(dict(adapter_code=file_sha(Path(__file__).with_name('rq4_teachers.py')),
+            video_options=dict(fps=2., min_pixels=32*32, max_pixels=480*480, max_frames=200),
+            max_new_tokens=256, timeple_prompt=args.timeple_prompt))))
+    with gpu_slot(args.gpu, wait=getattr(args, 'wait_gpu', False)) as selected:
         visible = str(selected['index']) if args.teacher == 'timeple_8b' else selected['uuid']
         os.environ.update(CUDA_VISIBLE_DEVICES=visible, RQ3_GPU_INDEX=str(selected['index']),
             RQ3_GPU_UUID=selected['uuid'], TOKENIZERS_PARALLELISM='false')
@@ -193,6 +200,10 @@ def score(args):
                     candidate_sha256=digest(row), teacher=args.teacher,
                     request_sha256=digest(request), class_names_sha256=digest(list(ACTION_PHRASES)),
                     seconds=time.monotonic()-started, **exc.response)
+                if is_target:
+                    if '<|TIMESPAN|>' in output['raw_text']:
+                        raise RuntimeError('TIMESPAN emitted but codec missing; technical failure') from exc
+                    output['output_status'] = 'native_interval_missing'
             responses.append(output)
             save(root/(request['candidate']['candidate_id']+'.json'), output)
             print('SOURCE_RESPONSE', request['candidate']['candidate_id'], round(time.monotonic()-started, 3), flush=True)
@@ -289,6 +300,8 @@ def main():
     p.add_argument('--official-repo')
     p.add_argument('--timeple-sync', action='store_true', help='原生codec单变量同步调度诊断')
     p.add_argument('--timeple-prompt', choices=['official','native-only'], default='official')
+    p.add_argument('--target-input', action='store_true', help='validated fixed20 target requests, not source diagnostics')
+    p.add_argument('--wait-gpu', action='store_true', help='wait on existing shared GPU/capacity locks')
     p = sub.add_parser('summarize'); p.add_argument('--requests', required=True)
     p.add_argument('--responses', required=True); p.add_argument('--output', required=True)
     p = sub.add_parser('calibrate'); p.add_argument('--requests', required=True)
