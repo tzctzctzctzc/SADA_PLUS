@@ -117,6 +117,9 @@ def check_target_manifest(path, target_splits, annotation_path=None):
 def check_formal_config(cfg, regime, manifest_path=None):
     if regime not in ("so", "uda"):
         raise ValueError("RQ2 regime must be so or uda")
+    if cfg.get('rq4_boundary'):
+        from tools.rq4_protocol import validate_config as validate_rq4
+        validate_rq4(cfg, regime)
     if cfg.get("rq3_auxiliary"):
         # RQ3复用相同预算/标签隔离门禁；只有这个明确记录的新辅助项可以开启。
         from tools.rq3_protocol import validate_config

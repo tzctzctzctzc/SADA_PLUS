@@ -258,7 +258,7 @@ class BaseTrainerDA:
 
         # Iterate over each of the epochs
         from tools.rq3_early_stop import enabled, decision
-        rq3_early_stop = enabled(self.cfg)
+        rq3_early_stop = enabled(self.cfg) or self.cfg.get('rq4_boundary', {}).get('early_stop_patience') == 15
         if rq3_early_stop and self.start_epoch != 1:
             raise ValueError('RQ3 early-stop runs must start fresh; validation history cannot be reset on resume')
         source_validation_history = []
@@ -686,7 +686,8 @@ class BaseTrainerDA:
             state['rq2_run_signature'] = self.cfg['rq2_formal']['run_signature']
             state['rq2_training_state'] = self.get_formal_training_state()
         if hasattr(self, 'rq3_termination'):
-            state['rq3_termination'] = self.rq3_termination
+            key = 'rq4_termination' if self.cfg.get('rq4_boundary') else 'rq3_termination'
+            state[key] = self.rq3_termination
         if self.cfg.get('stage1', {}).get('enabled', False):
             state['stage1'] = {
                 'enabled': True,

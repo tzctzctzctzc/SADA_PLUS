@@ -1115,6 +1115,7 @@ def create_argparser():
     parser.add_argument('--rq2-shift', choices=('S1', 'S2', 'S3', 'S4', 'S5', 'S6'))
     parser.add_argument('--rq2-registry', default='configs/rq2/shift_registry.yaml')
     parser.add_argument('--rq2-reference-root', default='./data/ek100_slowfast/features')
+    parser.add_argument('--rq4-config', default=None, help='explicit RQ4 boundary interface specification')
     parser.add_argument('--rq3-strategy', choices=('off', 'hard', 'verify', 'prototype'), default='off')
     parser.add_argument('--rq3-revision', choices=('legacy', 'revised'), default='legacy')
     parser.add_argument('--rq3-batch-size', type=int, choices=(2, 4, 8), default=2)
@@ -2677,6 +2678,8 @@ if __name__ == '__main__':
     apply_batch(config_dict, args.rq3_batch_size)
     from tools.rq3_early_stop import apply_policy
     apply_policy(config_dict, args.rq3_early_stop_patience)
+    from tools.rq4_protocol import configure as configure_rq4
+    configure_rq4(config_dict, args.rq4_config)
 
     if args.rq2_regime:
         from tools.rq2_formal import build_formal_run_signature
@@ -2699,4 +2702,6 @@ if __name__ == '__main__':
         print('RQ2 CPU audit passed; no model or GPU job was created')
         sys.exit(0)
 
+    from tools.rq4_protocol import assert_launch_ready
+    assert_launch_ready(config_dict)
     main(config_dict, resume=args.resume is not None, debug=args.debug)

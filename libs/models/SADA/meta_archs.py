@@ -1513,6 +1513,10 @@ class SADA(nn.Module):
         self.rq3_auxiliary = None
         self.rq3_prototype = None
         self.rq3_verify_cache = None
+        self.rq4_boundary = None
+        if cfg.get('rq4_boundary'):
+            from .rq4_boundary import RQ4Boundary
+            self.rq4_boundary = RQ4Boundary(cfg['rq4_boundary'])
         if cfg.get('rq3_auxiliary'):
             from tools.rq3_protocol import load_cache, proposal_evidence, REVISION
             rq3 = cfg['rq3_auxiliary']
@@ -3226,6 +3230,14 @@ class SADA(nn.Module):
                     losses['downstream_loss'] + weighted_relation_loss
                 )
             
+            if mode == 'train' and self.rq4_boundary is not None:
+                rq4_output = self.rq4_boundary(
+                    video_list_tgt, points, fpn_masks_tgt,
+                    [value[bs:] for value in out_offsets], curr_epoch >= self.warmup_adv)
+                for key, value in rq4_output.items():
+                    losses['rq4_' + key] = torch.as_tensor(value, device=self.device).detach()
+                losses['downstream_loss'] = losses['downstream_loss'] + rq4_output['loss']
+
             if mode == 'train' and self.rq3_auxiliary is not None:
                 rq3_output = self.rq3_auxiliary(
                     video_list_tgt, points, fpn_masks_tgt,
