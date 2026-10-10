@@ -10,6 +10,16 @@ import time
 from tools.rq4_protocol import digest, file_sha, decode_response, match_response, interval_iou
 
 
+def timeple_prompt_variant(prompt, variant):
+    result = dict(prompt)
+    if variant == 'native-only':
+        result['user_prompt'] = ('Localize the event "{query}" in the video. '
+            'Output only <|TIMESPAN|>. Do not output a description or numerical timestamps.')
+    elif variant != 'official':
+        raise ValueError('unknown TimePLE diagnostic prompt')
+    return result
+
+
 def save(path, value):
     with Path(path).open('x', encoding='utf-8') as stream:
         json.dump(value, stream, ensure_ascii=False, indent=2, allow_nan=False)
@@ -146,6 +156,7 @@ def score(args):
             from benchmark_loader import BenchmarkSample
             inference = yaml.safe_load((repo/'evaluation/configs/models/timeple_8b.yaml').read_text())['model']['eval']['config']['inference']
             prompt = yaml.safe_load((repo/'evaluation/configs/prompts/common.yaml').read_text())['prompt']['by_runner_family']['qwen3_vl_timeple']
+            prompt = timeple_prompt_variant(prompt, args.timeple_prompt)
             inference.update(model_path=args.model, allowed_local_media_path=str(Path(args.requests).parent))
             # 单条验收降低预分配，不改原生codec、精度或生成规则。
             inference['engine'].update(max_num_seqs=1, enforce_eager=True, seed=123,
@@ -268,6 +279,7 @@ def main():
     p.add_argument('--model', required=True); p.add_argument('--gpu', choices=['0','1'], required=True)
     p.add_argument('--official-repo')
     p.add_argument('--timeple-sync', action='store_true', help='原生codec单变量同步调度诊断')
+    p.add_argument('--timeple-prompt', choices=['official','native-only'], default='official')
     p = sub.add_parser('summarize'); p.add_argument('--requests', required=True)
     p.add_argument('--responses', required=True); p.add_argument('--output', required=True)
     p = sub.add_parser('calibrate'); p.add_argument('--requests', required=True)

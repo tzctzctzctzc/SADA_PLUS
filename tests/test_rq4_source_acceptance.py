@@ -43,6 +43,18 @@ def test_missing_native_output_remains_failure_and_keeps_evidence():
     assert err.response['error'] and 'codec_predictions' not in err.response['metadata']
 
 
+def test_prompt_diagnostic_changes_only_instruction_not_query_or_decoder():
+    import string
+    from tools.rq4_source_acceptance import timeple_prompt_variant
+    original=dict(system_prompt='native system',user_prompt='Locate {query}',enabled_sys_prompt=True)
+    assert timeple_prompt_variant(original,'official') == original
+    revised=timeple_prompt_variant(original,'native-only')
+    assert revised['system_prompt'] == original['system_prompt']
+    assert original['user_prompt'] == 'Locate {query}'
+    assert [x[1] for x in string.Formatter().parse(revised['user_prompt']) if x[1]] == ['query']
+    assert '<|TIMESPAN|>' in revised['user_prompt']
+
+
 @pytest.mark.parametrize('teacher,visible',[('timeple_8b','1'),('timelens2_8b','GPU-test')])
 def test_native_visibility_preserves_single_physical_gpu(monkeypatch,teacher,visible):
     from tools.rq4_source_acceptance import guard_teacher_cuda
