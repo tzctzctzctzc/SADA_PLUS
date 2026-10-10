@@ -48,3 +48,12 @@ def test_reject_missing_strategy_acceptance(tmp_path):
     path = tmp_path/'acceptance.json'
     path.write_text(json.dumps(dict(status='passed',code_commit='correct',reports=[])))
     with pytest.raises(ValueError,match='both strategies'): acceptance_ready(path,'timelens2_8b','correct')
+
+
+def test_finite_matrix_no_duplicates():
+    # Linux-only orchestration module uses fcntl for a cross-process lock.
+    pytest.importorskip('fcntl')
+    from tools.run_rq4_matrix import matrix_entries
+    entries=matrix_entries()
+    assert len(entries)==len(set(entries))==24
+    assert {e[2] for e in entries}=={'S1','S2','S3','S4','S5','S6'}
