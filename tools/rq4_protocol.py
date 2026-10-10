@@ -64,22 +64,47 @@ def validate_candidate(row):
 
 
 def select_candidates(rows, fraction, seed=6):
-    """可选预算实现：视频内SHA排序取floor(N*fraction)，与教师分数无关。"""
+    """整个shift按原候选身份排序取floor(N*fraction)，与教师分数无关。"""
     if not 0 < fraction <= 1 or seed not in SUPPORTED_SEEDS:
         raise ValueError('invalid candidate budget/seed')
-    groups, identities = {}, set()
+    identities = set()
+    rows = list(rows)
     for row in rows:
         validate_candidate(row)
         key = (row['video_id'], row['candidate_id'])
         if key in identities:
             raise ValueError('duplicate candidate')
         identities.add(key)
-        groups.setdefault(row['video_id'], []).append(row)
-    selected = []
-    for video in sorted(groups):
-        ordered = sorted(groups[video], key=lambda r: digest([seed, video, r['candidate_id']]))
-        selected.extend(deepcopy(ordered[:math.floor(len(ordered) * fraction)]))
-    return selected
+    ordered = sorted(rows, key=lambda r: (digest([seed, r['video_id'], r['candidate_id']]),
+                                         r['video_id'], r['candidate_id']))
+    return deepcopy(ordered[:math.floor(len(ordered) * fraction)])
+
+
+def build_budget(pool, shift, seed=6):
+    """正式20%预算：pool必须是单个shift、未扩展双上下文的原候选池。"""
+    import re
+    if shift not in {'S'+str(i) for i in range(1, 7)} or seed != 6:
+        raise ValueError('formal budget requires shift S1-S6 and seed6')
+    pool = sorted(deepcopy(pool), key=lambda r: (r['video_id'], r['candidate_id']))
+    if any(re.search(r'-context\d+$', r['candidate_id']) for r in pool):
+        raise ValueError('budget requires original candidate IDs, not context request IDs')
+    selected = select_candidates(pool, .2, seed)
+    result = dict(schema='rq4-shift-budget-v1', shift=shift, seed=seed,
+                  fraction=.2, selection='sha256-seed-video-original-id',
+                  pool=pool, pool_sha256=digest(pool), pool_count=len(pool),
+                  selected_ids=[[r['video_id'], r['candidate_id']] for r in selected],
+                  selected_count=len(selected), selected_sha256=digest(selected))
+    result['payload_sha256'] = digest(result)
+    return result
+
+
+def validate_budget(budget, candidates, shift, seed):
+    # 重算全池选择；不能只提供自声明的数量或SHA就声称符合20%。
+    if budget != build_budget(budget['pool'], shift, seed):
+        raise ValueError('budget artifact differs from recomputed shift selection')
+    if digest(candidates) != budget['selected_sha256']:
+        raise ValueError('cache candidates differ from fixed shift budget')
+    return budget
 
 
 def query_for(row, class_names):
@@ -127,10 +152,13 @@ def match_response(row, local_spans, min_iou, ambiguity_margin):
     return list(ranked[0][1]), 'matched'
 
 
-def build_cache(candidates, responses, *, teacher, shift, identity, min_iou, ambiguity_margin, seed=6):
+def build_cache(candidates, responses, *, teacher, shift, identity, min_iou, ambiguity_margin, seed=6,
+                budget=None):
     """responses由原生适配器生成；技术错误必须上抛，格式错误单列拒绝。"""
     if teacher not in TEACHERS:
         raise ValueError('unknown teacher')
+    if budget is not None:
+        validate_budget(budget, candidates, shift, seed)
     by_id = {}
     for response in responses:
         key = (response['video_id'], response['candidate_id'])
@@ -168,6 +196,8 @@ def build_cache(candidates, responses, *, teacher, shift, identity, min_iou, amb
     payload = dict(schema=SCHEMA, teacher=teacher, shift=shift, seed=seed, target_gt_used=False,
                    identity=deepcopy(identity), candidates_sha256=digest(candidates),
                    matching=dict(min_iou=min_iou, ambiguity_margin=ambiguity_margin), records=rows)
+    if budget is not None:
+        payload['budget'] = deepcopy(budget)
     payload['payload_sha256'] = digest(payload)
     validate_cache(payload)
     return payload
@@ -185,6 +215,9 @@ def validate_cache(payload):
         require_sha(payload['identity'][key])
     if digest([r['candidate'] for r in payload['records']]) != payload['candidates_sha256']:
         raise ValueError('candidate set changed')
+    if 'budget' in payload:
+        validate_budget(payload['budget'], [r['candidate'] for r in payload['records']],
+                        payload['shift'], payload['seed'])
     seen = set()
     for record in payload['records']:
         row = validate_candidate(record['candidate'])
@@ -286,6 +319,8 @@ def validate_config(cfg, regime):
     if spec.get('normalizer') != 'common-routable-candidates' or spec.get('activation') != 'sada-adaptation-phase':
         raise ValueError('unsupported normalization/activation')
     cache = load_cache(spec['cache_path'], spec['cache_file_sha256'])
+    if spec.get('protocol_frozen') is True and 'budget' not in cache:
+        raise ValueError('formal RQ4 requires a recomputable fixed shift budget')
     if cache['seed'] != cfg['seed']:
         raise ValueError('RQ4 cache/training seed mismatch')
     if cache['shift'] != cfg['rq2_formal']['shift']:
@@ -308,6 +343,10 @@ def assert_launch_ready(cfg):
     spec = cfg.get('rq4_boundary')
     if spec and spec.get('protocol_frozen') is not True:
         raise ValueError('RQ4 interface draft: freeze parameters and GPU acceptance before formal training')
+    if spec and spec.get('strategy') != 'off':
+        cache = load_cache(spec['cache_path'], spec['cache_file_sha256'])
+        if 'budget' not in cache:
+            raise ValueError('formal RQ4 requires a recomputable fixed shift budget')
 
 
 def selection_loss(losses, domain):
