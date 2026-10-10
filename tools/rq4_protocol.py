@@ -300,7 +300,18 @@ def configure(cfg, path):
         return
     spec = json.loads(Path(path).read_text(encoding='utf-8'))
     cfg['rq4_boundary'] = dict(spec, config_path=str(Path(path).resolve()), config_sha256=file_sha(path))
+    baseline = None
+    if spec.get('baseline_config_path'):
+        if file_sha(spec['baseline_config_path']) != spec.get('baseline_config_sha256'):
+            raise ValueError('baseline config SHA mismatch')
+        baseline = json.loads(Path(spec['baseline_config_path']).read_text())
+        if baseline.get('sada_unified') != REUSABLE_BASELINE_POLICY:
+            raise ValueError('baseline lacks the matched source-selection/stopping policy')
+        # 仅记录已实现的同一选模/停止策略，不覆盖任何训练超参数。
+        cfg['sada_unified'] = deepcopy(REUSABLE_BASELINE_POLICY)
     validate_config(cfg, cfg.get('rq2_formal', {}).get('regime'))
+    if baseline is not None:
+        audit_baseline_pair(baseline, cfg)
 
 
 def validate_config(cfg, regime):

@@ -1,6 +1,5 @@
 """单项RQ4：真实CPU预检、独占GPU训练/评估与可复算complete。"""
 import argparse
-from copy import deepcopy
 import json
 import math
 import os
@@ -137,20 +136,23 @@ def main():
         raise ValueError('not a no-teacher baseline')
     spec = read(args.spec)
     spec['protocol_frozen'] = True
+    spec['baseline_config_path'] = str(Path(args.baseline_config).resolve())
+    spec['baseline_config_sha256'] = file_sha(args.baseline_config)
     cache = load_cache(spec['cache_path'], spec['cache_file_sha256'])
     shift,teacher = cache['shift'],cache['teacher']
     if teacher not in ('timelens2_8b','timeple_8b') or spec['strategy'] not in ('direct','gated'):
         raise ValueError('entry outside authorized matrix')
     save(root/'spec.json',spec)
-    # JSON也是合法YAML；从已完成基线的实际展开配置启动，预检再次配对。
-    config = deepcopy(baseline)
-    config.pop('rq4_boundary',None)
-    save(root/'input_config.json', config)
+    # 原始YAML通过冻结注册表；真正的展开配置随后与已完成基线逐字段配对。
+    import yaml
+    registry = args.data_root/'configs/rq2/shift_registry.yaml'
+    entry = yaml.safe_load(registry.read_text())['shifts'][shift]
+    config_path = CODE/entry['config']
     name = 'rq4_'+teacher+'_'+spec['strategy']+'_'+shift+'_'+root.name
     run_root = args.data_root/'model_results'/name
     if run_root.exists():
         raise FileExistsError('never overwrite an existing training directory')
-    common = ['-c',str(root/'input_config.json'),'-s','6','-i','0','--rq2-shift',shift,
+    common = ['-c',str(config_path),'-s','6','-i','0','--rq2-shift',shift,
         '--rq2-registry',str(args.data_root/'configs/rq2/shift_registry.yaml'),
         '--rq2-reference-root',str(args.data_root/'data/ek100_slowfast/features')]
     command = [sys.executable,'-B',str(CODE/'train_da.py'),*common,'-n',name,'--debug',
