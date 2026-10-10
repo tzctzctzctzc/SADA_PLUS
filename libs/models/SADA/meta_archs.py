@@ -1514,7 +1514,7 @@ class SADA(nn.Module):
         self.rq3_prototype = None
         self.rq3_verify_cache = None
         self.rq4_boundary = None
-        if cfg.get('rq4_boundary'):
+        if cfg.get('rq4_boundary', {}).get('strategy', 'off') != 'off':
             from .rq4_boundary import RQ4Boundary
             self.rq4_boundary = RQ4Boundary(cfg['rq4_boundary'])
         if cfg.get('rq3_auxiliary'):

@@ -255,11 +255,19 @@ def configure(cfg, path):
 
 def validate_config(cfg, regime):
     spec = cfg['rq4_boundary']
-    if (spec.get('schema') != 'rq4-boundary-training-v1' or spec.get('strategy') not in ('direct', 'gated', 'self')
+    if (spec.get('schema') != 'rq4-boundary-training-v1' or spec.get('strategy') not in ('off', 'direct', 'gated', 'self')
             or regime != 'uda' or cfg.get('seed') != 123 or cfg.get('rq3_auxiliary')
             or cfg['dataset']['input_dim'] != 2304 or cfg['model'].get('use_trident_head', False)
             or cfg['loader']['batch_size'] != 2 or cfg['opt']['epochs'] != 50):
         raise ValueError('RQ4 requires isolated seed123 batch2 SlowFast/SADA UDA normal regression head')
+    if spec.get('early_stop_patience') not in (0, 15):
+        raise ValueError('unsupported patience')
+    if cfg['train_cfg'].get('early_stop', 0) > 0:
+        raise ValueError('legacy early-stop policy must be disabled')
+    if spec['strategy'] == 'off':
+        if spec.get('weight') != 0 or spec.get('cache_path') or spec.get('gate_path'):
+            raise ValueError('matched SADA control must not load teacher/cache')
+        return None
     weight = spec.get('weight')
     if not isinstance(weight, (int, float)) or not math.isfinite(weight) or weight <= 0:
         raise ValueError('set explicit positive boundary loss weight before testing')
@@ -279,10 +287,6 @@ def validate_config(cfg, regime):
         if file_sha(spec['gate_path']) != spec['gate_file_sha256']:
             raise ValueError('gate artifact changed')
         validate_gate(json.loads(Path(spec['gate_path']).read_text(encoding='utf-8')), cache)
-    if spec.get('early_stop_patience') not in (0, 15):
-        raise ValueError('unsupported patience')
-    if cfg['train_cfg'].get('early_stop', 0) > 0:
-        raise ValueError('legacy early-stop policy must be disabled')
     return cache
 
 
@@ -290,3 +294,27 @@ def assert_launch_ready(cfg):
     spec = cfg.get('rq4_boundary')
     if spec and spec.get('protocol_frozen') is not True:
         raise ValueError('RQ4 interface draft: freeze parameters and GPU acceptance before formal training')
+
+
+def audit_baseline_pair(baseline, candidate):
+    """匹配种子和停止预算；不能用旧seed6/固定50轮假充同协议基线。"""
+    b, c = deepcopy(baseline), deepcopy(candidate)
+    bs, cs = b.pop('rq4_boundary'), c.pop('rq4_boundary')
+    if (bs['strategy'] != 'off' or cs['strategy'] not in ('direct', 'gated', 'self')
+            or bs['early_stop_patience'] != cs['early_stop_patience']
+            or b['seed'] != 123 or c['seed'] != 123):
+        raise ValueError('baseline seed/stopping budget/strategy mismatch')
+    from tools.rq2_formal import build_formal_run_signature
+    if build_formal_run_signature(b) != build_formal_run_signature(c):
+        raise ValueError('non-auxiliary training/evaluation configuration differs')
+    return dict(seed=123, stopping_budget_matched=True, only_boundary_auxiliary_changed=True)
+
+
+def audit_termination(checkpoint, spec):
+    if spec['early_stop_patience'] == 15:
+        from tools.rq3_early_stop import audit_termination as source_audit
+        if 'rq4_termination' not in checkpoint:
+            raise ValueError('missing RQ4 source-only stopping evidence')
+        source_audit(dict(checkpoint, rq3_termination=checkpoint['rq4_termination']))
+    elif checkpoint['epoch'] != 50:
+        raise ValueError('fixed-budget RQ4 must complete 50 epochs')

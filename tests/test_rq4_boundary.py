@@ -2,6 +2,7 @@
 import copy
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -256,3 +257,59 @@ def test_training_entry_wiring_and_legacy_untouched():
 def test_rq4_termination_uses_existing_source_only_epoch_decision():
     from tools.rq3_early_stop import decision
     assert decision([[5, 2.], [10, 1.], [15, 1.], [20, 1.], [25, 1.]])['reason'] == 'source_patience_exhausted'
+
+
+def test_baseline_requires_identical_nonauxiliary_protocol():
+    cfg = dict(seed=123, rq2_formal=dict(regime='uda'), loader=dict(batch_size=2),
+               rq4_boundary=dict(strategy='off', early_stop_patience=15))
+    auxiliary = copy.deepcopy(cfg); auxiliary['rq4_boundary']['strategy'] = 'direct'
+    assert p.audit_baseline_pair(cfg, auxiliary)['stopping_budget_matched']
+    auxiliary['loader']['batch_size'] = 8
+    with pytest.raises(ValueError): p.audit_baseline_pair(cfg, auxiliary)
+    auxiliary['loader']['batch_size'] = 2
+    auxiliary['rq4_boundary']['early_stop_patience'] = 0
+    with pytest.raises(ValueError): p.audit_baseline_pair(cfg, auxiliary)
+
+
+def test_checkpoint_early_stop_evidence_is_not_optional():
+    from tools.rq3_early_stop import decision
+    history = [[5, 2.], [10, 1.], [15, 1.], [20, 1.], [25, 1.]]
+    ckpt = dict(epoch=25, selection_provenance=dict(selected_epoch=10, split='source_validation', metric_value=1.),
+                rq4_termination=dict(source_validation_history=history, decision=decision(history)))
+    p.audit_termination(ckpt, dict(early_stop_patience=15))
+    with pytest.raises(ValueError): p.audit_termination(ckpt, dict(early_stop_patience=0))
+    ckpt['epoch'] = 20
+    with pytest.raises(ValueError): p.audit_termination(ckpt, dict(early_stop_patience=15))
+
+
+@pytest.mark.skipif(not os.environ.get('RQ4_BASE_CONFIG'), reason='requires existing SADA CPU environment/config')
+def test_actual_sada_full_forward_backward_and_config_gate(tmp_path):
+    from libs.models.SADA import make_meta_arch
+    from tools.rq2_formal import check_formal_config
+    cfg = json.loads(Path(os.environ['RQ4_BASE_CONFIG']).read_text())
+    database = json.loads(Path(cfg['dataset']['json_file']).read_text())['database']
+    target_splits = {s.lower() for s in cfg['tgt_train_split']}
+    target_id = next(k for k, v in database.items() if v['subset'].lower() in target_splits)
+    cache = payload([candidate(video_id=target_id)])
+    s = spec(tmp_path, cache)
+    cfg['rq4_boundary'] = s
+    p.validate_config(cfg, 'uda')
+    target_manifest = cfg['rq2_formal']['target_manifest']
+    check_formal_config(cfg, 'uda', target_manifest['path'] if isinstance(target_manifest, dict) else target_manifest)
+    # 只用synthetic batch核对真实模型接线；不是训练实验或真实数据精度测试。
+    cfg['dataset']['max_seq_len'] = 128
+    cfg['model']['max_seq_len'] = 128
+    torch.manual_seed(123)
+    model = make_meta_arch(cfg['model_name'], cfg, device='cpu')
+    model.train()
+    v = dict(feats=torch.randn(2304, 128), segments=torch.tensor([[2., 6.]]), labels=torch.tensor([1]),
+             metadata=dict(video_id='source', fps=2, feat_stride=2, feat_num_frames=2,
+                           duration=128., crop_start=0, crop_feat_len=128))
+    t = copy.deepcopy(v); t['metadata']['video_id'] = target_id
+    t['segments'] = torch.empty(0, 2); t['labels'] = torch.empty(0, dtype=torch.long)
+    losses = model([v], [t], mode='train', curr_epoch=max(1, model.warmup_adv))[0]
+    for key in ('target_gt_cls_loss', 'target_gt_reg_loss', 'target_gt_downstream_loss'):
+        assert losses[key] == 0
+    assert losses['rq4_accepted'] == 1 and losses['rq4_gradient_norm'] > 0
+    losses['downstream_loss'].backward()
+    assert model.reg_head.offset_head.conv.weight.grad.abs().sum() > 0
