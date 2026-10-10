@@ -9,6 +9,16 @@ def test_context_uses_proposal_only_and_clamps():
     assert context([19,20], 20, 3) == [16.5,20]
 
 
+def test_fixed_holdout_candidates_do_not_overlap_or_depend_on_input_order():
+    from tools.rq4_source_acceptance import diagnostic_rows
+    rows=[(i,{'label':i % 2}) for i in range(12)]
+    first=diagnostic_rows(rows,'v',3,0)
+    second=diagnostic_rows(rows,'v',3,3)
+    assert not {x[0] for x in first} & {x[0] for x in second}
+    assert second == diagnostic_rows(list(reversed(rows)),'v',3,3)
+    with pytest.raises(ValueError): diagnostic_rows(rows,'v',1,-1)
+
+
 def test_source_matching_is_fixed_before_teacher():
     row = dict(candidate=dict(class_id=1,proposal=[2,6]),target=[10,15])
     annotations = [dict(label_id=1,segment=[2,6]),dict(label_id=1,segment=[10,15])]

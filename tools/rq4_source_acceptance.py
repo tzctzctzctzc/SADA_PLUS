@@ -37,6 +37,12 @@ def context(proposal, duration, scale):
     return [max(0., center - width / 2), min(duration, center + width / 2)]
 
 
+def diagnostic_rows(rows, vid, count, offset):
+    if count < 1 or offset < 0:
+        raise ValueError('invalid diagnostic sample slice')
+    return sorted(rows, key=lambda r: digest([123, vid, r[0]]))[offset:offset+count]
+
+
 def prepare(args):
     evaluation = json.loads(Path(args.evaluation).read_text())
     if evaluation['domain'] != 'source' or evaluation['seed'] != 123:
@@ -56,8 +62,7 @@ def prepare(args):
         fps = fps_num / fps_den
         videos[vid] = dict(path=str(video), probe=info)
         # 固定SHA抽样，仅用于源域接口诊断，不按GT或教师效果选样。
-        rows.sort(key=lambda r: digest([123, vid, r[0]]))
-        for index, pred in rows[:args.per_video]:
+        for index, pred in diagnostic_rows(rows, vid, args.per_video, args.sample_offset):
             proposal = [float(pred['t-start']), float(pred['t-end'])]
             if not 0 <= proposal[0] < proposal[1] <= duration:
                 raise ValueError('source prediction outside actual video')
@@ -80,7 +85,7 @@ def prepare(args):
         seed=123, prediction_file_sha256=file_sha(args.evaluation),
         checkpoint_sha256=evaluation['checkpoint_sha256'], videos=videos,
         anchor_note='diagnostic midpoint only; not exported as a formal SADA anchor',
-        contexts=[2, 3], requests=requests))
+        contexts=[2, 3], sample_offset=args.sample_offset, per_video=args.per_video, requests=requests))
     print('SOURCE_REQUESTS_READY', len(requests), flush=True)
 
 
@@ -274,6 +279,7 @@ def main():
     sub = parser.add_subparsers(dest='command', required=True)
     p = sub.add_parser('prepare'); p.add_argument('--evaluation', required=True); p.add_argument('--videos', required=True)
     p.add_argument('--output', required=True); p.add_argument('--per-video', type=int, default=1)
+    p.add_argument('--sample-offset', type=int, default=0, help='固定SHA顺序中的偏移；不按GT选样')
     p = sub.add_parser('score'); p.add_argument('--requests', required=True); p.add_argument('--output', required=True)
     p.add_argument('--teacher', choices=['timelens2_8b','timeple_8b'], required=True)
     p.add_argument('--model', required=True); p.add_argument('--gpu', choices=['0','1'], required=True)
