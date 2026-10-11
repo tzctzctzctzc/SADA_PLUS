@@ -42,6 +42,7 @@ def main():
     for key in ('output','source-root','caches','old-relation-root','data-root'):
         p.add_argument('--'+key,type=Path,required=True)
     p.add_argument('--expected-head',required=True)
+    p.add_argument('--recovered-entry',type=Path,action='append',default=[])
     p.add_argument('--gpu',choices=('0',),default='0')
     args=p.parse_args();check_code(args.expected_head)
     for key in ('output','source_root','caches','old_relation_root','data_root'):
@@ -83,6 +84,25 @@ def main():
             raise ValueError('old relational matrix must already be complete')
         save(args.output/'old_reference.json',reference(args.old_relation_root/'final_audit.json'))
         status()
+        for recovered in args.recovered_entry:
+            recovered=recovered.resolve();record=read(recovered/'complete.json')
+            pair=(record['teacher'],record['shift'])
+            if (pair not in {(t,s) for t in TEACHERS for s in ('S1','S2','S3')}
+                    or pair in {(x['teacher'],x['shift']) for x in completed}):
+                raise ValueError('unexpected or duplicate recovered pilot identity')
+            recovery=read(recovered/'recovery.json')
+            if record['artifacts'].get(str(recovered/'recovery.json'))!=file_sha(recovered/'recovery.json'):
+                raise ValueError('recovered code provenance is not bound')
+            spec=read(recovered/'preflight.json')['rq4_boundary']
+            if (any(spec[k]!=v for k,v in PARAMETERS.items()) or spec['weight']!=.1
+                    or read(spec['quality_path'])['calibration']['quantile']!=.5):
+                raise ValueError('recovered method parameters differ')
+            script=('import sys,os;sys.path.insert(0,'+repr(recovery['training_code_root'])+');'
+                    'os.chdir('+repr(str(args.data_root))+');'
+                    'from tools.rq4_consensus_audit import audit_complete;audit_complete('+repr(str(recovered))+')')
+            run('audit_recovered_'+pair[0]+'_'+pair[1],[sys.executable,'-B','-c',script],True)
+            completed.append(dict(teacher=pair[0],shift=pair[1],root=str(recovered)))
+        status()
         for shifts in (('S1','S2','S3'),('S4','S5','S6')):
             state['phase']='source_prepare';state['shifts']=shifts;status()
             prepared={};reports=[]
@@ -105,7 +125,8 @@ def main():
                     folder=args.output/'prepared'/teacher/shift
                     prepare(args.caches/teacher/shift/'artifacts/direct.json',quality,folder,**PARAMETERS)
                     prepared[(teacher,shift)]=folder/'spec.json'
-            pairs=[(t,s) for s in shifts for t in TEACHERS]
+            pairs=[(t,s) for s in shifts for t in TEACHERS
+                   if (t,s) not in {(x['teacher'],x['shift']) for x in completed}]
             for phase in ('acceptance','formal'):
                 state['phase']=phase;status();pending=list(pairs);running={}
                 while pending or running:
@@ -136,12 +157,14 @@ def main():
                     acceptance=args.output/('acceptance_'+shifts[0]+'.json')
                     freeze_acceptance(acceptance,reports,args.expected_head)
                     for pair,path in list(prepared.items()):
+                        if pair not in pairs: continue
                         spec=read(path);spec.update(acceptance_path=str(acceptance),acceptance_file_sha256=file_sha(acceptance))
                         accepted=path.with_name('accepted.json');save(accepted,spec);prepared[pair]=accepted
             if shifts[0]=='S1':
                 rows=[]
-                for teacher,shift in pairs:
-                    new=args.output/'formal'/teacher/shift/'evaluation/target_val.json'
+                for item in completed:
+                    teacher,shift=item['teacher'],item['shift']
+                    new=Path(item['root'])/'evaluation/target_val.json'
                     oldroot=args.old_relation_root/'formal'/teacher/shift/'relational'
                     old=oldroot/'evaluation/target_val.json';record=read(oldroot/'complete.json')
                     if (record['teacher']!=teacher or record['shift']!=shift
