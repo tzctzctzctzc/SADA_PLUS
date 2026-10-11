@@ -1,4 +1,5 @@
 from copy import deepcopy
+import json
 import numpy as np
 
 from tools.rq4_temporal_information import (scores, direct_report, oracle_report,
@@ -50,7 +51,9 @@ def test_heldout_gt_cannot_change_fold_predictions():
 
 def test_same_information_identical_cross_validation():
     data=rows();blank=np.zeros((len(data),7))
-    assert cross_validate(data,blank)==cross_validate(data,blank.copy())
+    result=cross_validate(data,blank)
+    assert result==cross_validate(data,blank.copy())
+    assert json.loads(json.dumps(result,allow_nan=False))==result
 
 
 def test_shuffle_preserves_video_distribution():

@@ -115,7 +115,7 @@ def predict_fold(rows, features, heldout):
     pred=model.predict(features[test])
     boxes=[corrected(row['proposal'],p,row['duration']) for row,p in zip([r for r,t in zip(rows,test) if t],pred)]
     return np.where(test)[0],boxes,dict(heldout_video=heldout,train_videos=sorted(counts),
-        train_count=int(train.sum()),test_count=int(test.sum()),leaf_count=model.get_n_leaves())
+        train_count=int(train.sum()),test_count=int(test.sum()),leaf_count=int(model.get_n_leaves()))
 
 
 def cross_validate(rows, extra):
