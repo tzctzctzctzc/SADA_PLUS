@@ -361,7 +361,13 @@ def test_actual_sada_consensus_ema_forward_and_strict_restore(tmp_path):
     losses['downstream_loss'].backward()
     assert model.reg_head.offset_head.conv.weight.grad.abs().sum()>0
     assert all(parameter.grad is None for parameter in model.rq4_boundary.quality.parameters())
-    restored=make_meta_arch(cfg['model_name'],cfg,device='cpu')
+    from tools.rq2_evaluate import restore_auxiliary_config
+    evaluation_cfg=copy.deepcopy(cfg)
+    del evaluation_cfg['rq4_boundary']
+    restore_auxiliary_config(evaluation_cfg,cfg)
+    assert evaluation_cfg['rq4_boundary']==cfg['rq4_boundary']
+    assert evaluation_cfg['rq4_boundary'] is not cfg['rq4_boundary']
+    restored=make_meta_arch(cfg['model_name'],evaluation_cfg,device='cpu')
     restored.load_state_dict(model.state_dict(),strict=True)
 
 

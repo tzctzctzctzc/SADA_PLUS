@@ -82,6 +82,13 @@ def selected_checkpoint_state(checkpoint, config=None, require_provenance=False)
     return key, checkpoint[key]
 
 
+def restore_auxiliary_config(cfg, saved_config):
+    # 辅助模块不参与test前向，但必须重建相同结构才能strict恢复全部权重。
+    for key in ('rq3_auxiliary', 'rq4_boundary'):
+        if saved_config.get(key):
+            cfg[key] = deepcopy(saved_config[key])
+
+
 def evaluate(cfg, ckpt_path, config_path, output_dir, device, feature_protocol=None,
              reference_root="./data/ek100_slowfast/features",
              registry_path="configs/rq2/shift_registry.yaml", shift_id=None):
@@ -142,9 +149,7 @@ def evaluate(cfg, ckpt_path, config_path, output_dir, device, feature_protocol=N
 
     from libs.utils.parse_config import ConfigParser
 
-    if saved_config.get("rq3_auxiliary"):
-        # 推理时保留buffer/配置身份以strict加载；forward不使用教师或辅助损失。
-        cfg["rq3_auxiliary"] = deepcopy(saved_config["rq3_auxiliary"])
+    restore_auxiliary_config(cfg, saved_config)
     model_cfg = ConfigParser(cfg, save=False)
     from tools.rq3_gpu import guard_before_cuda
     guard_before_cuda()
