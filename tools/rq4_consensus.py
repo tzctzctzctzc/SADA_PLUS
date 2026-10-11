@@ -182,7 +182,8 @@ def launch_ready(spec,cache):
     desired=(cache['teacher'],cache['shift']); found=[]
     for ref in record['reports']:
         report=checked(ref)
-        if report.get('variant')!=VARIANT or report.get('formal_result') is not False:
+        if (report.get('variant')!=VARIANT or report.get('formal_result') is not False
+                or report.get('code_commit')!=record['code_commit']):
             raise ValueError('invalid consensus diagnostic identity')
         if (report.get('teacher'),report.get('shift'))!=desired: continue
         if (report.get('real_video_features') is not True or report.get('status')!='passed'
@@ -209,7 +210,8 @@ def freeze_acceptance(output,reports,expected_head):
     for ref in refs:
         report=checked(ref); key=(report.get('teacher'),report.get('shift'))
         if (key in seen or report.get('variant')!=VARIANT or report.get('status')!='passed'
-                or report.get('diagnostic_epoch')!=50 or report.get('formal_result') is not False):
+                or report.get('diagnostic_epoch')!=50 or report.get('formal_result') is not False
+                or report.get('code_commit')!=expected_head):
             raise ValueError('invalid or duplicate consensus acceptance')
         seen.add(key)
         spec=report['spec']; cache=load_cache(spec['cache_path'],spec['cache_file_sha256'])

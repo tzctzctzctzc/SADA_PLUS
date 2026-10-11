@@ -3,6 +3,7 @@ import math
 from pathlib import Path
 import runpy
 import sys
+import subprocess
 
 
 def main():
@@ -31,7 +32,10 @@ def main():
         spec=self.cfg['rq4_boundary']; cache=protocol.load_cache(spec['cache_path'],spec['cache_file_sha256'])
         binding={k:v for k,v in spec.items() if k not in (
             'acceptance_path','acceptance_file_sha256','protocol_frozen','config_path','config_sha256')}
-        save(report,dict(variant=VARIANT,status='passed',formal_result=False,real_video_features=True,
+        code_commit=subprocess.check_output(['git','-C',str(Path(script).resolve().parent),
+            'rev-parse','HEAD'],text=True).strip()
+        save(report,dict(variant=VARIANT,status='passed',code_commit=code_commit,
+            formal_result=False,real_video_features=True,
             teacher=cache['teacher'],shift=cache['shift'],seed=6,batch_size=2,diagnostic_epoch=50,
             specification_sha256=digest(binding),spec=spec,metrics=metrics))
         print('RQ4_CONSENSUS_REAL_ACCEPTANCE_PASS',flush=True)
