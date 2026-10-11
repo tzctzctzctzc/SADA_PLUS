@@ -316,7 +316,9 @@ def configure(cfg, path):
 
 def validate_config(cfg, regime):
     spec = cfg['rq4_boundary']
-    if (spec.get('schema') != 'rq4-boundary-training-v1' or spec.get('strategy') not in ('off', 'direct', 'gated', 'self')
+    if spec.get('variant') and spec.get('strategy') not in ('relational', 'proposal_relation'):
+        raise ValueError('new variant cannot masquerade as an original strategy')
+    if (spec.get('schema') != 'rq4-boundary-training-v1' or spec.get('strategy') not in ('off', 'direct', 'gated', 'self', 'relational', 'proposal_relation')
             or regime != 'uda' or cfg.get('seed') not in SUPPORTED_SEEDS
             or cfg.get('init_rand_seed', cfg.get('seed')) != cfg.get('seed')
             or cfg.get('rq3_auxiliary')
@@ -354,8 +356,11 @@ def validate_config(cfg, regime):
     if any(r['candidate']['video_id'] not in members or r['candidate']['class_id'] >= 10
            for r in cache['records']):
         raise ValueError('RQ4 cache target membership/class mismatch')
-    if (spec['strategy'] == 'self') != (cache['teacher'] == 'sada_self'):
+    if (spec['strategy'] in ('self', 'proposal_relation')) != (cache['teacher'] == 'sada_self'):
         raise ValueError('self-boundary control cannot use teacher boundaries')
+    if spec['strategy'] in ('relational', 'proposal_relation'):
+        from tools.rq4_relational import validate_spec
+        validate_spec(spec, cache)
     if spec['strategy'] == 'gated':
         if file_sha(spec['gate_path']) != spec['gate_file_sha256']:
             raise ValueError('gate artifact changed')
@@ -377,6 +382,10 @@ def assert_launch_ready(cfg):
         proof = json.loads(Path(spec['evidence_path']).read_text())
         if spec['weight'] != .1 or spec['early_stop_patience'] != 15:
             raise ValueError('formal RQ4 differs from frozen weight/stopping policy')
+        if spec['strategy'] in ('relational', 'proposal_relation'):
+            from tools.rq4_relational import audit_spec
+            audit_spec(spec, cache)
+            return
         gate = None
         if spec['strategy'] == 'gated':
             gate = json.loads(Path(spec['gate_path']).read_text())
@@ -402,7 +411,7 @@ def audit_baseline_pair(baseline, candidate):
         if b.get('sada_unified') != REUSABLE_BASELINE_POLICY or b.get('rq3_auxiliary'):
             raise ValueError('existing baseline is not the matched source-patience protocol')
         bs = dict(strategy='off', early_stop_patience=15)
-    if (bs['strategy'] != 'off' or cs['strategy'] not in ('direct', 'gated', 'self')
+    if (bs['strategy'] != 'off' or cs['strategy'] not in ('direct', 'gated', 'self', 'relational', 'proposal_relation')
             or bs['early_stop_patience'] != cs['early_stop_patience']
             or b['seed'] not in SUPPORTED_SEEDS or b['seed'] != c['seed']):
         raise ValueError('baseline seed/stopping budget/strategy mismatch')

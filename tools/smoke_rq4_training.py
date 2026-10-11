@@ -29,6 +29,9 @@ def main():
             raise ValueError('real target candidates were never observed')
         if self.cfg['rq4_boundary']['strategy'] == 'direct' and metrics['rq4_gradient_norm'] <= 0:
             raise ValueError('real Direct boundary gradient did not activate')
+        if self.cfg['rq4_boundary']['strategy'] in ('relational','proposal_relation'):
+            if metrics['rq4_accepted'] <= 0 or metrics['rq4_gradient_norm'] <= 0:
+                raise ValueError('relational interface acceptance needs real multi-point gradient')
         if metrics['rq4_loss'] > 0 and metrics['rq4_gradient_norm'] <= 0:
             raise ValueError('boundary loss detached')
         save(report,dict(status='passed',formal_result=False,real_video_features=True,

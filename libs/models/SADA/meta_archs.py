@@ -1515,8 +1515,12 @@ class SADA(nn.Module):
         self.rq3_verify_cache = None
         self.rq4_boundary = None
         if cfg.get('rq4_boundary', {}).get('strategy', 'off') != 'off':
-            from .rq4_boundary import RQ4Boundary
-            self.rq4_boundary = RQ4Boundary(cfg['rq4_boundary'])
+            if cfg['rq4_boundary']['strategy'] in ('relational', 'proposal_relation'):
+                from .rq4_relational import RQ4Relational
+                self.rq4_boundary = RQ4Relational(cfg['rq4_boundary'])
+            else:
+                from .rq4_boundary import RQ4Boundary
+                self.rq4_boundary = RQ4Boundary(cfg['rq4_boundary'])
         if cfg.get('rq3_auxiliary'):
             from tools.rq3_protocol import load_cache, proposal_evidence, REVISION
             rq3 = cfg['rq3_auxiliary']

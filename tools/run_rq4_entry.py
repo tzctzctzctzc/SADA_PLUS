@@ -23,7 +23,7 @@ def save(path, value):
         json.dump(value, stream, indent=2, allow_nan=False)
 
 
-def acceptance_ready(path, teacher, expected_head):
+def acceptance_ready(path, teacher, expected_head, strategy=None):
     record = read(path)
     if record.get('status') != 'passed' or record.get('code_commit') != expected_head:
         raise ValueError('acceptance code/status mismatch')
@@ -40,13 +40,24 @@ def acceptance_ready(path, teacher, expected_head):
                 or report['real_video_features'] is not True or report['batch_size'] != 2
                 or report['seed'] != 6 or spec['weight'] != 0.1):
             raise ValueError('invalid real-data acceptance report')
+        if strategy is not None:
+            from tools.rq4_relational import STRATEGIES, validate_spec
+            if strategy not in STRATEGIES or report['strategy'] != strategy:
+                continue
+            validate_spec(spec, cache)
+            metrics = report['metrics']
+            if (metrics['rq4_accepted'] <= 0 or metrics['rq4_gradient_norm'] <= 0
+                    or any(metrics['target_gt_'+k+'_loss'] != 0 for k in ('cls','reg','downstream'))):
+                raise ValueError('relational acceptance needs real routing/gradient and zero target GT')
         strategies.add(report['strategy'])
-    if strategies != {'direct','gated'}:
+    if strategy is not None and strategies != {strategy}:
+        raise ValueError('relational real-data acceptance is missing')
+    if strategy is None and strategies != {'direct','gated'}:
         raise ValueError('both strategies must pass real-data acceptance for this teacher')
     return record
 
 
-def supervision(path, stop_epoch):
+def supervision(path, stop_epoch, relational=False):
     rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     if [r['epoch'] for r in rows] != list(range(1, stop_epoch+1)):
         raise ValueError('incomplete epoch metric history')
@@ -67,6 +78,22 @@ def supervision(path, stop_epoch):
         raise ValueError('zero intervention produced a gradient')
     if sums['loss'] > 0 and sums['gradient_norm'] == 0:
         raise ValueError('positive auxiliary loss has no gradient')
+    if relational:
+        for key in ('core_rejected','multipoint_rejected','relation_points','relation_pairs'):
+            values = [r['t_rq4_'+key] for r in rows]
+            if any(not math.isfinite(v) or v < 0 for v in values):
+                raise ValueError('invalid relational metric: '+key)
+            sums[key] = sum(values)
+        for row in rows:
+            r = {k.removeprefix('t_rq4_'):v for k,v in row.items() if k.startswith('t_rq4_')}
+            if (r['relation_points'] < 2*r['accepted']-1e-6
+                    or r['relation_points'] > 3*r['accepted']+1e-6
+                    or not math.isclose(r['relation_pairs'], r['relation_points']-r['accepted'],abs_tol=1e-6)
+                    or not math.isclose(r['routable'], sum(r[k] for k in (
+                        'accepted','gate_rejected','core_rejected','multipoint_rejected')),abs_tol=1e-6)):
+                raise ValueError('invalid relational multi-point routing counts')
+            if not math.isclose(r['loss'], .1*r['raw_loss'], rel_tol=1e-5,abs_tol=1e-8):
+                raise ValueError('relational loss weight differs')
     return dict(epoch_mean_sums=sums, intervened=sums['accepted'] > 0,
         effective_gradient=sums['gradient_norm'] > 0,
         zero_coverage_is_reported_not_filtered=True)
@@ -95,7 +122,8 @@ def training_audit(run_root, cfg, baseline):
     selected_checkpoint_state(chosen, saved, require_provenance=True)
     if chosen['epoch'] != stop['rq4_termination']['decision']['best_epoch']:
         raise ValueError('best checkpoint differs from source stopping history')
-    report = supervision(configs[0].parent/'benchmark_epoch_metrics.jsonl', stop['epoch'])
+    report = supervision(configs[0].parent/'benchmark_epoch_metrics.jsonl', stop['epoch'],
+                         cfg['rq4_boundary']['strategy'] in ('relational','proposal_relation'))
     return configs[0], best[0], latest[0], stop['rq4_termination'], report
 
 
@@ -104,8 +132,30 @@ def audit_complete(root):
     root = Path(root)
     record = read(root/'complete.json')
     cfg, baseline = read(root/'preflight.json'), read(record['baseline_config'])
+    spec = cfg['rq4_boundary']
+    if spec['strategy'] in ('relational','proposal_relation'):
+        from tools.rq4_relational import VARIANT
+        cache = load_cache(spec['cache_path'],spec['cache_file_sha256'])
+        if (record.get('schema') != 'rq4-relational-complete-v1' or record.get('variant') != VARIANT
+                or record['strategy'] != spec['strategy'] or record['teacher'] != cache['teacher']
+                or record['shift'] != cache['shift'] or record['seed'] != 6 or record['batch_size'] != 2):
+            raise ValueError('relational completion identity mismatch')
+        reference = read(root/'acceptance_reference.json')
+        if file_sha(reference['path']) != reference['sha256']:
+            raise ValueError('relational acceptance changed')
+        acceptance_ready(reference['path'],cache['teacher'],record['code_commit'],spec['strategy'])
+        required = [root/'preflight.json',root/'spec.json',root/'acceptance_reference.json',
+                    root/'baseline_pair.json',root/'supervision_audit.json',Path(record['baseline_config'])]
+        required += [Path(spec[k+'_path']) for k in ('cache','regions','evidence')]
+        required += [root/'evaluation'/name for name in ('manifest.json','source_val.json','target_val.json')]
+        if not {str(x) for x in required} <= set(record['artifacts']):
+            raise ValueError('relational completion lacks required artifact hashes')
     assert_launch_ready(cfg)
     config, best, latest, termination, report = training_audit(Path(record['run_root']), cfg, baseline)
+    if spec['strategy'] in ('relational','proposal_relation'):
+        required = [config,best,latest,config.parent/'benchmark_epoch_metrics.jsonl']
+        if not {str(x) for x in required} <= set(record['artifacts']):
+            raise ValueError('relational completion lacks checkpoint/history hashes')
     manifest = checked_evaluation(root/'evaluation', cfg, best)
     if manifest.get('rq4_boundary') != cfg['rq4_boundary']:
         raise ValueError('evaluation lacks RQ4 provenance')
@@ -117,7 +167,7 @@ def audit_complete(root):
     return record
 
 
-def main():
+def main(*, relational=False):
     from tools.run_rq2_matched_control import check_code, check_new_protocol, checked_evaluation, run_command
     from tools.rq3_gpu import gpu_slot
     parser = argparse.ArgumentParser(description=__doc__)
@@ -141,7 +191,9 @@ def main():
     spec['baseline_config_sha256'] = file_sha(args.baseline_config)
     cache = load_cache(spec['cache_path'], spec['cache_file_sha256'])
     shift,teacher = cache['shift'],cache['teacher']
-    if teacher not in ('timelens2_8b','timeple_8b') or spec['strategy'] not in ('direct','gated'):
+    allowed_teachers = ('timelens2_8b','timeple_8b','sada_self') if relational else ('timelens2_8b','timeple_8b')
+    allowed_strategies = ('relational','proposal_relation') if relational else ('direct','gated')
+    if teacher not in allowed_teachers or spec['strategy'] not in allowed_strategies:
         raise ValueError('entry outside authorized matrix')
     save(root/'spec.json',spec)
     # 原始YAML通过冻结注册表；真正的展开配置随后与已完成基线逐字段配对。
@@ -181,7 +233,7 @@ def main():
     acceptance = os.environ.get('RQ4_REAL_ACCEPTANCE')
     if not acceptance:
         raise ValueError('real-data acceptance evidence required before formal training')
-    acceptance_ready(acceptance, teacher, args.expected_head)
+    acceptance_ready(acceptance, teacher, args.expected_head, spec['strategy'] if relational else None)
     save(root/'acceptance_reference.json',dict(path=acceptance,sha256=file_sha(acceptance)))
     with gpu_slot(args.gpu,wait=True) as training_gpu:
         check_code(args.expected_head)
@@ -202,11 +254,17 @@ def main():
         root/'evaluation/source_val.json',root/'evaluation/target_val.json',Path(spec['cache_path']),
         Path(spec['evidence_path']),Path(args.baseline_config),root/'spec.json',root/'supervision_audit.json']
     if spec['strategy'] == 'gated': artifacts.append(Path(spec['gate_path']))
-    save(root/'complete.json',dict(schema='rq4-complete-v1',teacher=teacher,strategy=spec['strategy'],
+    if relational:
+        artifacts += [Path(spec['regions_path']),config_path.parent/'benchmark_epoch_metrics.jsonl',
+                      root/'acceptance_reference.json',root/'baseline_pair.json']
+    record = dict(schema='rq4-relational-complete-v1' if relational else 'rq4-complete-v1',
+        teacher=teacher,strategy=spec['strategy'],
         shift=shift,seed=6,batch_size=2,code_commit=args.expected_head,termination=termination,
         baseline_config=str(Path(args.baseline_config).resolve()),run_root=str(run_root),
         training_gpu=training_gpu,evaluation_gpu=evaluation_gpu,
-        artifacts={str(path):file_sha(path) for path in artifacts}))
+        artifacts={str(path):file_sha(path) for path in artifacts})
+    if relational: record['variant'] = spec['variant']
+    save(root/'complete.json',record)
     audit_complete(root)
     print('RQ4_ENTRY_COMPLETE',teacher,spec['strategy'],shift,flush=True)
 
