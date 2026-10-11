@@ -12,6 +12,16 @@ def candidate():
                 window=[8.,20.],class_id=0,anchor_sec=14.,fpn_level=0)
 
 
+def test_physical_gpu3_mapping_for_both_native_runtimes():
+    from tools.run_rq4_teacher_queries import teacher_environment
+    card=dict(index=3,uuid='GPU-test3')
+    assert POLICY['gpu']==3
+    a=teacher_environment(card,'timelens2_8b');b=teacher_environment(card,'timeple_8b')
+    assert a['CUDA_VISIBLE_DEVICES']=='GPU-test3' and b['CUDA_VISIBLE_DEVICES']=='3'
+    assert a['RQ3_GPU_INDEX']==b['RQ3_GPU_INDEX']=='3'
+    with pytest.raises(ValueError):teacher_environment(dict(index=0,uuid='GPU-test0'),'timelens2_8b')
+
+
 def test_fixed_tasks_and_local_time():
     generated=tasks(candidate(),'taking an object')
     assert len(generated)==7 and len({r['task_id'] for r in generated})==7

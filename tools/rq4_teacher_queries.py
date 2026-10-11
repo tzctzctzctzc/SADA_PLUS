@@ -6,7 +6,7 @@ from tools.rq4_protocol import digest, interval_iou
 
 POLICY = dict(seed=6,shift='S1',per_video=2,fps=8.,max_frames=200,max_new_tokens=64,
               point_offsets=[-.25,.5,1.25],perturbation=.25,tolerance_fraction=.1,
-              tolerance_floor_seconds=.125,ranking_tie_iou=.02,gpu=0)
+              tolerance_floor_seconds=.125,ranking_tie_iou=.02,gpu=3)
 OPTIONS = dict(state=['BEFORE','DURING','AFTER','ABSENT','UNCERTAIN'],
                direction=['EARLIER','LATER','KEEP','ABSENT','UNCERTAIN'],
                ranking=['A','B','TIE','ABSENT','UNCERTAIN'])

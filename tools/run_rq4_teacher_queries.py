@@ -43,6 +43,35 @@ def frame_times(path):
         '-show_entries','frame=best_effort_timestamp_time','-of','csv=p=0',str(path)],text=True).splitlines()
 
 
+def reuse_prepared(args):
+    """换卡仅重新绑定代码/设备身份，原问题、视频和评分文件逐字节复用。"""
+    import shutil
+    clean_head(args.expected_head)
+    old=args.prepared_root.resolve();root=args.root.resolve()
+    proof=read(old/'preflight.json');manifest=read(old/'requests.json')
+    assert proof['status']=='passed' and file_sha(old/'requests.json')==proof['request_sha256']
+    assert file_sha(old/'scoring_only.json')==proof['scoring_sha256']
+    assert {k:v for k,v in manifest['policy'].items() if k!='gpu'}=={k:v for k,v in POLICY.items() if k!='gpu'}
+    assert proof['code_files']==manifest['code_files']
+    for r in manifest['requests']:assert file_sha(r['clip_path'])==r['clip_sha256']
+    root.mkdir(parents=True,exist_ok=False)
+    previous=dict(path=str(old),preflight_sha256=file_sha(old/'preflight.json'),requests_sha256=file_sha(old/'requests.json'))
+    manifest.update(policy=POLICY,code_files=code_files())
+    save(root/'requests.json',manifest)
+    shutil.copyfile(old/'scoring_only.json',root/'scoring_only.json')
+    proof.update(code_commit=args.expected_head,code_files=code_files(),policy=POLICY,
+        request_sha256=file_sha(root/'requests.json'),reused_preparation=previous)
+    save(root/'preflight.json',proof)
+    assert read(root/'requests.json')['requests']==read(old/'requests.json')['requests']
+    print('EXACT_PREPARED_REUSE_PASS',len(manifest['requests']),flush=True)
+
+
+def teacher_environment(card,teacher_name):
+    if card['index']!=POLICY['gpu']:raise ValueError('unexpected physical GPU')
+    return dict(CUDA_VISIBLE_DEVICES=str(card['index']) if teacher_name=='timeple_8b' else card['uuid'],
+        RQ3_GPU_INDEX=str(card['index']),RQ3_GPU_UUID=card['uuid'],TOKENIZERS_PARALLELISM='false')
+
+
 def prepare(args):
     from tools.run_clip_target_adapter import ACTION_PHRASES
     clean_head(args.expected_head)
@@ -145,9 +174,8 @@ def teacher(args):
     responses=[]
     def stopped(*_):raise RuntimeError('user stopped diagnostic; preserve outputs')
     signal.signal(signal.SIGTERM,stopped);signal.signal(signal.SIGINT,stopped)
-    with gpu_slot('0',BASE/'SADA_PLUS',wait=True) as card:
-        visible='0' if args.teacher=='timeple_8b' else card['uuid']
-        os.environ.update(CUDA_VISIBLE_DEVICES=visible,RQ3_GPU_INDEX='0',RQ3_GPU_UUID=card['uuid'],TOKENIZERS_PARALLELISM='false')
+    with gpu_slot(str(POLICY['gpu']),BASE/'SADA_PLUS',wait=True) as card:
+        os.environ.update(teacher_environment(card,args.teacher))
         if args.teacher=='timelens2_8b':
             import torch
             from transformers import AutoModelForImageTextToText,AutoProcessor
@@ -243,10 +271,11 @@ def run(args):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode',choices=['prepare','run','teacher']);p.add_argument('--root',type=Path,required=True)
+    p.add_argument('mode',choices=['prepare','reuse-prepared','run','teacher']);p.add_argument('--root',type=Path,required=True)
     p.add_argument('--expected-head',required=True);p.add_argument('--probe-root',type=Path)
+    p.add_argument('--prepared-root',type=Path)
     p.add_argument('--teacher',choices=list(MODELS));args=p.parse_args();args.root=args.root.resolve()
-    {'prepare':prepare,'run':run,'teacher':teacher}[args.mode](args)
+    {'prepare':prepare,'reuse-prepared':reuse_prepared,'run':run,'teacher':teacher}[args.mode](args)
 
 
 if __name__=='__main__':main()
