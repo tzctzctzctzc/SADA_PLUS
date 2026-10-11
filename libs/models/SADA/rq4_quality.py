@@ -75,16 +75,57 @@ def fit_quality(x, y, *, epochs, learning_rate, seed=6):
 
 
 def calibrate(prediction, truth, video_ids, *, quantile):
-    """逐视频最坏残差的源验证分位数；不是目标域coverage保证。"""
+    """固定预测质量组内的视频等权残差分位数；不宣称目标域coverage保证。"""
     if not 0 < quantile < 1: raise ValueError('calibration quantile must be explicit in (0,1)')
+    prediction,truth=prediction.detach().cpu(),truth.detach().cpu()
+    if prediction.shape!=truth.shape or prediction.shape!=(len(video_ids),3):
+        raise ValueError('calibration rows differ')
+    if not torch.isfinite(prediction).all() or not torch.isfinite(truth).all():
+        raise ValueError('nonfinite calibration inputs')
     residual=torch.cat(((prediction[:,:1]-truth[:,:1]).clamp_min(0),
                          (truth[:,1:]-prediction[:,1:]).clamp_min(0)),1)
-    grouped=[]
-    for video in sorted(set(video_ids)):
-        indices=torch.tensor([i for i,v in enumerate(video_ids) if v==video])
-        grouped.append(residual[indices].amax(0))
-    if len(grouped)<2: raise ValueError('source calibration needs at least two independent videos')
-    margin=torch.quantile(torch.stack(grouped),quantile,dim=0,interpolation='higher')
-    return dict(quantile=quantile,quality_margin=float(margin[0]),
-        error_margin=margin[1:].tolist(),calibration_videos=len(grouped),
-        target_coverage_guaranteed=False)
+    if len(set(video_ids))<2: raise ValueError('source calibration needs at least two independent videos')
+    edges=[0.,.2,.4,.6,.8,1.]
+    group_ids=torch.bucketize(prediction[:,0],prediction.new_tensor(edges[1:-1]),right=True)
+    groups=[]
+    for group in range(len(edges)-1):
+        ids=torch.where(group_ids==group)[0]
+        videos=sorted({video_ids[i] for i in ids.tolist()})
+        record=dict(lower=edges[group],upper=edges[group+1],rows=len(ids),
+                    videos=len(videos),supported=len(videos)>=2)
+        if record['supported']:
+            # 每视频总质量相同；一个视频重复所有行不改变分位数。
+            counts={v:sum(video_ids[i]==v for i in ids.tolist()) for v in videos}
+            weights=torch.tensor([1./counts[video_ids[i]] for i in ids.tolist()],dtype=torch.float64)
+            margins=[]
+            for column in range(3):
+                order=residual[ids,column].argsort(stable=True)
+                cumulative=weights[order].cumsum(0)
+                index=torch.searchsorted(cumulative,cumulative[-1]*quantile).clamp_max(len(ids)-1)
+                margins.append(float(residual[ids[order[index]],column]))
+            record.update(quality_margin=margins[0],error_margin=margins[1:])
+        groups.append(record)
+    return dict(schema='source-quality-binned-video-balanced-v1',quantile=quantile,
+        bin_edges=edges,groups=groups,calibration_videos=len(set(video_ids)),
+        unsupported_policy='abstain',target_coverage_guaranteed=False)
+
+
+def calibrated_bounds(prediction, calibration):
+    """诊断与学生共用：质量下界、预测盒时长单位的半径、校准组可用性。"""
+    if calibration.get('schema') is None:  # 旧草稿/测试工件兼容，不改旧训练结果。
+        lower=(prediction[:,0]-calibration['quality_margin']).clamp(0,1)
+        radius=prediction[:,1:]+prediction.new_tensor(calibration['error_margin'])
+        return lower,radius,torch.ones_like(lower,dtype=torch.bool)
+    if calibration['schema']!='source-quality-binned-video-balanced-v1':
+        raise ValueError('unknown quality calibration schema')
+    ids=torch.bucketize(prediction[:,0].contiguous(),
+                       prediction.new_tensor(calibration['bin_edges'][1:-1]),right=True)
+    lower=torch.zeros_like(prediction[:,0]);radius=torch.zeros_like(prediction[:,1:])
+    supported=torch.zeros_like(lower,dtype=torch.bool)
+    for group,row in enumerate(calibration['groups']):
+        if not row['supported']: continue
+        take=ids==group
+        lower[take]=(prediction[take,0]-row['quality_margin']).clamp(0,1)
+        radius[take]=prediction[take,1:]+prediction.new_tensor(row['error_margin'])
+        supported[take]=True
+    return lower,radius,supported

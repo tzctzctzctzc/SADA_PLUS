@@ -3,7 +3,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from .rq4_boundary import feature_span
-from .rq4_quality import LocalizationQuality, descriptor
+from .rq4_quality import LocalizationQuality, descriptor, calibrated_bounds
 from tools.rq4_protocol import load_cache
 from tools.rq4_consensus import validate_spec, load_quality, paired_iou
 
@@ -125,10 +125,9 @@ class RQ4Consensus(nn.Module):
                         quality=self.quality(x)
                         if not torch.isfinite(ema_boxes).all() or not torch.isfinite(quality).all():
                             raise ValueError('nonfinite EMA/quality output is a technical error, not abstention')
-                        q=(quality[:,0]-self.calibration['quality_margin']).clamp(0,1)
-                        radii=(quality[:,1:]+quality.new_tensor(self.calibration['error_margin']))
+                        q,radii,supported=calibrated_bounds(quality,self.calibration)
                         radii=radii*(ema_boxes[:,1]-ema_boxes[:,0]).clamp_min(1e-6)[:,None]
-                        trusted=(q>=self.spec['minimum_quality']) & (ema_boxes[:,1]>ema_boxes[:,0])
+                        trusted=supported & (q>=self.spec['minimum_quality']) & (ema_boxes[:,1]>ema_boxes[:,0])
                         trusted &= (radii.amax(1)/duration <= self.spec['maximum_uncertainty'])
                         confidence=q*support*paired_iou(pair)
                         trusted &= confidence>0

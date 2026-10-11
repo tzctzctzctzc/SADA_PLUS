@@ -284,6 +284,40 @@ def test_source_quality_fit_and_calibration_dont_touch_global_rng():
     assert cal['target_coverage_guaranteed'] is False and cal['calibration_videos']==2
 
 
+def test_grouped_calibration_does_not_spread_bad_low_quality_residuals():
+    pred=torch.tensor([[.1,.1,.1],[.1,.1,.1],[.9,.05,.05],[.9,.05,.05]])
+    truth=torch.tensor([[0.,2.,2.],[0.,2.,2.],[.85,.1,.1],[.85,.1,.1]])
+    cal=Q.calibrate(pred,truth,['a','b','a','b'],quantile=.9)
+    lower,radius,supported=Q.calibrated_bounds(pred,cal)
+    assert supported.all() and lower[2]>.8 and radius[2].max()<.11
+    assert radius[0].min()>1.9
+
+
+def test_calibration_video_equal_weight_is_invariant_to_duplication():
+    pred=torch.tensor([[.7,.1,.1],[.7,.1,.1],[.7,.1,.1]])
+    truth=torch.tensor([[.69,.1,.1],[.1,1.,1.],[.6,.2,.2]])
+    cal=Q.calibrate(pred,truth,['a','a','b'],quantile=.6)
+    indices=[0,1]*20+[2]
+    again=Q.calibrate(pred[indices],truth[indices],['a']*40+['b'],quantile=.6)
+    assert cal['groups'][3]['quality_margin']==again['groups'][3]['quality_margin']
+    assert cal['groups'][3]['error_margin']==again['groups'][3]['error_margin']
+
+
+def test_sparse_calibration_groups_abstain_and_boundary_is_shared():
+    pred=torch.tensor([[.2,.1,.1],[.2,.1,.1],[.8,.1,.1]])
+    cal=Q.calibrate(pred,pred,['a','b','a'],quantile=.9)
+    assert cal['groups'][1]['supported'] and not cal['groups'][4]['supported']
+    lower,radius,supported=Q.calibrated_bounds(torch.tensor([[.2,.1,.1],[.8,.1,.1],[1.,.1,.1]]),cal)
+    assert supported.tolist()==[True,False,False]
+    assert lower[1:].sum()==0 and radius[1:].sum()==0
+
+
+def test_group_assignment_uses_prediction_not_true_quality():
+    pred=torch.tensor([[.4,.1,.1],[.4,.1,.1]])
+    cal=Q.calibrate(pred,torch.tensor([[.99,0.,0.],[.01,1.,1.]]),['a','b'],quantile=.9)
+    assert [g['rows'] for g in cal['groups']]==[0,0,2,0,0]
+
+
 def test_source_quality_targets_have_localization_meaning():
     boxes=torch.tensor([[1.,5.],[0.,8.],[10.,12.]])
     y=Q.source_targets(boxes,torch.tensor([[1.,5.]]))

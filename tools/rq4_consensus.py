@@ -41,9 +41,22 @@ def validate_quality(bundle, *, shift, target_ids):
     if not train or len(val)<2 or train&val or (train|val)&set(target_ids):
         raise ValueError('source train/calibration/target video leakage')
     margin=bundle['calibration']
-    values=[margin['quality_margin'],*margin['error_margin']]
-    if len(values)!=3 or any(not math.isfinite(v) or v<0 for v in values):
-        raise ValueError('invalid source uncertainty calibration')
+    if margin.get('schema') is None:
+        records=[margin]
+    else:
+        if (margin.get('schema')!='source-quality-binned-video-balanced-v1'
+                or margin.get('bin_edges')!=[0.,.2,.4,.6,.8,1.]
+                or margin.get('unsupported_policy')!='abstain' or len(margin['groups'])!=5):
+            raise ValueError('invalid grouped source calibration')
+        records=[row for row in margin['groups'] if row['supported']]
+        for i,row in enumerate(margin['groups']):
+            if (row['lower']!=margin['bin_edges'][i] or row['upper']!=margin['bin_edges'][i+1]
+                    or row['supported']!=(row['videos']>=2) or row['rows']<row['videos']):
+                raise ValueError('invalid grouped source support')
+    for record in records:
+        values=[record['quality_margin'],*record['error_margin']]
+        if len(values)!=3 or any(not math.isfinite(v) or v<0 for v in values):
+            raise ValueError('invalid source uncertainty calibration')
     if margin['target_coverage_guaranteed'] is not False:
         raise ValueError('source calibration is not a target reliability guarantee')
     table=checked(bundle['source_table'])
@@ -83,7 +96,7 @@ def audit_source_table(table):
 def source_policy_summary(bundle,*,minimum_quality,maximum_uncertainty,anchor_fraction):
     """源验证上的阈值诊断，不搜索target收益，也不宣称这是最优分支权重。"""
     import torch
-    from libs.models.SADA.rq4_quality import LocalizationQuality
+    from libs.models.SADA.rq4_quality import LocalizationQuality,calibrated_bounds,calibrate
     table=checked(bundle['source_table']); audit_source_table(table)
     with torch.random.fork_rng(devices=[]): model=LocalizationQuality()
     model.load_state_dict(load_quality(bundle),strict=True); model.eval().requires_grad_(False)
@@ -91,9 +104,11 @@ def source_policy_summary(bundle,*,minimum_quality,maximum_uncertainty,anchor_fr
     y=torch.tensor([r['y'] for r in table['validation']],dtype=torch.float32)
     with torch.no_grad(): prediction=model(x)
     calibration=bundle['calibration']
-    lower=(prediction[:,0]-calibration['quality_margin']).clamp(0,1)
-    radius=prediction[:,1:]+prediction.new_tensor(calibration['error_margin'])
-    eligible=(lower>=minimum_quality)&(radius.amax(1)<=maximum_uncertainty)
+    if calibration.get('schema') and calibrate(prediction,y,
+            [r['video_id'] for r in table['validation']],quantile=calibration['quantile'])!=calibration:
+        raise ValueError('source residual calibration cannot be reproduced')
+    lower,radius,supported=calibrated_bounds(prediction,calibration)
+    eligible=supported&(lower>=minimum_quality)&(radius.amax(1)<=maximum_uncertainty)
     return dict(schema='rq4-consensus-source-policy-diagnostic-v1',target_gt_used=False,
         quality_payload_sha256=bundle['payload_sha256'],source_table=bundle['source_table'],
         parameters=dict(minimum_quality=minimum_quality,maximum_uncertainty=maximum_uncertainty,
@@ -101,7 +116,9 @@ def source_policy_summary(bundle,*,minimum_quality,maximum_uncertainty,anchor_fr
         parameter_selection='explicit-settings-not-target-optimized',
         source_rows=len(x),accepted=int(eligible.sum()),coverage=float(eligible.float().mean()),
         mean_iou=float(y[:,0].mean()),accepted_mean_iou=float(y[eligible,0].mean()) if eligible.any() else None,
-        endpoint_band_coverage=((y[:,1:]<=radius).float().mean(0)).tolist(),
+        calibration_supported=int(supported.sum()),
+        endpoint_band_coverage=((y[supported,1:]<=radius[supported]).float().mean(0)).tolist()
+            if supported.any() else None,
         scope='individual frozen-detector source boxes; not target crop intervention or student gain')
 
 
