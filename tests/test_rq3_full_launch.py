@@ -132,3 +132,41 @@ def test_entry_audit_only_is_not_an_execute_flag_and_gpu_scope_is_fixed():
     assert "choices=('0', '1')" in text
     assert "if args.audit_only:" in text
     assert "audit_launch_reference(root, cfg, args.expected_head)" in text
+
+
+def test_matrix_resolves_cli_paths_before_using_data_cwd(tmp_path, monkeypatch):
+    """从独立代码目录启动时，真实前序审计仍按原数据目录读冻结相对路径。"""
+    import builtins
+    import sys
+    from tools import run_rq3_full_matrix as matrix
+
+    caller, data = tmp_path/'caller', tmp_path/'data_repo'
+    caller.mkdir(); data.mkdir()
+    annotation = data/'data/annotations.json'
+    write(annotation, {'data': 'original'})
+    references = {s: str(caller/(s+'.json')) for s in launch.SHIFTS}
+    write(caller/'refs.json', references)
+    write(caller/'rq4/final_audit.json', {'status': 'passed'})
+    monkeypatch.chdir(caller)
+    monkeypatch.setattr(matrix, 'check_code', lambda _: None)
+    real_open = builtins.open
+    monkeypatch.setattr(matrix, 'open', lambda p, *a, **k: real_open(
+        tmp_path/'matrix.lock' if str(p).endswith('.rq3_qwen100_matrix.lock') else p, *a, **k),
+        raising=False)
+    monkeypatch.setattr(matrix.signal, 'signal', lambda *args: None)
+    monkeypatch.setattr(sys, 'argv', ['matrix', '--output', 'out', '--references', 'refs.json',
+        '--rq4-root', 'rq4', '--expected-head', 'new', '--rq4-head', 'old',
+        '--data-root', str(data)])
+
+    def checked_audit(final_path, rq4_head, actual_refs, expected_head):
+        assert Path.cwd() == data
+        assert launch.read('data/annotations.json') == {'data': 'original'}
+        assert final_path == caller/'rq4/final_audit.json'
+        assert actual_refs == references
+        raise RuntimeError('stop after verified CPU audit cwd')
+
+    monkeypatch.setattr(matrix, 'create_launch_proof', checked_audit)
+    with pytest.raises(RuntimeError, match='verified CPU audit cwd'):
+        matrix.main()
+    assert launch.read(caller/'out/state.json')['active'] == {}
+    assert not (data/'out').exists()

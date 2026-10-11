@@ -36,8 +36,14 @@ def main():
         parser.add_argument('--'+key, type=Path, required=True)
     parser.add_argument('--expected-head', required=True)
     parser.add_argument('--rq4-head', required=True)
+    parser.add_argument('--data-root', type=Path, default=Path('/vepfs/vlms/SADA_PLUS'))
     args = parser.parse_args()
     check_code(args.expected_head)
+    # 保存工件路径仍相对调用目录；冻结配置中的data/...相对原数据仓库。
+    # 前序基线审计与每项完成审计均需同一数据cwd，不能只在学生子进程切换。
+    for key in ('output', 'references', 'rq4_root', 'data_root'):
+        setattr(args, key, getattr(args, key).resolve())
+    os.chdir(args.data_root)
     references = read(args.references)
     if set(references) != set(SHIFTS):
         raise ValueError('exact six references required')
@@ -114,6 +120,7 @@ def main():
                 command = [sys.executable, '-B', '-m', 'tools.run_rq3_full_entry',
                            '--reference', references[shift], '--output', str(output),
                            '--expected-head', args.expected_head, '--gpu', gpu,
+                           '--data-root', str(args.data_root),
                            '--launch-proof', str(proof_path)]
                 command += ['--smoke-only'] if phase == 'acceptance' else ['--acceptance', str(acceptance_path)]
                 stream = (output.parent/(shift+'.log')).open('x')
