@@ -316,9 +316,9 @@ def configure(cfg, path):
 
 def validate_config(cfg, regime):
     spec = cfg['rq4_boundary']
-    if spec.get('variant') and spec.get('strategy') not in ('relational', 'proposal_relation'):
+    if spec.get('variant') and spec.get('strategy') not in ('relational', 'proposal_relation', 'consensus'):
         raise ValueError('new variant cannot masquerade as an original strategy')
-    if (spec.get('schema') != 'rq4-boundary-training-v1' or spec.get('strategy') not in ('off', 'direct', 'gated', 'self', 'relational', 'proposal_relation')
+    if (spec.get('schema') != 'rq4-boundary-training-v1' or spec.get('strategy') not in ('off', 'direct', 'gated', 'self', 'relational', 'proposal_relation', 'consensus')
             or regime != 'uda' or cfg.get('seed') not in SUPPORTED_SEEDS
             or cfg.get('init_rand_seed', cfg.get('seed')) != cfg.get('seed')
             or cfg.get('rq3_auxiliary')
@@ -361,6 +361,17 @@ def validate_config(cfg, regime):
     if spec['strategy'] in ('relational', 'proposal_relation'):
         from tools.rq4_relational import validate_spec
         validate_spec(spec, cache)
+    if spec['strategy'] == 'consensus':
+        from tools.rq4_consensus import validate_spec
+        _,quality=validate_spec(spec,cache)
+        if (cfg['seed']!=6 or not cfg['train_cfg'].get('ema_active')
+                or quality['source_table']['path'] == ''):
+            raise ValueError('consensus requires seed6 and active frozen EMA')
+        if spec.get('baseline_config_sha256') and quality['source_table']:
+            from tools.rq4_consensus import read
+            table=read(quality['source_table']['path'])
+            if table['baseline_config']['sha256']!=spec['baseline_config_sha256']:
+                raise ValueError('quality head fitted against a different baseline')
     if spec['strategy'] == 'gated':
         if file_sha(spec['gate_path']) != spec['gate_file_sha256']:
             raise ValueError('gate artifact changed')
@@ -374,6 +385,10 @@ def assert_launch_ready(cfg):
         raise ValueError('RQ4 interface draft: freeze parameters and GPU acceptance before formal training')
     if spec and spec.get('strategy') != 'off':
         cache = load_cache(spec['cache_path'], spec['cache_file_sha256'])
+        if spec['strategy'] == 'consensus':
+            from tools.rq4_consensus import launch_ready
+            launch_ready(spec,cache)
+            return
         if 'budget' not in cache:
             raise ValueError('formal RQ4 requires a recomputable fixed shift budget')
         from tools.rq4_artifacts import audit_evidence
@@ -411,7 +426,7 @@ def audit_baseline_pair(baseline, candidate):
         if b.get('sada_unified') != REUSABLE_BASELINE_POLICY or b.get('rq3_auxiliary'):
             raise ValueError('existing baseline is not the matched source-patience protocol')
         bs = dict(strategy='off', early_stop_patience=15)
-    if (bs['strategy'] != 'off' or cs['strategy'] not in ('direct', 'gated', 'self', 'relational', 'proposal_relation')
+    if (bs['strategy'] != 'off' or cs['strategy'] not in ('direct', 'gated', 'self', 'relational', 'proposal_relation', 'consensus')
             or bs['early_stop_patience'] != cs['early_stop_patience']
             or b['seed'] not in SUPPORTED_SEEDS or b['seed'] != c['seed']):
         raise ValueError('baseline seed/stopping budget/strategy mismatch')

@@ -1515,7 +1515,10 @@ class SADA(nn.Module):
         self.rq3_verify_cache = None
         self.rq4_boundary = None
         if cfg.get('rq4_boundary', {}).get('strategy', 'off') != 'off':
-            if cfg['rq4_boundary']['strategy'] in ('relational', 'proposal_relation'):
+            if cfg['rq4_boundary']['strategy'] == 'consensus':
+                from .rq4_consensus import RQ4Consensus
+                self.rq4_boundary = RQ4Consensus(cfg['rq4_boundary'])
+            elif cfg['rq4_boundary']['strategy'] in ('relational', 'proposal_relation'):
                 from .rq4_relational import RQ4Relational
                 self.rq4_boundary = RQ4Relational(cfg['rq4_boundary'])
             else:
@@ -2165,6 +2168,18 @@ class SADA(nn.Module):
             self.proposal_semantic_nms_threshold,
         )
 
+    @torch.no_grad()
+    def build_rq4_consensus_teacher(self, videos):
+        """同crop、同原始FPN的EMA定位输出；不分类筛选，不NMS，不读取标签。"""
+        if self.training or self.use_trident_head:
+            raise ValueError('consensus teacher requires eval-mode direct-offset EMA')
+        inputs,masks=self.preprocessing(videos,mode='validation')
+        feats,backbone_masks,_=self.backbone_target(inputs,masks)
+        fpn,fpn_masks=self.neck_target(feats,backbone_masks)
+        offsets,_=self.reg_head_target(fpn,fpn_masks)
+        return dict(points=self.point_generator(fpn),masks=fpn_masks,
+                    offsets=[x.permute(0,2,1).detach() for x in offsets])
+
     @staticmethod
     def _merge_proposals(primary, extra):
         keys = (
@@ -2647,6 +2662,7 @@ class SADA(nn.Module):
         mean_class_conf=None,
         vlm_routes=None,
         proposal_teacher=None,
+        rq4_consensus_teacher=None,
     ):
         
         # Note: The domain is by default src, which indicates in the case of training that we care about applying supervision on the source domain (upper part of the architecture)
@@ -3235,9 +3251,15 @@ class SADA(nn.Module):
                 )
             
             if mode == 'train' and self.rq4_boundary is not None:
+                extra = ({'teacher':rq4_consensus_teacher}
+                         if self.cfg['rq4_boundary']['strategy']=='consensus' else {})
                 rq4_output = self.rq4_boundary(
                     video_list_tgt, points, fpn_masks_tgt,
-                    [value[bs:] for value in out_offsets], curr_epoch >= self.warmup_adv)
+                    [value[bs:] for value in out_offsets], curr_epoch >= self.warmup_adv, **extra)
+                if extra and torch.is_grad_enabled():
+                    from .rq4_consensus import gradient_diagnostics
+                    rq4_output.update(gradient_diagnostics(losses['downstream_loss'],
+                        rq4_output['loss'],self.reg_head_target.parameters()))
                 for key, value in rq4_output.items():
                     losses['rq4_' + key] = torch.as_tensor(value, device=self.device).detach()
                 losses['downstream_loss'] = losses['downstream_loss'] + rq4_output['loss']

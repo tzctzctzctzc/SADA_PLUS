@@ -435,6 +435,13 @@ class Trainer(BaseTrainerDA):
                         video_list_tgt
                     )
                 )
+            rq4_consensus_teacher = None
+            if (self.cfg.get('rq4_boundary',{}).get('strategy') == 'consensus'
+                    and curr_epoch >= self.model.warmup_adv):
+                if self.model_ema is None:
+                    raise ValueError('RQ4 consensus requires EMA')
+                self.model_ema.module.eval()
+                rq4_consensus_teacher = self.model_ema.module.build_rq4_consensus_teacher(video_list_tgt)
             losses, _, _, _, _, _, _ = self.model(video_list_src = video_list_src,
                                 video_list_tgt = video_list_tgt,
                                 mode='train',
@@ -447,7 +454,8 @@ class Trainer(BaseTrainerDA):
                                 cls_static_anchors=cls_static_anchors,
                                 mean_class_conf=mean_class_conf,
                                 vlm_routes=vlm_routes,
-                                proposal_teacher=proposal_teacher)
+                                proposal_teacher=proposal_teacher,
+                                rq4_consensus_teacher=rq4_consensus_teacher)
 
             # Update the final loss with the adversarial loss
             

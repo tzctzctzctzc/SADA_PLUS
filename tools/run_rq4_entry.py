@@ -139,6 +139,8 @@ def audit_complete(root):
     record = read(root/'complete.json')
     cfg, baseline = read(root/'preflight.json'), read(record['baseline_config'])
     spec = cfg['rq4_boundary']
+    if spec['strategy']=='consensus':
+        raise ValueError('consensus is a separate variant; use rq4_consensus_audit')
     if spec['strategy'] in ('relational','proposal_relation'):
         from tools.rq4_relational import VARIANT
         cache = load_cache(spec['cache_path'],spec['cache_file_sha256'])
@@ -175,9 +177,13 @@ def audit_complete(root):
     return record
 
 
-def main(*, relational=False):
+def main(*, relational=False, consensus=False):
     from tools.run_rq2_matched_control import check_code, check_new_protocol, checked_evaluation, run_command
     from tools.rq3_gpu import gpu_slot
+    audit_training=training_audit
+    audit_finished=audit_complete
+    if consensus:
+        from tools.rq4_consensus_audit import training_audit as audit_training, audit_complete as audit_finished
     parser = argparse.ArgumentParser(description=__doc__)
     for key in ('baseline-config', 'spec', 'output', 'expected-head'):
         parser.add_argument('--'+key, required=True)
@@ -200,7 +206,7 @@ def main(*, relational=False):
     cache = load_cache(spec['cache_path'], spec['cache_file_sha256'])
     shift,teacher = cache['shift'],cache['teacher']
     allowed_teachers = ('timelens2_8b','timeple_8b','sada_self') if relational else ('timelens2_8b','timeple_8b')
-    allowed_strategies = ('relational','proposal_relation') if relational else ('direct','gated')
+    allowed_strategies = ('consensus',) if consensus else (('relational','proposal_relation') if relational else ('direct','gated'))
     if teacher not in allowed_teachers or spec['strategy'] not in allowed_strategies:
         raise ValueError('entry outside authorized matrix')
     save(root/'spec.json',spec)
@@ -225,28 +231,34 @@ def main(*, relational=False):
     cfg = read(root/'preflight.json')
     check_new_protocol(cfg)
     pairing = audit_baseline_pair(baseline,cfg)
-    assert_launch_ready(cfg)
+    if consensus and (args.audit_only or args.smoke_only):
+        from tools.rq4_consensus import audit_spec
+        audit_spec(spec,cache)
+    else:
+        assert_launch_ready(cfg)
     save(root/'baseline_pair.json',pairing)
     if args.audit_only:
         print('RQ4_ENTRY_CPU_PREFLIGHT_PASS',teacher,spec['strategy'],shift,flush=True)
         return
     if args.smoke_only:
-        diagnostic = [sys.executable,'-B','-m','tools.smoke_rq4_training',str(root/'smoke.json'),*command[2:]]
+        smoke_module='tools.smoke_rq4_consensus' if consensus else 'tools.smoke_rq4_training'
+        diagnostic = [sys.executable,'-B','-m',smoke_module,str(root/'smoke.json'),*command[2:]]
         with gpu_slot(args.gpu,wait=True) as selected:
             run_command(diagnostic,root/'logs/smoke.log',args.data_root,selected['uuid'],selected['index'])
         if read(root/'smoke.json')['status'] != 'passed':
             raise ValueError('RQ4 real-data acceptance failed')
         return
     # 正式队列必须提供已验收证据，不能把--execute等价于已测试。
-    acceptance = os.environ.get('RQ4_REAL_ACCEPTANCE')
+    acceptance = spec.get('acceptance_path') if consensus else os.environ.get('RQ4_REAL_ACCEPTANCE')
     if not acceptance:
         raise ValueError('real-data acceptance evidence required before formal training')
-    acceptance_ready(acceptance, teacher, args.expected_head, spec['strategy'] if relational else None)
+    if not consensus:
+        acceptance_ready(acceptance, teacher, args.expected_head, spec['strategy'] if relational else None)
     save(root/'acceptance_reference.json',dict(path=acceptance,sha256=file_sha(acceptance)))
     with gpu_slot(args.gpu,wait=True) as training_gpu:
         check_code(args.expected_head)
         run_command(command,root/'logs/train.log',args.data_root,training_gpu['uuid'],training_gpu['index'])
-    config_path,best,latest,termination,report = training_audit(run_root,cfg,baseline)
+    config_path,best,latest,termination,report = audit_training(run_root,cfg,baseline)
     log = (root/'logs/train.log').read_text(errors='replace')
     if re.search(r'Traceback|CUDA out of memory|\bloss\w*\s*:\s*[-+]?(?:nan|inf)\b',log,re.I):
         raise ValueError('training contains technical error/nonfinite loss')
@@ -262,18 +274,20 @@ def main(*, relational=False):
         root/'evaluation/source_val.json',root/'evaluation/target_val.json',Path(spec['cache_path']),
         Path(spec['evidence_path']),Path(args.baseline_config),root/'spec.json',root/'supervision_audit.json']
     if spec['strategy'] == 'gated': artifacts.append(Path(spec['gate_path']))
-    if relational:
+    if relational or consensus:
         artifacts += [Path(spec['regions_path']),config_path.parent/'benchmark_epoch_metrics.jsonl',
                       root/'acceptance_reference.json',root/'baseline_pair.json']
-    record = dict(schema='rq4-relational-complete-v1' if relational else 'rq4-complete-v1',
+    if consensus:
+        artifacts += [Path(spec['quality_path']),Path(spec['acceptance_path'])]
+    record = dict(schema='rq4-consensus-complete-v1' if consensus else ('rq4-relational-complete-v1' if relational else 'rq4-complete-v1'),
         teacher=teacher,strategy=spec['strategy'],
         shift=shift,seed=6,batch_size=2,code_commit=args.expected_head,termination=termination,
         baseline_config=str(Path(args.baseline_config).resolve()),run_root=str(run_root),
         training_gpu=training_gpu,evaluation_gpu=evaluation_gpu,
         artifacts={str(path):file_sha(path) for path in artifacts})
-    if relational: record['variant'] = spec['variant']
+    if relational or consensus: record['variant'] = spec['variant']
     save(root/'complete.json',record)
-    audit_complete(root)
+    audit_finished(root)
     print('RQ4_ENTRY_COMPLETE',teacher,spec['strategy'],shift,flush=True)
 
 
