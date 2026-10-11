@@ -86,7 +86,7 @@ def calibrate(prediction, truth, video_ids, *, quantile):
                          (truth[:,1:]-prediction[:,1:]).clamp_min(0)),1)
     if len(set(video_ids))<2: raise ValueError('source calibration needs at least two independent videos')
     edges=[0.,.2,.4,.6,.8,1.]
-    group_ids=torch.bucketize(prediction[:,0],prediction.new_tensor(edges[1:-1]),right=True)
+    group_ids=torch.bucketize(prediction[:,0].contiguous(),prediction.new_tensor(edges[1:-1]),right=True)
     groups=[]
     for group in range(len(edges)-1):
         ids=torch.where(group_ids==group)[0]

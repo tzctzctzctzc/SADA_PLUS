@@ -213,6 +213,7 @@ def launch_ready(spec,cache):
         m=report['metrics']
         if (any(not math.isfinite(v) for v in m.values()) or m['rq4_gradient_norm']<=0
                 or m['rq4_anchor_points']<=0 or m['rq4_relation_pairs']<=0
+                or m.get('rq4_anchor_raw',0)<=0 or m.get('rq4_relation_raw',0)<=0
                 or any(m['target_gt_'+k+'_loss']!=0 for k in ('cls','reg','downstream'))):
             raise ValueError('consensus acceptance lacks both mechanisms or leaks target GT')
         found.append(ref)

@@ -26,6 +26,7 @@ def main():
                  if 'rq4_' in k or 'target_gt_' in k}
         if (not metrics or any(not math.isfinite(v) for v in metrics.values())
                 or metrics['rq4_anchor_points']<=0 or metrics['rq4_relation_pairs']<=0
+                or metrics['rq4_anchor_raw']<=0 or metrics['rq4_relation_raw']<=0
                 or metrics['rq4_gradient_norm']<=0
                 or any(metrics['target_gt_'+k+'_loss']!=0 for k in ('cls','reg','downstream'))):
             raise ValueError('consensus real-data mechanisms/gradient/GT isolation failed')
