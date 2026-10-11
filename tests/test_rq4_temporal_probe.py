@@ -7,7 +7,7 @@ from tools.rq4_temporal_probe_core import (
     POLICY, ARMS, TemporalProbe, phase_distribution, paired_distribution,
     real_indices, local_patches, alignment_loss, supervised_loss, source_bank,
     video_batches, check_training_payload, score_predictions, score_routes, train_arms)
-from tools.run_rq4_temporal_probe import membership
+from tools.run_rq4_temporal_probe import membership,check_native_responses,teacher_pairs
 
 
 def payload():
@@ -54,6 +54,28 @@ def test_membership_is_video_disjoint():
     assert membership(cfg,db)['heldout']==['val']
     cfg['tgt_train_split']=['val']
     with pytest.raises(ValueError,match='overlap'):membership(cfg,db)
+
+
+def test_native_technical_failures_are_not_abstention():
+    row=dict(class_names_sha256='same',raw_text='<|TIMESPAN|>',metadata={},error='')
+    with pytest.raises(RuntimeError,match='codec'):check_native_responses([row],'timeple_8b')
+    row.update(raw_text='',error='CUDA OOM')
+    with pytest.raises(RuntimeError,match='OOM'):check_native_responses([row],'timeple_8b')
+    row['output_status']='native_interval_missing'
+    check_native_responses([row],'timeple_8b')
+
+
+def test_source_identity_does_not_require_target_processor_schema(monkeypatch,tmp_path):
+    import json
+    import tools.run_rq4_temporal_probe as entry
+    monkeypatch.setattr(entry,'audit_source_chain',lambda *a:{'verified':'source-replay'})
+    (tmp_path/'responses.json').write_text(json.dumps([dict(class_names_sha256='same',raw_text='[]',
+                                                      metadata={},error='')]))
+    records=[dict(candidate=dict(video_id='v',candidate_id='c-context'+str(k)),target=[1.,3.]) for k in (2,3)]
+    (tmp_path/'diagnostics.json').write_text(json.dumps(dict(records=records)))
+    pairs,evidence=teacher_pairs('requests',tmp_path,'annotations','timelens2_8b')
+    assert pairs=={('v','c'):[[1.,3.],[1.,3.]]}
+    assert evidence=={'verified':'source-replay'}
 
 
 @pytest.mark.parametrize('field', ['gt','segments','labels','quality_truth'])

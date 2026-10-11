@@ -12,7 +12,7 @@ import time
 import torch
 
 from tools.rq4_artifacts import audit_source_chain, read, reference
-from tools.rq4_protocol import build_cache, digest, file_sha, select_candidates, interval_iou
+from tools.rq4_protocol import file_sha, select_candidates, interval_iou
 from tools.rq4_source_acceptance import save
 from tools.rq4_temporal_probe_core import (
     ARMS, POLICY, phase_distribution, paired_distribution, real_indices, local_patches,
@@ -49,21 +49,32 @@ def membership(cfg, database):
 
 def teacher_pairs(request_path, folder, annotations, teacher):
     evidence=audit_source_chain(request_path,folder,annotations,teacher)
-    manifest=read(request_path)
     replies=read(Path(folder)/'responses.json')
-    identity=dict(proposal_checkpoint_sha256=manifest['checkpoint_sha256'],
-        teacher_weights_sha256=digest(read(Path(folder)/'identity.json')['weights']),
-        processor_sha256=read(Path(folder)/'identity.json')['processor_sha256'],
-        input_manifest_sha256=file_sha(request_path),class_names_sha256=replies[0]['class_names_sha256'])
-    cache=build_cache([r['candidate'] for r in manifest['requests']],replies,
-        teacher=teacher,shift='S1',identity=identity,min_iou=0.,ambiguity_margin=0.)
+    check_native_responses(replies,teacher)
+    # audit_source_chain已从原生响应重算并逐字段核对diagnostics；源身份不是目标缓存schema。
+    records=read(Path(folder)/'diagnostics.json')['records']
     groups={}
-    for row in cache['records']:
+    for row in records:
         c=row['candidate']; base,scale=c['candidate_id'].rsplit('-context',1)
         groups.setdefault((c['video_id'],base),{})[int(scale)]=row['target']
     if any(set(pair)!={2,3} for pair in groups.values()):
         raise ValueError('incomplete source contexts')
     return {key:[pair[2],pair[3]] for key,pair in groups.items()},evidence
+
+
+def check_native_responses(replies,teacher):
+    if len({r['class_names_sha256'] for r in replies})!=1:
+        raise ValueError('source teacher vocabulary changed')
+    for row in replies:
+        if row.get('error'):
+            # 本探针不绕过源打分技术失败；原生弃权只有明确证据时可用。
+            missing=row.get('output_status')=='native_interval_missing'
+            if not (teacher=='timeple_8b' and missing and '<|TIMESPAN|>' not in row.get('raw_text','')
+                    and row.get('metadata',{}).get('codec_predictions') is None):
+                raise RuntimeError(row['error'])
+        if teacher=='timeple_8b' and '<|TIMESPAN|>' in row.get('raw_text','') and \
+                row.get('metadata',{}).get('codec_predictions') is None:
+            raise RuntimeError('native TimePLE token exists but codec failed')
 
 
 def prepare(args):
