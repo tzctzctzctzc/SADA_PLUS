@@ -60,6 +60,11 @@ def gradient_diagnostics(main,auxiliary,parameters):
         gradient_comparison_valid=(norm_a>0)&(norm_b>0))
 
 
+def video_keys(videos):
+    return [(str(v['metadata']['video_id']),float(v['metadata'].get('crop_start',0)),
+             int(v['feats'].shape[-1])) for v in videos]
+
+
 class RQ4Consensus(nn.Module):
     def __init__(self,spec):
         super().__init__(); self.spec=dict(spec)
@@ -82,6 +87,8 @@ class RQ4Consensus(nn.Module):
         if active and teacher is None: raise ValueError('consensus requires same-crop frozen EMA outputs')
         terms=[]
         if active:
+            if teacher.get('video_keys')!=video_keys(videos):
+                raise ValueError('EMA outputs belong to a different target crop/order')
             if len(points)!=len(teacher['points']) or len(points)!=len(teacher['offsets']):
                 raise ValueError('EMA level count differs')
             for a,b,c,d in zip(points,teacher['points'],offsets,teacher['offsets']):

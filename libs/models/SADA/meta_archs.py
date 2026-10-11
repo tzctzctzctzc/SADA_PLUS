@@ -2177,8 +2177,9 @@ class SADA(nn.Module):
         feats,backbone_masks,_=self.backbone_target(inputs,masks)
         fpn,fpn_masks=self.neck_target(feats,backbone_masks)
         offsets,_=self.reg_head_target(fpn,fpn_masks)
+        from .rq4_consensus import video_keys
         return dict(points=self.point_generator(fpn),masks=fpn_masks,
-                    offsets=[x.permute(0,2,1).detach() for x in offsets])
+                    offsets=[x.permute(0,2,1).detach() for x in offsets],video_keys=video_keys(videos))
 
     @staticmethod
     def _merge_proposals(primary, extra):

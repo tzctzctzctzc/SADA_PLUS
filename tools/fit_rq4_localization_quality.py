@@ -8,6 +8,21 @@ from tools.rq4_artifacts import reference
 from tools.rq4_protocol import digest, file_sha
 
 
+def source_crops(video,max_length):
+    """标签无关的至多三个真实crop；GT只用于随后质量标签，不决定crop位置。"""
+    length=video['feats'].shape[-1]
+    starts=sorted({0,max(0,(length-max_length)//2),max(0,length-max_length)})
+    for start in starts:
+        result=dict(video,metadata=dict(video['metadata']))
+        result['feats']=video['feats'][:,start:start+max_length]
+        result['metadata'].update(crop_start=start,crop_feat_len=result['feats'].shape[-1])
+        keep=(video['segments'][:,1]>start)&(video['segments'][:,0]<start+max_length)
+        # 不裁剪真实边界，容许局部可见动作的真实端点在crop外。
+        result['segments']=video['segments'][keep]-start
+        result['labels']=video['labels'][keep]
+        yield result
+
+
 def collect(baseline_config,checkpoint,data_root,output,*,per_video):
     from libs.datasets import make_dataset
     from libs.models.SADA import make_meta_arch
@@ -19,7 +34,7 @@ def collect(baseline_config,checkpoint,data_root,output,*,per_video):
     saved=load_checkpoint(checkpoint); _,state=selected_checkpoint_state(saved,cfg,True)
     if saved['rq2_run_signature']!=cfg['rq2_formal']['run_signature']:
         raise ValueError('source quality checkpoint/baseline mismatch')
-    if per_video<6: raise ValueError('per-video budget must cover the six FPN levels')
+    if per_video<18: raise ValueError('per-video budget must cover six FPN levels and up to three crops')
     root=Path(data_root).resolve()
     for key in ('json_file','feat_folder'):
         cfg['dataset'][key]=str((root/cfg['dataset'][key]).resolve())
@@ -37,7 +52,8 @@ def collect(baseline_config,checkpoint,data_root,output,*,per_video):
     table=dict(schema='rq4-quality-source-table-v1',shift=cfg['rq2_formal']['shift'],seed=6,
         target_gt_used=False,baseline_config=reference(baseline_config),checkpoint=reference(checkpoint),
         annotations=reference(cfg['dataset']['json_file']),features=[],per_video=per_video,
-        extractor_sha256=file_sha(__file__),train_video_ids=members['train'],
+        extractor_sha256=file_sha(__file__),crop_policy='source-label-blind-start-middle-end-max-seq',
+        train_video_ids=members['train'],
         validation_video_ids=members['validation'])
     seen=set()
     for split in ('train','validation'):
@@ -50,24 +66,26 @@ def collect(baseline_config,checkpoint,data_root,output,*,per_video):
             path=Path(cfg['dataset']['feat_folder'])/(str(cfg['dataset'].get('file_prefix') or '')+
                 vid+cfg['dataset']['file_ext'])
             if str(path) not in seen: table['features'].append(reference(path)); seen.add(str(path))
-            with torch.no_grad():
+            for crop in source_crops(video,model.max_seq_len):
+                with torch.no_grad():
                 # 与训练EMA相同target分支的定位输出，输入仍严格为source视频。
-                raw=model.build_rq4_consensus_teacher([video])
-                candidates=[]
-                for level,(grid,mask,offset) in enumerate(zip(raw['points'],raw['masks'],raw['offsets'])):
-                    ids=torch.where(mask.reshape(-1).bool())[0]
-                    # 标签无关、确定性按grid均匀采样；不按source质量挑容易样本。
-                    count=min(len(ids),max(1,per_video//len(raw['points'])))
-                    ids=ids[torch.linspace(0,len(ids)-1,count).long()] if count else ids
-                    for index in ids.tolist(): candidates.append((level,index))
-                for level,index in candidates:
-                    grid=raw['points'][level]; center=grid[index,0]; stride=grid[index,3]
-                    off=raw['offsets'][level][0,index]
-                    box=torch.stack((center-off[0]*stride,center+off[1]*stride))[None]
-                    if box[0,1]<=box[0,0]: continue
-                    x=descriptor(video['feats'],box,center[None],stride[None])
-                    y=source_targets(box,video['segments'])
-                    rows.append(dict(video_id=vid,level=level,index=index,x=x[0].tolist(),y=y[0].tolist()))
+                    raw=model.build_rq4_consensus_teacher([crop])
+                    candidates=[]
+                    for level,(grid,mask,offset) in enumerate(zip(raw['points'],raw['masks'],raw['offsets'])):
+                        ids=torch.where(mask.reshape(-1).bool())[0]
+                        # 标签无关、确定性按grid均匀采样；不按source质量挑容易样本。
+                        count=min(len(ids),max(1,per_video//(3*len(raw['points']))))
+                        ids=ids[torch.linspace(0,len(ids)-1,count).long()] if count else ids
+                        for index in ids.tolist(): candidates.append((level,index))
+                    for level,index in candidates:
+                        grid=raw['points'][level]; center=grid[index,0]; stride=grid[index,3]
+                        off=raw['offsets'][level][0,index]
+                        box=torch.stack((center-off[0]*stride,center+off[1]*stride))[None]
+                        if box[0,1]<=box[0,0]: continue
+                        x=descriptor(crop['feats'],box,center[None],stride[None])
+                        y=source_targets(box,crop['segments'])
+                        rows.append(dict(video_id=vid,level=level,index=index,crop_start=crop['metadata']['crop_start'],
+                            x=x[0].tolist(),y=y[0].tolist()))
             print('QUALITY_SOURCE_EXTRACT',split,vid,len(rows),flush=True)
         table[split]=rows
     audit_source_table(table); save(output,table)

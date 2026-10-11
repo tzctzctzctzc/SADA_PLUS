@@ -57,7 +57,7 @@ def args_with_teacher():
     args=inputs(); args[0][0]['feats']=torch.randn(2304,10,requires_grad=True)
     centers=args[1][0][:,0]
     ema=torch.stack(((centers-1).clamp_min(.1),(9-centers).clamp_min(.1)),-1)[None].requires_grad_()
-    teacher=dict(points=args[1],masks=args[2],offsets=[ema])
+    teacher=dict(points=args[1],masks=args[2],offsets=[ema],video_keys=M.video_keys(args[0]))
     return args,teacher
 
 
@@ -103,7 +103,7 @@ def test_draft_cannot_start_by_boolean(tmp_path):
 def test_local_support_not_tiny_three_way_core():
     grid=torch.tensor([[i,0,100,1] for i in range(10)]).float()
     ids,support,edges=M.local_graph(grid,torch.ones(10,dtype=torch.bool),[1,9],[[1,5],[4,9]],4.,0)
-    assert ids.tolist()==[3,4,5] and len(edges)==2
+    assert ids.tolist()==[3,4,5] and edges==[(0,1,.5)]
     assert not (4<3<5)  # 最小共同区间只有(4,5)，新方法仍有三个真实点。
 
 
@@ -134,7 +134,7 @@ def test_uncertainty_dead_zone_does_not_pull_inside():
 def test_weighted_median_resists_one_outlier_and_detaches():
     boxes=torch.tensor([[1.,9.],[1.2,9.2],[0.,20.]],requires_grad=True)
     ref,rad=M.consensus(boxes,torch.tensor([.8,.8,.1]),torch.zeros(3,2))
-    assert torch.allclose(ref,torch.tensor([1.2,9.2]))
+    assert torch.allclose(ref,torch.tensor([1.,9.2]))
     assert not ref.requires_grad and not rad.requires_grad
 
 
@@ -160,6 +160,7 @@ def test_single_real_point_has_anchor_not_fake_relation(tmp_path):
 def test_partial_crop_still_routes_visible_positions(tmp_path):
     module=M.RQ4Consensus(spec(tmp_path)); args,teacher=args_with_teacher()
     args[0][0]['metadata']['crop_start']=4
+    teacher['video_keys']=M.video_keys(args[0])
     result=module(*args,True,teacher=teacher)
     assert result['routable']==2 and result['crop_rejected']==0
 

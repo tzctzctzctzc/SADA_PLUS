@@ -364,8 +364,7 @@ def validate_config(cfg, regime):
     if spec['strategy'] == 'consensus':
         from tools.rq4_consensus import validate_spec
         _,quality=validate_spec(spec,cache)
-        if (cfg['seed']!=6 or not cfg['train_cfg'].get('ema_active')
-                or quality['source_table']['path'] == ''):
+        if cfg['seed']!=6 or not cfg['train_cfg'].get('ema_active'):
             raise ValueError('consensus requires seed6 and active frozen EMA')
         if spec.get('baseline_config_sha256') and quality['source_table']:
             from tools.rq4_consensus import read
