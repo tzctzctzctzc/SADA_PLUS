@@ -46,7 +46,8 @@ def acceptance_ready(path, teacher, expected_head, strategy=None):
                 continue
             validate_spec(spec, cache)
             metrics = report['metrics']
-            if (metrics['rq4_accepted'] <= 0 or metrics['rq4_gradient_norm'] <= 0
+            if (any(not math.isfinite(v) for v in metrics.values())
+                    or metrics['rq4_accepted'] <= 0 or metrics['rq4_gradient_norm'] <= 0
                     or any(metrics['target_gt_'+k+'_loss'] != 0 for k in ('cls','reg','downstream'))):
                 raise ValueError('relational acceptance needs real routing/gradient and zero target GT')
         strategies.add(report['strategy'])
@@ -156,6 +157,8 @@ def audit_complete(root):
         required = [config,best,latest,config.parent/'benchmark_epoch_metrics.jsonl']
         if not {str(x) for x in required} <= set(record['artifacts']):
             raise ValueError('relational completion lacks checkpoint/history hashes')
+        if read(root/'baseline_pair.json') != audit_baseline_pair(baseline,cfg):
+            raise ValueError('relational baseline pairing differs')
     manifest = checked_evaluation(root/'evaluation', cfg, best)
     if manifest.get('rq4_boundary') != cfg['rq4_boundary']:
         raise ValueError('evaluation lacks RQ4 provenance')

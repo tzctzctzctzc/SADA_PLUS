@@ -63,6 +63,10 @@ def self_cache(requests):
 def build_regions(cache, proof, strategy):
     if strategy == 'relational':
         audit_evidence(proof, cache)
+        source_ids = set(checked(proof['source']['calibration'])['source_video_ids'])
+        target_ids = {x['candidate']['video_id'] for x in cache['records']}
+        if not source_ids or source_ids & target_ids:
+            raise ValueError('source calibration membership overlaps target')
         rows = relation_rows(cache, checked(proof['requests']), checked(proof['responses']))
     elif strategy == 'proposal_relation':
         if set(proof) != {'schema', 'requests'} or proof['schema'] != 'rq4-proposal-relation-evidence-v1':
