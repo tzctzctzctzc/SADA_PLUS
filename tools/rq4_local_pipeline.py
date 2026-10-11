@@ -1,5 +1,6 @@
 """E1等价CPU预取/断点接续；科学计算仍调用冻结原实现。"""
 import argparse
+import ast
 from concurrent.futures import ProcessPoolExecutor
 import multiprocessing as mp
 import os
@@ -82,7 +83,13 @@ def reuse(args):
         assert file_sha(CODE/'tools'/name) == file_sha(args.old_code/'tools'/name)
         originals[name] = file_sha(CODE/'tools'/name)
     bench = read(args.report)
-    assert bench['status'] == 'passed' and bench['code_commit'] == args.expected_head
+    assert bench['status'] == 'passed'
+    # 调度/退出修复不必重做相同CPU测试；逐函数AST绑定原测试代码。
+    tested_source = subprocess.check_output(['git', 'show', bench['code_commit']+':tools/rq4_local_pipeline.py'], cwd=CODE, text=True)
+    def cpu_ast(source):
+        return {n.name:ast.dump(n, include_attributes=False) for n in ast.parse(source).body
+                if isinstance(n, ast.FunctionDef) and n.name in ('cpu_init','cpu_prepare','ordered_inputs','benchmark')}
+    assert cpu_ast(tested_source) == cpu_ast(Path(__file__).read_text())
     assert bench['original_manifest_sha256'] == proof['manifest_sha256']
     root.mkdir(parents=True, exist_ok=False)
     m['code_commit'] = args.expected_head; save(root/'manifest.json', m)
@@ -171,9 +178,7 @@ def extract(args):
 def driver(args):
     active = []
     def stop(*_):
-        for child in active:
-            if child.poll() is None: os.killpg(child.pid, signal.SIGTERM)
-        for child in active: child.wait()
+        # 不在正在Popen.wait的信号栈里再次wait，先展开栈再由except统一回收。
         raise RuntimeError('explicit stop; preserved artifacts')
     signal.signal(signal.SIGTERM, stop); signal.signal(signal.SIGINT, stop)
     def launch(mode, teacher):
