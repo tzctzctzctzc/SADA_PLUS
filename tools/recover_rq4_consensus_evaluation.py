@@ -38,6 +38,7 @@ def main():
     if read(spec['acceptance_path'])['code_commit']!=args.training_head:
         raise ValueError('original training acceptance commit differs')
     args.output.mkdir(parents=True,exist_ok=False)
+    (args.output/'logs').mkdir()
     for filename in ('preflight.json','spec.json','baseline_pair.json','acceptance_reference.json'):
         shutil.copy2(args.old_entry/filename,args.output/filename)
     recovery=dict(training_code_root=str(args.training_code_root),training_commit=args.training_head,
