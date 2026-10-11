@@ -38,6 +38,11 @@ def media_info(path):
         '-show_entries','stream=width,height,r_frame_rate,nb_read_frames:format=duration','-of','json',str(path)],text=True))
 
 
+def frame_times(path):
+    return subprocess.check_output(['ffprobe','-v','error','-select_streams','v:0',
+        '-show_entries','frame=best_effort_timestamp_time','-of','csv=p=0',str(path)],text=True).splitlines()
+
+
 def prepare(args):
     from tools.run_clip_target_adapter import ACTION_PHRASES
     clean_head(args.expected_head)
@@ -54,11 +59,14 @@ def prepare(args):
         original=Path(request['clip_path']);assert file_sha(original)==request['clip_sha256']
         assert [request['clip_start_sec'],request['clip_end_sec']]==c['window']
         black=root/'black'/(digest([vid,c['candidate_id']])+'.mkv')
-        subprocess.run(['ffmpeg','-v','error','-nostdin','-n','-i',str(original),'-map','0:v:0','-an',
-            '-vf','lutyuv=y=16:u=128:v=128','-c:v','ffv1','-threads','2',str(black)],check=True)
+        subprocess.run(['ffmpeg','-v','error','-nostdin','-n','-copyts','-i',str(original),'-map','0:v:0','-an',
+            '-vf','lutyuv=y=16:u=128:v=128','-vsync','0','-c:v','ffv1','-threads','2',str(black)],check=True)
         infos={key:media_info(path) for key,path in (('video',original),('black',black))}
         assert infos['video']['streams']==infos['black']['streams']
         assert abs(float(infos['video']['format']['duration'])-float(infos['black']['format']['duration']))<.001
+        original_times=frame_times(original)
+        assert original_times==frame_times(black)
+        infos['paired_frame_timestamps_sha256']=digest(original_times)
         duration=float(infos['video']['format']['duration'])
         assert abs(duration-(c['window'][1]-c['window'][0]))<.1
         # 对每帧缩小后实际解码RGB，核实遮黑条件，而非仅相信滤镜参数。
