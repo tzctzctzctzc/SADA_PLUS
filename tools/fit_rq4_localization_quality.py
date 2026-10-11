@@ -1,6 +1,5 @@
 """源域CPU质量拟合/校准。冻结既有UDA的EMA；从不构造target dataset。"""
 import argparse
-import copy
 from pathlib import Path
 import torch
 from tools.rq4_consensus import read, save, audit_source_table

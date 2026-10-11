@@ -206,6 +206,12 @@ def test_quality_abstention_does_not_invent_gradient(tmp_path):
     result['loss'].backward(); assert args[-1][0].grad.abs().sum()==0
 
 
+def test_nonfinite_ema_is_not_silently_rejected(tmp_path):
+    module=M.RQ4Consensus(spec(tmp_path)); args,teacher=args_with_teacher()
+    teacher['offsets'][0]=torch.full_like(teacher['offsets'][0],float('nan'))
+    with pytest.raises(ValueError,match='technical error'): module(*args,True,teacher=teacher)
+
+
 def test_low_coverage_does_not_renormalize_remaining_candidate(tmp_path):
     module=M.RQ4Consensus(spec(tmp_path)); args,teacher=args_with_teacher()
     full=module(*args,True,teacher=teacher)['loss'].detach()
@@ -323,3 +329,55 @@ def test_actual_sada_consensus_ema_forward_and_strict_restore(tmp_path):
     assert all(parameter.grad is None for parameter in model.rq4_boundary.quality.parameters())
     restored=make_meta_arch(cfg['model_name'],cfg,device='cpu')
     restored.load_state_dict(model.state_dict(),strict=True)
+
+
+@pytest.mark.skipif(not os.environ.get('RQ4_REAL_ARTIFACT_ROOT'),reason='requires original remote teacher evidence')
+@pytest.mark.parametrize('teacher',['timelens2_8b','timeple_8b'])
+@pytest.mark.parametrize('shift',['S1','S2','S3','S4','S5','S6'])
+def test_real_twelve_teacher_cache_bindings(teacher,shift):
+    from tools.rq4_relational import build_regions
+    from tools.rq4_artifacts import read
+    root=Path(os.environ['RQ4_REAL_ARTIFACT_ROOT'])/teacher/shift/'artifacts'
+    spec=read(root/'direct.json'); cache=p.load_cache(spec['cache_path'],spec['cache_file_sha256'])
+    rebuilt=build_regions(cache,read(spec['evidence_path']),'relational')
+    assert len(rebuilt['rows'])==len(cache['records'])==cache['budget']['selected_count']
+    assert cache['seed']==6 and cache['shift']==shift and cache['teacher']==teacher
+    for row,region in zip(cache['records'],rebuilt['rows']):
+        assert region['candidate_sha256']==digest(row['candidate'])
+        if region['pair'] is not None and all(region['pair']):
+            assert 0<=p.paired_iou(region['pair'])<=1
+
+
+@pytest.mark.skipif(not os.environ.get('RQ4_REAL_SOURCE_CHECK'),reason='requires real baseline checkpoint/features')
+def test_real_source_feature_and_baseline_ema_extraction():
+    from libs.datasets import make_dataset
+    from libs.models.SADA import make_meta_arch
+    from tools.rq2_evaluate import load_checkpoint,selected_checkpoint_state
+    from tools.fit_rq4_localization_quality import source_crops
+    cfg=p.read(os.environ['RQ4_BASE_CONFIG'])
+    cfg['dataset']['json_file']=str(Path(os.environ['RQ4_DATA_ROOT'])/cfg['dataset']['json_file'])
+    cfg['dataset']['feat_folder']=str(Path(os.environ['RQ4_DATA_ROOT'])/cfg['dataset']['feat_folder'])
+    complete=p.read(Path(os.environ['RQ4_BASE_CONFIG']).with_name('complete.json'))
+    checkpoint,=Path(complete['uda']).parent.glob('saved_ckpt/best_ckpt/*.pt')
+    stored=load_checkpoint(checkpoint)
+    assert stored['rq2_run_signature']==cfg['rq2_formal']['run_signature']
+    _,state=selected_checkpoint_state(stored,cfg,True)
+    with torch.random.fork_rng(devices=[]): model=make_meta_arch(cfg['model_name'],cfg,device='cpu')
+    model.load_state_dict(state,strict=True); model.eval().requires_grad_(False)
+    seen=[]
+    for split in ('src_train_split','src_val_split'):
+        dataset=make_dataset(cfg['dataset_name'],False,cfg[split],**cfg['dataset'])
+        full=dataset[0]; seen.append(full['metadata']['video_id'])
+        crop=next(source_crops(full,model.max_seq_len))
+        with torch.no_grad():
+            output=model.build_rq4_consensus_teacher([crop])
+            grid=output['points'][0]; mask=output['masks'][0].reshape(-1)
+            ids=torch.where(mask)[0][:8]
+            offsets=output['offsets'][0][0,ids]
+            boxes=torch.stack((grid[ids,0]-offsets[:,0]*grid[ids,3],
+                               grid[ids,0]+offsets[:,1]*grid[ids,3]),-1)
+            x=Q.descriptor(crop['feats'],boxes,grid[ids,0],grid[ids,3])
+            y=Q.source_targets(boxes,crop['segments'])
+        assert torch.isfinite(x).all() and torch.isfinite(y).all() and x.shape==(len(ids),134)
+        assert ((y[:,0]>=0)&(y[:,0]<=1)).all()
+    assert seen[0]!=seen[1]

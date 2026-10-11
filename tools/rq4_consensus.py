@@ -204,6 +204,7 @@ def launch_ready(spec,cache):
 def freeze_acceptance(output,reports,expected_head):
     from tools.run_rq2_matched_control import check_code
     check_code(expected_head)
+    if not reports: raise ValueError('real-data reports are required')
     refs=[reference(path) for path in reports]; seen=set()
     for ref in refs:
         report=checked(ref); key=(report.get('teacher'),report.get('shift'))

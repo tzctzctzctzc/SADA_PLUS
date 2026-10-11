@@ -123,6 +123,8 @@ class RQ4Consensus(nn.Module):
                     with torch.no_grad():
                         x=descriptor(video['feats'],ema_boxes-crop,centers-crop,stride.expand(len(indices)))
                         quality=self.quality(x)
+                        if not torch.isfinite(ema_boxes).all() or not torch.isfinite(quality).all():
+                            raise ValueError('nonfinite EMA/quality output is a technical error, not abstention')
                         q=(quality[:,0]-self.calibration['quality_margin']).clamp(0,1)
                         radii=(quality[:,1:]+quality.new_tensor(self.calibration['error_margin']))
                         radii=radii*(ema_boxes[:,1]-ema_boxes[:,0]).clamp_min(1e-6)[:,None]
