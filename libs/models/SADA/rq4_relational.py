@@ -4,7 +4,7 @@ import torch
 from torch import nn
 from .rq4_boundary import feature_span
 from tools.rq4_protocol import load_cache
-from tools.rq4_relational import validate_spec, RULE
+from tools.rq4_relational import validate_spec, relation_weight, RULE
 
 
 def select_points(grid, valid, core, crop):
@@ -37,7 +37,7 @@ class RQ4Relational(nn.Module):
         zero = sum(x.sum()*0 for x in offsets)
         stats = dict(queried=0, matched=0, routable=0, accepted=0, crop_rejected=0,
             anchor_rejected=0, gate_rejected=0, core_rejected=0, multipoint_rejected=0,
-            relation_points=0, relation_pairs=0)
+            relation_points=0, relation_pairs=0, weight_sum=0.)
         terms = []
         if active:
             for batch, video in enumerate(videos):
@@ -85,7 +85,9 @@ class RQ4Relational(nn.Module):
                     stats['accepted'] += 1
                     stats['relation_points'] += len(indices)
                     stats['relation_pairs'] += len(indices)-1
-                    terms.append(consistency_loss(offsets[level][batch,indices],
+                    weight = relation_weight(region['pair']) if region['pair'] is not None else 1.
+                    stats['weight_sum'] += weight
+                    terms.append(weight*consistency_loss(offsets[level][batch,indices],
                         grid[indices,0]+crop, stride, old_end-old_start))
         raw = sum(terms,zero)/max(stats['routable'],1)
         loss = self.spec['weight']*raw

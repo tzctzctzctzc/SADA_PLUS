@@ -160,12 +160,33 @@ def test_noop_and_gt_isolation(tmp_path,condition):
 
 def test_gate_rejection_keeps_common_denominator(tmp_path):
     s=spec(tmp_path); full=M.RQ4Relational(s)(*inputs(),active=True)
-    regions=a.read(s['regions_path']); regions['rows'][0].update(pair=[[2.,8.],[7.,9.]],core=None)
+    regions=a.read(s['regions_path']); regions['rows'][0].update(pair=[[2.,8.],[8.,9.]],core=None)
     regions['payload_sha256']=p.digest({k:v for k,v in regions.items() if k!='payload_sha256'})
     write(Path(s['regions_path']),regions); s['regions_file_sha256']=p.file_sha(s['regions_path'])
     half=M.RQ4Relational(s)(*inputs(),active=True)
     assert half['accepted']==half['gate_rejected']==1 and half['routable']==2
     assert torch.allclose(half['loss']*2,full['loss'])
+
+
+def test_soft_consistency_not_hard_threshold_and_not_renormalized(tmp_path):
+    s=spec(tmp_path); full=M.RQ4Relational(s)(*inputs(),active=True)
+    regions=a.read(s['regions_path'])
+    # 2x [2,8]、3x [0,9]，交集与原方案一样，唯一变化为2/3权重。
+    for row in regions['rows']: row['pair']=[[2.,8.],[0.,9.]]
+    regions['payload_sha256']=p.digest({k:v for k,v in regions.items() if k!='payload_sha256'})
+    write(Path(s['regions_path']),regions); s['regions_file_sha256']=p.file_sha(s['regions_path'])
+    module=M.RQ4Relational(s); args=inputs(); soft=module(*args,active=True)
+    assert soft['accepted']==full['accepted']==2
+    assert soft['weight_sum']==pytest.approx(4/3)
+    assert torch.allclose(soft['loss'],full['loss']*(2/3))
+    soft['loss'].backward(); assert args[-1][0].grad.abs().sum()>0
+
+
+def test_common_core_does_not_fill_disagreement():
+    assert r.core_interval([0.,10.],[[1.,5.],[4.,8.]])==[4.,5.]
+    assert r.relation_weight([[1.,5.],[4.,8.]])==pytest.approx(1/7)
+    assert r.core_interval([0.,10.],[[1.,3.],[4.,8.]]) is None
+    assert r.relation_weight([None,[4.,8.]])==0
 
 
 def test_points_do_not_depend_on_rng_and_masks_are_respected():

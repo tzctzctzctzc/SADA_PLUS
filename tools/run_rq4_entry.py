@@ -53,6 +53,9 @@ def acceptance_ready(path, teacher, expected_head, strategy=None):
         strategies.add(report['strategy'])
     if strategy is not None and strategies != {strategy}:
         raise ValueError('relational real-data acceptance is missing')
+    if strategy == 'relational':
+        from tools.rq4_relation_launch import validate_acceptance
+        validate_acceptance(record)
     if strategy is None and strategies != {'direct','gated'}:
         raise ValueError('both strategies must pass real-data acceptance for this teacher')
     return record
@@ -80,7 +83,7 @@ def supervision(path, stop_epoch, relational=False):
     if sums['loss'] > 0 and sums['gradient_norm'] == 0:
         raise ValueError('positive auxiliary loss has no gradient')
     if relational:
-        for key in ('core_rejected','multipoint_rejected','relation_points','relation_pairs'):
+        for key in ('core_rejected','multipoint_rejected','relation_points','relation_pairs','weight_sum'):
             values = [r['t_rq4_'+key] for r in rows]
             if any(not math.isfinite(v) or v < 0 for v in values):
                 raise ValueError('invalid relational metric: '+key)
@@ -95,6 +98,8 @@ def supervision(path, stop_epoch, relational=False):
                 raise ValueError('invalid relational multi-point routing counts')
             if not math.isclose(r['loss'], .1*r['raw_loss'], rel_tol=1e-5,abs_tol=1e-8):
                 raise ValueError('relational loss weight differs')
+            if not 0 <= r['weight_sum'] <= r['accepted']+1e-6:
+                raise ValueError('invalid soft relation weight sum')
     return dict(epoch_mean_sums=sums, intervened=sums['accepted'] > 0,
         effective_gradient=sums['gradient_norm'] > 0,
         zero_coverage_is_reported_not_filtered=True)

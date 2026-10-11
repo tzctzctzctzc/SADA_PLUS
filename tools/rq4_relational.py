@@ -10,19 +10,24 @@ from tools import rq4_protocol as p
 from tools.rq4_artifacts import (read, checked, reference, audit_evidence,
                                  audit_target_requests, check_responses)
 
-VARIANT = 'rq4-relational-boundary-v1'
+VARIANT = 'rq4-soft-relational-boundary-v1'
 STRATEGIES = ('relational', 'proposal_relation')
-RULE = dict(threshold=.75, max_points=3, min_points=2,
+RULE = dict(threshold=None, confidence='paired-context-tiou', max_points=3, min_points=2,
             selection='first-middle-last-valid-original-fpn',
             loss='adjacent-absolute-boundary-l1-over-original-duration')
 
 
 def core_interval(proposal, pair):
-    if not all(pair) or p.interval_iou(*pair) < RULE['threshold']:
+    if not all(pair):
         return None
     start = max(proposal[0], *(x[0] for x in pair))
     stop = min(proposal[1], *(x[1] for x in pair))
     return [start, stop] if start < stop else None
+
+
+def relation_weight(pair):
+    # 连续一致性权重，不是校准过的正确率；禁止按接受率倒数补强。
+    return p.interval_iou(*pair) if all(pair) else 0.
 
 
 def relation_rows(cache, manifest, responses):
