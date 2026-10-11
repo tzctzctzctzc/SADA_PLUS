@@ -62,6 +62,8 @@ def test_native_technical_failures_are_not_abstention():
     row.update(raw_text='',error='CUDA OOM')
     with pytest.raises(RuntimeError,match='OOM'):check_native_responses([row],'timeple_8b')
     row['output_status']='native_interval_missing'
+    with pytest.raises(RuntimeError,match='OOM'):check_native_responses([row],'timeple_8b')
+    row['error']=''
     check_native_responses([row],'timeple_8b')
 
 

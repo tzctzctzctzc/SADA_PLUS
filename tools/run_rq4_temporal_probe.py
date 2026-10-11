@@ -67,11 +67,8 @@ def check_native_responses(replies,teacher):
         raise ValueError('source teacher vocabulary changed')
     for row in replies:
         if row.get('error'):
-            # 本探针不绕过源打分技术失败；原生弃权只有明确证据时可用。
-            missing=row.get('output_status')=='native_interval_missing'
-            if not (teacher=='timeple_8b' and missing and '<|TIMESPAN|>' not in row.get('raw_text','')
-                    and row.get('metadata',{}).get('codec_predictions') is None):
-                raise RuntimeError(row['error'])
+            # S1历史源响应均无技术error；合法空区间由原生解码记录弃权。
+            raise RuntimeError(row['error'])
         if teacher=='timeple_8b' and '<|TIMESPAN|>' in row.get('raw_text','') and \
                 row.get('metadata',{}).get('codec_predictions') is None:
             raise RuntimeError('native TimePLE token exists but codec failed')
