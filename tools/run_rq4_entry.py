@@ -278,7 +278,7 @@ def main(*, relational=False, consensus=False):
         artifacts += [Path(spec['regions_path']),config_path.parent/'benchmark_epoch_metrics.jsonl',
                       root/'acceptance_reference.json',root/'baseline_pair.json']
     if consensus:
-        artifacts += [Path(spec['quality_path']),Path(spec['acceptance_path'])]
+        artifacts += [Path(spec['quality_path']),Path(spec['source_policy_path']),Path(spec['acceptance_path'])]
     record = dict(schema='rq4-consensus-complete-v1' if consensus else ('rq4-relational-complete-v1' if relational else 'rq4-complete-v1'),
         teacher=teacher,strategy=spec['strategy'],
         shift=shift,seed=6,batch_size=2,code_commit=args.expected_head,termination=termination,

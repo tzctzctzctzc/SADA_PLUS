@@ -75,12 +75,14 @@ def audit_complete(root):
             or record['shift']!=cache['shift'] or record['seed']!=6 or record['batch_size']!=2):
         raise ValueError('consensus completion identity mismatch')
     launch_ready(spec,cache)
+    if read(spec['acceptance_path'])['code_commit']!=record['code_commit']:
+        raise ValueError('consensus completion code differs from accepted code')
     baseline=read(record['baseline_config'])
     config,best,latest,termination,report=training_audit(record['run_root'],cfg,baseline)
     required=[config,best,latest,config.parent/'benchmark_epoch_metrics.jsonl',root/'preflight.json',
         root/'spec.json',root/'baseline_pair.json',root/'supervision_audit.json',Path(record['baseline_config']),
         root/'evaluation/manifest.json',root/'evaluation/source_val.json',root/'evaluation/target_val.json']
-    required += [Path(spec[k+'_path']) for k in ('cache','evidence','regions','quality','acceptance')]
+    required += [Path(spec[k+'_path']) for k in ('cache','evidence','regions','quality','source_policy','acceptance')]
     if not {str(x) for x in required}<=set(record['artifacts']):
         raise ValueError('consensus completion lacks required artifact hashes')
     for path,sha in record['artifacts'].items():

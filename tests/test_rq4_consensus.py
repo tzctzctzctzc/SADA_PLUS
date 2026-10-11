@@ -192,6 +192,76 @@ def test_ema_grid_mismatch_stops(tmp_path):
     with pytest.raises(ValueError,match='geometry'): module(*args,True,teacher=teacher)
 
 
+def test_stale_ema_crop_is_rejected(tmp_path):
+    module=M.RQ4Consensus(spec(tmp_path)); args,teacher=args_with_teacher()
+    args[0][0]['metadata']['crop_start']=1
+    with pytest.raises(ValueError,match='crop/order'): module(*args,True,teacher=teacher)
+
+
+def test_quality_abstention_does_not_invent_gradient(tmp_path):
+    module=M.RQ4Consensus(spec(tmp_path)); args,teacher=args_with_teacher()
+    module.calibration['quality_margin']=1.
+    result=module(*args,True,teacher=teacher)
+    assert result['routable']==result['quality_rejected']==2 and result['accepted']==0
+    result['loss'].backward(); assert args[-1][0].grad.abs().sum()==0
+
+
+def test_low_coverage_does_not_renormalize_remaining_candidate(tmp_path):
+    module=M.RQ4Consensus(spec(tmp_path)); args,teacher=args_with_teacher()
+    full=module(*args,True,teacher=teacher)['loss'].detach()
+    record,region=module.records['v'][0]
+    module.records['v'][0]=(record,dict(region,pair=[[20.,21.],[20.,21.]]))
+    half=module(*args,True,teacher=teacher)
+    assert half['routable']==2 and half['accepted']==1
+    assert torch.allclose(half['loss']*2,full)
+
+
+def test_source_crops_do_not_use_gt_to_select_locations():
+    from tools.fit_rq4_localization_quality import source_crops
+    video=dict(feats=torch.randn(2304,21),segments=torch.tensor([[2.,6.],[11.,19.]]),
+               labels=torch.tensor([0,1]),metadata=dict(video_id='source'))
+    crops=list(source_crops(video,10))
+    assert [c['metadata']['crop_start'] for c in crops]==[0,5,11]
+    video['segments']=torch.tensor([[0.,21.]])
+    video['labels']=torch.tensor([1])
+    altered=list(source_crops(video,10))
+    assert [c['metadata']['crop_start'] for c in altered]==[0,5,11]
+    assert altered[1]['segments'].tolist()==[[-5.,16.]]
+
+
+def test_new_metrics_cannot_hide_target_leakage(tmp_path):
+    from tools.rq4_consensus_audit import supervision
+    module=M.RQ4Consensus(spec(tmp_path)); args,teacher=args_with_teacher()
+    result=module(*args,True,teacher=teacher)
+    result.update(M.gradient_diagnostics(args[-1][0].square().mean(),result['loss'],args[-1]))
+    row=dict(epoch=1,**{'t_rq4_'+k:float(v) for k,v in result.items()})
+    row.update({'t_target_gt_'+k+'_loss':0 for k in ('cls','reg','downstream')})
+    write(tmp_path/'metrics.jsonl',row)
+    assert supervision(tmp_path/'metrics.jsonl',1)['effective_gradient']
+    row['t_target_gt_reg_loss']=1
+    write(tmp_path/'metrics.jsonl',row)
+    with pytest.raises(ValueError,match='leakage'): supervision(tmp_path/'metrics.jsonl',1)
+
+
+@pytest.mark.skipif(not os.environ.get('RQ4_BASE_CONFIG'),reason='requires Linux package imports')
+def test_preparation_rebuilds_real_protocol_evidence_and_source_policy(tmp_path):
+    from test_rq4_artifacts import fixture
+    from tools import rq4_artifacts as a
+    args=fixture(tmp_path); a.build_artifacts(**args)
+    # source_bundle只提供显式TEST合成质量头；检查工件链，不冒充真实源域拟合。
+    quality_dir=tmp_path/'source_quality'; quality_dir.mkdir()
+    source_bundle(quality_dir)
+    result=p.prepare(Path(args['output'])/'direct.json',quality_dir/'quality.json',tmp_path/'new',
+        minimum_quality=.5,maximum_uncertainty=.5,anchor_fraction=.5)
+    cache=p.load_cache(result['cache_path'])
+    p.audit_spec(result,cache)
+    with pytest.raises(ValueError,match='acceptance'): p.launch_ready(result,cache)
+    policy=p.read(result['source_policy_path']); policy['coverage']=.123
+    write(Path(result['source_policy_path']),policy)
+    result['source_policy_file_sha256']=file_sha(result['source_policy_path'])
+    with pytest.raises(ValueError,match='policy evidence'): p.audit_spec(result,cache)
+
+
 def test_quality_descriptor_is_finite_detached_and_dimensional():
     f=torch.randn(2304,10,requires_grad=True)
     boxes=torch.tensor([[-2.,6.],[11.,12.]])

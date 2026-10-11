@@ -80,6 +80,31 @@ def audit_source_table(table):
         raise ValueError('quality table baseline shift/seed mismatch')
 
 
+def source_policy_summary(bundle,*,minimum_quality,maximum_uncertainty,anchor_fraction):
+    """源验证上的阈值诊断，不搜索target收益，也不宣称这是最优分支权重。"""
+    import torch
+    from libs.models.SADA.rq4_quality import LocalizationQuality
+    table=checked(bundle['source_table']); audit_source_table(table)
+    with torch.random.fork_rng(devices=[]): model=LocalizationQuality()
+    model.load_state_dict(load_quality(bundle),strict=True); model.eval().requires_grad_(False)
+    x=torch.tensor([r['x'] for r in table['validation']],dtype=torch.float32)
+    y=torch.tensor([r['y'] for r in table['validation']],dtype=torch.float32)
+    with torch.no_grad(): prediction=model(x)
+    calibration=bundle['calibration']
+    lower=(prediction[:,0]-calibration['quality_margin']).clamp(0,1)
+    radius=prediction[:,1:]+prediction.new_tensor(calibration['error_margin'])
+    eligible=(lower>=minimum_quality)&(radius.amax(1)<=maximum_uncertainty)
+    return dict(schema='rq4-consensus-source-policy-diagnostic-v1',target_gt_used=False,
+        quality_payload_sha256=bundle['payload_sha256'],source_table=bundle['source_table'],
+        parameters=dict(minimum_quality=minimum_quality,maximum_uncertainty=maximum_uncertainty,
+                        anchor_fraction=anchor_fraction),
+        parameter_selection='explicit-settings-not-target-optimized',
+        source_rows=len(x),accepted=int(eligible.sum()),coverage=float(eligible.float().mean()),
+        mean_iou=float(y[:,0].mean()),accepted_mean_iou=float(y[eligible,0].mean()) if eligible.any() else None,
+        endpoint_band_coverage=((y[:,1:]<=radius).float().mean(0)).tolist(),
+        scope='individual frozen-detector source boxes; not target crop intervention or student gain')
+
+
 def validate_spec(spec,cache):
     if (spec.get('variant')!=VARIANT or spec.get('strategy')!='consensus' or spec.get('consensus_rule')!=RULE
             or spec.get('weight')!=.1 or spec.get('early_stop_patience')!=15
@@ -116,6 +141,11 @@ def audit_spec(spec,cache):
     proof=read(spec['evidence_path']); audit_evidence(proof,cache)
     if build_regions(cache,proof,'relational')!=regions:
         raise ValueError('local graph support is not reproducible from native teacher replies')
+    if not spec.get('source_policy_path') or file_sha(spec['source_policy_path'])!=spec['source_policy_file_sha256']:
+        raise ValueError('source policy diagnostic required')
+    if read(spec['source_policy_path'])!=source_policy_summary(quality,**{
+            k:spec[k] for k in ('minimum_quality','maximum_uncertainty','anchor_fraction')}):
+        raise ValueError('source-only policy evidence differs')
     return regions,quality
 
 
@@ -129,7 +159,9 @@ def prepare(original_spec,quality,output,*,minimum_quality,maximum_uncertainty,a
         weight=.1,normalizer='common-routable-candidates',activation='sada-adaptation-phase',
         early_stop_patience=15,protocol_frozen=False,minimum_quality=minimum_quality,
         maximum_uncertainty=maximum_uncertainty,anchor_fraction=anchor_fraction)
-    for key,obj in (('cache',cache),('regions',regions),('quality',bundle),('evidence',proof)):
+    policy=source_policy_summary(bundle,minimum_quality=minimum_quality,
+        maximum_uncertainty=maximum_uncertainty,anchor_fraction=anchor_fraction)
+    for key,obj in (('cache',cache),('regions',regions),('quality',bundle),('evidence',proof),('source_policy',policy)):
         path=root/(key+'.json'); save(path,obj)
         spec[key+'_path']=str(path); spec[key+'_file_sha256']=file_sha(path)
     validate_spec(spec,cache); save(root/'spec.json',spec)
@@ -167,6 +199,31 @@ def launch_ready(spec,cache):
             raise ValueError('consensus acceptance lacks both mechanisms or leaks target GT')
         found.append(ref)
     if len(found)!=1: raise ValueError('exact matching consensus acceptance required')
+
+
+def freeze_acceptance(output,reports,expected_head):
+    from tools.run_rq2_matched_control import check_code
+    check_code(expected_head)
+    refs=[reference(path) for path in reports]; seen=set()
+    for ref in refs:
+        report=checked(ref); key=(report.get('teacher'),report.get('shift'))
+        if (key in seen or report.get('variant')!=VARIANT or report.get('status')!='passed'
+                or report.get('diagnostic_epoch')!=50 or report.get('formal_result') is not False):
+            raise ValueError('invalid or duplicate consensus acceptance')
+        seen.add(key)
+        spec=report['spec']; cache=load_cache(spec['cache_path'],spec['cache_file_sha256'])
+        if key!=(cache['teacher'],cache['shift']): raise ValueError('acceptance teacher/shift differs')
+        audit_spec(spec,cache)
+    record=dict(variant=VARIANT,status='passed',code_commit=expected_head,reports=refs)
+    # 发布前复用与正式入口相同的所有验收检查；临时文件不冒充最终验收。
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix='rq4-consensus-accept-') as temp:
+        path=Path(temp)/'acceptance.json'; save(path,record)
+        for ref in refs:
+            spec=dict(checked(ref)['spec'],acceptance_path=str(path),acceptance_file_sha256=file_sha(path))
+            launch_ready(spec,load_cache(spec['cache_path'],spec['cache_file_sha256']))
+    save(output,record)
+    return record
 
 
 def main():
