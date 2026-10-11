@@ -88,8 +88,53 @@ def load_visual(model_path):
     return model.eval().requires_grad_(False), cfg, tensor_sha
 
 
+def official_inputs(request, processor):
+    from qwen_vl_utils import process_vision_info
+    content = dict(type='video', video=Path(request['clip_path']).as_uri(), fps=8., max_frames=200,
+                   min_pixels=32*32, max_pixels=480*480, total_pixels=400*480*480)
+    _, videos, _ = process_vision_info([dict(role='user', content=[content])], image_patch_size=16,
+                                       return_video_kwargs=True, return_video_metadata=True)
+    tensor, metadata = videos[0]
+    actual = [float(i)/metadata['fps'] for i in metadata['frames_indices']]
+    assert len(actual) == tensor.shape[0]
+    inputs = processor(videos=[tensor], video_metadata=[metadata], do_resize=False,
+                       do_sample_frames=False, return_tensors='pt')
+    grid = inputs['video_grid_thw']; assert tuple(grid.shape) == (1, 3)
+    assert int(grid[0, 0])*2 == len(actual)
+    assert actual[-1] <= request['clip_end_sec']-request['clip_start_sec']+.1
+    return inputs, actual
+
+
+def audit_inputs(root, head):
+    """两权重严格恢复及同一官方输入接口的最短/最长真实clip，禁CUDA。"""
+    m = check(root, head)
+    from transformers.models.qwen3_vl.video_processing_qwen3_vl import Qwen3VLVideoProcessor
+    ordered = sorted(m['rows'], key=lambda r:r['request']['clip_end_sec']-r['request']['clip_start_sec'])
+    reports = {}
+    for teacher in MODELS:
+        path = Path(MODELS[teacher]['model'])
+        model, cfg, sha = load_visual(path)
+        processor = Qwen3VLVideoProcessor.from_pretrained(path, local_files_only=True)
+        assert processor.temporal_patch_size == cfg.temporal_patch_size == 2
+        assert processor.merge_size == cfg.spatial_merge_size == 2
+        samples = []
+        for row in (ordered[0], ordered[-1]):
+            inputs, actual = official_inputs(row['request'], processor)
+            samples.append(dict(id=row['id'], grid=inputs['video_grid_thw'].tolist(), frames=len(actual),
+                                pixels=list(inputs['pixel_values_videos'].shape), actual_times=actual))
+        reports[teacher] = dict(visual_tensor_sha256=sha, samples=samples, visual_config=cfg.to_dict())
+        del model
+        print('E1_CPU_INPUT_AUDIT', teacher, len(sha), flush=True)
+    save(root/'input_audit.json', dict(status='passed', code_commit=head,
+         manifest_sha256=file_sha(root/'manifest.json'), teachers=reports,
+         identical_visual_weights=reports['timelens2_8b']['visual_tensor_sha256']==reports['timeple_8b']['visual_tensor_sha256']))
+
+
 def extract(root, head, teacher):
     m = check(root, head); out = root/teacher; out.mkdir(exist_ok=False)
+    audit = read(root/'input_audit.json')
+    assert audit['status'] == 'passed' and audit['code_commit'] == head
+    assert audit['manifest_sha256'] == file_sha(root/'manifest.json')
     model_path = Path(MODELS[teacher]['model'])
     identity = dict(teacher=teacher, code_commit=head, weights=weights(model_path),
                     scope='official frozen visual subtree only; no language model or interval codec',
@@ -99,8 +144,8 @@ def extract(root, head, teacher):
         os.environ['CUDA_VISIBLE_DEVICES'] = card['uuid']
         import torch
         from transformers.models.qwen3_vl.video_processing_qwen3_vl import Qwen3VLVideoProcessor
-        from qwen_vl_utils import process_vision_info
         model, config, tensor_sha = load_visual(model_path)
+        assert tensor_sha == audit['teachers'][teacher]['visual_tensor_sha256']
         processor = Qwen3VLVideoProcessor.from_pretrained(model_path, local_files_only=True)
         assert processor.temporal_patch_size == config.temporal_patch_size == 2
         assert processor.merge_size == config.spatial_merge_size == 2
@@ -112,16 +157,8 @@ def extract(root, head, teacher):
         for index, row in enumerate(m['rows']):
             started = time.monotonic(); request = row['request']
             assert file_sha(request['clip_path']) == request['clip_sha256']
-            content = dict(type='video', video=Path(request['clip_path']).as_uri(), fps=8., max_frames=200,
-                           min_pixels=32*32, max_pixels=480*480, total_pixels=400*480*480)
-            _, videos, _ = process_vision_info([dict(role='user', content=[content])], image_patch_size=16,
-                                               return_video_kwargs=True, return_video_metadata=True)
-            tensor, metadata = videos[0]
-            actual = [float(i)/metadata['fps'] for i in metadata['frames_indices']]
-            assert len(actual) == tensor.shape[0]
-            inputs = processor(videos=[tensor], video_metadata=[metadata], do_resize=False,
-                               do_sample_frames=False, return_tensors='pt')
-            grid = inputs['video_grid_thw']; assert tuple(grid.shape) == (1, 3)
+            inputs, actual = official_inputs(request, processor)
+            grid = inputs['video_grid_thw']
             with torch.inference_mode():
                 tokens, _ = model(inputs['pixel_values_videos'].to('cuda', dtype=torch.bfloat16),
                                   grid_thw=grid.to('cuda'))
@@ -200,12 +237,13 @@ def driver(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['prepare', 'extract', 'evaluate', 'driver'])
+    parser.add_argument('mode', choices=['prepare', 'audit_inputs', 'extract', 'evaluate', 'driver'])
     parser.add_argument('--root', type=Path, required=True); parser.add_argument('--expected-head', required=True)
     parser.add_argument('--teacher', choices=['timelens2_8b', 'timeple_8b'])
     args = parser.parse_args(); args.root = args.root.resolve()
     if args.mode == 'driver': driver(args)
     elif args.mode == 'prepare': prepare(args.root, args.expected_head)
+    elif args.mode == 'audit_inputs': audit_inputs(args.root, args.expected_head)
     else: globals()[args.mode](args.root, args.expected_head, args.teacher)
 
 
