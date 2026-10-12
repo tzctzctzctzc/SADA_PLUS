@@ -68,6 +68,8 @@ def main():
     parser.add_argument('--benchmark-batches', action='store_true', help='先实测batch4/8再固定吞吐更高者')
     parser.add_argument('--pair-students', action='store_true',
                         help='每两个shift准备后，同策略Hard/Prototype两学生共享一卡；Verify和评估独占')
+    parser.add_argument('--pipeline-cpu', action='store_true',
+                        help='只提前一个shift的目标帧CPU准备；不提前GPU查询或改变候选')
     parser.add_argument('--queue-slot', type=int, choices=(0, 1),
                         help='由两卡监控分配的互斥工作队列槽位')
     parser.add_argument('--prepared-root', type=Path, help='重验并复用完整候选/帧和教师缓存；不复用部分产物或训练')
@@ -122,6 +124,8 @@ def main():
         state['strategy_participation'] = dict(hard='all-common-candidates', verify=.2, prototype=.2)
         state['pair_students'] = args.pair_students
         pending_students = []
+        prefetch_pool = ThreadPoolExecutor(max_workers=1)
+        target_prefetch = {}
 
         def save(**values):
             state.update(values)
@@ -309,7 +313,8 @@ def main():
             baselines = {shift: completed_baseline(baseline_root(Path('/vepfs/vlms'), shift), shift)
                          for shift in sorted({row['shift'] for row in rows})}
             cpu_tested = set()
-            for shift_number, shift in enumerate(sorted(baselines), 1):
+            shifts = sorted(baselines)
+            for shift_number, shift in enumerate(shifts, 1):
                 group = [row for row in rows if row['shift'] == shift]
                 save(phase='prepare', shift=shift)
                 baseline = baseline_root(Path('/vepfs/vlms'), shift)
@@ -330,12 +335,19 @@ def main():
                          '--max-per-video', '30', '--max-proposals', '200', '--seed', '6'],
                             shift + '.source.proposals', selected=selected)
                 with ThreadPoolExecutor(max_workers=3) as pool:
-                    work = {kind: pool.submit(frames, shift, domain, scope, source)
+                    work = {kind: (target_prefetch.pop(shift) if kind == 'target_local' and shift in target_prefetch
+                                   else pool.submit(frames, shift, domain, scope, source))
                             for kind, domain, scope, source in (
                                 ('target_local', 'target', 'local', OLD_CANDIDATES / 'proposals' / (shift + '.jsonl')),
                                 ('source_local', 'source', 'local', proposals),
                                 ('source_proposal', 'source', 'proposal', proposals))}
                     manifests = {kind: future.result() for kind, future in work.items()}
+                if args.pipeline_cpu and shift_number < len(shifts):
+                    next_shift = shifts[shift_number]
+                    # 独立目录、原顺序与原SHA校验；后台仅CPU，训练RNG在独立进程。
+                    target_prefetch[next_shift] = prefetch_pool.submit(
+                        frames, next_shift, 'target', 'local',
+                        OLD_CANDIDATES / 'proposals' / (next_shift + '.jsonl'))
                 for row in group:
                     model, strategy = row['teacher'], row['strategy']
                     save(phase='teacher-calibration', teacher=model, strategy=strategy)
@@ -439,6 +451,7 @@ def main():
             stop(None, None)
             raise
         finally:
+            prefetch_pool.shutdown(wait=True, cancel_futures=True)
             for child in list(children):
                 child.wait()
 
