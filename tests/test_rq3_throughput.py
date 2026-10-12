@@ -24,3 +24,12 @@ def test_hash_covers_optimizer_and_model():
     assert digest_state(a)==digest_state(b)
     b['optim']['moment'][1]=1
     assert digest_state(a)!=digest_state(b)
+
+
+def test_handoff_excludes_only_exact_completed():
+    from tools.rq3_pipeline_handoff import remaining_rows
+    t='timeple_8b';done={(t,s,'S1') for s in ('hard','verify','prototype')}
+    rows=remaining_rows(t,done)
+    assert len(rows)==15
+    assert {r['shift'] for r in rows}=={'S2','S3','S4','S5','S6'}
+    with pytest.raises(ValueError):remaining_rows(t,{('other','hard','S1')})
