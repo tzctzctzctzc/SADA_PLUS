@@ -32,6 +32,14 @@ def write_once(path, obj):
         with path.open('x') as f: json.dump(obj, f, sort_keys=True)
 
 
+def managed_environment(slot):
+    # 本worker实际监督队列；保持与原trusted monitor相同的锁身份传递。
+    return dict(os.environ, CUDA_VISIBLE_DEVICES='', RQ3_QUEUE_SLOT=str(slot),
+        RQ3_MONITOR_PID=str(os.getpid()),
+        PYTHONPATH=str(CODE)+':/vepfs/vlms/cache/rq3_preparation_deps_0928',
+        PYTHONDONTWRITEBYTECODE='1')
+
+
 def worker(args):
     check_code(args.expected_head)
     teacher = args.teacher; slot = TEACHERS.index(teacher); gpu = slot
@@ -51,8 +59,7 @@ def worker(args):
     signal.signal(signal.SIGTERM, stop); signal.signal(signal.SIGINT, stop)
     def run(command, name, python):
         nonlocal child
-        env = dict(os.environ, CUDA_VISIBLE_DEVICES='', RQ3_QUEUE_SLOT=str(slot),
-            PYTHONPATH=str(CODE)+':/vepfs/vlms/cache/rq3_preparation_deps_0928', PYTHONDONTWRITEBYTECODE='1')
+        env = managed_environment(slot)
         with (root/(name+'.log')).open('x') as f:
             child = subprocess.Popen([python,'-u',*command], cwd=CODE, env=env,
                 stdout=f, stderr=subprocess.STDOUT, start_new_session=True)

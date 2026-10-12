@@ -23,3 +23,21 @@ def test_exact_new_36(tmp_path):
 def test_no_silent_model_substitution(key):
     with pytest.raises(ValueError): check_loading({key:['codec.weight']})
     check_loading({key:[]})
+
+
+@pytest.mark.parametrize('slot', [0, 1])
+def test_managed_worker_reaches_matrix_lock(monkeypatch, slot):
+    import os
+    from tools.run_rq3_temporal_pair import managed_environment
+    from tools.run_rq3_matrix import matrix_lock_name
+    monkeypatch.delenv('RQ3_COHORT_LEASE', raising=False)
+    monkeypatch.setenv('RQ3_MONITOR_PID', 'stale-parent')
+    env = managed_environment(slot)
+    assert env['RQ3_MONITOR_PID'] == str(os.getpid())
+    assert env['CUDA_VISIBLE_DEVICES'] == ''
+    for key in ('RQ3_QUEUE_SLOT', 'RQ3_MONITOR_PID'):
+        monkeypatch.setenv(key, env[key])
+    assert matrix_lock_name(0, 1) == f'.rq3_matrix_managed_slot{slot}.lock'
+    monkeypatch.delenv('RQ3_MONITOR_PID')
+    with pytest.raises(ValueError, match='invalid managed'):
+        matrix_lock_name(0, 1)
