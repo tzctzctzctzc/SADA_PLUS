@@ -12,7 +12,7 @@ from tools.rq3_early_stop import apply_policy, enabled
 
 
 def test_expanded_36_unique_and_old_default_54_unchanged(tmp_path):
-    rows = [dict(teacher=m, strategy=s, shift='S'+str(i)) for m in EXTRA
+    rows = [dict(teacher=m, strategy=s, shift='S'+str(i)) for m in ('videochat3_4b','moss_vl_instruct_0708')
             for s in ('hard','verify','prototype') for i in range(1,7)]
     plan = dict(schema='rq3-expanded-fresh-matrix-v1', seed=6, fresh=True, entries=rows)
     path=tmp_path/'plan.json'; path.write_text(json.dumps(plan))

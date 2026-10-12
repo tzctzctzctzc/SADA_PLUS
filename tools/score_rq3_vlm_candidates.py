@@ -100,6 +100,13 @@ def processor_files(model, settings):
         paths.extend(path for path in root.glob('*.py') if path.is_file())
         paths.extend(Path(__file__).with_name(name) for name in ('rq3_extra_teachers.py', 'extract_rq1_videochat3_features.py', 'extract_rq1_moss_vl_features.py'))
         directories.append(root)
+        if model in ('timelens2_8b', 'timeple_8b'):
+            paths.append(Path(__file__).with_name('rq3_temporal_teachers.py'))
+            import qwen_vl_utils
+            paths.extend(Path(qwen_vl_utils.__file__).resolve().parent.rglob('*.py'))
+            if model == 'timeple_8b':
+                from tools.rq3_temporal_teachers import official_timeple_root
+                paths.extend((official_timeple_root(settings)/'src/timeple').rglob('*.py'))
         if model == 'moss_vl_instruct_0708':
             paths.extend(Path(path) for path in ('/usr/lib/x86_64-linux-gnu/libstdc++.so.6',
                                                  '/usr/lib/x86_64-linux-gnu/libgcc_s.so.1'))

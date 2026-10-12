@@ -9,6 +9,26 @@ import numpy as np
 from PIL import Image
 
 EXTRA = {
+    'timelens2_8b': {
+        'repo': 'MCG-NJU/TimeLens2-8B',
+        'revision': 'afb728d176c1ab919b3ee12e581c1620cbdfa5c0',
+        'weights': {
+            'model-00001-of-00004.safetensors': '8c9b8f3693764451f19205a5903e86d7adcbad47b0606292b27e462ecdfd2901',
+            'model-00002-of-00004.safetensors': '268eb57412e2390592e552f7aa89cb55a7b933ce5c256941535552143baf0471',
+            'model-00003-of-00004.safetensors': 'ebbd8974bfd0c7049007d1b595b20192c41596d094ebeba9c49dc3f22872f4ba',
+            'model-00004-of-00004.safetensors': 'd7487cf611578016a95403978efba3c62040da5a90c6383e88a836f79f14e4e5',
+        },
+    },
+    'timeple_8b': {
+        'repo': 'KlingTeam/TimePLE',
+        'revision': 'f583ef50ea9fc3498d537ff14438af25d5613d38',
+        'weights': {
+            'model-00001-of-00004.safetensors': '0ebdf1905d9e72a95510362a90f1a07ee9c4f3cf59b43d913898af0745fc72b8',
+            'model-00002-of-00004.safetensors': '73dacaf181b9e0f094459f46ff4bbf72153ca4b9c18372fca453772a82c0a58b',
+            'model-00003-of-00004.safetensors': 'a8a6c25fcbfcf1cfdca0cc20b026e3a3dc2ff8476395e7a3768c49e1aaefbb1a',
+            'model-00004-of-00004.safetensors': '4be0c7653dac89633c511e9436565b84c4724fc2feac634e2fcb626755f94759',
+        },
+    },
     'videochat3_4b': {
         'repo': 'MCG-NJU/VideoChat3-4B',
         'revision': '37fa901ec5913f84bc31108ebc1e60ad1903634c',
@@ -75,6 +95,9 @@ def write_lossless_video(frames, path, sample_fps):
 
 
 def load_extra_teacher(model, settings):
+    if model in ('timelens2_8b', 'timeple_8b'):
+        from tools.rq3_temporal_teachers import load_temporal_teacher
+        return load_temporal_teacher(model, settings)
     import torch
     from tools.run_qwen3_vl_classification import build_prompt, digit_to_label, resolve_digit_token_ids, normalize_digit_logits
     from tools.rq3_gpu import guard_before_cuda
