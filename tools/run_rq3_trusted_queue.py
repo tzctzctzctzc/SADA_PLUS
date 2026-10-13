@@ -68,6 +68,8 @@ def main():
     parser.add_argument('--benchmark-batches', action='store_true', help='先实测batch4/8再固定吞吐更高者')
     parser.add_argument('--pair-students', action='store_true',
                         help='每两个shift准备后，同策略Hard/Prototype两学生共享一卡；Verify和评估独占')
+    parser.add_argument('--pair-strategies', nargs='+', choices=('hard', 'prototype'),
+                        default=['hard', 'prototype'])
     parser.add_argument('--pipeline-cpu', action='store_true',
                         help='只提前一个shift的目标帧CPU准备；不提前GPU查询或改变候选')
     parser.add_argument('--queue-slot', type=int, choices=(0, 1),
@@ -123,6 +125,7 @@ def main():
         state['early_stop_patience_epochs'] = args.early_stop_patience
         state['strategy_participation'] = dict(hard='all-common-candidates', verify=.2, prototype=.2)
         state['pair_students'] = args.pair_students
+        state['pair_strategies'] = args.pair_strategies if args.pair_students else []
         pending_students = []
         prefetch_pool = ThreadPoolExecutor(max_workers=1)
         target_prefetch = {}
@@ -259,7 +262,7 @@ def main():
 
         def flush_students():
             from tools.rq3_colocation import choose_student_groups
-            for group in choose_student_groups(pending_students):
+            for group in choose_student_groups(pending_students, args.pair_strategies):
                 save(phase='training-evaluation', student_entries=[j['identity'] for j in group])
                 check_code(args.expected_head)
                 if len(group) == 2:

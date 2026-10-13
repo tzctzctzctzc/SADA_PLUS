@@ -134,12 +134,14 @@ def shared_stage(request, stage):
             os.environ['RQ3_COHORT_STAGE'] = old
 
 
-def choose_student_groups(jobs):
+def choose_student_groups(jobs, pair_strategies=('hard', 'prototype')):
     """仅同策略Hard/Prototype配对；Verify保持单任务。不读任何性能结果。"""
+    if not set(pair_strategies).issubset({'hard', 'prototype'}):
+        raise ValueError('only tested Hard/Prototype policies can be paired')
     result = []
     for strategy in ('hard', 'verify', 'prototype'):
         selected = [job for job in jobs if job['strategy'] == strategy]
-        width = 1 if strategy == 'verify' else 2
+        width = 2 if strategy in pair_strategies else 1
         result.extend(selected[i:i+width] for i in range(0, len(selected), width))
     if sum(map(len, result)) != len(jobs):
         raise ValueError('unknown strategy in student jobs')

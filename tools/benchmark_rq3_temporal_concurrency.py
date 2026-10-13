@@ -42,21 +42,27 @@ def digest_state(value):
 def training_args(reference, name):
     c = json.loads(reference.read_text())
     a = c['rq3_auxiliary']
-    if a['strategy'] != 'hard' or c['seed'] != 6 or c['loader']['batch_size'] != 2:
-        raise ValueError('diagnostic supports only the frozen batch2 seed6 Hard inputs')
+    if a['strategy'] not in ('hard', 'prototype') or c['seed'] != 6 or c['loader']['batch_size'] != 2:
+        raise ValueError('diagnostic supports frozen batch2 seed6 Hard/Prototype inputs')
     # 原冻结yaml，不将expanded config当yaml；所有科学参数走原train_da入口。
     from tools.rq2_dense_protocol import sha256_file
     original = Path(c['config_path'])
     config = CODE/'configs'/Path(*original.parts[original.parts.index('configs')+1:])
     if sha256_file(config) != sha256_file(original):
         raise ValueError('diagnostic config differs')
-    return ['-c',str(config),'-s','6','-i','0','-n',name,'--debug','--benchmark-audit-log',
+    command = ['-c',str(config),'-s','6','-i','0','-n',name,'--debug','--benchmark-audit-log',
         '--rq2-shift',c['rq2_formal']['shift'],'--rq2-regime','uda','--supervised-upper-bound','off',
         '--rq2-registry',str(DATA/'configs/rq2/shift_registry.yaml'),
         '--rq2-reference-root',str(DATA/'data/ek100_slowfast/features'),
         '--rq2-target-manifest',c['rq2_formal']['target_manifest']['path'],
-        '--rq3-strategy','hard','--rq3-teacher',a['teacher_model'],'--rq3-cache',a['cache_path'],
+        '--rq3-strategy',a['strategy'],'--rq3-teacher',a['teacher_model'],'--rq3-cache',a['cache_path'],
         '--rq3-batch-size','2','--rq3-early-stop-patience','15']
+    if a['strategy'] == 'prototype':
+        if a['schema'] != 'rq3-fixed-participation-time-matched-v5':
+            raise ValueError('diagnostic requires original v5 Prototype')
+        command += ['--rq3-revision','revised','--rq3-candidate-manifest',a['manifest_path'],
+                    '--rq3-confidence-calibration',a['calibration_path']]
+    return command
 
 
 def child(args):
@@ -113,6 +119,8 @@ def child(args):
 
 
 def compare(serial,parallel):
+    if len(serial) != 2 or len(parallel) != 2 or any(len(x['measurements']) != 2 for x in serial+parallel):
+        raise ValueError('two complete jobs and phases required')
     equivalent=all(a['state_sha256']==b['state_sha256'] and a['metrics']==b['metrics']
         for s,p in zip(serial,parallel) for a,b in zip(s['measurements'],p['measurements']))
     speeds=[]
@@ -122,16 +130,21 @@ def compare(serial,parallel):
         speeds.append(s/p)
     return dict(exact_state_and_metrics=equivalent,phase_speedups=speeds,
         enable_candidate=equivalent and min(speeds)>1.10,
-        scope='S1 Hard two-teacher 15-step warmup/adaptation diagnostic only')
+        scope='two-reference 15-step warmup/adaptation diagnostic only')
 
 
 def parent(args):
     check_code(args.expected_head); args.root.mkdir(exist_ok=False)
     refs=[]
-    for teacher in TEACHERS:
-        paths=list((args.reference/teacher/'formal18').glob('**/hard/S1_seed6/preflight.json'))
-        if len(paths)!=1: raise ValueError('expected one frozen S1 Hard preflight')
-        refs.append(paths[0]); training_args(paths[0],'validate-only')
+    if args.references_json:
+        refs=[Path(p) for p in json.loads(args.references_json.read_text())]
+        if len(refs)!=2 or len(set(refs))!=2: raise ValueError('two distinct references required')
+    else:
+        for teacher in TEACHERS:
+            paths=list((args.reference/teacher/'formal18').glob('**/hard/S1_seed6/preflight.json'))
+            if len(paths)!=1: raise ValueError('expected one frozen S1 Hard preflight')
+            refs.append(paths[0])
+    for reference in refs: training_args(reference,'validate-only')
     results=[]
     children=[]
     def stop(*unused): raise InterruptedError('diagnostic stopped')
@@ -187,15 +200,20 @@ def parent(args):
                     time.sleep(1)
     report=compare(*results)
     report.update(code_commit=args.expected_head,diagnostic_only=True,gpu=args.gpu)
+    from tools.rq2_dense_protocol import sha256_file
+    report['references']=[dict(path=str(p),sha256=sha256_file(p)) for p in refs]
     write_json(args.root/'result.json',report);print(json.dumps(report),flush=True)
 
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('mode',choices=['parent','child']);p.add_argument('--root',type=Path,required=True)
-    p.add_argument('--reference',type=Path,required=True);p.add_argument('--expected-head',required=True)
+    p.add_argument('--reference',type=Path);p.add_argument('--references-json',type=Path)
+    p.add_argument('--expected-head',required=True)
     p.add_argument('--gpu',type=int,choices=[0,1],default=0);p.add_argument('--parallel',action='store_true')
-    a=p.parse_args();globals()[a.mode](a)
+    a=p.parse_args()
+    if a.reference is None and a.references_json is None:p.error('a reference is required')
+    globals()[a.mode](a)
 
 
 if __name__=='__main__':main()
