@@ -210,7 +210,7 @@ def main():
     p.add_argument('mode',choices=['parent','child']);p.add_argument('--root',type=Path,required=True)
     p.add_argument('--reference',type=Path);p.add_argument('--references-json',type=Path)
     p.add_argument('--expected-head',required=True)
-    p.add_argument('--gpu',type=int,choices=[0,1],default=0);p.add_argument('--parallel',action='store_true')
+    p.add_argument('--gpu',type=int,choices=[0,1,2,3],default=0);p.add_argument('--parallel',action='store_true')
     a=p.parse_args()
     if a.reference is None and a.references_json is None:p.error('a reference is required')
     globals()[a.mode](a)

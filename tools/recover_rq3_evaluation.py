@@ -16,9 +16,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--expected-head', required=True)
+    parser.add_argument('--training-head', required=True)
+    parser.add_argument('--gpu', type=int, required=True)
     args = parser.parse_args()
     root = args.root.resolve()
-    if (root / 'complete.json').exists() or any((root / 'evaluation').glob('*.json')):
+    if (root / 'complete.json').exists() or (root / 'evaluation').exists():
         raise FileExistsError('existing results must not be overwritten')
     check_code(args.expected_head)
     cfg = json.loads((root / 'preflight.json').read_text())
@@ -30,7 +32,7 @@ def main():
     baseline = baseline_root(Path('/vepfs/vlms'), shift)
     base_cfg, *_ = completed_baseline(baseline, shift)
     config, checkpoint = checked_train_result(data / 'model_results' / name,
-        root / 'logs/uda.train.log', cfg, allow_accelerated=True)
+        root / 'logs/uda.train.log', cfg, allow_accelerated=cfg['loader']['batch_size'] != 2)
     audit_baseline(base_cfg, json.loads(config.read_text()))
     if sha256_file(aux['cache_path']) != aux['cache_sha256']:
         raise ValueError('cache changed')
@@ -40,12 +42,12 @@ def main():
     command = [sys.executable, '-B', str(CODE_ROOT / 'evaluate_da.py'), '-c', config_path,
         '-s', '6', '-i', '0', '--rq2-shift', shift, '--rq2-registry', str(registry),
         '--rq2-reference-root', str(data / 'data/ek100_slowfast/features'),
-        '-n', name + '_eval_recovered', '-r', str(checkpoint), '--rq2-formal',
+        '-n', name + '_eval_recovered_gpu' + str(args.gpu), '-r', str(checkpoint), '--rq2-formal',
         '--rq2-output-dir', str(root / 'evaluation')]
-    with gpu_slot('3', data, wait=True) as selected:
+    with gpu_slot(str(args.gpu), data, wait=True) as selected:
         check_code(args.expected_head)
         run_command(command, root / 'logs/uda.eval.recovered.log', data,
-                    selected['uuid'], gpu_index=3)
+                    selected['uuid'], gpu_index=args.gpu)
     manifest = checked_evaluation(root / 'evaluation', cfg, checkpoint)
     if manifest.get('rq3_auxiliary') != aux:
         raise ValueError('evaluation auxiliary identity differs')
@@ -55,8 +57,11 @@ def main():
     (root / 'supervision_audit.json').write_text(json.dumps(coverage, sort_keys=True))
     record = dict(teacher=teacher, strategy=strategy, shift=shift, seed=6,
         single_seed_stage_result=True, code_commit=args.expected_head,
-        training_code_commit='8593dab4ce64317ce7a652c51f1ab0aff0881578',
-        batch_size=cfg['loader']['batch_size'], batch_matched_baseline=False,
+        training_code_commit=args.training_head,
+        batch_size=cfg['loader']['batch_size'],
+        batch_matched_baseline=cfg['loader']['batch_size'] == 2,
+        early_stopping=aux.get('early_stopping'),
+        stopping_budget_matched_baseline=not bool(aux.get('early_stopping')),
         evaluation_gpu=selected, baseline_root=str(baseline), cache_sha256=aux['cache_sha256'],
         checkpoint_sha256=sha256_file(checkpoint),
         manifest_sha256=sha256_file(root / 'evaluation/manifest.json'))
