@@ -24,6 +24,9 @@ def main():
                     't_rq3_gradient_norm', 't_rq3_target_gradient_norm'):
             if not float(metrics.get(key, 0)) > 0:
                 raise ValueError('real supervision missing: ' + key)
+        if self.cfg['rq3_enhancement']['source_supcon_weight']:
+            if metrics.get('t_rq3_source_supcon_loss', 0) <= 0 or metrics.get('t_rq3_source_supcon_anchors', 0) <= 0:
+                raise ValueError('source supervised contrastive branch did not activate')
         if not all(torch.isfinite(torch.tensor(float(v))) for v in metrics.values()):
             raise ValueError('nonfinite smoke metrics')
         # 严格恢复含新增模块的完整state，避免只在正式离线评估时发现漏接。

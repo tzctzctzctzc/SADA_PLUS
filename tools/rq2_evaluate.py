@@ -25,17 +25,11 @@ def load_checkpoint(path):
         if not (exc.name or '').startswith('numpy._core'):
             raise
         # NumPy 2只重命名了这些pickle模块；不改数组内容或训练使用的NumPy版本。
-        import pickle
-        import types
-        compat = types.ModuleType('numpy_namespace_compat_pickle')
-        class NamespaceUnpickler(pickle.Unpickler):
-            def find_class(self, module, name):
-                if module == 'numpy._core' or module.startswith('numpy._core.'):
-                    module = 'numpy.core' + module[len('numpy._core'):]
-                return super().find_class(module, name)
-        compat.Unpickler = NamespaceUnpickler
-        compat.load, compat.loads = pickle.load, pickle.loads
-        return torch.load(path, map_location='cpu', weights_only=False, pickle_module=compat)
+        import importlib
+        import sys
+        for suffix in ('', '.multiarray', '.numeric'):
+            sys.modules.setdefault('numpy._core'+suffix, importlib.import_module('numpy.core'+suffix))
+        return torch.load(path, map_location='cpu', weights_only=False)
     except TypeError as exc:
         if "weights_only" not in str(exc):
             raise
