@@ -84,7 +84,7 @@ def selected_checkpoint_state(checkpoint, config=None, require_provenance=False)
 
 def restore_auxiliary_config(cfg, saved_config):
     # 辅助模块不参与test前向，但必须重建相同结构才能strict恢复全部权重。
-    for key in ('rq3_auxiliary', 'rq4_boundary'):
+    for key in ('rq3_auxiliary', 'rq4_boundary', 'rq3_enhancement'):
         if saved_config.get(key):
             cfg[key] = deepcopy(saved_config[key])
 
@@ -182,6 +182,8 @@ def evaluate(cfg, ckpt_path, config_path, output_dir, device, feature_protocol=N
     summaries = {}
     if saved_config.get("rq3_auxiliary"):
         metadata["rq3_auxiliary"] = saved_config["rq3_auxiliary"]
+    if saved_config.get('rq3_enhancement'):
+        metadata['rq3_enhancement'] = saved_config['rq3_enhancement']
     if saved_config.get('rq4_boundary'):
         # 仅保存训练身份；推理不加载边界教师或附加任何预测。
         metadata['rq4_boundary'] = saved_config['rq4_boundary']

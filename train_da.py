@@ -1117,6 +1117,8 @@ def create_argparser():
     parser.add_argument('--rq2-reference-root', default='./data/ek100_slowfast/features')
     parser.add_argument('--rq4-config', default=None, help='explicit RQ4 boundary interface specification')
     parser.add_argument('--rq3-strategy', choices=('off', 'hard', 'verify', 'prototype'), default='off')
+    from tools.rq3_enhancement import ORDER as enhancement_order
+    parser.add_argument('--rq3-enhancement', choices=enhancement_order)
     parser.add_argument('--rq3-revision', choices=('legacy', 'revised'), default='legacy')
     parser.add_argument('--rq3-batch-size', type=int, choices=(2, 4, 8), default=2)
     parser.add_argument('--rq3-early-stop-patience', type=int, choices=(0, 15), default=0)
@@ -2678,6 +2680,8 @@ if __name__ == '__main__':
     apply_batch(config_dict, args.rq3_batch_size)
     from tools.rq3_early_stop import apply_policy
     apply_policy(config_dict, args.rq3_early_stop_patience)
+    from tools.rq3_enhancement import configure as configure_enhancement
+    configure_enhancement(config_dict, args.rq3_enhancement)
     from tools.rq4_protocol import configure as configure_rq4
     configure_rq4(config_dict, args.rq4_config)
 

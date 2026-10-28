@@ -56,6 +56,8 @@ def probe_idle(index):
 def audit_complete(path, baselines):
     record = json.loads(path.read_text())
     cfg = json.loads((path.parent / 'preflight.json').read_text())
+    if cfg.get('rq3_enhancement'):
+        raise ValueError('enhancement results require their independent audit; not the old v5 matrix')
     aux = cfg['rq3_auxiliary']
     hard = aux['strategy'] == 'hard' and aux['schema'] == 'rq3-three-strategies-v2'
     if (not hard and (aux['schema'] != REVISION or aux['participation_fraction'] != .2)) or aux['target_gt_used']:

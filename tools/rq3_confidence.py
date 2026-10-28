@@ -135,8 +135,8 @@ def calibrate(cfg, cache_path, manifest_path, strategy, min_precision, min_suppo
                          confidence_policy='fixed-top20-percent-per-shift-v1')
         schema = BUDGET_SCHEMA
     return dict(schema=schema, strategy=strategy, teacher_model=payload['teacher_model'], shift=payload['shift'],
-                source_cache_path=str(Path(cache_path).resolve()), source_cache_sha256=sha256_file(cache_path),
-                source_manifest_path=str(Path(manifest_path).resolve()), source_manifest_sha256=sha256_file(manifest_path),
+                source_cache_path=str(Path(cache_path).absolute()), source_cache_sha256=sha256_file(cache_path),
+                source_manifest_path=str(Path(manifest_path).absolute()), source_manifest_sha256=sha256_file(manifest_path),
                 annotations_sha256=sha256_file(cfg['dataset']['json_file']),
                 source_val_members=source_members, target_gt_used=False, evidence_scope=scope_for(strategy),
                 proposal_teacher_sha256=payload['teacher_checkpoint_sha256'],

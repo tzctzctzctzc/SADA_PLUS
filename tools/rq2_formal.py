@@ -111,7 +111,8 @@ def check_target_manifest(path, target_splits, annotation_path=None):
             raise ValueError(
                 "target manifest is incomplete or its unlabeled metadata was changed"
             )
-    return {"path": str(Path(path).resolve()), "sha256": sha256_file(path), "videos": len(database)}
+    # 保留已签名工件的逻辑绝对路径；迁移后的内容寻址软链接不改变工件身份。
+    return {"path": str(Path(path).absolute()), "sha256": sha256_file(path), "videos": len(database)}
 
 
 def check_formal_config(cfg, regime, manifest_path=None):

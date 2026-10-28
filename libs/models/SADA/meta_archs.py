@@ -1534,9 +1534,17 @@ class SADA(nn.Module):
                     self.rq3_verify_cache = evidence
                     self.rq3_verify_threshold = rq3['confidence_threshold']
                 else:
-                    self.rq3_prototype = RQ3ProposalPrototype(
-                        fpn_dim, self.num_class_orig, evidence, self.fpn_strides, self.reg_range,
-                        rq3['confidence_threshold'])
+                    if cfg.get('rq3_enhancement'):
+                        from .rq3_enhancement import EnhancedPrototype
+                        from tools.rq3_enhancement import validate as validate_enhancement
+                        validate_enhancement(cfg)
+                        self.rq3_prototype = EnhancedPrototype(
+                            fpn_dim, self.num_class_orig, evidence, self.fpn_strides, self.reg_range,
+                            rq3['confidence_threshold'], cfg['rq3_enhancement'])
+                    else:
+                        self.rq3_prototype = RQ3ProposalPrototype(
+                            fpn_dim, self.num_class_orig, evidence, self.fpn_strides, self.reg_range,
+                            rq3['confidence_threshold'])
             else:
                 self.rq3_auxiliary = RQ3Auxiliary(
                     rq3['strategy'], rq3['levels'], [fpn_dim] * self.n_levels,

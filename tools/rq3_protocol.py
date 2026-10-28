@@ -269,7 +269,7 @@ def configure(cfg, strategy, cache_path, model, shift, revision='legacy', manife
     validate_reference_lengths(payload, cfg)
     cfg["rq3_auxiliary"] = {
         "schema": "rq3-three-strategies-v2", "strategy": strategy, "teacher_model": model,
-        "cache_path": str(Path(cache_path).resolve()), "cache_sha256": sha256_file(cache_path),
+        "cache_path": str(Path(cache_path).absolute()), "cache_sha256": sha256_file(cache_path),
         "candidate_sha256": payload["candidate_sha256"], "frames_sha256": payload["frames_sha256"],
         "teacher_checkpoint_sha256": payload["teacher_checkpoint_sha256"],
         "input_protocol": payload["input_protocol"], "levels": [0, 1, 2],
@@ -294,9 +294,9 @@ def configure(cfg, strategy, cache_path, model, shift, revision='legacy', manife
             'strategy', 'teacher_model', 'cache_path', 'cache_sha256', 'candidate_sha256',
             'frames_sha256', 'teacher_checkpoint_sha256', 'input_protocol')}
         cfg['rq3_auxiliary'].update(REVISED_FIXED, schema=REVISION,
-                                   manifest_path=str(Path(manifest_path).resolve()),
+                                   manifest_path=str(Path(manifest_path).absolute()),
                                    manifest_sha256=sha256_file(manifest_path),
-                                   calibration_path=str(Path(calibration_path).resolve()),
+                                   calibration_path=str(Path(calibration_path).absolute()),
                                    calibration_sha256=sha256_file(calibration_path),
                                    confidence_threshold=calibration['threshold'],
                                    selected_coordinates=selected)
