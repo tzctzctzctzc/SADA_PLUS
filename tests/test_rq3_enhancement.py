@@ -141,3 +141,13 @@ def test_registry_annotation_symlink_preserves_logical_provenance(tmp_path):
         'S1':{'config':'configs/shift.yaml','config_sha256':sha256_normalized_text(path)}}}))
     ids,proof=video_selection_from_registry(registry)
     assert ids==['v'] and proof['annotation']['path']=='annotation.json'
+
+
+@pytest.mark.parametrize('name',ORDER)
+def test_empty_source_crop_keeps_legal_zero_alignment(name):
+    model=build(name)
+    data=prototype_data()
+    data[0][0]['segments']=torch.empty(0,2)
+    data[0][0]['labels']=torch.empty(0,dtype=torch.long)
+    out=model(*data,epoch=5)
+    assert torch.isfinite(out['loss']) and out['target_gradient_norm']==0

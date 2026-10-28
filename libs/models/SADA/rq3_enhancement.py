@@ -66,6 +66,8 @@ class EnhancedBranch(VLMProposalCoAdaptationBranch):
 
     @torch.no_grad()
     def update_subprototypes(self, embedding, targets):
+        if targets is None or not targets.numel():
+            return
         for cls in range(self.num_classes):
             rows = embedding[targets[:, cls] > 0].detach()
             if not len(rows):
