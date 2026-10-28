@@ -101,3 +101,23 @@ def test_spec_tampering_and_nonbranch_changes_rejected():
     cfg['rq3_auxiliary']['selected_coordinates']=[['v',3]]
     with pytest.raises(ValueError):
         assert_reference_pair(cfg,reference)
+
+
+def test_numpy2_namespace_checkpoint_is_read_without_changing_array(tmp_path):
+    import numpy as np
+    import zipfile
+    from tools.rq2_evaluate import load_checkpoint
+    source=tmp_path/'source.pt'
+    moved=tmp_path/'numpy2.pt'
+    values=np.arange(6,dtype=np.float64)
+    torch.save({'array':values,'weight':torch.ones(3)},source)
+    with zipfile.ZipFile(source) as inp, zipfile.ZipFile(moved,'w') as out:
+        for name in inp.namelist():
+            data=inp.read(name)
+            if name.endswith('data.pkl'):
+                assert b'numpy.core.multiarray' in data
+                data=data.replace(b'numpy.core.multiarray',b'numpy._core.multiarray')
+            out.writestr(name,data)
+    restored=load_checkpoint(moved)
+    assert np.array_equal(restored['array'],values)
+    assert torch.equal(restored['weight'],torch.ones(3))

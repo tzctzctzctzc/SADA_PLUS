@@ -12,6 +12,7 @@ def main():
     from libs.trainer.da_trainer import Trainer
 
     def smoke(self):
+        before = {k: v.detach().clone() for k, v in self.model.rq3_prototype.named_parameters()}
         self.train_metrics.reset()
         self._train_epoch(50, ad_lambda=self.adaptation_factor(50/30),
                           cls_static_anchors=None, mean_class_conf=None)
@@ -27,6 +28,8 @@ def main():
             raise ValueError('nonfinite smoke metrics')
         # 严格恢复含新增模块的完整state，避免只在正式离线评估时发现漏接。
         self.model.load_state_dict(self.model.state_dict(), strict=True)
+        if not any(not torch.equal(before[k], v.detach()) for k, v in self.model.rq3_prototype.named_parameters()):
+            raise ValueError('branch has gradients but optimizer did not update parameters')
         with report.open('x') as stream:
             json.dump(dict(status='passed', diagnostic_only=True, no_checkpoint=True,
                            specification=self.cfg['rq3_enhancement'], metrics=metrics), stream, sort_keys=True)
