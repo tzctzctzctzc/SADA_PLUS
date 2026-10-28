@@ -121,3 +121,23 @@ def test_numpy2_namespace_checkpoint_is_read_without_changing_array(tmp_path):
     restored=load_checkpoint(moved)
     assert np.array_equal(restored['array'],values)
     assert torch.equal(restored['weight'],torch.ones(3))
+
+
+def test_registry_annotation_symlink_preserves_logical_provenance(tmp_path):
+    import json,yaml
+    from tools.extract_rq2_dense_vlm_features import video_selection_from_registry
+    from tools.rq2_dense_protocol import sha256_normalized_text
+    repo=tmp_path/'repo'
+    (repo/'configs').mkdir(parents=True)
+    content=tmp_path/'content.json'
+    content.write_text(json.dumps({'database':{'v':{'subset':'train'}}}))
+    (repo/'annotation.json').symlink_to(content)
+    cfg={'dataset':{'json_file':'annotation.json'},'src_train_split':['train'],
+         'src_val_split':['val'],'tgt_train_split':['target'],'tgt_val_split':['target_val']}
+    path=repo/'configs/shift.yaml'
+    path.write_text(yaml.safe_dump(cfg))
+    registry=repo/'configs/registry.yaml'
+    registry.write_text(yaml.safe_dump({'repository_root':'..','shifts':{
+        'S1':{'config':'configs/shift.yaml','config_sha256':sha256_normalized_text(path)}}}))
+    ids,proof=video_selection_from_registry(registry)
+    assert ids==['v'] and proof['annotation']['path']=='annotation.json'

@@ -740,7 +740,7 @@ def video_selection_from_registry(path):
         for key in ("src_train_split", "src_val_split", "tgt_train_split", "tgt_val_split"):
             subsets.update(str(value).lower() for value in config[key])
         annotation_paths.add(
-            str((repository_root / config["dataset"]["json_file"]).resolve())
+            str((repository_root / config["dataset"]["json_file"]).absolute())
         )
     if len(annotation_paths) != 1:
         raise ValueError("RQ2 shifts must use one common annotation database")
