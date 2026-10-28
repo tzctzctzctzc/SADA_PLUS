@@ -24,7 +24,7 @@ CHILD = None
 def stop(signum, frame):
     if CHILD is not None and CHILD.poll() is None:
         os.killpg(CHILD.pid, signal.SIGTERM)
-        CHILD.wait()
+    # 不在signal handler里重入Popen.wait的非重入锁；由run的异常清理收尸。
     raise SystemExit(128 + (signum or 15))
 
 
@@ -39,8 +39,15 @@ def run(command, log, data, card=None):
     with log.open('x') as stream:
         CHILD = subprocess.Popen(command, cwd=data, env=env, stdout=stream,
                                   stderr=subprocess.STDOUT, start_new_session=True)
-        code = CHILD.wait()
-        CHILD = None
+        try:
+            code = CHILD.wait()
+        except BaseException:
+            if CHILD.poll() is None:
+                os.killpg(CHILD.pid, signal.SIGTERM)
+            CHILD.wait(timeout=30)
+            raise
+        finally:
+            CHILD = None
         if code:
             raise subprocess.CalledProcessError(code, command)
 

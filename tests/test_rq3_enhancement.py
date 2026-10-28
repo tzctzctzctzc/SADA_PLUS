@@ -151,3 +151,34 @@ def test_empty_source_crop_keeps_legal_zero_alignment(name):
     data[0][0]['labels']=torch.empty(0,dtype=torch.long)
     out=model(*data,epoch=5)
     assert torch.isfinite(out['loss']) and out['target_gradient_norm']==0
+
+
+@pytest.mark.skipif(sys.platform!='linux',reason='Linux process-group cancellation')
+def test_signal_cancellation_reaps_own_child_without_wait_deadlock(tmp_path):
+    import subprocess,os,signal,time
+    marker=tmp_path/'child.pid'
+    child_script="import os,time,pathlib;pathlib.Path(%r).write_text(str(os.getpid()));time.sleep(60)"%str(marker)
+    script="""import signal,sys
+from pathlib import Path
+from tools import run_rq3_enhancement as m
+signal.signal(signal.SIGTERM,m.stop)
+m.run([sys.executable,'-c',%r],Path(%r),Path(%r))
+"""%(child_script,str(tmp_path/'child.log'),str(Path.cwd()))
+    env=dict(os.environ,PYTHONPATH=str(Path(__file__).resolve().parents[1]),CUDA_VISIBLE_DEVICES='')
+    proc=subprocess.Popen([sys.executable,'-c',script],env=env,start_new_session=True)
+    child_pid=None
+    try:
+        deadline=time.monotonic()+20
+        while not marker.exists() and time.monotonic()<deadline and proc.poll() is None:
+            time.sleep(.05)
+        assert marker.exists()
+        child_pid=int(marker.read_text())
+        proc.send_signal(signal.SIGTERM)
+        assert proc.wait(timeout=8)==143
+        assert not Path('/proc',str(child_pid)).exists()
+    finally:
+        if proc.poll() is None:
+            os.killpg(proc.pid,signal.SIGKILL)
+            proc.wait()
+        if child_pid and Path('/proc',str(child_pid)).exists():
+            os.kill(child_pid,signal.SIGKILL)
