@@ -214,6 +214,9 @@ def epoch_setup(ctx, epoch):
 
 def probe(cfg, output, warmup_steps=2, timed_steps=6):
     ctx = build(cfg)
+    # 固定40/200名单不能用前6批覆盖来代表；诊断遍历完整原始epoch，不补抽候选。
+    if cfg.get('prototype_capacity'):
+        timed_steps=max(len(ctx.train_loader_src),len(ctx.train_loader_tgt))
     reports = {}
     for epoch in (1, 5):
         epoch_setup(ctx, epoch)
@@ -266,7 +269,8 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
                       initial_detector_sha=ctx.initial_detector_sha,
                       cuda_seed_proof=ctx.cuda_seed_proof,
                       rng_roundtrip=dict(status='passed',cuda_rng_count=1,full_state_sha=tensor_digest(saved),
-                                         replayed_draw_sha=expected_draw)))
+                                         replayed_draw_sha=expected_draw),
+                      diagnostic_steps_per_phase=timed_steps))
 
 
 def train(cfg, entry, resume=None):
