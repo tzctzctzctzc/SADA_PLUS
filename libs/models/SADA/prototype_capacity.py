@@ -25,6 +25,9 @@ def build_capacity(cfg,fpn_dim,num_classes,strides,regression_ranges,device):
     if hashlib.sha256(path.read_bytes()).hexdigest()!=cfg['prepared_cache_sha256']:
         raise ValueError('冻结教师缓存发生变化')
     payload=json.loads(path.read_text())
+    oracle = payload.get('schema') == 'prototype-gt-oracle-cache-v1'
+    if oracle != (cfg.get('oracle_auxiliary_ground_truth') is True):
+        raise ValueError('GT oracle缓存必须显式授权，不能冒充普通VLM缓存')
     # 与基线共享检测器初始化与采样轨迹，新增分支只在隔离随机域中初始化。
     devices=[0] if torch.device(device).type=='cuda' else []
     with torch.random.fork_rng(devices=devices):
