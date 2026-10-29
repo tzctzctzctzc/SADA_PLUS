@@ -160,8 +160,6 @@ def synchronous_probe(root,data,cfg,indices,minimum,label):
 
 def child(args):
     from tools.baseline_gpu import first_cuda_guard
-    # 首次CUDA前独立核验，不能只相信父监督的状态。
-    proof=first_cuda_guard()
     from tools.baseline_engine import probe,train,evaluate
     cfg=read(args.config)
     if code_identity()!=cfg['baseline']['code']:
@@ -171,6 +169,8 @@ def child(args):
     if sha(cfg['baseline']['target_manifest'])!=cfg['baseline']['target_manifest_sha256']:
         raise ValueError('无标注目标工件在预检后变化')
     os.chdir(args.data_root)
+    # CPU导入/文件检查完成后、seed或模型首次触发CUDA之前再核显存。
+    proof=first_cuda_guard()
     if args.child=='probe':probe(cfg,args.report)
     elif args.child=='train':train(cfg,args.entry)
     else:evaluate(cfg,args.entry,cfg['baseline']['annotation_for_offline_evaluation'])
