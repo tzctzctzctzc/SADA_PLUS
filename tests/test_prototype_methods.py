@@ -152,3 +152,16 @@ def test_methods_remain_independent_original_capacity_and_original_sampling():
         assert s['sample_ratios']==[-.25,0.,.25,.5,.75,1.,1.25]
         assert s['context_distance']=='original_quarter_duration'
     assert a['prototypes_per_class']==1 and b['pooling']=='mean'
+
+
+def test_per_direction_gate_never_retrains_control_or_overtakes_missing_reference(tmp_path):
+    from tools.run_prototype_methods import next_ready_job
+    pending=[('temporal_pool','S1'),('multi_prototype','S1'),('temporal_pool','S2')]
+    assert next_ready_job(pending,'temporal_pool',tmp_path) is None
+    ready=tmp_path/'formal/control/S2/complete.json';ready.parent.mkdir(parents=True);ready.write_text('{}')
+    assert next_ready_job(pending,'temporal_pool',tmp_path) is None
+    ready=tmp_path/'formal/control/S1/complete.json';ready.parent.mkdir(parents=True);ready.write_text('{}')
+    assert next_ready_job(pending,'temporal_pool',tmp_path)==('temporal_pool','S1')
+    assert next_ready_job(pending,'multi_prototype',tmp_path)==('multi_prototype','S1')
+    pending.remove(('temporal_pool','S1'))
+    assert next_ready_job(pending,'temporal_pool',tmp_path)==('temporal_pool','S2')

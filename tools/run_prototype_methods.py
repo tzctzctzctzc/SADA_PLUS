@@ -83,6 +83,12 @@ def audit(entry):
     return result
 
 
+def next_ready_job(pending,variant,control_root):
+    job=next((x for x in pending if x[0]==variant),None)
+    if job is None:return None
+    return job if (Path(control_root)/'formal/control'/job[1]/'complete.json').exists() else None
+
+
 def main(args):
     root=args.output_root.resolve();data=args.data_root.resolve();baseline=args.baseline_root.resolve()
     control_root=args.control_root.resolve();prepared_root=args.prepared_root.resolve()
@@ -91,24 +97,28 @@ def main(args):
     identity=protocol.code_identity();root.mkdir(parents=True,exist_ok=False)
     args.tmpdir=args.tmpdir.resolve();args.tmpdir.mkdir(parents=True,exist_ok=True)
     state=dict(phase='audit_original',pid=os.getpid(),active={},completed=[]);save(root/'state.json',state)
-    while not (control_root/'final_audit.json').exists():
-        if (control_root/'error.json').exists():raise ValueError('原版队列异常，不跳过前序审计')
-        print('WAIT_ORIGINAL_FINAL',flush=True);time.sleep(15)
-    final=read(control_root/'final_audit.json')
-    if final['status']!='passed' or final['count']!=12:raise ValueError('前序原版/宽深版未完整终审')
+    if (control_root/'error.json').exists():raise ValueError('原版队列异常，不跳过前序审计')
+    if (control_root/'final_audit.json').exists():
+        final=read(control_root/'final_audit.json')
+        if final['status']!='passed' or final['count']!=12:raise ValueError('前序终审不合法')
     prepared=read(prepared_root/'audit.json')
     if prepared['status']!='passed' or set(prepared['entries'])!={'S'+str(i) for i in range(1,7)}:
         raise ValueError('教师证据不是精确六方向')
-    references={}
+    references={};reference_configs={}
     for shift in ['S'+str(i) for i in range(1,7)]:
         old=control_root/'formal/control'/shift
-        references[shift]=audit_control(old)
+        original=read(old/'config.json')
+        if original['prototype_capacity']['variant']!='control':raise ValueError('不是原版配置')
+        assert_pair(original,read(baseline/'formal'/shift/'uda/config.json'))
+        reference_configs[shift]=sha(old/'config.json')
+        if (old/'complete.json').exists():references[shift]=audit_control(old)
         row=prepared['entries'][shift]
         if sha(row['path'])!=row['sha256'] or row['selected_count']!=40:raise ValueError('教师工件或固定40名单改变')
     inputs=dict(code=identity,seed=123,batch=2,teacher='qwen3_vl_8b',
         variants={v:method_specification(v) for v in VARIANTS},
-        original_final=str(control_root/'final_audit.json'),original_final_sha256=sha(control_root/'final_audit.json'),
-        original_control_audits=references,baseline_input_sha256=sha(baseline/'inputs/identity.json'),
+        original_control_audits_at_launch=references,original_control_config_sha256=reference_configs,
+        reference_gate='each_direction_complete_and_full_audit_before_that_direction_training',
+        baseline_input_sha256=sha(baseline/'inputs/identity.json'),
         feature_inventory_sha256=sha(baseline/'inputs/feature_inventory.json'),
         prepared_audit=str(prepared_root/'audit.json'),prepared_audit_sha256=sha(prepared_root/'audit.json'))
     save(root/'inputs.json',inputs)
@@ -152,9 +162,14 @@ def main(args):
                     if variant in reports:continue
                     shift='S1';stage='probe';e=root/'probes'/variant
                 else:
-                    next_job=next((x for x in pending if x[0]==variant),None)
+                    next_job=next_ready_job(pending,variant,control_root)
                     if next_job is None:continue
                     _,shift=next_job;stage='train';e=root/'formal'/variant/shift
+                    if (control_root/'error.json').exists():raise ValueError('原版接续异常，停止新方向放行')
+                    if sha(control_root/'formal/control'/shift/'config.json')!=reference_configs[shift]:
+                        raise ValueError('原版冻结配置发生变化')
+                    if shift not in references:
+                        references[shift]=audit_control(control_root/'formal/control'/shift)
                 found=acquire([mapping[variant]],data,root,minimum,identity['commit'])
                 if not found:continue
                 context,lease=found
@@ -176,7 +191,10 @@ def main(args):
         for variant in VARIANTS:
             rows=[audit(root/'formal'/variant/('S'+str(i))) for i in range(1,7)]
             save(root/variant/'final_audit.json',dict(status='passed',count=6,results=rows))
-        save(root/'final_audit.json',dict(status='passed',count=12,schema=SCHEMA,results=completed))
+        controls=[audit_control(control_root/'formal/control'/('S'+str(i))) for i in range(1,7)]
+        save(root/'original_control_final.json',dict(status='passed',count=6,results=controls))
+        save(root/'final_audit.json',dict(status='passed',count=12,schema=SCHEMA,results=completed,
+            original_control_audit_sha256=sha(root/'original_control_final.json')))
         save(root/'state.json',dict(phase='complete',pid=os.getpid(),completed=completed,active={}))
     finally:cleanup()
 
