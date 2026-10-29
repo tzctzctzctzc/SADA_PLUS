@@ -310,9 +310,10 @@ def evaluate(cfg, entry, annotation):
                         columns[k].extend(v.detach().cpu().tolist())
         evaluator = ANETdetection(str(annotation),splits,num_workers=4,action_subsampling='10_majority_classes')
         ap,mean,*_ = evaluator.evaluate({k:np.asarray(v) for k,v in columns.items()},verbose=True)
-        result = dict(map_0.1_to_0.5=float(mean),map_by_tiou=[float(x) for x in ap],
+        result = dict(map_by_tiou=[float(x) for x in ap],
                       videos=len(ds),prediction_count=len(columns['score']),selected_epoch=saved['epoch'],
                       checkpoint_sha256=sha(entry/'best.pt'),state='ema_state_dict',split=splits)
+        result['map_0.1_to_0.5']=float(mean)
         save(entry/'evaluation'/('%s_val.json' % domain),result);results[domain]=result
     save(entry/'evaluation/manifest.json',dict(config_sha256=sha(entry/'config.json'),
          checkpoint_sha256=sha(entry/'best.pt'),annotation_sha256=sha(annotation),results=results))
