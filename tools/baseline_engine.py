@@ -224,6 +224,10 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
         before = tensor_digest(ctx.model.state_dict())
         if cfg.get('prototype_capacity'):
             branch_before=tensor_digest(dict(ctx.model.rq3_capacity.named_parameters()))
+            special_before=tensor_digest({k:v for k,v in ctx.model.rq3_capacity.named_parameters()
+                                           if any(n in k for n in ('attention','pool_fusion'))})
+            pool_before={name:tensor_digest(dict(module.named_parameters())) for name,module in
+                ctx.model.rq3_capacity.branch.named_children() if name in ('inside_attention','outside_attention','pool_fusion')}
         ctx.train_loader_src, ctx.train_loader_tgt = [StepLoader(x, warmup_steps) for x in originals]
         ctx._train_epoch(epoch)
         ctx.train_metrics.reset()
@@ -243,6 +247,10 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
             values=ctx.train_metrics.result()
             reports[str(epoch)]['auxiliary']={k[2:]:float(v) for k,v in values.items() if k.startswith('t_rq3_')}
             reports[str(epoch)]['branch_parameters_updated']=branch_before!=tensor_digest(dict(ctx.model.rq3_capacity.named_parameters()))
+            reports[str(epoch)]['pool_parameters_updated']=special_before!=tensor_digest(
+                {k:v for k,v in ctx.model.rq3_capacity.named_parameters() if any(n in k for n in ('attention','pool_fusion'))})
+            reports[str(epoch)]['pool_submodules_updated']={name:before!=tensor_digest(
+                dict(getattr(ctx.model.rq3_capacity.branch,name).named_parameters())) for name,before in pool_before.items()}
         ctx.train_loader_src, ctx.train_loader_tgt = originals
     ctx.valid_metrics_src.reset()
     validation = float(ctx._valid_epoch(5, ctx.val_loader_src, domain='src'))

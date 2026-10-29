@@ -9,6 +9,9 @@ from torch.nn import functional as F
 
 
 def specification(variant):
+    if variant in ('temporal_pool','multi_prototype'):
+        from .prototype_methods import method_specification
+        return method_specification(variant)
     if variant not in ('control','wide_deep'):raise ValueError('仅允许原版与直接加宽加深')
     return dict(variant=variant,embedding_dim=128 if variant=='control' else 256,
         hidden_dim=256 if variant=='control' else 512,layers=1 if variant=='control' else 2,
@@ -27,6 +30,10 @@ def build_capacity(cfg,fpn_dim,num_classes,strides,regression_ranges,device):
     with torch.random.fork_rng(devices=devices):
         torch.manual_seed(0)
         result=RQ3ProposalPrototype(fpn_dim,num_classes,payload['by_video'],strides,regression_ranges,0.)
+        if cfg['variant'] in ('temporal_pool','multi_prototype'):
+            from .prototype_methods import make_method_branch
+            torch.manual_seed(0)
+            result.branch=make_method_branch(cfg['variant'],fpn_dim,num_classes)
         if cfg['variant']=='wide_deep':
             torch.manual_seed(0)
             result.branch=VLMProposalCoAdaptationBranch(fpn_dim,num_classes,
@@ -429,10 +436,14 @@ class RQ3ProposalPrototype(nn.Module):
         self.num_classes = num_classes
         self.confidence_threshold = confidence_threshold
 
-    def forward(self, source_videos, target_videos, source_features, target_features, epoch):
+    def forward(self, source_videos, target_videos, source_features, target_features, epoch,
+                source_masks=None,target_masks=None):
         source = source_gt_proposals(source_videos, self.num_classes, len(self.strides), self.regression_ranges)
-        encoded_source = self.branch.encode(source_features, source, self.strides)
+        encoded_source = (self.branch.encode_masked(source_features,source,self.strides,source_masks)
+                          if hasattr(self.branch,'encode_masked') else self.branch.encode(source_features,source,self.strides))
         source_targets = self.branch.flatten_field(source, 'targets')
+        if source_targets is not None and 'valid' in encoded_source:
+            source_targets=source_targets*encoded_source['valid'][:,None].to(source_targets.dtype)
         source_loss = self.branch.source_loss(encoded_source, source)
         kept, candidates, visible = fully_visible_cache(self.cache, target_videos, self.confidence_threshold)
         target = []
@@ -443,8 +454,10 @@ class RQ3ProposalPrototype(nn.Module):
         for proposal in target:
             for key in proposal:
                 proposal[key] = proposal[key][:256]
-        encoded_target = self.branch.encode(target_features, target, self.strides)
+        encoded_target = (self.branch.encode_masked(target_features,target,self.strides,target_masks)
+                          if hasattr(self.branch,'encode_masked') else self.branch.encode(target_features,target,self.strides))
         selection = self.branch.select_vlm_target(target)
+        if 'valid' in encoded_target:selection['selected'] &= encoded_target['valid']
         if epoch >= 1:
             alignment, classes, _ = self.branch.prototype_alignment(
                 encoded_source, source_targets, encoded_target, selection)
@@ -452,7 +465,7 @@ class RQ3ProposalPrototype(nn.Module):
             self.branch._update_source_prototypes(encoded_source['embedding'], source_targets)
             alignment, classes = source_loss * 0.0, 0
         loss = source_loss + 0.1 * alignment
-        return {
+        result = {
             'loss': loss, 'source_loss': source_loss.detach(), 'alignment_loss': alignment.detach(),
             'eligible': len(encoded_target['embedding']),
             'candidate_count': candidates, 'fully_visible_count': visible,
@@ -461,3 +474,7 @@ class RQ3ProposalPrototype(nn.Module):
             'gradient_norm': gradient_norm(loss, source_features + target_features),
             'target_gradient_norm': gradient_norm(0.1 * alignment, target_features),
         }
+        for domain,encoded in [('source',encoded_source),('target',encoded_target)]:
+            result.update({domain+'_'+k:v for k,v in encoded.get('statistics',{}).items()})
+        if hasattr(self.branch,'diagnostics'):result.update(self.branch.diagnostics())
+        return result

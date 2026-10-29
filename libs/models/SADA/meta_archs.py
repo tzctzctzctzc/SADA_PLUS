@@ -833,7 +833,8 @@ class SADA(nn.Module):
             )
             
             if mode=='train' and self.rq3_capacity is not None:
-                auxiliary=self.rq3_capacity(video_list_src,video_list_tgt,fpn_feats_src,fpn_feats_tgt,curr_epoch)
+                auxiliary=self.rq3_capacity(video_list_src,video_list_tgt,fpn_feats_src,fpn_feats_tgt,curr_epoch,
+                                            source_masks=fpn_masks_src,target_masks=fpn_masks_tgt)
                 for key,value in auxiliary.items():
                     losses['rq3_'+key]=torch.as_tensor(value,device=self.device).detach()
                 losses['downstream_loss']=losses['downstream_loss']+auxiliary['loss']
