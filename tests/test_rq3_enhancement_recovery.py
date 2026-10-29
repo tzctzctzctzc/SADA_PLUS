@@ -49,5 +49,6 @@ def test_full_numpy_rng_hash_detects_changes_hidden_by_short_repr():
     a=np.random.RandomState(6).get_state()
     b=(a[0],a[1].copy(),*a[2:])
     b[1][300]^=1
-    assert repr(a)==repr(b)
+    with np.printoptions(threshold=20):
+        assert repr(a)==repr(b)
     assert state_digest(a)!=state_digest(b)
