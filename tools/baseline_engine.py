@@ -18,7 +18,7 @@ from libs.models.SADA.optimizer import make_optimizer, make_scheduler
 from libs.trainer.da_trainer import Trainer, move_to_device
 from libs.utils import fix_random_seed, ModelEma2
 from libs.evaluation.metrics import MetricTracker
-from tools.baseline_protocol import (SCHEMA, POLICY, assert_no_target_gt, decision,
+from tools.baseline_protocol import (SCHEMA, POLICY, assert_no_target_gt, decision, random_seeds,
                                       read, save, sha, termination)
 
 
@@ -55,7 +55,8 @@ def dataset(cfg, path, splits, training, unlabeled=False):
 
 
 def build(cfg):
-    fix_random_seed(6, include_cuda=True)
+    seeds = random_seeds(cfg['seed'])
+    fix_random_seed(seeds['model'], include_cuda=True)
     ctx = object.__new__(Trainer)
     ctx.cfg = deepcopy(cfg)
     ctx.ema_active = True
@@ -67,8 +68,8 @@ def build(cfg):
     if cfg['baseline']['regime'] == 'so':
         # 模型参数构造与UDA完全相同；仅关闭对抗目标，保持检测与优化器阶段。
         ctx.cfg['model']['adv_method'] = ['None']
-    ctx.generators = {k: torch.Generator().manual_seed(seed)
-                      for k, seed in [('source', 6), ('target', 1000009), ('validation', 2000012)]}
+    ctx.generators = {k: torch.Generator().manual_seed(seeds[k])
+                      for k in ('source', 'target', 'validation')}
     source = dataset(cfg, cfg['dataset']['json_file'], cfg['src_train_split'], True)
     ctx.train_loader_src = loader(source, True, ctx.generators['source'], cfg['loader']['batch_size'],
                                   cfg['loader']['num_workers'])
@@ -291,13 +292,13 @@ def evaluate(cfg, entry, annotation):
     terminal = read(entry/'termination.json')
     if saved['epoch'] != termination(terminal['history'])['best_epoch']:
         raise ValueError('不是源域选定的best EMA')
-    fix_random_seed(6, include_cuda=True)
+    fix_random_seed(cfg['seed'], include_cuda=True)
     model = make_meta_arch('sada', deepcopy(cfg), device='cuda:0').to('cuda:0')
     model.load_state_dict(saved['ema_state_dict'], strict=True); model.eval()
     results = {}
     for domain, splits in [('source',cfg['src_val_split']), ('target',cfg['tgt_val_split'])]:
         ds = dataset(cfg, annotation, splits, False)
-        dl = loader(ds,False,torch.Generator().manual_seed(6),1,cfg['loader']['num_workers'])
+        dl = loader(ds,False,torch.Generator().manual_seed(cfg['seed']),1,cfg['loader']['num_workers'])
         columns = {'video-id':[], 't-start':[], 't-end':[], 'label':[], 'score':[]}
         with torch.no_grad():
             for video in dl:

@@ -19,6 +19,12 @@ POLICY = dict(max_epochs=50, valid_every=5, patience_epochs=15, min_delta=0.,
               learning_rate='official_schedule_unchanged_no_batch_scaling')
 
 
+def random_seeds(seed):
+    # 保留旧seed6的loader映射；换种子时三条随机流整体平移。
+    return dict(model=int(seed), source=int(seed), target=int(seed)+1000003,
+                validation=int(seed)+2000006, python_hash=int(seed))
+
+
 def sha(path):
     h = hashlib.sha256()
     with Path(path).open('rb') as stream:
@@ -120,6 +126,10 @@ def audit_entry(entry):
         if sha(path) != digest:
             raise ValueError('完成工件SHA改变: '+path)
     cfg = read(entry/'config.json')
+    if cfg['seed'] != cfg['init_rand_seed']:
+        raise ValueError('训练种子与冻结配置不一致')
+    if cfg['baseline'].get('random_seeds',random_seeds(cfg['seed'])) != random_seeds(cfg['seed']):
+        raise ValueError('随机流种子与配置不一致')
     root=entry.parents[2]
     if sha(root/'acceptance.json')!=complete['acceptance_sha256']:
         raise ValueError('真实验收凭证改变')

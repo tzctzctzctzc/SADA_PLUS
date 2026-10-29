@@ -13,7 +13,7 @@ import time
 
 CODE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CODE))
-from tools.baseline_protocol import (SCHEMA, CODE, POLICY, audit_entry, batch_choice,
+from tools.baseline_protocol import (SCHEMA, CODE, POLICY, audit_entry, batch_choice, random_seeds,
     audit_pair,code_identity, read, save, sanitized_inputs, sha, termination)
 from tools.baseline_gpu import slot, snapshot
 
@@ -44,7 +44,7 @@ def membership_manifest(database,cfg):
                                ('target_train','tgt_train_split'),('target_val','tgt_val_split')]}
 
 
-def prepare(root, data, identity):
+def prepare(root, data, identity, seed=6):
     import yaml
     registry = yaml.safe_load((CODE/'configs/rq2/shift_registry.yaml').read_text())['shifts']
     configs, inventories = {}, {}
@@ -59,12 +59,13 @@ def prepare(root, data, identity):
         # 不因去标注而重排原始视频顺序；shuffle的索引语义保持不变。
         save(source_file,source,sort_keys=False);save(target_file,target,sort_keys=False)
         cfg = deepcopy(raw)
-        cfg.update(seed=6,init_rand_seed=6,gpu=0)
+        cfg.update(seed=seed,init_rand_seed=seed,gpu=0)
         cfg['dataset'].update(json_file=str(source_file),feat_folder=str(features))
         cfg['model'].update(input_dim=cfg['dataset']['input_dim'],num_classes=cfg['dataset']['num_classes'],
                             test_cfg=cfg['test_cfg'],max_seq_len=cfg['dataset']['max_seq_len'])
         cfg['train_cfg'].update(valid_freq=5,early_stop=-1,test_freq=-1)
         cfg['baseline'] = dict(schema=SCHEMA,shift=shift,policy=POLICY,code=identity,
+            random_seeds=random_seeds(seed),
             official_config=str(original),official_config_sha256=sha(original),
             annotation_for_offline_evaluation=str(annotation),annotation_sha256=sha(annotation),
             source_manifest_sha256=sha(source_file),target_manifest=str(target_file),
@@ -118,8 +119,9 @@ def runtime_config(template,batch,regime):
 
 
 def spawn(mode,cfg_path,entry,lease,data,report=None):
+    seed=read(cfg_path)['seed']
     env=dict(os.environ,PYTHONPATH=str(CODE),PYTHONDONTWRITEBYTECODE='1',
-             PYTHONUNBUFFERED='1',PYTHONHASHSEED='6',CUDA_VISIBLE_DEVICES=lease['uuid'],OMP_NUM_THREADS='8',MKL_NUM_THREADS='8',
+             PYTHONUNBUFFERED='1',PYTHONHASHSEED=str(seed),CUDA_VISIBLE_DEVICES=lease['uuid'],OMP_NUM_THREADS='8',MKL_NUM_THREADS='8',
              SADA_BASELINE_LEASE=lease['lease'],SADA_BASELINE_LEASE_SHA256=lease['lease_sha256'],
              CUBLAS_WORKSPACE_CONFIG=':4096:8')
     for name in ['RQ3_EXTERNAL_GPU_LEASE','RQ3_EXTERNAL_GPU_LEASE_SHA256','RQ3_COHORT_LEASE']:
@@ -186,16 +188,16 @@ def main(args):
     identity=code_identity()
     root.mkdir(parents=True,exist_ok=False)
     save(root/'state.json',dict(phase='cpu_input_audit',pid=os.getpid(),completed=[],active={}))
-    configs=prepare(root,data,identity)
+    configs=prepare(root,data,identity,seed=args.seed)
     if args.prepare_only:
         save(root/'cpu_preflight.json',dict(status='passed',shifts=list(configs),code=identity))
         return
     indices=[int(x) for x in args.gpus.split(',')]
     reports={}
-    for batch in (2,4):
+    for batch in ((args.batch_size,) if args.batch_size else (2,4)):
         cfg=runtime_config(configs['S1'],batch,'uda')
         reports[batch]=synchronous_probe(root,data,cfg,indices,16384,'uda_batch%d'%batch)
-    batch=batch_choice(reports)
+    batch=args.batch_size or batch_choice(reports)
     # batch只按两阶段吞吐冻结，不读取任何target mAP或按效果重选。
     minimum=max(12288,math.ceil(max(reports[batch]['peak_reserved_mib'],
         *[x['peak_reserved_mib'] for x in reports[batch]['phases'].values()])+4096))
@@ -206,7 +208,8 @@ def main(args):
          batch_reports=reports,so=so,code=identity,inputs_sha256=sha(root/'inputs/identity.json'),
          report_sha256={str(p):sha(p) for p in (root/'probes').glob('*/result.json')}))
     jobs=[(shift,regime) for shift in configs for regime in ('so','uda')]
-    save(root/'plan.json',dict(schema=SCHEMA,batch=batch,policy=POLICY,jobs=jobs,code=identity))
+    save(root/'plan.json',dict(schema=SCHEMA,batch=batch,seed=args.seed,
+                              random_seeds=random_seeds(args.seed),policy=POLICY,jobs=jobs,code=identity))
     pending=list(jobs);completed=[]
     try:
         while pending or ACTIVE:
@@ -260,6 +263,9 @@ if __name__=='__main__':
     p.add_argument('--output-root',type=Path)
     p.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'))
     p.add_argument('--gpus',default='0,3,1,2')
+    p.add_argument('--seed',type=int,default=6)
+    p.add_argument('--batch-size',type=int,choices=[2,4],default=None,
+                   help='指定时冻结已有batch协议，只做对应batch验收，不重新选择')
     p.add_argument('--prepare-only',action='store_true')
     p.add_argument('--child',choices=['probe','train','evaluate'])
     p.add_argument('--config',type=Path);p.add_argument('--entry',type=Path);p.add_argument('--report',type=Path)
