@@ -74,6 +74,27 @@ def baseline_pair(baseline, cfg):
     return audit_baseline(baseline, plain)
 
 
+def entry_command(root, data, variant, shift, ref):
+    """单卡和双卡复用同一正式命令，调度不能改变训练参数。"""
+    registry = CODE/'configs/rq2/shift_registry.yaml'
+    shifts = yaml.safe_load(registry.read_text())['shifts']
+    aux = ref['rq3_auxiliary']
+    name = 'rq3_enhance_%s_%s_%s' % (variant, shift, root.name)
+    run_root = data/'model_results'/name
+    common = ['-c', str(CODE/shifts[shift]['config']), '-s', '6', '-i', '0',
+              '--rq2-shift', shift, '--rq2-registry', str(registry),
+              '--rq2-reference-root', str(data/'data/ek100_slowfast/features')]
+    command = [sys.executable, '-B', str(CODE/'train_da.py'), *common, '-n', name,
+               '--debug', '--benchmark-audit-log', '--rq2-regime', 'uda', '--supervised-upper-bound', 'off',
+               '--rq2-target-manifest', ref['rq2_formal']['target_manifest']['path'],
+               '--rq3-strategy', 'prototype', '--rq3-revision', 'revised', '--rq3-teacher', 'qwen3_vl_8b',
+               '--rq3-cache', aux['cache_path'], '--rq3-candidate-manifest', aux['manifest_path'],
+               '--rq3-confidence-calibration', aux['calibration_path'], '--rq3-batch-size', '2',
+               '--rq3-early-stop-patience', '15' if aux.get('early_stopping') else '0',
+               '--rq3-enhancement', variant]
+    return name, run_root, common, command
+
+
 def audit_entry(root, reference, baseline):
     cfg = read(root/'preflight.json')
     assert_reference_pair(cfg, reference)
@@ -107,13 +128,13 @@ def main():
     p.add_argument('--output-root', type=Path, required=True)
     p.add_argument('--expected-head', required=True)
     p.add_argument('--data-root', type=Path, default=Path('/vepfs/vlms/SADA_PLUS'))
-    p.add_argument('--gpu', choices=('0','2'), default='0')
+    p.add_argument('--gpu', choices=('0','1','2'), default='0')
     p.add_argument('--share-external-gpu', action='store_true',
-                   help='explicitly authorized GPU2 sharing; preserves 16GiB free before CUDA')
+                   help='explicitly authorized GPU1/2 sharing; preserves 16GiB free before CUDA')
     p.add_argument('--preflight-only', action='store_true')
     args = p.parse_args()
-    if args.share_external_gpu and args.gpu != '2':
-        p.error('external sharing is authorized only on physical GPU2')
+    if args.share_external_gpu and args.gpu not in ('1','2'):
+        p.error('external sharing is authorized only on physical GPU1/2')
     root, data = args.output_root.absolute(), args.data_root.absolute()
     migration = read(args.migration)
     if migration['teacher'] != 'qwen3_vl_8b' or sorted(r['shift'] for r in migration['references']) != ['S'+str(i) for i in range(1,7)]:
@@ -167,22 +188,9 @@ def main():
                 entry = stage/shift
                 (entry/'logs').mkdir(parents=True)
                 ref = references[shift]
-                aux = ref['rq3_auxiliary']
-                name = 'rq3_enhance_%s_%s_%s'%(variant,shift,root.name)
-                run_root = data/'model_results'/name
+                name, run_root, common, command = entry_command(root,data,variant,shift,ref)
                 if run_root.exists():
                     raise FileExistsError('never overwrite a partial or completed run: '+str(run_root))
-                common = ['-c', str(CODE/shifts[shift]['config']), '-s','6','-i','0',
-                          '--rq2-shift',shift,'--rq2-registry',str(registry),
-                          '--rq2-reference-root',str(data/'data/ek100_slowfast/features')]
-                command = [sys.executable,'-B',str(CODE/'train_da.py'),*common,'-n',name,
-                           '--debug','--benchmark-audit-log','--rq2-regime','uda','--supervised-upper-bound','off',
-                           '--rq2-target-manifest',ref['rq2_formal']['target_manifest']['path'],
-                           '--rq3-strategy','prototype','--rq3-revision','revised','--rq3-teacher','qwen3_vl_8b',
-                           '--rq3-cache',aux['cache_path'],'--rq3-candidate-manifest',aux['manifest_path'],
-                           '--rq3-confidence-calibration',aux['calibration_path'],'--rq3-batch-size','2',
-                           '--rq3-early-stop-patience','15' if aux.get('early_stopping') else '0',
-                           '--rq3-enhancement',variant]
                 state.update(phase='preflight',active=dict(variant=variant,shift=shift))
                 save(root/'state.json',state)
                 run(command+['--rq2-audit-output',str(entry/'preflight.json')],entry/'logs/preflight.log',data)

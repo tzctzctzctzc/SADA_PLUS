@@ -1,4 +1,4 @@
-"""用户明确授权的GPU2外部共享；只改变准入，不改变训练或随机数设置。"""
+"""用户明确授权的GPU1/2外部共享；只改变准入，不改变训练或随机数设置。"""
 from contextlib import contextmanager
 import hashlib
 import json
@@ -9,6 +9,7 @@ import time
 
 SCHEMA = 'rq3-authorized-external-gpu-share-v1'
 MIN_FREE_MIB = 16384
+AUTHORIZED_GPUS = (1, 2)
 
 
 def snapshot(index):
@@ -31,10 +32,10 @@ def snapshot(index):
 
 
 def validate_admission(current, admitted=None):
-    if current['index'] != 2:
-        raise ValueError('external sharing is authorized only on physical GPU2')
+    if current['index'] not in AUTHORIZED_GPUS:
+        raise ValueError('external sharing is authorized only on physical GPU1/2')
     if current['total_mib'] - current['used_mib'] < MIN_FREE_MIB:
-        raise RuntimeError('GPU2 sharing requires at least 16GiB free memory')
+        raise RuntimeError('GPU sharing requires at least 16GiB free memory')
     if admitted is not None:
         if (current['index'], current['uuid']) != (admitted['index'], admitted['uuid']):
             raise RuntimeError('shared GPU identity changed')
@@ -50,8 +51,9 @@ def digest(path):
 @contextmanager
 def external_gpu_slot(index, lock_root, receipts, code_commit, poll_seconds=30):
     import fcntl
-    if str(index) != '2':
-        raise ValueError('external sharing is authorized only on GPU2')
+    index = int(index)
+    if index not in AUTHORIZED_GPUS:
+        raise ValueError('external sharing is authorized only on GPU1/2')
     lock_root, receipts = Path(lock_root), Path(receipts)
     receipts.mkdir(exist_ok=True)
     announced = False
@@ -68,9 +70,9 @@ def external_gpu_slot(index, lock_root, receipts, code_commit, poll_seconds=30):
                     handle.close()
             if capacity is None:
                 raise BlockingIOError('RQ3 capacity occupied')
-            card_lock = (lock_root/'.rq2_gpu2.lock').open('a')
+            card_lock = (lock_root/('.rq2_gpu%d.lock' % index)).open('a')
             fcntl.flock(card_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            admitted = snapshot(2)
+            admitted = snapshot(index)
             validate_admission(admitted)
         except (BlockingIOError, RuntimeError):
             if card_lock is not None:
@@ -78,7 +80,7 @@ def external_gpu_slot(index, lock_root, receipts, code_commit, poll_seconds=30):
             if capacity is not None:
                 capacity.close()
             if not announced:
-                print('RQ3_WAITING_FOR_SHARED_GPU2 min_free_mib=16384', flush=True)
+                print('RQ3_WAITING_FOR_SHARED_GPU%d min_free_mib=16384' % index, flush=True)
                 announced = True
             time.sleep(poll_seconds)
             continue
@@ -95,10 +97,10 @@ def external_gpu_slot(index, lock_root, receipts, code_commit, poll_seconds=30):
                          locks=[str(Path(capacity.name).absolute()), str(Path(card_lock.name).absolute())])
             with path.open('x') as stream:
                 json.dump(lease, stream, sort_keys=True)
-            print('RQ3_SHARED_GPU2_ADMITTED free_mib=%d external_pids=%s' % (
-                admitted['total_mib']-admitted['used_mib'],
+            print('RQ3_SHARED_GPU_ADMITTED index=%d free_mib=%d external_pids=%s' % (
+                index, admitted['total_mib']-admitted['used_mib'],
                 [p['pid'] for p in admitted['processes']]), flush=True)
-            yield dict(index=2, uuid=admitted['uuid'], external_share_lease=str(path),
+            yield dict(index=index, uuid=admitted['uuid'], external_share_lease=str(path),
                        external_share_sha256=digest(path))
         finally:
             card_lock.close()
@@ -117,10 +119,10 @@ def shared_guard():
     if lease['owner_pid'] != os.getppid():
         raise RuntimeError('GPU sharing controller is not the direct parent')
     admitted = lease['admitted']
-    if (os.environ.get('RQ3_GPU_INDEX') != '2' or
+    if (os.environ.get('RQ3_GPU_INDEX') != str(admitted['index']) or
         os.environ.get('RQ3_GPU_UUID') != admitted['uuid'] or
         os.environ.get('CUDA_VISIBLE_DEVICES') != admitted['uuid']):
-        raise RuntimeError('CUDA visibility differs from authorized GPU2')
+        raise RuntimeError('CUDA visibility differs from authorized GPU')
     for lock in lease['locks']:
         with Path(lock).open('a') as handle:
             try:
@@ -128,8 +130,8 @@ def shared_guard():
             except BlockingIOError:
                 continue
             raise RuntimeError('GPU sharing controller released its lock')
-    validate_admission(snapshot(2), admitted)
-    print('RQ3_PRE_CUDA_EXTERNAL_SHARE_CHECK_PASS index=2 min_free_mib=16384', flush=True)
+    validate_admission(snapshot(admitted['index']), admitted)
+    print('RQ3_PRE_CUDA_EXTERNAL_SHARE_CHECK_PASS index=%d min_free_mib=16384' % admitted['index'], flush=True)
 
 
 def audit_receipt(card, code_commit):
@@ -142,5 +144,5 @@ def audit_receipt(card, code_commit):
     if lease['schema'] != SCHEMA or lease['code_commit'] != code_commit:
         raise ValueError('GPU sharing code identity changed')
     validate_admission(lease['admitted'])
-    if card['index'] != 2 or card['uuid'] != lease['admitted']['uuid']:
+    if card['index'] != lease['admitted']['index'] or card['uuid'] != lease['admitted']['uuid']:
         raise ValueError('GPU admission identity differs from complete')

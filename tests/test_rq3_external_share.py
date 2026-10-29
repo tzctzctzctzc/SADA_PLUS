@@ -35,7 +35,7 @@ def test_new_process_insufficient_memory_or_changed_identity_is_rejected(change)
     elif change == 'pid':
         current['processes'].append(dict(pid=300, memory_mib=1))
     else:
-        current['index'] = 1
+        current['index'] = 0
     with pytest.raises((RuntimeError, ValueError)):
         share.validate_admission(current, original)
 
@@ -52,15 +52,18 @@ def test_snapshot_reads_only_nvml_metadata(monkeypatch):
 
 
 @pytest.mark.skipif(sys.platform != 'linux', reason='POSIX GPU locks')
-def test_real_parent_child_guard_lock_lifetime_and_receipt_audit(tmp_path, monkeypatch):
-    monkeypatch.setattr(share, 'snapshot', lambda i:observation())
+@pytest.mark.parametrize('gpu',[1,2])
+def test_real_parent_child_guard_lock_lifetime_and_receipt_audit(tmp_path, monkeypatch,gpu):
+    current=observation()
+    current['index']=gpu
+    monkeypatch.setattr(share, 'snapshot', lambda i:current)
     code = """from tools import rq3_external_share as m
 import json
 m.snapshot=lambda i:json.loads(%r)
 m.shared_guard()
-""" % json.dumps(observation())
-    with share.external_gpu_slot('2', tmp_path, tmp_path/'receipts', 'commit') as card:
-        env = dict(os.environ, RQ3_GPU_INDEX='2', RQ3_GPU_UUID=card['uuid'],
+""" % json.dumps(current)
+    with share.external_gpu_slot(str(gpu), tmp_path, tmp_path/'receipts', 'commit') as card:
+        env = dict(os.environ, RQ3_GPU_INDEX=str(gpu), RQ3_GPU_UUID=card['uuid'],
                    CUDA_VISIBLE_DEVICES=card['uuid'],
                    RQ3_EXTERNAL_GPU_LEASE=card['external_share_lease'],
                    RQ3_EXTERNAL_GPU_LEASE_SHA256=card['external_share_sha256'])
