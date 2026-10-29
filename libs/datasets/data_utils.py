@@ -111,6 +111,8 @@ def truncate_feats(
 
 
     # Update the video length
-    data_dict['metadata']['feat_num_frames'] = feats.shape[1]
+    # 每个特征覆盖的原始帧数与裁剪后的token个数是不同单位。
+    data_dict['metadata']['crop_feat_len'] = feats.shape[1]
+    data_dict['metadata']['crop_start'] = st
     
     return data_dict

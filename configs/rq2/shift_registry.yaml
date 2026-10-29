@@ -1,0 +1,59 @@
+schema: rq2-shift-registry-v1
+repository_root: ../..
+
+shifts:
+  S1:
+    paper_id: S3 Dark(100)
+    acquisition: new
+    config: configs/dark_vs_all_new_videos_full/version_final_ckpt.yaml
+    config_sha256: bd84f1a8005dced16aa52d80e22cad000449dcd70ae373a2bd56414568272148
+    source_train: [ek100_dark_training]
+    source_val: [ek100_dark_validation]
+    target_train: [ek100_white_training, ek100_brown_training, ek100_other_training]
+    target_val: [ek100_white_validation, ek100_brown_validation, ek100_other_validation]
+  S2:
+    paper_id: S1 Dark(55)
+    acquisition: old
+    config: configs/dark_vs_all_old_videos_full/version_final_ckpt.yaml
+    config_sha256: 0324adcb750bea6af817b1ca15051ee5f267675bf6e45fc82b2cdcd6f58900a8
+    source_train: [ek55_dark_training]
+    source_val: [ek55_dark_validation]
+    target_train: [ek55_white_training, ek55_brown_training, ek55_other_training]
+    target_val: [ek55_white_validation, ek55_brown_validation, ek55_other_validation]
+  S3:
+    paper_id: S4 White(100)
+    acquisition: new
+    config: configs/white_vs_all_new_videos_full/version_final_ckpt.yaml
+    config_sha256: c3ef6e87ba4e36b48d50cd5d147585f2c2f5c90318b8406853968d1f469c52ee
+    source_train: [ek100_white_training]
+    source_val: [ek100_white_validation]
+    target_train: [ek100_dark_training, ek100_brown_training, ek100_other_training]
+    target_val: [ek100_dark_validation, ek100_brown_validation, ek100_other_validation]
+  S4:
+    paper_id: S2 White(55)
+    acquisition: old
+    config: configs/white_vs_all_old_videos_full/version_final_ckpt.yaml
+    config_sha256: 79ae9d11de00ccbe4c46df2749f1e063f78ecdf44b9ae34b005553d3522b0fa9
+    source_train: [ek55_white_training]
+    source_val: [ek55_white_validation]
+    target_train: [ek55_dark_training, ek55_brown_training, ek55_other_training]
+    target_val: [ek55_dark_validation, ek55_brown_validation, ek55_other_validation]
+  S5:
+    paper_id: S5 old->new
+    acquisition: old_to_new
+    config: configs/old_vs_new/version_final_ckpt.yaml
+    config_sha256: 5043749d3d8a95f3dc8f2fc046614e146ad69948d648727a20e28740d92a88fc
+    source_train: [ek55_white_training, ek55_dark_training, ek55_brown_training, ek55_other_training]
+    source_val: [ek55_white_validation, ek55_dark_validation, ek55_brown_validation, ek55_other_validation]
+    target_train: [ek100_white_training, ek100_dark_training, ek100_brown_training, ek100_other_training]
+    target_val: [ek100_white_validation, ek100_dark_validation, ek100_brown_validation, ek100_other_validation]
+  S6:
+    paper_id: S6 new->old
+    acquisition: new_to_old
+    config: configs/new_vs_old/version_paper_s6_dim512.yaml
+    config_sha256: b8d47ea1fcf79943b6e1cc6d6a3ee681578f71da9a1eccde31f92207862ae5bf
+    config_provenance: controlled_reconstruction_not_author_released
+    source_train: [ek100_white_training, ek100_dark_training, ek100_brown_training, ek100_other_training]
+    source_val: [ek100_white_validation, ek100_dark_validation, ek100_brown_validation, ek100_other_validation]
+    target_train: [ek55_white_training, ek55_dark_training, ek55_brown_training, ek55_other_training]
+    target_val: [ek55_white_validation, ek55_dark_validation, ek55_brown_validation, ek55_other_validation]

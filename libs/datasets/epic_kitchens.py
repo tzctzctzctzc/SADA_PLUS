@@ -30,6 +30,7 @@ class EpicKitchensDataset(Dataset):
         file_ext,        # feature file extension if any
         force_upsampling, # force to upsample to max_seq_len
         action_subsampling='all', # subsample actions to max_seq_len
+        unlabeled=False,
     ):
         # file path
         assert os.path.exists(feat_folder)
@@ -58,6 +59,7 @@ class EpicKitchensDataset(Dataset):
         self.trunc_thresh = trunc_thresh
         self.num_classes = num_classes
         self.label_dict = None
+        self.unlabeled = unlabeled
         self.crop_ratio = crop_ratio
 
         # load database and select the subset
@@ -101,7 +103,9 @@ class EpicKitchensDataset(Dataset):
         if self.label_dict is None:
             label_dict = {}
             for key, value in json_db.items():
-                for act in value['annotations']:
+                if value['subset'].lower() not in self.split:
+                    continue
+                for act in (() if self.unlabeled else value.get('annotations', ())):
                     label_dict[act['label']] = act['label_id']
 
         # fill in the db (immutable afterwards)
@@ -126,7 +130,7 @@ class EpicKitchensDataset(Dataset):
                 duration = 1e8
 
             # get annotations if available
-            if ('annotations' in value) and (len(value['annotations']) > 0):
+            if not self.unlabeled and value.get('annotations'):
                 num_acts = len(value['annotations'])
                 segments = np.zeros([num_acts, 2], dtype=np.float32)
                 labels = np.zeros([num_acts, ], dtype=np.int64)
@@ -176,6 +180,9 @@ class EpicKitchensDataset(Dataset):
             labels = torch.from_numpy(video_item['labels'])
         else:
             segments, labels = None, None
+        if self.unlabeled:
+            segments = torch.empty((0, 2), dtype=torch.float32)
+            labels = torch.empty((0,), dtype=torch.long)
         
         if self.action_subsampling == '10_majority_classes':
             # subsample the first 10 classes (which are the majority ones)
@@ -219,8 +226,9 @@ class EpicKitchensDataset(Dataset):
 
         # sort segments by ascending order of start time
         if segments is not None:
-            segments, sort_idx = torch.sort(segments, dim=0)
-            labels = labels[sort_idx[:, 0]]
+            sort_idx = torch.argsort(segments[:, 0])
+            segments = segments[sort_idx]
+            labels = labels[sort_idx]
         
         
         # return a data dict
@@ -234,7 +242,8 @@ class EpicKitchensDataset(Dataset):
         # truncate the features during training
         if self.is_training and (segments is not None):
             data_dict = truncate_feats(
-                data_dict, self.max_seq_len, self.trunc_thresh, self.crop_ratio
+                data_dict, self.max_seq_len, self.trunc_thresh, self.crop_ratio,
+                has_action=not self.unlabeled,
             )
             
 

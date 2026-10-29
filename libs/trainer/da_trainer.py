@@ -6,11 +6,9 @@ from .base_trainer_da import BaseTrainerDA
 from libs.utils.train_utils import AverageMeter
 
 def move_to_device(video_list, device):
-    for i, video in enumerate(video_list):
-        for key in video.keys():
-            if isinstance(video[key], torch.Tensor):
-                video_list[i][key] = video[key].to(device)
-    return video_list
+    # 保留cycle缓存的CPU batch；移动后的副本只用于当前step。
+    return [{key: value.to(device) if isinstance(value, torch.Tensor) else value
+             for key, value in video.items()} for video in video_list]
 
 
 class Trainer(BaseTrainerDA):
