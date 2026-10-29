@@ -1,5 +1,6 @@
 """换种子应覆盖模型、三个loader与子进程环境，旧seed6映射不变。"""
 from pathlib import Path
+from copy import deepcopy
 import random
 import subprocess
 from unittest.mock import Mock
@@ -7,10 +8,11 @@ from unittest.mock import Mock
 import numpy as np
 import torch
 import yaml
+import pytest
 
 from libs.utils import fix_random_seed
 from tools.baseline_protocol import CODE, OFFICIAL, random_seeds, save
-from tools.run_sada_baseline import spawn
+from tools.run_sada_baseline import spawn, assert_seed_only_change
 
 
 def test_official_released_epic_seed_is_123():
@@ -49,3 +51,25 @@ def test_child_environment_uses_configured_seed(tmp_path,monkeypatch):
     assert options['env']['CUDA_VISIBLE_DEVICES']=='only-selected-card'
     assert options['env']['OMP_NUM_THREADS']==options['env']['MKL_NUM_THREADS']=='8'
     assert options['start_new_session'] is True
+
+
+def test_seed_rerun_rejects_other_protocol_changes():
+    previous=dict(seed=6,init_rand_seed=6,loader={'batch_size':4},opt={'learning_rate':.0001},
+        dataset={'json_file':'old/source.json'},baseline=dict(
+            code={'core_files':{'model.py':'unchanged'},'commit':'old'},
+            official_config='old/config.yaml',target_manifest='old/target.json',
+            source_manifest_sha256='source',target_manifest_sha256='target',
+            policy={'patience_epochs':15}))
+    current=deepcopy(previous)
+    current.update(seed=123,init_rand_seed=123)
+    current['dataset']['json_file']='new/source.json'
+    current['baseline'].update(code={'core_files':{'model.py':'unchanged'},'commit':'new'},
+        official_config='new/config.yaml',target_manifest='new/target.json',random_seeds=random_seeds(123))
+    assert_seed_only_change(current,previous)
+    for field,value in [('loader',{'batch_size':2}),('opt',{'learning_rate':.0002})]:
+        bad=deepcopy(current);bad[field]=value
+        with pytest.raises(ValueError):assert_seed_only_change(bad,previous)
+    bad=deepcopy(current);bad['baseline']['policy']['patience_epochs']=10
+    with pytest.raises(ValueError):assert_seed_only_change(bad,previous)
+    bad=deepcopy(current);bad['baseline']['source_manifest_sha256']='changed'
+    with pytest.raises(ValueError):assert_seed_only_change(bad,previous)

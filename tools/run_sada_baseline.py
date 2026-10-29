@@ -118,6 +118,21 @@ def runtime_config(template,batch,regime):
     return cfg
 
 
+def assert_seed_only_change(current, previous):
+    # 重跑只允许种子和同一工件/代码的新路径变化；核心代码SHA必须相同。
+    if current['baseline']['code']['core_files'] != previous['baseline']['code']['core_files']:
+        raise ValueError('换种子时不能修改模型或数据核心代码')
+    expected=deepcopy(previous)
+    for key in ('seed','init_rand_seed'):
+        expected[key]=current[key]
+    expected['dataset']['json_file']=current['dataset']['json_file']
+    for key in ('code','official_config','target_manifest'):
+        expected['baseline'][key]=current['baseline'][key]
+    expected['baseline']['random_seeds']=random_seeds(current['seed'])
+    if current != expected:
+        raise ValueError('重跑配置除种子/路径外发生变化')
+
+
 def spawn(mode,cfg_path,entry,lease,data,report=None):
     seed=read(cfg_path)['seed']
     env=dict(os.environ,PYTHONPATH=str(CODE),PYTHONDONTWRITEBYTECODE='1',
@@ -189,6 +204,25 @@ def main(args):
     root.mkdir(parents=True,exist_ok=False)
     save(root/'state.json',dict(phase='cpu_input_audit',pid=os.getpid(),completed=[],active={}))
     configs=prepare(root,data,identity,seed=args.seed)
+    if args.reference_root:
+        reference=args.reference_root.resolve()
+        final=read(reference/'final_audit.json')
+        if final.get('status')!='passed' or final.get('count')!=12:
+            raise ValueError('种子对照缺少前序12项完整终审')
+        if args.batch_size is None:
+            raise ValueError('种子对照必须固定已有batch')
+        bound={}
+        for shift in configs:
+            for regime in ('so','uda'):
+                entry=reference/'formal'/shift/regime
+                cfg_path=entry/'config.json'
+                complete=read(entry/'complete.json')
+                if sha(cfg_path)!=complete['artifacts'][str(cfg_path)]:
+                    raise ValueError('前序配置SHA发生变化')
+                assert_seed_only_change(runtime_config(configs[shift],args.batch_size,regime),read(cfg_path))
+                bound[shift+'_'+regime]=dict(config_sha256=sha(cfg_path),complete_sha256=sha(entry/'complete.json'))
+        save(root/'seed_reference.json',dict(status='passed',seed=args.seed,reference_root=str(reference),
+             final_audit_sha256=sha(reference/'final_audit.json'),entries=bound))
     if args.prepare_only:
         save(root/'cpu_preflight.json',dict(status='passed',shifts=list(configs),code=identity))
         return
@@ -266,6 +300,7 @@ if __name__=='__main__':
     p.add_argument('--seed',type=int,default=6)
     p.add_argument('--batch-size',type=int,choices=[2,4],default=None,
                    help='指定时冻结已有batch协议，只做对应batch验收，不重新选择')
+    p.add_argument('--reference-root',type=Path,help='逐项核对只改变种子的已完成12项根')
     p.add_argument('--prepare-only',action='store_true')
     p.add_argument('--child',choices=['probe','train','evaluate'])
     p.add_argument('--config',type=Path);p.add_argument('--entry',type=Path);p.add_argument('--report',type=Path)
