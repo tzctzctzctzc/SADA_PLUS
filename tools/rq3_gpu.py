@@ -154,6 +154,11 @@ def guard_before_cuda():
     index = os.environ.get("RQ3_GPU_INDEX")
     if index is None:
         return
+    if os.environ.get('RQ3_EXTERNAL_GPU_LEASE'):
+        if os.environ.get('RQ3_COHORT_LEASE'):
+            raise RuntimeError('external and cohort sharing cannot be combined')
+        from tools.rq3_external_share import shared_guard
+        return shared_guard()
     if os.environ.get('RQ3_COHORT_LEASE'):
         from tools.rq3_colocation import shared_guard
         return shared_guard()

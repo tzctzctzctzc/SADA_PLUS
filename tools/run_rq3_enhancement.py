@@ -13,6 +13,7 @@ import yaml
 from tools.rq3_enhancement import ORDER, SCHEMA, specification, assert_reference_pair
 from tools.rq2_dense_protocol import sha256_file
 from tools.rq3_gpu import gpu_slot
+from tools.rq3_external_share import external_gpu_slot, audit_receipt
 from tools.rq3_protocol import audit_baseline, load_cache, validate_interface_audit, audit_cache_predictions
 from tools.run_rq3_matrix import completed_baseline, supervision_audit
 from tools.run_rq2_matched_control import checked_train_result, checked_evaluation, check_code
@@ -34,8 +35,13 @@ def run(command, log, data, card=None):
                CUDA_VISIBLE_DEVICES=card['uuid'] if card else '', OMP_NUM_THREADS='8', MKL_NUM_THREADS='8')
     env.pop('RQ3_GPU_INDEX', None)
     env.pop('RQ3_GPU_UUID', None)
+    for key in ('RQ3_EXTERNAL_GPU_LEASE', 'RQ3_EXTERNAL_GPU_LEASE_SHA256', 'RQ3_COHORT_LEASE'):
+        env.pop(key, None)
     if card:
         env.update(RQ3_GPU_INDEX=str(card['index']), RQ3_GPU_UUID=card['uuid'])
+        if 'external_share_lease' in card:
+            env.update(RQ3_EXTERNAL_GPU_LEASE=card['external_share_lease'],
+                       RQ3_EXTERNAL_GPU_LEASE_SHA256=card['external_share_sha256'])
     with log.open('x') as stream:
         CHILD = subprocess.Popen(command, cwd=data, env=env, stdout=stream,
                                   stderr=subprocess.STDOUT, start_new_session=True)
@@ -74,6 +80,8 @@ def audit_entry(root, reference, baseline):
     record = read(root/'complete.json')
     if record['schema'] != SCHEMA or record['specification'] != specification(record['variant']):
         raise ValueError('complete variant changed')
+    for key in ('training_gpu', 'evaluation_gpu'):
+        audit_receipt(record[key], record['code_commit'])
     config, best = checked_train_result(Path(record['run_root']), root/'logs/train.log', cfg)
     saved = read(config)
     assert_reference_pair(saved, reference)
@@ -99,15 +107,23 @@ def main():
     p.add_argument('--output-root', type=Path, required=True)
     p.add_argument('--expected-head', required=True)
     p.add_argument('--data-root', type=Path, default=Path('/vepfs/vlms/SADA_PLUS'))
-    p.add_argument('--gpu', choices=('0',), default='0')
+    p.add_argument('--gpu', choices=('0','2'), default='0')
+    p.add_argument('--share-external-gpu', action='store_true',
+                   help='explicitly authorized GPU2 sharing; preserves 16GiB free before CUDA')
     p.add_argument('--preflight-only', action='store_true')
     args = p.parse_args()
+    if args.share_external_gpu and args.gpu != '2':
+        p.error('external sharing is authorized only on physical GPU2')
     root, data = args.output_root.absolute(), args.data_root.absolute()
     migration = read(args.migration)
     if migration['teacher'] != 'qwen3_vl_8b' or sorted(r['shift'] for r in migration['references']) != ['S'+str(i) for i in range(1,7)]:
         raise ValueError('requires six unique migrated Qwen reference entries')
     check_code(args.expected_head)
     root.mkdir(parents=True, exist_ok=False)
+    def slot():
+        if args.share_external_gpu:
+            return external_gpu_slot(args.gpu, data, root/'gpu_admissions', args.expected_head)
+        return gpu_slot(args.gpu, data, wait=True)
     os.chdir(data)
     registry = CODE/'configs/rq2/shift_registry.yaml'
     shifts = yaml.safe_load(registry.read_text())['shifts']
@@ -115,7 +131,12 @@ def main():
                  plan=[dict(variant=v, shift='S'+str(i)) for v in ORDER for i in range(1,7)], completed=[], active=None)
     save(root/'state.json', state)
     save(root/'plan.json', dict(order=list(ORDER), specifications=[specification(v) for v in ORDER],
-         references=migration['references'], target_based_selection=False, new_hardware_control=True))
+         references=migration['references'], target_based_selection=False, new_hardware_control=True,
+         resource_policy=dict(physical_gpu=int(args.gpu), external_sharing=args.share_external_gpu,
+                              own_cuda_tasks=1, minimum_free_mib=16384 if args.share_external_gpu else None)))
+    save(root/'environment.json', dict(python=sys.version, executable=sys.executable,
+         code_commit=args.expected_head, data_root=str(data),
+         resource_policy=read(root/'plan.json')['resource_policy']))
     for s in (signal.SIGINT, signal.SIGTERM):
         signal.signal(s, stop)
     try:
@@ -175,17 +196,20 @@ def main():
                     save(root/'state.json',state)
                     smoke = list(command)
                     smoke[smoke.index('-n')+1] = name+'_diagnostic'
-                    with gpu_slot(args.gpu,data,wait=True) as card:
+                    with slot() as card:
                         run([sys.executable,'-B',str(CODE/'tools/smoke_rq3_enhancement.py'),
                              str(stage/'acceptance.json'),*smoke[2:]], entry/'logs/smoke.log',data,card)
                     acceptance = read(stage/'acceptance.json')
                     if acceptance['specification'] != specification(variant) or acceptance['status'] != 'passed':
                         raise ValueError('invalid real-data acceptance')
+                    if 'external_share_lease' in card:
+                        acceptance['gpu_admission'] = card
+                        save(stage/'acceptance.json', acceptance)
                 if not (stage/'acceptance.json').exists():
                     raise ValueError('no real-data acceptance')
                 state['phase']='training'
                 save(root/'state.json',state)
-                with gpu_slot(args.gpu,data,wait=True) as training_card:
+                with slot() as training_card:
                     run(command,entry/'logs/train.log',data,training_card)
                 config,best = checked_train_result(run_root,entry/'logs/train.log',cfg)
                 baseline_pair(baselines[shift],read(config))
@@ -193,7 +217,7 @@ def main():
                 save(root/'state.json',state)
                 evaluation=[sys.executable,'-B',str(CODE/'evaluate_da.py'),*common,'-n',name+'_eval',
                             '-r',str(best),'--rq2-formal','--rq2-output-dir',str(entry/'evaluation')]
-                with gpu_slot(args.gpu,data,wait=True) as eval_card:
+                with slot() as eval_card:
                     run(evaluation,entry/'logs/evaluation.log',data,eval_card)
                 checked_evaluation(entry/'evaluation',cfg,best)
                 coverage=supervision_audit(config.parent/'benchmark_epoch_metrics.jsonl',cfg)
