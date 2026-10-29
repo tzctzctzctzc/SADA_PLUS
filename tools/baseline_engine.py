@@ -166,7 +166,8 @@ def capture(ctx, cfg, epoch, history):
         optimizers=[x.state_dict() for x in optimizers(ctx)],
         schedulers=[x.state_dict() for x in schedulers(ctx)],
         rng=dict(python=random.getstate(), numpy=np.random.get_state(), cpu=torch.get_rng_state(),
-                 cuda=torch.cuda.get_rng_state_all(), loaders={k:g.get_state() for k,g in ctx.generators.items()}))
+                 # 本协议每进程仅一张可见卡，直接读取逻辑0，避免旧NVML计数误报0。
+                 cuda=[torch.cuda.get_rng_state(0)], loaders={k:g.get_state() for k,g in ctx.generators.items()}))
 
 
 def checkpoint(path, state):
@@ -234,7 +235,23 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
                       checked_target_batches=ctx.checked_steps, initial_state_sha=ctx.initial_state_sha))
 
 
-def train(cfg, entry, resume=None, resume_map_location='cuda:0'):
+def compare_restore(actual, expected, allow_cuda_rng_restart=False):
+    missing_cuda = len(expected['rng']['cuda']) == 0
+    if missing_cuda and not allow_cuda_rng_restart:
+        raise ValueError('旧checkpoint缺CUDA RNG，严格恢复拒绝；探索性重置必须显式授权')
+    if missing_cuda:
+        left=dict(actual,rng={k:v for k,v in actual['rng'].items() if k!='cuda'})
+        right=dict(expected,rng={k:v for k,v in expected['rng'].items() if k!='cuda'})
+        scope='all_saved_state_except_missing_cuda_rng'
+    else:
+        left,right=actual,expected;scope='full_state'
+    if tensor_digest(left)!=tensor_digest(right):raise ValueError('恢复后的已保存状态不一致')
+    return dict(status='passed',comparison_scope=scope,compared_state_sha=tensor_digest(left),
+        full_state_restored=not missing_cuda,cuda_rng_continuity='broken_authorized_restart' if missing_cuda else 'preserved',
+        strict_paired_baseline=not missing_cuda)
+
+
+def train(cfg, entry, resume=None, resume_map_location='cuda:0', allow_cuda_rng_restart=False):
     entry = Path(entry)
     ctx = build(cfg)
     save(entry/'runtime_config.json',ctx.cfg)
@@ -248,9 +265,13 @@ def train(cfg, entry, resume=None, resume_map_location='cuda:0'):
         rows = [x for x in rows if x['epoch'] < start]
         actual = capture(ctx, cfg, saved['epoch'], history)
         expected = {k:saved[k] for k in actual}
-        if tensor_digest(actual) != tensor_digest(expected): raise ValueError('完整恢复状态不一致')
-        save(entry/'restore_proof.json', dict(status='passed', start_epoch=start,
-                                             checkpoint_sha256=sha(resume), full_state_sha=tensor_digest(actual)))
+        proof=compare_restore(actual,expected,allow_cuda_rng_restart)
+        if not proof['full_state_restored']:
+            # 用户已选择探索性续跑：只重置缺失的本卡GPU流，不改变CPU/loader历史。
+            torch.cuda.manual_seed(cfg['seed'])
+            proof.update(cuda_restart_seed=cfg['seed'],
+                         cuda_restart_state_sha=tensor_digest(torch.cuda.get_rng_state(0)))
+        save(entry/'restore_proof.json',dict(proof,start_epoch=start,checkpoint_sha256=sha(resume)))
     best = min([v for _,v in history], default=float('inf'))
     for epoch in range(start, 51):
         if history and decision(history)['reason'] != 'running': break

@@ -22,7 +22,7 @@ def partial(tmp_path):
     saved=dict(config=cfg,epoch=10,history=[[5,1.],[10,.8]],state_dict={'w':torch.ones(3)},
         ema_state_dict={'w':torch.ones(3)},model_controls={},ema_controls={},optimizers=[{}, {}, {}],
         schedulers=[{}, {}, {}],rng=dict(python=(),numpy=(),cpu=torch.get_rng_state(),
-        cuda=[],loaders={k:torch.Generator().get_state() for k in ('source','target','validation')}))
+        cuda=[torch.zeros(5056,dtype=torch.uint8)],loaders={k:torch.Generator().get_state() for k in ('source','target','validation')}))
     torch.save(saved,entry/'latest.pt');torch.save(saved,entry/'best.pt')
     return entry
 
@@ -94,16 +94,40 @@ def test_threads_share_physical_card_locks(tmp_path,monkeypatch):
         assert set(executor.map(acquire_one,range(2)))=={1,2}
 
 
-def test_resume_engine_changes_only_checkpoint_map_location():
+def test_resume_engine_preserves_original_epoch_loop_and_math():
     from tools.baseline_protocol import CODE
     before=subprocess.check_output(['git','show','90bdce09660b820df7d527aabf1d43df1350bc4b:tools/baseline_engine.py'],cwd=CODE,text=True)
     after=(CODE/'tools/baseline_engine.py').read_text(encoding='utf-8')
     original=ast.parse(before);current=ast.parse(after)
-    train=next(n for n in current.body if isinstance(n,ast.FunctionDef) and n.name=='train')
-    assert train.args.args[-1].arg=='resume_map_location'
-    train.args.args.pop();train.args.defaults.pop()
-    changed=0
-    for node in ast.walk(train):
-        if isinstance(node,ast.keyword) and node.arg=='map_location' and isinstance(node.value,ast.Name) and node.value.id=='resume_map_location':
-            node.value=ast.Constant(value='cuda:0');changed+=1
-    assert changed==1 and ast.dump(current)==ast.dump(original)
+    def fn(tree,name):return next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name==name)
+    for name in ('build','restore','evaluate','epoch_setup','optimizers','schedulers'):
+        assert ast.dump(fn(original,name))==ast.dump(fn(current,name))
+    epoch_loop=lambda tree:next(n for n in fn(tree,'train').body if isinstance(n,ast.For))
+    assert ast.dump(epoch_loop(original))==ast.dump(epoch_loop(current))
+
+
+def test_missing_cuda_rng_is_never_silently_accepted(tmp_path):
+    source=partial(tmp_path)
+    saved=torch.load(source/'latest.pt');saved['rng']['cuda']=[];torch.save(saved,source/'latest.pt')
+    with pytest.raises(ValueError):inspect_partial(source)
+    assert inspect_partial(source,allow_cuda_rng_restart=True)['exploratory_cuda_rng_restart'] is True
+
+
+def test_exploratory_proof_compares_all_other_state():
+    from copy import deepcopy
+    from tools.baseline_engine import compare_restore
+    expected=dict(state_dict={'w':torch.ones(2)},history=[[5,.9]],rng=dict(cpu=torch.ones(5),cuda=[],loaders={'source':torch.zeros(3)}))
+    actual=deepcopy(expected);actual['rng']['cuda']=[torch.ones(5,dtype=torch.uint8)]
+    with pytest.raises(ValueError):compare_restore(actual,expected)
+    proof=compare_restore(actual,expected,allow_cuda_rng_restart=True)
+    assert proof['status']=='passed' and proof['full_state_restored'] is False and proof['strict_paired_baseline'] is False
+    actual['state_dict']['w'][0]=2
+    with pytest.raises(ValueError):compare_restore(actual,expected,allow_cuda_rng_restart=True)
+
+
+def test_complete_rng_uses_full_state_comparison():
+    from copy import deepcopy
+    from tools.baseline_engine import compare_restore
+    saved=dict(state_dict={'w':torch.ones(2)},rng={'cuda':[torch.zeros(5,dtype=torch.uint8)],'cpu':torch.ones(3)})
+    proof=compare_restore(deepcopy(saved),saved)
+    assert proof['full_state_restored'] is True and proof['comparison_scope']=='full_state'

@@ -78,7 +78,7 @@ def stop_own_parent(old,state):
     return dict(parent_pid=parent,training_groups=groups,remaining_group_members=[])
 
 
-def inspect_partial(entry,identity=('S2','so')):
+def inspect_partial(entry,identity=('S2','so'),allow_cuda_rng_restart=False):
     import torch
     entry=Path(entry)
     if (entry/'complete.json').exists() or (entry/'termination.json').exists():
@@ -91,6 +91,10 @@ def inspect_partial(entry,identity=('S2','so')):
     if any(k not in saved for k in required) or saved['config']!=cfg:raise ValueError('保存点缺状态或配置不同')
     if set(saved['rng'])!={'python','numpy','cpu','cuda','loaders'}:raise ValueError('保存点缺完整RNG')
     if set(saved['rng']['loaders'])!={'source','target','validation'}:raise ValueError('缺少loader随机状态')
+    cuda_count=len(saved['rng']['cuda'])
+    if cuda_count not in (0,1) or (cuda_count==0 and not allow_cuda_rng_restart):
+        raise ValueError('缺少真实CUDA RNG，不能标记为严格恢复')
+    if cuda_count and saved['rng']['cuda'][0].numel()==0:raise ValueError('CUDA RNG张量为空')
     if len(saved['optimizers'])!=3 or len(saved['schedulers'])!=3:raise ValueError('缺三组优化器/调度器')
     rows=[json.loads(x) for x in (entry/'metrics.jsonl').read_text().splitlines()]
     if [x['epoch'] for x in rows]!=list(range(1,len(rows)+1)):raise ValueError('原metrics轮次不连续')
@@ -105,6 +109,7 @@ def inspect_partial(entry,identity=('S2','so')):
     best_state=torch.load(entry/'best.pt',map_location='cpu')
     if best_state['epoch']!=best_epoch or best_state['config']!=cfg:raise ValueError('原best保存点不符')
     return dict(config=cfg,epoch=epoch,start_epoch=epoch+1,history=history,metrics_prefix=prefix,
+        cuda_rng_count=cuda_count,exploratory_cuda_rng_restart=(cuda_count==0),
         old_complete_epochs=len(rows),best_epoch=best_epoch,
         original_artifacts={str(entry/n):sha(entry/n) for n in ('config.json','best.pt','latest.pt','metrics.jsonl','train.log')})
 
@@ -151,7 +156,8 @@ def child(args):
         path=Path(__file__).with_name('baseline_engine.py')
         spec=importlib.util.spec_from_file_location('sada_checkpoint_cpu_engine',path)
         resume_engine=importlib.util.module_from_spec(spec);spec.loader.exec_module(resume_engine)
-        resume_engine.train(cfg,args.entry,resume=args.entry/'latest.pt',resume_map_location='cpu')
+        resume_engine.train(cfg,args.entry,resume=args.entry/'latest.pt',resume_map_location='cpu',
+                            allow_cuda_rng_restart=args.allow_cuda_rng_restart)
     else:engine.evaluate(cfg,args.entry,cfg['baseline']['annotation_for_offline_evaluation'])
     save(args.entry/(args.child+'_gpu.json'),dict(guard=proof,guard_sha256=sha(proof),config_sha256=sha(args.entry/'config.json')))
 
@@ -185,7 +191,7 @@ def main(args):
     engine,protocol,gpu=training_modules(args.training_code)
     inspections={}
     for shift,regime in sorted(missing):
-        inspection=inspect_partial(old/'formal'/shift/regime,(shift,regime))
+        inspection=inspect_partial(old/'formal'/shift/regime,(shift,regime),args.allow_cuda_rng_restart)
         inspections[(shift,regime)]=inspection
         clone_partial(old/'formal'/shift/regime,root/'formal'/shift/regime,inspection)
     for name in ('acceptance.json','plan.json','seed_reference.json'):shutil.copyfile(old/name,root/name)
@@ -199,7 +205,9 @@ def main(args):
         provenance.update(source_entry=str(old/'formal'/shift/regime),training_commit=TRAINING_COMMIT,
             recovery_code_commit=helper_commit,recovery_script_sha256=sha(helper),tmpdir=str(args.tmpdir),
             resume_engine_sha256=sha(helper.with_name('baseline_engine.py')),
-            resume_loading='CPU deserialization; original epoch loop and full GPU restore comparison',
+            resume_loading='CPU deserialization; original epoch loop; saved-state comparison with explicit missing-GPU-RNG handling',
+            exploratory_cuda_rng_restart=inspection['exploratory_cuda_rng_restart'],
+            strict_paired_baseline=not inspection['exploratory_cuda_rng_restart'],
             prior_completed_entries=state['completed'],previous_stop=stopped,
             recomputed_complete_epochs=list(range(inspection['start_epoch'],inspection['old_complete_epochs']+1)))
         save(root/'formal'/shift/regime/'recovery.json',provenance)
@@ -234,6 +242,7 @@ def main(args):
                 for k in ('RQ3_EXTERNAL_GPU_LEASE','RQ3_EXTERNAL_GPU_LEASE_SHA256','RQ3_COHORT_LEASE'):env.pop(k,None)
                 command=[sys.executable,'-B',str(helper),'--child',stage,'--entry',str(recovered),
                     '--training-code',str(args.training_code),'--data-root',str(args.data_root),'--tmpdir',str(args.tmpdir)]
+                if args.allow_cuda_rng_restart:command+=['--allow-cuda-rng-restart']
                 with (recovered/(stage+'.log')).open('x') as log:
                     process=subprocess.Popen(command,cwd=args.training_code,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
                 with lock:
@@ -248,7 +257,9 @@ def main(args):
                 'evaluation/manifest.json','restore_proof.json','recovery.json','train.log','evaluate.log')
             save(recovered/'complete.json',dict(schema=protocol.SCHEMA,shift=shift,regime=regime,code=cfg['baseline']['code'],
                 acceptance_sha256=sha(root/'acceptance.json'),artifacts={str(recovered/n):sha(recovered/n) for n in artifacts},
-                recovery_code_commit=helper_commit,recovery_sha256=sha(recovered/'recovery.json')))
+                recovery_code_commit=helper_commit,recovery_sha256=sha(recovered/'recovery.json'),
+                exploratory_cuda_rng_restart=inspection['exploratory_cuda_rng_restart'],
+                strict_paired_baseline=not inspection['exploratory_cuda_rng_restart']))
             result=protocol.audit_entry(recovered)
             with lock:completed.append(result);record()
         finally:context.__exit__(None,None,None)
@@ -257,8 +268,12 @@ def main(args):
     paths={(x['shift'],x['regime']):Path(x['complete']).parent for x in completed}
     if set(paths)!=EXPECTED:raise ValueError('并非精确12项')
     for shift in ('S1','S2','S3','S4','S5','S6'):
-        save(root/'pair_audits'/(shift+'.json'),protocol.audit_pair(paths[(shift,'so')],paths[(shift,'uda')]))
-    save(root/'final_audit.json',dict(status='passed',count=12,schema=protocol.SCHEMA,seed=123,batch=4,results=completed))
+        pair=protocol.audit_pair(paths[(shift,'so')],paths[(shift,'uda')])
+        pair.update(scope='configuration_and_cold_initialization_only',strict_paired_baseline=False)
+        save(root/'pair_audits'/(shift+'.json'),pair)
+    save(root/'final_audit.json',dict(status='passed',count=12,schema=protocol.SCHEMA,seed=123,batch=4,results=completed,
+        scope='exploratory_with_authorized_cuda_rng_restart',strict_paired_baseline=False,
+        cuda_rng_restart_entries=[s+'_'+r for (s,r),v in inspections.items() if v['exploratory_cuda_rng_restart']]))
     save(root/'state.json',dict(phase='complete',pid=os.getpid(),completed=completed,active={}))
     print('FINAL_AUDIT_PASSED',12,flush=True)
 
@@ -277,6 +292,7 @@ if __name__=='__main__':
     p.add_argument('--gpus',default='1,0,2,3')
     p.add_argument('--relocate-s5',action='store_true',help='连同慢卡S5 UDA保存点迁移，仍只做精确缺失集合')
     p.add_argument('--stopped-proof',type=Path,help='仅接受此前精确停止自有父子组的SHA绑定凭证')
+    p.add_argument('--allow-cuda-rng-restart',action='store_true',help='用户授权的探索性接续，不能作为严格配对基线')
     p.add_argument('--tmpdir',type=Path,default=Path('/vepfs/vlms/tmp/sada_seed123_1029'))
     p.add_argument('--child',choices=['train','evaluate']);p.add_argument('--entry',type=Path)
     args=p.parse_args();signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
