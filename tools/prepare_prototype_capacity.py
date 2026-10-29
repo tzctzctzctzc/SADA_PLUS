@@ -35,9 +35,12 @@ def main(args):
     for row in references:
         shift=row['shift'];entry=Path(row['entry']);preflight=entry/'preflight.json'
         cfg=json.loads(preflight.read_text());complete=json.loads((entry/'complete.json').read_text())
-        if checked_hash(preflight)!=complete['artifacts'][str(preflight)]:raise ValueError('旧正式配置SHA变化')
         old.validate_config(cfg,'uda')
         aux=cfg['rq3_auxiliary']
+        # 旧complete没有preflight SHA字段；其cache SHA与原教师接口输出共同绑定证据。
+        if (complete['cache_sha256']!=checked_hash(aux['cache_path']) or complete['teacher']!='qwen3_vl_8b'
+                or complete['shift']!=shift or complete['strategy']!='prototype'):
+            raise ValueError('旧完成记录与教师缓存身份不一致')
         if aux['strategy']!='prototype' or aux['teacher_model']!='qwen3_vl_8b' or aux['participation_fraction']!=.2:
             raise ValueError('必须复用原Qwen Prototype固定20%')
         payload,_=old.load_cache(aux['cache_path'],'qwen3_vl_8b',shift)

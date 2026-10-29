@@ -76,3 +76,32 @@ def test_pairing_rejects_learning_rate_or_seed_changes(tmp_path):
     for path,value in [('seed',6),('opt',{'learning_rate':.0002})]:
         bad=deepcopy(cfg);bad[path]=value
         with pytest.raises(ValueError):assert_pair(bad,base)
+
+
+@pytest.mark.parametrize('variant',['control','wide_deep'])
+def test_true_sada_integration_keeps_detector_initialization_and_source_loss(tmp_path,monkeypatch,variant):
+    from runpy import run_path
+    small_config=run_path(str(CODE/'tests/test_corrected_baseline.py'))['small_config']
+    from libs.models.SADA.meta_archs import SADA
+    from libs.models.SADA.optimizer import make_optimizer
+    native=torch.tensor
+    def cpu_copy(*args,**kwargs):
+        value=native(*args,**kwargs)
+        return value.clone() if value.requires_grad and value.device.type=='cpu' else value
+    monkeypatch.setattr(torch,'tensor',cpu_copy)
+    cfg=small_config();cfg['prototype_capacity']=configuration(tmp_path,variant)
+    plain=deepcopy(cfg);plain.pop('prototype_capacity')
+    torch.manual_seed(123);base=SADA(plain,'cpu')
+    torch.manual_seed(123);aux=SADA(cfg,'cpu')
+    assert all(torch.equal(v,aux.state_dict()[k]) for k,v in base.state_dict().items())
+    opt=make_optimizer(aux,cfg['opt'],.0001,exclude_params=['disc_dom_adv','disc_dom_conditional_adv','learnable_embeddings'])
+    ids={id(p) for g in opt.param_groups for p in g['params']}
+    assert all(id(p) in ids for p in aux.rq3_capacity.parameters())
+    s,t=videos()
+    torch.manual_seed(777);old=base(video_list_src=[s],video_list_tgt=[t],mode='train',curr_epoch=5)[0]
+    torch.manual_seed(777);new=aux(video_list_src=[s],video_list_tgt=[t],mode='train',curr_epoch=5)[0]
+    assert torch.equal(old['cls_loss'],new['cls_loss']) and torch.equal(old['reg_loss'],new['reg_loss'])
+    assert new['rq3_target_gradient_norm']>0
+    torch.testing.assert_close(new['downstream_loss'],old['downstream_loss']+new['rq3_loss'])
+    new['downstream_loss'].backward()
+    assert aux.rq3_capacity.branch.input_projection.weight.grad.abs().sum()>0
