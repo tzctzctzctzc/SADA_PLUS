@@ -234,13 +234,13 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
                       checked_target_batches=ctx.checked_steps, initial_state_sha=ctx.initial_state_sha))
 
 
-def train(cfg, entry, resume=None):
+def train(cfg, entry, resume=None, resume_map_location='cuda:0'):
     entry = Path(entry)
     ctx = build(cfg)
     save(entry/'runtime_config.json',ctx.cfg)
     history, start, rows = [], 1, []
     if resume:
-        saved = torch.load(resume, map_location='cuda:0')
+        saved = torch.load(resume, map_location=resume_map_location)
         if saved['config'] != cfg: raise ValueError('恢复配置必须完全相同')
         restore(ctx, saved)
         history, start = saved['history'], saved['epoch']+1

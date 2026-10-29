@@ -1,5 +1,7 @@
 """恢复保留历史与源文件，拒绝完成项/缺失状态，不重算已保存的轮次。"""
 import json
+import ast
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -90,3 +92,18 @@ def test_threads_share_physical_card_locks(tmp_path,monkeypatch):
         raise AssertionError('未获得独立卡锁')
     with ThreadPoolExecutor(max_workers=2) as executor:
         assert set(executor.map(acquire_one,range(2)))=={1,2}
+
+
+def test_resume_engine_changes_only_checkpoint_map_location():
+    from tools.baseline_protocol import CODE
+    before=subprocess.check_output(['git','show','90bdce09660b820df7d527aabf1d43df1350bc4b:tools/baseline_engine.py'],cwd=CODE,text=True)
+    after=(CODE/'tools/baseline_engine.py').read_text(encoding='utf-8')
+    original=ast.parse(before);current=ast.parse(after)
+    train=next(n for n in current.body if isinstance(n,ast.FunctionDef) and n.name=='train')
+    assert train.args.args[-1].arg=='resume_map_location'
+    train.args.args.pop();train.args.defaults.pop()
+    changed=0
+    for node in ast.walk(train):
+        if isinstance(node,ast.keyword) and node.arg=='map_location' and isinstance(node.value,ast.Name) and node.value.id=='resume_map_location':
+            node.value=ast.Constant(value='cuda:0');changed+=1
+    assert changed==1 and ast.dump(current)==ast.dump(original)

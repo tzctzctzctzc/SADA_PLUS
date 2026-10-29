@@ -3,6 +3,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -144,7 +145,13 @@ def child(args):
         if sha(path)!=cfg['baseline'][key]:raise ValueError('训练输入SHA改变')
     os.chdir(args.data_root)
     proof=gpu.first_cuda_guard()
-    if args.child=='train':engine.train(cfg,args.entry,resume=args.entry/'latest.pt')
+    if args.child=='train':
+        # 只在恢复加载时走CPU，绕开PyTorch1.13 UUID/NVML设备数反序列化问题。
+        # 模型/优化器/RNG依然由原恢复逻辑回到真实GPU，并逐字节校验。
+        path=Path(__file__).with_name('baseline_engine.py')
+        spec=importlib.util.spec_from_file_location('sada_checkpoint_cpu_engine',path)
+        resume_engine=importlib.util.module_from_spec(spec);spec.loader.exec_module(resume_engine)
+        resume_engine.train(cfg,args.entry,resume=args.entry/'latest.pt',resume_map_location='cpu')
     else:engine.evaluate(cfg,args.entry,cfg['baseline']['annotation_for_offline_evaluation'])
     save(args.entry/(args.child+'_gpu.json'),dict(guard=proof,guard_sha256=sha(proof),config_sha256=sha(args.entry/'config.json')))
 
@@ -166,7 +173,14 @@ def main(args):
         if not process_alive(state['pid']):raise ValueError('原监督意外退出，需重新检查剩余集合')
         print('WAIT_HEALTHY_ENTRIES',len(completed),sorted(state['active']),flush=True)
         time.sleep(15)
-    stopped=stop_own_parent(old,state)
+    if args.stopped_proof:
+        stopped=read(args.stopped_proof)
+        if stopped['parent_pid']!=state['pid'] or set(stopped['training_groups'])!={int(x['pid']) for x in state['active'].values()}:
+            raise ValueError('已退出监督的身份凭证不符')
+        if process_alive(stopped['parent_pid']) or any(group_members(g) for g in stopped['training_groups']):
+            raise ValueError('旧自有进程仍活跃，拒绝重复恢复')
+        stopped=dict(stopped,proof_path=str(args.stopped_proof),proof_sha256=sha(args.stopped_proof))
+    else:stopped=stop_own_parent(old,state)
     save(root/'stopped_previous.json',stopped)
     engine,protocol,gpu=training_modules(args.training_code)
     inspections={}
@@ -184,6 +198,8 @@ def main(args):
         provenance=deepcopy(inspection);provenance.pop('metrics_prefix')
         provenance.update(source_entry=str(old/'formal'/shift/regime),training_commit=TRAINING_COMMIT,
             recovery_code_commit=helper_commit,recovery_script_sha256=sha(helper),tmpdir=str(args.tmpdir),
+            resume_engine_sha256=sha(helper.with_name('baseline_engine.py')),
+            resume_loading='CPU deserialization; original epoch loop and full GPU restore comparison',
             prior_completed_entries=state['completed'],previous_stop=stopped,
             recomputed_complete_epochs=list(range(inspection['start_epoch'],inspection['old_complete_epochs']+1)))
         save(root/'formal'/shift/regime/'recovery.json',provenance)
@@ -260,6 +276,7 @@ if __name__=='__main__':
     p.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'))
     p.add_argument('--gpus',default='1,0,2,3')
     p.add_argument('--relocate-s5',action='store_true',help='连同慢卡S5 UDA保存点迁移，仍只做精确缺失集合')
+    p.add_argument('--stopped-proof',type=Path,help='仅接受此前精确停止自有父子组的SHA绑定凭证')
     p.add_argument('--tmpdir',type=Path,default=Path('/vepfs/vlms/tmp/sada_seed123_1029'))
     p.add_argument('--child',choices=['train','evaluate']);p.add_argument('--entry',type=Path)
     args=p.parse_args();signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
