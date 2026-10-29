@@ -10,6 +10,7 @@ import time
 SCHEMA = 'rq3-authorized-external-gpu-share-v1'
 MIN_FREE_MIB = 16384
 AUTHORIZED_GPUS = (1, 2)
+POOL_POLICY = 'memory-revalidated-external-pool-v2'
 
 
 def snapshot(index):
@@ -94,6 +95,7 @@ def external_gpu_slot(index, lock_root, receipts, code_commit, poll_seconds=30):
             path = receipts/('%d_%d.json' % (os.getpid(), time.time_ns()))
             lease = dict(schema=SCHEMA, owner_pid=os.getpid(), code_commit=code_commit,
                          minimum_free_mib=MIN_FREE_MIB, admitted=admitted,
+                         external_process_policy=POOL_POLICY,
                          locks=[str(Path(capacity.name).absolute()), str(Path(card_lock.name).absolute())])
             with path.open('x') as stream:
                 json.dump(lease, stream, sort_keys=True)
@@ -130,7 +132,30 @@ def shared_guard():
             except BlockingIOError:
                 continue
             raise RuntimeError('GPU sharing controller released its lock')
-    validate_admission(snapshot(admitted['index']), admitted)
+    if lease.get('external_process_policy') == POOL_POLICY:
+        # 用户授权共享整卡外部负载，并未固定外部PID名单。仍核UUID/锁/显存，
+        # 显存不够就等待；良性的外部进程变化不应杀掉另一卡的健康训练。
+        announced = False
+        while True:
+            if os.getppid() != lease['owner_pid']:
+                raise RuntimeError('GPU sharing parent exited')
+            current = snapshot(admitted['index'])
+            if current['uuid'] != admitted['uuid']:
+                raise RuntimeError('shared GPU identity changed')
+            try:
+                validate_admission(current)
+                break
+            except RuntimeError:
+                if not announced:
+                    print('RQ3_WAITING_BEFORE_CUDA_SHARED_MEMORY index=%d' % admitted['index'], flush=True)
+                    announced = True
+                time.sleep(10)
+        proof = guard_receipt_path(path, os.getpid())
+        with proof.open('x') as stream:
+            json.dump(dict(policy=POOL_POLICY, lease_sha256=digest(path), observed=current,
+                           child_pid=os.getpid(), owner_pid=lease['owner_pid']), stream, sort_keys=True)
+    else:
+        validate_admission(snapshot(admitted['index']), admitted)
     print('RQ3_PRE_CUDA_EXTERNAL_SHARE_CHECK_PASS index=%d min_free_mib=16384' % admitted['index'], flush=True)
 
 
@@ -146,3 +171,28 @@ def audit_receipt(card, code_commit):
     validate_admission(lease['admitted'])
     if card['index'] != lease['admitted']['index'] or card['uuid'] != lease['admitted']['uuid']:
         raise ValueError('GPU admission identity differs from complete')
+    if lease.get('external_process_policy') == POOL_POLICY:
+        proof_path = Path(card['pre_cuda_receipt'])
+        if digest(proof_path) != card['pre_cuda_sha256']:
+            raise ValueError('first-CUDA receipt changed')
+        proof = json.loads(proof_path.read_text())
+        if proof['lease_sha256'] != digest(path) or proof['policy'] != POOL_POLICY:
+            raise ValueError('first-CUDA receipt belongs to another lease')
+        validate_admission(proof['observed'])
+        if (proof['observed']['index'],proof['observed']['uuid']) != (card['index'],card['uuid']):
+            raise ValueError('first-CUDA GPU identity differs')
+
+
+def guard_receipt_path(lease, child_pid):
+    path = Path(lease)
+    return path.with_name(path.stem+'_guard_%d.json' % child_pid)
+
+
+def capture_guard_receipt(card, child_pid):
+    lease = Path(card['external_share_lease'])
+    if json.loads(lease.read_text()).get('external_process_policy') != POOL_POLICY:
+        return
+    path = guard_receipt_path(lease,child_pid)
+    if not path.is_file():
+        raise ValueError('CUDA stage has no first-CUDA revalidation receipt')
+    card.update(pre_cuda_receipt=str(path),pre_cuda_sha256=digest(path))

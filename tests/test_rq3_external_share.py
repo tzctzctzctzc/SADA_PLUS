@@ -67,9 +67,11 @@ m.shared_guard()
                    CUDA_VISIBLE_DEVICES=card['uuid'],
                    RQ3_EXTERNAL_GPU_LEASE=card['external_share_lease'],
                    RQ3_EXTERNAL_GPU_LEASE_SHA256=card['external_share_sha256'])
-        child = subprocess.run([sys.executable, '-c', code], env=env, capture_output=True, text=True)
-        assert child.returncode == 0, child.stderr
-        assert 'EXTERNAL_SHARE_CHECK_PASS' in child.stdout
+        child = subprocess.Popen([sys.executable, '-c', code], env=env, stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        stdout,stderr=child.communicate(timeout=20)
+        assert child.returncode == 0, stderr
+        assert 'EXTERNAL_SHARE_CHECK_PASS' in stdout
+        share.capture_guard_receipt(card,child.pid)
         share.audit_receipt(card, 'commit')
         with pytest.raises(ValueError):
             share.audit_receipt(card, 'wrong-commit')
@@ -79,6 +81,33 @@ m.shared_guard()
     Path(card['external_share_lease']).write_text('{}')
     with pytest.raises(ValueError, match='receipt changed'):
         share.audit_receipt(card, 'commit')
+
+
+@pytest.mark.skipif(sys.platform!='linux',reason='POSIX process locks')
+def test_dynamic_external_pid_churn_is_revalidated_with_memory_and_sha_proof(tmp_path,monkeypatch):
+    original=observation()
+    monkeypatch.setattr(share,'snapshot',lambda i:original)
+    changed=copy.deepcopy(original)
+    changed['processes'].append(dict(pid=300,memory_mib=2000))
+    changed['used_mib']+=2000
+    code="""import json
+from tools import rq3_external_share as s
+s.snapshot=lambda i:json.loads(%r)
+s.shared_guard()
+""" % json.dumps(changed)
+    with share.external_gpu_slot(2,tmp_path,tmp_path/'receipts','head') as card:
+        env=dict(os.environ,RQ3_GPU_INDEX='2',RQ3_GPU_UUID=card['uuid'],CUDA_VISIBLE_DEVICES=card['uuid'],
+                 RQ3_EXTERNAL_GPU_LEASE=card['external_share_lease'],RQ3_EXTERNAL_GPU_LEASE_SHA256=card['external_share_sha256'])
+        p=subprocess.Popen([sys.executable,'-c',code],env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        out,error=p.communicate(timeout=20)
+        assert p.returncode==0,error
+        share.capture_guard_receipt(card,p.pid)
+        share.audit_receipt(card,'head')
+        proof=json.loads(Path(card['pre_cuda_receipt']).read_text())
+        assert proof['observed']['processes'][-1]['pid']==300
+        Path(card['pre_cuda_receipt']).write_text('{}')
+        with pytest.raises(ValueError,match='receipt changed'):
+            share.audit_receipt(card,'head')
 
 
 def test_external_slot_rejects_other_gpu_without_creating_receipts(tmp_path):

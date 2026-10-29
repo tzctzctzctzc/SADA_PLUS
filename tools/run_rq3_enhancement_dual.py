@@ -14,6 +14,7 @@ from tools.rq2_dense_protocol import sha256_file
 from tools.rq3_protocol import audit_baseline, load_cache, validate_interface_audit, audit_cache_predictions
 from tools.run_rq3_matrix import completed_baseline, supervision_audit
 from tools.run_rq2_matched_control import check_code, checked_train_result, checked_evaluation
+from tools.rq3_enhancement_recovery import inspect_partial,clone_partial,prefix_log
 
 CODE = Path(__file__).resolve().parents[1]
 read, save = single.read, single.save
@@ -56,8 +57,14 @@ def worker(job_path, head):
         save(phase_path, dict(phase=value, pid=os.getpid(), gpu=gpu, variant=variant, shift=shift))
     def slot():
         return external_gpu_slot(gpu, data, root/'gpu_admissions', head)
-    name, run_root, common, command = single.entry_command(root,data,variant,shift,ref)
-    if run_root.exists():
+    resume_plan = job.get('resume_plan')
+    command_root = Path(resume_plan['origin_root']) if resume_plan else root
+    name, run_root, common, command = single.entry_command(command_root,data,variant,shift,ref)
+    if resume_plan:
+        run_root,resume_checkpoint = clone_partial(resume_plan,entry)
+        command += ['--resume',str(resume_checkpoint)]
+        save(entry/'recovery.json',resume_plan)
+    elif run_root.exists():
         raise FileExistsError('never overwrite an existing training root: '+str(run_root))
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, single.stop)
@@ -86,9 +93,21 @@ def worker(job_path, head):
             os.kill(job['controller_pid'], 0)
             time.sleep(1)
     ready_acceptance(stage, variant, head, job['inputs_sha256'])
+    if job.get('diagnostic_only'):
+        phase('diagnostic_complete')
+        return
     phase('training')
     with slot() as training_card:
-        single.run(command, entry/'logs/train.log', data, training_card)
+        log = entry/'logs/resume.log' if resume_plan else entry/'logs/train.log'
+        if resume_plan:
+            checked_command=[sys.executable,'-B',str(CODE/'tools/run_rq3_resume_checked.py'),
+                 str(entry/'resume_restore_proof.json'),str(resume_checkpoint),*command[2:]]
+            single.run(checked_command,log,data,training_card)
+        else:
+            single.run(command, log, data, training_card)
+    if resume_plan:
+        with (entry/'logs/train.log').open('x') as merged:
+            merged.write(prefix_log(resume_plan)+'\n# exact checkpoint continuation\n'+log.read_text())
     config, best = checked_train_result(run_root, entry/'logs/train.log', cfg)
     single.baseline_pair(baseline, read(config))
     phase('evaluation')
@@ -101,11 +120,17 @@ def worker(job_path, head):
     save(entry/'supervision_audit.json', coverage)
     artifacts = [entry/'preflight.json', config, best, entry/'evaluation/manifest.json',
                  entry/'evaluation/source_val.json', entry/'evaluation/target_val.json']
-    save(entry/'complete.json', dict(schema=SCHEMA, variant=variant, specification=specification(variant),
+    record = dict(schema=SCHEMA, variant=variant, specification=specification(variant),
          shift=shift, teacher='qwen3_vl_8b', strategy='enhanced_prototype', seed=6, batch_size=2,
          code_commit=head, run_root=str(run_root), training_gpu=training_card, evaluation_gpu=eval_card,
          reference_sha=snapshot, acceptance_sha256=sha256_file(stage/'acceptance.json'),
-         artifacts={str(path):sha256_file(path) for path in artifacts}))
+         artifacts={str(path):sha256_file(path) for path in artifacts})
+    if resume_plan:
+        record['recovery']=dict(sha256=sha256_file(entry/'recovery.json'),
+             resume_log_sha256=sha256_file(entry/'logs/resume.log'),
+             restore_proof_sha256=sha256_file(entry/'resume_restore_proof.json'),
+             source_code_commit=resume_plan['origin_code_commit'],resumed_from_epoch=resume_plan['epoch'])
+    save(entry/'complete.json',record)
     value = single.audit_entry(entry, ref, baseline)
     phase('complete')
     print('ENHANCEMENT_COMPLETE', variant, shift, value, flush=True)
@@ -119,6 +144,8 @@ def main():
     parser.add_argument('--output-root', type=Path)
     parser.add_argument('--data-root', type=Path, default=Path('/vepfs/vlms/SADA_PLUS'))
     parser.add_argument('--gpus', nargs=2, choices=('1','2'), default=['2','1'])
+    parser.add_argument('--previous-root', type=Path)
+    parser.add_argument('--resume-partial', type=Path, nargs='*',default=[])
     args = parser.parse_args()
     if args.job:
         return worker(args.job.absolute(), args.expected_head)
@@ -164,11 +191,62 @@ def main():
         save(root/'reference_sha.json', snapshots)
         save(root/'inputs.json', dict(references=references, baselines=baselines, snapshots=snapshots))
         inputs_sha = sha256_file(root/'inputs.json')
+        previous,partial = {},{}
+        if args.previous_root:
+            old = args.previous_root.absolute()
+            old_state = read(old/'state.json')
+            if old_state['phase'] not in ('failed','stopped') or Path('/proc',str(old_state['pid'])).exists():
+                raise ValueError('previous matrix must have exited before recovery')
+            if read(old/'reference_sha.json') != snapshots:
+                raise ValueError('recovery references differ from archived matrix')
+            for job in old_state.get('active',{}).values():
+                if Path('/proc',str(job['pid'])).exists():
+                    raise ValueError('previous worker remains active')
+            for item in old_state['completed']:
+                key = item['variant']+'_'+item['shift']
+                if key in previous:
+                    raise ValueError('duplicated old complete identity')
+                entry = Path(item['complete']).parent
+                value = single.audit_entry(entry,references[item['shift']],baselines[item['shift']])
+                previous[key] = dict(item,map=value,complete_sha256=sha256_file(entry/'complete.json'))
+            for entry in args.resume_partial:
+                plan = inspect_partial(entry.absolute())
+                if Path(plan['origin_root'])!=old:
+                    raise ValueError('partial entry belongs to another predecessor')
+                cfg = read(entry/'preflight.json')
+                key = cfg['rq3_enhancement']['variant']+'_'+cfg['rq2_formal']['shift']
+                if key in previous or key in partial:
+                    raise ValueError('partial conflicts with a completed or repeated identity')
+                partial[key] = plan
+            save(root/'predecessor.json',dict(previous_root=str(old),state_sha256=sha256_file(old/'state.json'),
+                 completed=previous,partial=partial,old_code_commit=old_state['code_commit']))
+        elif args.resume_partial:
+            raise ValueError('partial continuation requires an audited predecessor')
         for variant in ORDER:
             stage = root/variant
             stage.mkdir()
-            pending = ['S'+str(i) for i in range(1,7)]
             stage_results = {}
+            stage_entries = {}
+            pending = []
+            for i in range(1,7):
+                shift = 'S'+str(i)
+                key = variant+'_'+shift
+                if key in previous:
+                    item = previous[key]
+                    stage_results[shift] = item['map']
+                    stage_entries[shift] = Path(item['complete']).parent
+                    state['completed'].append(item)
+                else:
+                    pending.append(shift)
+            # 已完成S1不重训；仅重做当前clean代码的无checkpoint验收。
+            diagnostic_s1 = 'S1' in stage_results and bool(pending)
+            if diagnostic_s1:pending.insert(0,'S1')
+            if len(stage_results)==6:
+                save(stage/'final_audit.json',dict(status='passed',count=6,mean_map=sum(stage_results.values())/6,
+                     complete_sha={s:sha256_file(stage_entries[s]/'complete.json') for s in sorted(stage_entries)},
+                     complete_paths={s:str(stage_entries[s]/'complete.json') for s in sorted(stage_entries)}))
+                save(root/'state.json',state)
+                continue
             while pending or active:
                 dispatched = dispatch_pending(pending, state['active'], args.gpus)
                 for gpu, shift in dispatched:
@@ -176,8 +254,11 @@ def main():
                     pending.remove(shift)
                     key = variant+'_'+shift
                     job_path = root/'jobs'/(key+'.json')
-                    save(job_path, dict(root=str(root), data_root=str(data), variant=variant, shift=shift,
-                         gpu=gpu, inputs_sha256=inputs_sha, controller_pid=os.getpid()))
+                    diagnostic = diagnostic_s1 and shift=='S1'
+                    job = dict(root=str(root), data_root=str(data), variant=variant, shift=shift,
+                         gpu=gpu, inputs_sha256=inputs_sha, controller_pid=os.getpid(),diagnostic_only=diagnostic)
+                    if key in partial:job['resume_plan']=partial[key]
+                    save(job_path,job)
                     env = dict(os.environ, PYTHONPATH=str(CODE), CUDA_VISIBLE_DEVICES='',
                                PYTHONDONTWRITEBYTECODE='1', PYTHONUNBUFFERED='1')
                     with (stage/(shift+'.worker.log')).open('x') as log:
@@ -185,7 +266,7 @@ def main():
                                 '--job',str(job_path),'--expected-head',args.expected_head],
                                 cwd=CODE, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
                     active[key] = child
-                    state['active'][key] = dict(gpu=gpu, pid=child.pid, shift=shift, variant=variant)
+                    state['active'][key] = dict(gpu=gpu, pid=child.pid, shift=shift, variant=variant,diagnostic_only=diagnostic)
                 if dispatched:
                     state['phase'] = 'executing'
                     save(root/'state.json', state)
@@ -199,19 +280,22 @@ def main():
                     shift = job['shift']
                     entry = stage/shift
                     ready_acceptance(stage,variant,args.expected_head,inputs_sha)
-                    value = single.audit_entry(entry,references[shift],baselines[shift])
-                    state['completed'].append(dict(variant=variant,shift=shift,complete=str(entry/'complete.json'),map=value))
-                    stage_results[shift] = value
+                    if not job.get('diagnostic_only'):
+                        value = single.audit_entry(entry,references[shift],baselines[shift])
+                        state['completed'].append(dict(variant=variant,shift=shift,complete=str(entry/'complete.json'),map=value))
+                        stage_results[shift] = value
+                        stage_entries[shift] = entry
+                        print('INDEPENDENT_AUDIT_COMPLETE',variant,shift,value,flush=True)
                     del active[key]
                     del state['active'][key]
                     save(root/'state.json',state)
-                    print('INDEPENDENT_AUDIT_COMPLETE',variant,shift,value,flush=True)
                 if active:
                     time.sleep(1)
             if sorted(stage_results) != ['S'+str(i) for i in range(1,7)]:
                 raise ValueError('stage did not complete exact six shifts')
             save(stage/'final_audit.json',dict(status='passed',count=6,mean_map=sum(stage_results.values())/6,
-                 complete_sha={s:sha256_file(stage/s/'complete.json') for s in sorted(stage_results)}))
+                 complete_sha={s:sha256_file(stage_entries[s]/'complete.json') for s in sorted(stage_results)},
+                 complete_paths={s:str(stage_entries[s]/'complete.json') for s in sorted(stage_results)}))
         if len(state['completed']) != 42:
             raise ValueError('matrix did not complete exact 42 items')
         state.update(phase='complete',active={})

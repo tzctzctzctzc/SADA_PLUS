@@ -13,7 +13,7 @@ import yaml
 from tools.rq3_enhancement import ORDER, SCHEMA, specification, assert_reference_pair
 from tools.rq2_dense_protocol import sha256_file
 from tools.rq3_gpu import gpu_slot
-from tools.rq3_external_share import external_gpu_slot, audit_receipt
+from tools.rq3_external_share import external_gpu_slot, audit_receipt, capture_guard_receipt
 from tools.rq3_protocol import audit_baseline, load_cache, validate_interface_audit, audit_cache_predictions
 from tools.run_rq3_matrix import completed_baseline, supervision_audit
 from tools.run_rq2_matched_control import checked_train_result, checked_evaluation, check_code
@@ -45,6 +45,7 @@ def run(command, log, data, card=None):
     with log.open('x') as stream:
         CHILD = subprocess.Popen(command, cwd=data, env=env, stdout=stream,
                                   stderr=subprocess.STDOUT, start_new_session=True)
+        child_pid = CHILD.pid
         try:
             code = CHILD.wait()
         except BaseException:
@@ -56,6 +57,8 @@ def run(command, log, data, card=None):
             CHILD = None
         if code:
             raise subprocess.CalledProcessError(code, command)
+        if card and 'external_share_lease' in card:
+            capture_guard_receipt(card, child_pid)
 
 
 def read(path):
@@ -101,6 +104,9 @@ def audit_entry(root, reference, baseline):
     record = read(root/'complete.json')
     if record['schema'] != SCHEMA or record['specification'] != specification(record['variant']):
         raise ValueError('complete variant changed')
+    if record.get('recovery'):
+        from tools.rq3_enhancement_recovery import audit_recovery
+        audit_recovery(root,record)
     for key in ('training_gpu', 'evaluation_gpu'):
         audit_receipt(record[key], record['code_commit'])
     config, best = checked_train_result(Path(record['run_root']), root/'logs/train.log', cfg)
