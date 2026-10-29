@@ -49,7 +49,8 @@ def prepare(root, data, identity):
         db = read(annotation)['database']
         source,target = sanitized_inputs(db,raw['src_train_split'],raw['src_val_split'],raw['tgt_train_split'])
         source_file,target_file = root/'inputs'/shift/'source.json',root/'inputs'/shift/'target_unlabeled.json'
-        save(source_file,source);save(target_file,target)
+        # 不因去标注而重排原始视频顺序；shuffle的索引语义保持不变。
+        save(source_file,source,sort_keys=False);save(target_file,target,sort_keys=False)
         cfg = deepcopy(raw)
         cfg.update(seed=6,init_rand_seed=6,gpu=0)
         cfg['dataset'].update(json_file=str(source_file),feat_folder=str(features))

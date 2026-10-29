@@ -12,7 +12,7 @@ import torch
 import yaml
 
 from tools.baseline_protocol import (CODE,OFFICIAL,assert_no_target_gt,batch_choice,
-                                      decision,sanitized_inputs,termination)
+                                      decision,sanitized_inputs,termination,save,read,audit_pair)
 from tools.run_sada_baseline import budget,runtime_config
 
 
@@ -45,6 +45,26 @@ def test_isolation_and_membership():
 def test_gt_rejected_before_model():
     assert_no_target_gt([{'segments':torch.empty(0,2),'labels':torch.empty(0,dtype=torch.long)}])
     with pytest.raises(ValueError):assert_no_target_gt([{'segments':torch.ones(1,2),'labels':torch.zeros(1)}])
+
+
+def test_manifest_preserves_video_order(tmp_path):
+    path=tmp_path/'source.json'
+    save(path,{'database':{'z':{'subset':'source'},'a':{'subset':'source'}}},sort_keys=False)
+    assert list(read(path)['database'])==['z','a']
+
+
+def test_pair_rejects_batch_or_initialization_changes(tmp_path):
+    roots=[tmp_path/x for x in ['so','uda']]
+    for root,regime in zip(roots,['so','uda']):
+        save(root/'config.json',dict(loader={'batch_size':4},baseline={'regime':regime,'shift':'S1'}))
+        save(root/'termination.json',dict(initial_state_sha='same'))
+    assert audit_pair(*roots)['status']=='passed'
+    changed=read(roots[1]/'config.json');changed['loader']['batch_size']=2
+    save(roots[1]/'config.json',changed)
+    with pytest.raises(ValueError):audit_pair(*roots)
+    changed['loader']['batch_size']=4;save(roots[1]/'config.json',changed)
+    save(roots[1]/'termination.json',dict(initial_state_sha='different'))
+    with pytest.raises(ValueError):audit_pair(*roots)
 
 
 def test_batch_frozen_by_both_phases():

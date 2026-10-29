@@ -27,11 +27,11 @@ def sha(path):
     return h.hexdigest()
 
 
-def save(path, value):
+def save(path, value, sort_keys=True):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name+'.tmp')
-    tmp.write_text(json.dumps(value, sort_keys=True, allow_nan=False), encoding='utf-8')
+    tmp.write_text(json.dumps(value, sort_keys=sort_keys, allow_nan=False), encoding='utf-8')
     tmp.replace(path)
 
 
