@@ -37,6 +37,13 @@ def budget(database, cfg, batch):
                 iterations_per_epoch=max(sb,tb),batch_size=batch,drop_last=True)
 
 
+def membership_manifest(database,cfg):
+    """清单按真实database视频ID生成，不把外层JSON键当视频ID。"""
+    return {role:sorted(k for k,v in database.items() if v['subset'].lower() in cfg[field])
+            for role,field in [('source_train','src_train_split'),('source_val','src_val_split'),
+                               ('target_train','tgt_train_split'),('target_val','tgt_val_split')]}
+
+
 def prepare(root, data, identity):
     import yaml
     registry = yaml.safe_load((CODE/'configs/rq2/shift_registry.yaml').read_text())['shifts']
@@ -87,11 +94,7 @@ def prepare(root, data, identity):
             path = features/(vid+raw['dataset']['file_ext'])
             if not path.is_file(): raise FileNotFoundError(path)
             inventories[str(path)] = path
-        save(root/'inputs'/shift/'membership.json',dict(
-            source_train=sorted(k for k,v in db.items() if v['subset'].lower() in raw['src_train_split']),
-            source_val=sorted(k for k,v in db.items() if v['subset'].lower() in raw['src_val_split']),
-            target_train=sorted(target),
-            target_val=sorted(k for k,v in db.items() if v['subset'].lower() in raw['tgt_val_split'])))
+        save(root/'inputs'/shift/'membership.json',membership_manifest(db,raw))
         cfg['baseline']['batch_budget_candidates'] = {str(b):budget(db,cfg,b) for b in (2,4)}
         save(root/'inputs'/shift/'template.json',cfg)
     def inventory(path):

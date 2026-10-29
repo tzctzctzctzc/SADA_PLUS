@@ -13,7 +13,7 @@ import yaml
 
 from tools.baseline_protocol import (CODE,OFFICIAL,assert_no_target_gt,batch_choice,
                                       decision,sanitized_inputs,termination,save,read,audit_pair)
-from tools.run_sada_baseline import budget,runtime_config
+from tools.run_sada_baseline import budget,runtime_config,membership_manifest
 
 
 def test_earlystop_means_epochs_not_validation_counts():
@@ -51,6 +51,16 @@ def test_manifest_preserves_video_order(tmp_path):
     path=tmp_path/'source.json'
     save(path,{'database':{'z':{'subset':'source'},'a':{'subset':'source'}}},sort_keys=False)
     assert list(read(path)['database'])==['z','a']
+
+
+def test_membership_ledger_uses_video_ids_not_json_wrapper_keys():
+    db={name:{'subset':split} for name,split in [('s','s_train'),('sv','s_val'),
+        ('target_video_a','t_train'),('target_video_b','t_train'),('tv','t_val')]}
+    cfg=dict(src_train_split=['s_train'],src_val_split=['s_val'],
+             tgt_train_split=['t_train'],tgt_val_split=['t_val'])
+    result=membership_manifest(db,cfg)
+    assert result['target_train']==['target_video_a','target_video_b']
+    assert result['source_train']==['s'] and result['target_val']==['tv']
 
 
 def test_pair_rejects_batch_or_initialization_changes(tmp_path):
