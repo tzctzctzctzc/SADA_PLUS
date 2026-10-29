@@ -72,6 +72,10 @@ def worker(job_path, head):
     single.run(command+['--rq2-audit-output', str(entry/'preflight.json')], entry/'logs/preflight.log', data)
     cfg = read(entry/'preflight.json')
     assert_reference_pair(cfg, ref)
+    if resume_plan:
+        original_cfg=read(Path(resume_plan['origin_entry'])/'preflight.json')
+        if cfg['rq2_formal']['run_signature']!=original_cfg['rq2_formal']['run_signature']:
+            raise ValueError('resume preflight changed the complete saved run signature')
     save(entry/'baseline_pair.json', single.baseline_pair(baseline, cfg))
     if shift == 'S1':
         phase('real_data_acceptance')
