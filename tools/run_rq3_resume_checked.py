@@ -2,8 +2,32 @@
 import json
 from pathlib import Path
 import random
+import hashlib
 import runpy
 import sys
+
+
+def state_digest(value):
+    import numpy as np
+    import torch
+    h=hashlib.sha256()
+    def visit(v):
+        if torch.is_tensor(v):
+            x=v.detach().cpu().contiguous()
+            h.update(str((str(x.dtype),tuple(x.shape))).encode())
+            h.update(x.reshape(-1).view(torch.uint8).numpy().tobytes())
+        elif isinstance(v,np.ndarray):
+            h.update(str((str(v.dtype),v.shape)).encode())
+            h.update(np.ascontiguousarray(v).tobytes())
+        elif isinstance(v,dict):
+            for key in sorted(v,key=str):
+                h.update(repr((type(key).__name__,key)).encode());visit(v[key])
+        elif isinstance(v,(list,tuple)):
+            for item in v:visit(item)
+        else:
+            h.update(repr(v).encode())
+    visit(value)
+    return h.hexdigest()
 
 
 def main():
@@ -12,7 +36,6 @@ def main():
     import numpy as np
     import torch
     from libs.trainer.da_trainer import Trainer
-    from tools.benchmark_rq3_temporal_concurrency import digest_state
     from tools.rq2_evaluate import load_checkpoint
     from tools.rq2_dense_protocol import sha256_file
     original=Trainer.train
@@ -33,14 +56,14 @@ def main():
         components['rng']=(observed,checkpoint['training_rng_state'])
         hashes={}
         for name,(actual,expected) in components.items():
-            a,b=digest_state(actual),digest_state(expected)
+            a,b=state_digest(actual),state_digest(expected)
             if a!=b:
                 raise ValueError('restored training state differs: '+name)
             hashes[name]=a
         after=dict(python=random.getstate(),numpy=np.random.get_state(),torch=torch.get_rng_state(),
                    cuda=torch.cuda.get_rng_state_all(),source_loader=self.source_rng_generator.get_state(),
                    target_loader=self.target_rng_generator.get_state())
-        if digest_state(after)!=hashes['rng']:
+        if state_digest(after)!=hashes['rng']:
             raise ValueError('resume verification consumed training RNG')
         with report.open('x') as stream:
             json.dump(dict(status='passed',restored_epoch=checkpoint['epoch'],start_epoch=self.start_epoch,

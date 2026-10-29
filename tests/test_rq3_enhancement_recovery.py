@@ -41,3 +41,13 @@ def test_changed_archived_checkpoint_is_rejected_before_clone(tmp_path):
     with pytest.raises(ValueError,match='archive|source changed'):
         clone_partial(plan,tmp_path/'new')
     assert not (tmp_path/'new').exists()
+
+
+def test_full_numpy_rng_hash_detects_changes_hidden_by_short_repr():
+    import numpy as np
+    from tools.run_rq3_resume_checked import state_digest
+    a=np.random.RandomState(6).get_state()
+    b=(a[0],a[1].copy(),*a[2:])
+    b[1][300]^=1
+    assert repr(a)==repr(b)
+    assert state_digest(a)!=state_digest(b)
