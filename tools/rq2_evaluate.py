@@ -212,9 +212,14 @@ def evaluate(cfg, ckpt_path, config_path, output_dir, device, feature_protocol=N
                     for key, value in video.items():
                         if isinstance(value, torch.Tensor):
                             video[key] = value.to(device)
-                source_output, target_output = model(
-                    video_list_src=batch, video_list_tgt=batch, mode="test"
-                )
+                if saved_config.get('rq3_enhancement'):
+                    from libs.utils.inference_scope import reporting_forward
+                    source_output, target_output = reporting_forward(
+                        model, batch, 'src' if name == 'source' else 'tgt')
+                else:
+                    source_output, target_output = model(
+                        video_list_src=batch, video_list_tgt=batch, mode="test"
+                    )
                 for video in (source_output if name == "source" else target_output):
                     for segment, label, score in zip(
                         video["segments"], video["labels"], video["scores"]

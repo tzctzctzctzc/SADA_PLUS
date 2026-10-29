@@ -3335,13 +3335,15 @@ class SADA(nn.Module):
             fpn_masks_src = [x[:bs] for x in fpn_masks]
             fpn_masks_tgt = [x[bs:] for x in fpn_masks]
             
-            results_src = self.inference(
+            # 报告只读取一路；两路backbone/head与输入批形状保持原样。
+            reporting_domain = getattr(self, '_rq3_reporting_domain', None)
+            results_src = None if reporting_domain == 'tgt' else self.inference(
                 video_list_src, points_src, fpn_masks_src,
                 out_cls_logits_src, out_offsets_src,
                 out_lb_logits_src, out_rb_logits_src,
             )
             
-            results_tgt = self.inference(
+            results_tgt = None if reporting_domain == 'src' else self.inference(
                 video_list_tgt, points_tgt, fpn_masks_tgt,
                 out_cls_logits_tgt, out_offsets_tgt,
                 out_lb_logits_tgt, out_rb_logits_tgt,

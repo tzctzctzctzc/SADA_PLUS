@@ -798,9 +798,12 @@ class Trainer(BaseTrainerDA):
                 # Get the evaluation model             
                 model.eval()
 
-                output_src, output_tgt = model(video_list_src=video_list, 
-                                                video_list_tgt=video_list,
-                                                mode='test') 
+                if self.cfg.get('rq3_enhancement'):
+                    from libs.utils.inference_scope import reporting_forward
+                    output_src, output_tgt = reporting_forward(model, video_list, domain)
+                else:
+                    output_src, output_tgt = model(video_list_src=video_list,
+                                                  video_list_tgt=video_list, mode='test')
                 
                 output = output_src if domain == 'src' else output_tgt
                 
