@@ -1,5 +1,6 @@
 """恢复保留历史与源文件，拒绝完成项/缺失状态，不重算已保存的轮次。"""
 import json
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -54,6 +55,8 @@ def test_reject_missing_epoch_or_changed_history(tmp_path):
     with pytest.raises(ValueError):inspect_partial(source)
 
 
-def test_private_tmpdir_supports_unix_communication(tmp_path):
-    path=tmp_path/'tmp';check_tmpdir(path)
-    assert path.exists() and list(path.iterdir())==[]
+def test_private_tmpdir_supports_unix_communication():
+    # UNIX socket地址上限约108字节，避免pytest嵌套测试名把路径拉长。
+    with tempfile.TemporaryDirectory(prefix='br_') as name:
+        path=Path(name)/'t';check_tmpdir(path)
+        assert path.exists() and list(path.iterdir())==[]
