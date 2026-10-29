@@ -124,6 +124,23 @@ def audit_entry(entry):
         raise ValueError('早停协议改变')
     if complete['code']['commit'] != cfg['baseline']['code']['commit']:
         raise ValueError('代码身份改变')
+    runtime=read(entry/'runtime_config.json')
+    expected_runtime=json.loads(json.dumps(cfg))
+    if cfg['baseline']['regime']=='so':expected_runtime['model']['adv_method']=['None']
+    if runtime!=expected_runtime:raise ValueError('实际运行配置超出声明的SO关闭对齐')
+    if sha(cfg['dataset']['json_file'])!=cfg['baseline']['source_manifest_sha256']:
+        raise ValueError('源域标注工件改变')
+    if sha(cfg['baseline']['target_manifest'])!=cfg['baseline']['target_manifest_sha256']:
+        raise ValueError('无标注目标工件改变')
+    for name in ('train','evaluate'):
+        receipt=read(entry/(name+'_gpu.json'))
+        if receipt['config_sha256']!=sha(entry/'config.json') or sha(receipt['guard'])!=receipt['guard_sha256']:
+            raise ValueError('GPU/配置凭证改变')
+        guard=read(receipt['guard']);lease=read(guard['lease'])
+        if (sha(guard['lease'])!=guard['lease_sha256'] or lease['commit']!=complete['code']['commit']
+                or guard['observed']['uuid']!=lease['observed']['uuid']
+                or guard['observed']['free_mib']<lease['minimum_free_mib']):
+            raise ValueError('首CUDA准入凭证不合法')
     terminal = read(entry/'termination.json')
     expected = termination(terminal['history'])
     if expected != terminal['decision']:
@@ -138,6 +155,19 @@ def audit_entry(entry):
                if 'source_validation_loss' in x]
     if history != terminal['history'] or not all(math.isfinite(x['train_loss']) for x in rows):
         raise ValueError('源验证或训练记录不符')
+    if not all(math.isfinite(x['source_gradient_norm']) and x['source_gradient_norm']>0 for x in rows):
+        raise ValueError('缺少有效源监督梯度')
+    import torch
+    for name in ('best','latest'):
+        checkpoint=torch.load(entry/(name+'.pt'),map_location='cpu')
+        epoch=expected['best_epoch'] if name=='best' else expected['epoch']
+        if checkpoint['config']!=cfg or checkpoint['epoch']!=epoch:
+            raise ValueError('checkpoint与配置/源选模不符')
+        if name=='latest' and checkpoint['history']!=history:
+            raise ValueError('checkpoint缺少完整源历史')
+        if not all(k in checkpoint for k in ('rng','model_controls','ema_controls','optimizers','schedulers')):
+            raise ValueError('checkpoint不具备完整恢复状态')
+        del checkpoint
     result = read(entry/'evaluation/target_val.json')
     if not 0 <= result['map_0.1_to_0.5'] <= 1:
         raise ValueError('mAP范围不合法')

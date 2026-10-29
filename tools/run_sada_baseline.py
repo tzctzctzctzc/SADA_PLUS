@@ -148,6 +148,12 @@ def child(args):
     proof=first_cuda_guard()
     from tools.baseline_engine import probe,train,evaluate
     cfg=read(args.config)
+    if code_identity()!=cfg['baseline']['code']:
+        raise ValueError('运行代码与冻结身份不符')
+    if sha(cfg['dataset']['json_file'])!=cfg['baseline']['source_manifest_sha256']:
+        raise ValueError('源域工件在预检后变化')
+    if sha(cfg['baseline']['target_manifest'])!=cfg['baseline']['target_manifest_sha256']:
+        raise ValueError('无标注目标工件在预检后变化')
     os.chdir(args.data_root)
     if args.child=='probe':probe(cfg,args.report)
     elif args.child=='train':train(cfg,args.entry)
@@ -196,7 +202,7 @@ def main(args):
                     task['process']=spawn('evaluate',entry/'config.json',entry,task['lease'],data)
                 else:
                     cfg=read(entry/'config.json')
-                    artifacts=[entry/x for x in ('config.json','metrics.jsonl','termination.json',
+                    artifacts=[entry/x for x in ('config.json','runtime_config.json','metrics.jsonl','termination.json',
                         'best.pt','latest.pt','train_gpu.json','evaluate_gpu.json',
                         'evaluation/source_val.json','evaluation/target_val.json','evaluation/manifest.json')]
                     save(entry/'complete.json',dict(schema=SCHEMA,shift=task['shift'],regime=task['regime'],
@@ -239,4 +245,9 @@ if __name__=='__main__':
     args=p.parse_args()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
     if args.child:child(args)
-    else:main(args)
+    else:
+        try:main(args)
+        except BaseException as error:
+            if args.output_root and args.output_root.exists():
+                save(args.output_root/'error.json',dict(type=type(error).__name__,error=str(error)))
+            raise

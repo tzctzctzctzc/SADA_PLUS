@@ -236,6 +236,7 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
 def train(cfg, entry, resume=None):
     entry = Path(entry)
     ctx = build(cfg)
+    save(entry/'runtime_config.json',ctx.cfg)
     history, start, rows = [], 1, []
     if resume:
         saved = torch.load(resume, map_location='cuda:0')
