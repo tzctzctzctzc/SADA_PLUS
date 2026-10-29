@@ -1,0 +1,15 @@
+{
+  "status": "passed",
+  "initial_model_sha256": "4357faeef17ce4bf9df759f5de5a543ccee1b44903d62236e243c4f6117ca0ea",
+  "policy": {
+    "max_epochs": 50,
+    "valid_every": 5,
+    "patience_epochs": 15,
+    "min_delta": 0.0,
+    "selection": "source_validation_cls_plus_reg",
+    "state": "ema_state_dict",
+    "learning_rate": "official_schedule_unchanged_no_batch_scaling"
+  },
+  "batch": 4,
+  "shift": "S2"
+}

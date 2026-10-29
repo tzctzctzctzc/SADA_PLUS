@@ -1,0 +1,1 @@
+{"decision": {"best_epoch": 10, "best_loss": 0.6331849404283472, "epoch": 25, "reason": "source_patience_exhausted"}, "history": [[5, 0.9285645791002222], [10, 0.6331849404283472], [15, 0.6544326028308353], [20, 0.708629706421414], [25, 0.7651687441645442]], "initial_state_sha": "6c137e96c174baefbb732824c240edd9e3310b232eca45035810dff547f3d54a"}

@@ -48,7 +48,9 @@ def code_identity():
                                       cwd=CODE, text=True).splitlines()
     allowed = set(CORE_PATCHES) | {'configs/rq2/shift_registry.yaml',
                                   'configs/new_vs_old/version_paper_s6_dim512.yaml'}
-    if any(p not in allowed and not p.startswith(('tools/', 'tests/')) for p in changed):
+    # 允许本次完整文本结果随代码发布；原始训练提交仍由工件显式记录。
+    published_results='results/sada_corrected_baseline_20261029/'
+    if any(p not in allowed and not p.startswith(('tools/', 'tests/', published_results)) for p in changed):
         raise ValueError('存在白名单外的官方核心文件修改')
     return dict(commit=head, official_commit=OFFICIAL,
                 core_files={p: sha(CODE/p) for p in CORE_PATCHES},

@@ -1,0 +1,15 @@
+{
+  "status": "passed",
+  "initial_model_sha256": "4cfee3c264051e7b0001ef2cb724ce42bac2c4d82963cabcf2cf7eee979b5d29",
+  "policy": {
+    "max_epochs": 50,
+    "valid_every": 5,
+    "patience_epochs": 15,
+    "min_delta": 0.0,
+    "selection": "source_validation_cls_plus_reg",
+    "state": "ema_state_dict",
+    "learning_rate": "official_schedule_unchanged_no_batch_scaling"
+  },
+  "batch": 4,
+  "shift": "S3"
+}

@@ -1,0 +1,1 @@
+{"checkpoint_sha256": "9d99e40e969eca63844e189fd820631a7ec6674ad9bb03db463bf8a8b01d0a03", "map_0.1_to_0.5": 0.5672359319418296, "map_by_tiou": [0.6395497351186564, 0.6242582871893958, 0.5906101172883258, 0.5395260543133832, 0.4422354657993866], "prediction_count": 58521, "selected_epoch": 15, "split": ["ek55_white_validation"], "state": "ema_state_dict", "videos": 33}

@@ -1,0 +1,8 @@
+{
+  "shift": "S6",
+  "regime": "uda",
+  "map": 0.44690160610134716,
+  "complete": "/vepfs/vlms/sada_baseline12_es_b9d4429_1029/formal/S6/uda/complete.json",
+  "complete_sha256": "2523d581abdd1b852192d8217335493a26754c019ca02b65d55ab26c2a01cb06",
+  "audited_at": "2026-10-29T08:52:03.031817+00:00"
+}

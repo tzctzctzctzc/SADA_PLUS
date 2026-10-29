@@ -1,0 +1,174 @@
+{
+  "observed_at": "2026-10-29T08:34:59.404915+00:00",
+  "source": "https://arxiv.org/html/2312.13377v4",
+  "paper_tables": "C and D",
+  "scenario_mapping": [
+    {
+      "internal_id": "S1",
+      "paper_id": "S3",
+      "source_train_split": [
+        "ek100_dark_training"
+      ],
+      "target_train_split": [
+        "ek100_white_training",
+        "ek100_brown_training",
+        "ek100_other_training"
+      ],
+      "actual_counts": [
+        51,
+        7,
+        106,
+        30
+      ],
+      "paper_table_CD_counts": [
+        45,
+        13,
+        105,
+        31
+      ],
+      "counts_equal_paper": false
+    },
+    {
+      "internal_id": "S2",
+      "paper_id": "S1",
+      "source_train_split": [
+        "ek55_dark_training"
+      ],
+      "target_train_split": [
+        "ek55_white_training",
+        "ek55_brown_training",
+        "ek55_other_training"
+      ],
+      "actual_counts": [
+        124,
+        37,
+        221,
+        50
+      ],
+      "paper_table_CD_counts": [
+        126,
+        35,
+        216,
+        55
+      ],
+      "counts_equal_paper": false
+    },
+    {
+      "internal_id": "S3",
+      "paper_id": "S4",
+      "source_train_split": [
+        "ek100_white_training"
+      ],
+      "target_train_split": [
+        "ek100_dark_training",
+        "ek100_brown_training",
+        "ek100_other_training"
+      ],
+      "actual_counts": [
+        53,
+        15,
+        104,
+        22
+      ],
+      "paper_table_CD_counts": [
+        49,
+        19,
+        101,
+        25
+      ],
+      "counts_equal_paper": false
+    },
+    {
+      "internal_id": "S4",
+      "paper_id": "S2",
+      "source_train_split": [
+        "ek55_white_training"
+      ],
+      "target_train_split": [
+        "ek55_dark_training",
+        "ek55_brown_training",
+        "ek55_other_training"
+      ],
+      "actual_counts": [
+        122,
+        33,
+        223,
+        54
+      ],
+      "paper_table_CD_counts": [
+        124,
+        31,
+        218,
+        59
+      ],
+      "counts_equal_paper": false
+    },
+    {
+      "internal_id": "S5",
+      "paper_id": "S5",
+      "source_train_split": [
+        "ek55_white_training",
+        "ek55_dark_training",
+        "ek55_brown_training",
+        "ek55_other_training"
+      ],
+      "target_train_split": [
+        "ek100_white_training",
+        "ek100_dark_training",
+        "ek100_brown_training",
+        "ek100_other_training"
+      ],
+      "actual_counts": [
+        345,
+        87,
+        157,
+        37
+      ],
+      "paper_table_CD_counts": [
+        342,
+        90,
+        150,
+        44
+      ],
+      "counts_equal_paper": false
+    },
+    {
+      "internal_id": "S6",
+      "paper_id": "S6",
+      "source_train_split": [
+        "ek100_white_training",
+        "ek100_dark_training",
+        "ek100_brown_training",
+        "ek100_other_training"
+      ],
+      "target_train_split": [
+        "ek55_white_training",
+        "ek55_dark_training",
+        "ek55_brown_training",
+        "ek55_other_training"
+      ],
+      "actual_counts": [
+        157,
+        37,
+        345,
+        87
+      ],
+      "paper_table_CD_counts": [
+        150,
+        44,
+        342,
+        90
+      ],
+      "counts_equal_paper": false
+    }
+  ],
+  "training_inputs_unchanged": true,
+  "counts_match_paper": false,
+  "split_provenance_unresolved": true,
+  "metadata_fix_commit": "3d23161",
+  "notes": [
+    "内部S1-S4与论文编号顺序不同，PDF也沿用内部编号",
+    "当前detailed_split的Train/Val统计与论文不一致；不能凭计数重新划分",
+    "membership.json的target_train记录误写为database键；实际target manifest和DataLoader正确，不重训，不覆盖旧工件"
+  ]
+}

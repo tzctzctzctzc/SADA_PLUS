@@ -1,0 +1,49 @@
+{
+  "schema": "sada-controlled-baseline-publication-v1",
+  "training_code_commit": "b9d4429848bd679372dd968868abac5309839b85",
+  "official_code_commit": "a96a15b0d0c905a553c7a2b14f607c9485ebe758",
+  "training_code_branch": "exp/sada-baseline-earlystop-1029",
+  "results_branch": "results/sada-baseline-1029",
+  "seed": 6,
+  "batch_per_domain": 4,
+  "uda_joint_batch": 8,
+  "source_validation_earlystop": {
+    "learning_rate": "official_schedule_unchanged_no_batch_scaling",
+    "max_epochs": 50,
+    "min_delta": 0.0,
+    "patience_epochs": 15,
+    "selection": "source_validation_cls_plus_reg",
+    "state": "ema_state_dict",
+    "valid_every": 5
+  },
+  "data_identity_sha256": "cabbc62f49ed06c552e8781a24ab8afb36824d2b4026bcfe66f305d7ca38e849",
+  "annotation_sha256": "2ed6c137ebce179b0ab0075c132b3ae05748022331f9f3897403f0e7b487d966",
+  "scenario_mapping": {
+    "S1": "S3",
+    "S2": "S1",
+    "S3": "S4",
+    "S4": "S2",
+    "S5": "S5",
+    "S6": "S6"
+  },
+  "dependencies": {
+    "torch": "1.13.1+cu117",
+    "numpy": "1.23.4",
+    "pandas": "1.5.1",
+    "einops": "0.6.0"
+  },
+  "notes": [
+    "受控基线，非原论文原始划分/训练协议的逐项复现",
+    "内部S1-S4编号与论文不同；对外对照使用paper_scenario映射",
+    "当前冻结划分版本已由用户确认，后续方法须使用相同划分与协议",
+    "S1-S5保留发布配置，S6按论文补全并明确标注受控重建",
+    "不与旧batch2或混合停止预算的结果直接计算严格配对增益",
+    "审计清单target_train包装键错误的修正仅保存在provenance/membership_correction.json；训练输入未改变",
+    "未上传视频、预提取特征、VLM缓存、模型权重、SSH凭据或外部进程明细"
+  ],
+  "reproduction": {
+    "checkout": "b9d4429848bd679372dd968868abac5309839b85",
+    "command": "python -B tools/run_sada_baseline.py --data-root /path/to/SADA_PLUS --gpus 0,1,2,3 --output-root /new/unique/result/root",
+    "requirements": "准备相同SHA的数据/SlowFast特征、官方NMS扩展和对应Python环境；从代码目录启动"
+  }
+}
