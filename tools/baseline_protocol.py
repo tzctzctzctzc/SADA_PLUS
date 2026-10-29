@@ -7,7 +7,9 @@ from pathlib import Path
 import subprocess
 
 OFFICIAL = 'a96a15b0d0c905a553c7a2b14f607c9485ebe758'
-SCHEMA = 'sada-corrected-source-earlystop-v1'
+SCHEMA = 'sada-corrected-source-earlystop-cudarng-v2'
+CUDA_RNG_POLICY = dict(visible_devices=1, logical_device=0, explicit_current_device_seed=True,
+                       checkpoint_rng='direct_get_rng_state_0', missing_cuda_rng='reject')
 CODE = Path(__file__).resolve().parents[1]
 CORE_PATCHES = (
     'libs/datasets/epic_kitchens.py', 'libs/datasets/data_utils.py',
@@ -130,6 +132,11 @@ def audit_entry(entry):
         raise ValueError('训练种子与冻结配置不一致')
     if cfg['baseline'].get('random_seeds',random_seeds(cfg['seed'])) != random_seeds(cfg['seed']):
         raise ValueError('随机流种子与配置不一致')
+    if cfg['baseline'].get('cuda_rng_policy') != CUDA_RNG_POLICY:
+        raise ValueError('缺少实际GPU播种与保存协议')
+    seed_proof=read(entry/'seed_proof.json')
+    if seed_proof['actual_cuda_seed']!=cfg['seed'] or seed_proof['requested_seed']!=cfg['seed']:
+        raise ValueError('实际CUDA种子与配置不符')
     root=entry.parents[2]
     if sha(root/'acceptance.json')!=complete['acceptance_sha256']:
         raise ValueError('真实验收凭证改变')
@@ -153,6 +160,8 @@ def audit_entry(entry):
         if receipt['config_sha256']!=sha(entry/'config.json') or sha(receipt['guard'])!=receipt['guard_sha256']:
             raise ValueError('GPU/配置凭证改变')
         guard=read(receipt['guard']);lease=read(guard['lease'])
+        if name=='train' and seed_proof['uuid']!=lease['observed']['uuid']:
+            raise ValueError('CUDA种子证明与真实训练GPU不一致')
         if (sha(guard['lease'])!=guard['lease_sha256'] or lease['commit']!=complete['code']['commit']
                 or guard['observed']['uuid']!=lease['observed']['uuid']
                 or guard['observed']['free_mib']<lease['minimum_free_mib']):
@@ -183,6 +192,7 @@ def audit_entry(entry):
             raise ValueError('checkpoint缺少完整源历史')
         if not all(k in checkpoint for k in ('rng','model_controls','ema_controls','optimizers','schedulers')):
             raise ValueError('checkpoint不具备完整恢复状态')
+        validate_cuda_rng(checkpoint['rng']['cuda'])
         del checkpoint
     result = read(entry/'evaluation/target_val.json')
     if not 0 <= result['map_0.1_to_0.5'] <= 1:
@@ -201,3 +211,8 @@ def audit_pair(source_only,adaptation):
     if states[0]!=states[1]:raise ValueError('SO/UDA模型初始化不配对')
     return dict(status='passed',initial_model_sha256=states[0],policy=POLICY,
                 batch=configs[0]['loader']['batch_size'],shift=configs[0]['baseline']['shift'])
+
+
+def validate_cuda_rng(states):
+    if len(states)!=1 or states[0].numel()==0 or str(states[0].dtype)!='torch.uint8':
+        raise ValueError('单卡checkpoint必须保存一个非空CUDA RNG状态，不能只检查字段存在')

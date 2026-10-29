@@ -1,6 +1,7 @@
 """调用官方单epoch训练/源验证函数，只重写数据隔离、停止与工件管理。"""
 from copy import deepcopy
 import itertools
+import io
 import json
 import math
 import os
@@ -18,7 +19,7 @@ from libs.models.SADA.optimizer import make_optimizer, make_scheduler
 from libs.trainer.da_trainer import Trainer, move_to_device
 from libs.utils import fix_random_seed, ModelEma2
 from libs.evaluation.metrics import MetricTracker
-from tools.baseline_protocol import (SCHEMA, POLICY, assert_no_target_gt, decision, random_seeds,
+from tools.baseline_protocol import (SCHEMA, POLICY, assert_no_target_gt, decision, random_seeds, validate_cuda_rng,
                                       read, save, sha, termination)
 
 
@@ -57,9 +58,17 @@ def dataset(cfg, path, splits, training, unlabeled=False):
 def build(cfg):
     seeds = random_seeds(cfg['seed'])
     fix_random_seed(seeds['model'], include_cuda=True)
+    # 旧PyTorch的UUID/NVML计数可能为0，直接播种当前逻辑卡，不依赖seed_all的枚举。
+    torch.cuda.manual_seed(seeds['model'])
     ctx = object.__new__(Trainer)
     ctx.cfg = deepcopy(cfg)
     ctx.ema_active = True
+    initial_cuda_state=torch.cuda.get_rng_state(0)
+    ctx.cuda_seed_proof=dict(requested_seed=seeds['model'],
+        actual_cuda_seed=torch.cuda.default_generators[0].initial_seed(),
+        state_sha256=tensor_digest(initial_cuda_state),
+        uuid=os.environ.get('CUDA_VISIBLE_DEVICES'))
+    if ctx.cuda_seed_proof['actual_cuda_seed']!=seeds['model']:raise ValueError('实际GPU播种失败')
     ctx.model = make_meta_arch('sada', ctx.cfg, device='cuda:0').to('cuda:0')
     # 保留官方独立构造EMA的初始化方式，不暗中换成另一套训练算法。
     ema_model = make_meta_arch('sada', ctx.cfg, device='cuda:0').to('cuda:0')
@@ -166,7 +175,7 @@ def capture(ctx, cfg, epoch, history):
         optimizers=[x.state_dict() for x in optimizers(ctx)],
         schedulers=[x.state_dict() for x in schedulers(ctx)],
         rng=dict(python=random.getstate(), numpy=np.random.get_state(), cpu=torch.get_rng_state(),
-                 cuda=torch.cuda.get_rng_state_all(), loaders={k:g.get_state() for k,g in ctx.generators.items()}))
+                 cuda=[torch.cuda.get_rng_state(0)], loaders={k:g.get_state() for k,g in ctx.generators.items()}))
 
 
 def checkpoint(path, state):
@@ -189,7 +198,8 @@ def restore(ctx, saved):
     for current, value in zip(schedulers(ctx), saved['schedulers']): current.load_state_dict(value)
     rng = saved['rng']
     random.setstate(rng['python']); np.random.set_state(rng['numpy']); torch.set_rng_state(rng['cpu'].cpu())
-    torch.cuda.set_rng_state_all([x.cpu() for x in rng['cuda']])
+    validate_cuda_rng(rng['cuda'])
+    torch.cuda.set_rng_state(rng['cuda'][0].cpu(),device=0)
     for name,g in ctx.generators.items(): g.set_state(rng['loaders'][name].cpu())
 
 
@@ -228,19 +238,37 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
     validation = float(ctx._valid_epoch(5, ctx.val_loader_src, domain='src'))
     if not math.isfinite(validation) or validation <= 0:
         raise ValueError('真实源验证失败')
+    # 内存序列化真实模型/EMA/优化器，不写诊断checkpoint；检查GPU随机流可真正接续。
+    saved=capture(ctx,cfg,5,[[5,validation]])
+    buffer=io.BytesIO();torch.save(saved,buffer);buffer.seek(0)
+    saved=torch.load(buffer,map_location='cpu');buffer.close()
+    validate_cuda_rng(saved['rng']['cuda'])
+    def draws():
+        return dict(python=random.random(),numpy=np.random.random(4),cpu=torch.rand(4),
+            cuda=torch.rand(4,device='cuda:0'),loaders={k:torch.randperm(8,generator=g) for k,g in ctx.generators.items()})
+    restore(ctx,saved);expected_draw=tensor_digest(draws())
+    restore(ctx,saved)
+    actual=capture(ctx,cfg,5,[[5,validation]])
+    if tensor_digest(actual)!=tensor_digest(saved) or tensor_digest(draws())!=expected_draw:
+        raise ValueError('真实GPU完整状态恢复或随机流重放失败')
+    restore(ctx,saved)
     save(output, dict(status='passed', batch=cfg['loader']['batch_size'], phases=reports,
                       source_validation_loss=validation,
                       peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,
-                      checked_target_batches=ctx.checked_steps, initial_state_sha=ctx.initial_state_sha))
+                      checked_target_batches=ctx.checked_steps, initial_state_sha=ctx.initial_state_sha,
+                      cuda_seed_proof=ctx.cuda_seed_proof,
+                      rng_roundtrip=dict(status='passed',cuda_rng_count=1,full_state_sha=tensor_digest(saved),
+                                         replayed_draw_sha=expected_draw)))
 
 
 def train(cfg, entry, resume=None):
     entry = Path(entry)
     ctx = build(cfg)
     save(entry/'runtime_config.json',ctx.cfg)
+    save(entry/'seed_proof.json',ctx.cuda_seed_proof)
     history, start, rows = [], 1, []
     if resume:
-        saved = torch.load(resume, map_location='cuda:0')
+        saved = torch.load(resume, map_location='cpu')
         if saved['config'] != cfg: raise ValueError('恢复配置必须完全相同')
         restore(ctx, saved)
         history, start = saved['history'], saved['epoch']+1
@@ -293,6 +321,7 @@ def evaluate(cfg, entry, annotation):
     if saved['epoch'] != termination(terminal['history'])['best_epoch']:
         raise ValueError('不是源域选定的best EMA')
     fix_random_seed(cfg['seed'], include_cuda=True)
+    torch.cuda.manual_seed(cfg['seed'])
     model = make_meta_arch('sada', deepcopy(cfg), device='cuda:0').to('cuda:0')
     model.load_state_dict(saved['ema_state_dict'], strict=True); model.eval()
     results = {}

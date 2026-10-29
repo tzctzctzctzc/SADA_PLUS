@@ -43,12 +43,13 @@ def test_seed123_drives_all_rng_streams():
 
 def test_child_environment_uses_configured_seed(tmp_path,monkeypatch):
     process=Mock();monkeypatch.setattr(subprocess,'Popen',process)
-    config=tmp_path/'config.json';save(config,dict(seed=123))
+    config=tmp_path/'config.json';save(config,dict(seed=123,baseline={'tmpdir':str(tmp_path)}))
     lease=dict(uuid='only-selected-card',lease='/lease',lease_sha256='sha')
     spawn('train',config,tmp_path,lease,Path('/data'))
     options=process.call_args.kwargs
     assert options['env']['PYTHONHASHSEED']=='123'
     assert options['env']['CUDA_VISIBLE_DEVICES']=='only-selected-card'
+    assert options['env']['TMPDIR']==str(tmp_path)
     assert options['env']['OMP_NUM_THREADS']==options['env']['MKL_NUM_THREADS']=='8'
     assert options['start_new_session'] is True
 

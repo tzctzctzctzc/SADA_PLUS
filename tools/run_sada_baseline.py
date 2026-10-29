@@ -7,13 +7,15 @@ import math
 import os
 from pathlib import Path
 import signal
+import socket
 import subprocess
 import sys
+import tempfile
 import time
 
 CODE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CODE))
-from tools.baseline_protocol import (SCHEMA, CODE, POLICY, audit_entry, batch_choice, random_seeds,
+from tools.baseline_protocol import (SCHEMA, CODE, POLICY, CUDA_RNG_POLICY, audit_entry, batch_choice, random_seeds,
     audit_pair,code_identity, read, save, sanitized_inputs, sha, termination)
 from tools.baseline_gpu import slot, snapshot
 
@@ -44,7 +46,7 @@ def membership_manifest(database,cfg):
                                ('target_train','tgt_train_split'),('target_val','tgt_val_split')]}
 
 
-def prepare(root, data, identity, seed=6):
+def prepare(root, data, identity, seed=6, tmpdir=Path('/vepfs/vlms/tmp/sada_baseline')):
     import yaml
     registry = yaml.safe_load((CODE/'configs/rq2/shift_registry.yaml').read_text())['shifts']
     configs, inventories = {}, {}
@@ -66,6 +68,7 @@ def prepare(root, data, identity, seed=6):
         cfg['train_cfg'].update(valid_freq=5,early_stop=-1,test_freq=-1)
         cfg['baseline'] = dict(schema=SCHEMA,shift=shift,policy=POLICY,code=identity,
             random_seeds=random_seeds(seed),
+            cuda_rng_policy=CUDA_RNG_POLICY,tmpdir=str(tmpdir),
             official_config=str(original),official_config_sha256=sha(original),
             annotation_for_offline_evaluation=str(annotation),annotation_sha256=sha(annotation),
             source_manifest_sha256=sha(source_file),target_manifest=str(target_file),
@@ -118,7 +121,7 @@ def runtime_config(template,batch,regime):
     return cfg
 
 
-def assert_seed_only_change(current, previous):
+def assert_seed_only_change(current, previous, allow_batch_change=False):
     # 重跑只允许种子和同一工件/代码的新路径变化；核心代码SHA必须相同。
     if current['baseline']['code']['core_files'] != previous['baseline']['code']['core_files']:
         raise ValueError('换种子时不能修改模型或数据核心代码')
@@ -129,15 +132,24 @@ def assert_seed_only_change(current, previous):
     for key in ('code','official_config','target_manifest'):
         expected['baseline'][key]=current['baseline'][key]
     expected['baseline']['random_seeds']=random_seeds(current['seed'])
+    for key in ('schema','cuda_rng_policy','tmpdir'):
+        if key in current['baseline']:expected['baseline'][key]=current['baseline'][key]
+    if allow_batch_change:
+        b=current['loader']['batch_size'];expected['loader']['batch_size']=b
+        old=previous['baseline']['epoch_budget']
+        sb,tb=old['source_videos']//b,old['target_videos']//b
+        expected['baseline']['epoch_budget']=dict(source_videos=old['source_videos'],target_videos=old['target_videos'],
+            source_batches=sb,target_batches=tb,iterations_per_epoch=max(sb,tb),batch_size=b,drop_last=True)
     if current != expected:
         raise ValueError('重跑配置除种子/路径外发生变化')
 
 
 def spawn(mode,cfg_path,entry,lease,data,report=None):
-    seed=read(cfg_path)['seed']
+    cfg=read(cfg_path);seed=cfg['seed']
     env=dict(os.environ,PYTHONPATH=str(CODE),PYTHONDONTWRITEBYTECODE='1',
              PYTHONUNBUFFERED='1',PYTHONHASHSEED=str(seed),CUDA_VISIBLE_DEVICES=lease['uuid'],OMP_NUM_THREADS='8',MKL_NUM_THREADS='8',
              SADA_BASELINE_LEASE=lease['lease'],SADA_BASELINE_LEASE_SHA256=lease['lease_sha256'],
+             TMPDIR=cfg['baseline']['tmpdir'],TMP=cfg['baseline']['tmpdir'],TEMP=cfg['baseline']['tmpdir'],
              CUBLAS_WORKSPACE_CONFIG=':4096:8')
     for name in ['RQ3_EXTERNAL_GPU_LEASE','RQ3_EXTERNAL_GPU_LEASE_SHA256','RQ3_COHORT_LEASE']:
         env.pop(name,None)
@@ -203,7 +215,12 @@ def main(args):
     identity=code_identity()
     root.mkdir(parents=True,exist_ok=False)
     save(root/'state.json',dict(phase='cpu_input_audit',pid=os.getpid(),completed=[],active={}))
-    configs=prepare(root,data,identity,seed=args.seed)
+    args.tmpdir=args.tmpdir.resolve();args.tmpdir.mkdir(parents=True,exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=args.tmpdir,prefix='check_') as name:
+        sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+        try:sock.bind(str(Path(name)/'listener.sock'))
+        finally:sock.close()
+    configs=prepare(root,data,identity,seed=args.seed,tmpdir=args.tmpdir)
     if args.reference_root:
         reference=args.reference_root.resolve()
         final=read(reference/'final_audit.json')
@@ -219,7 +236,7 @@ def main(args):
                 complete=read(entry/'complete.json')
                 if sha(cfg_path)!=complete['artifacts'][str(cfg_path)]:
                     raise ValueError('前序配置SHA发生变化')
-                assert_seed_only_change(runtime_config(configs[shift],args.batch_size,regime),read(cfg_path))
+                assert_seed_only_change(runtime_config(configs[shift],args.batch_size,regime),read(cfg_path),args.allow_reference_batch_change)
                 bound[shift+'_'+regime]=dict(config_sha256=sha(cfg_path),complete_sha256=sha(entry/'complete.json'))
         save(root/'seed_reference.json',dict(status='passed',seed=args.seed,reference_root=str(reference),
              final_audit_sha256=sha(reference/'final_audit.json'),entries=bound))
@@ -238,6 +255,12 @@ def main(args):
     so=synchronous_probe(root,data,runtime_config(configs['S1'],batch,'so'),indices,minimum,'so_acceptance')
     if so['initial_state_sha'] != reports[batch]['initial_state_sha']:
         raise ValueError('SO/UDA初始模型不同')
+    for report in (so,reports[batch]):
+        if report['rng_roundtrip']['status']!='passed' or report['rng_roundtrip']['cuda_rng_count']!=1:
+            raise ValueError('缺少真实GPU随机流和完整状态恢复验收')
+        if report['cuda_seed_proof']['actual_cuda_seed']!=args.seed:raise ValueError('验收CUDA种子不符')
+    if so['cuda_seed_proof']['state_sha256']!=reports[batch]['cuda_seed_proof']['state_sha256']:
+        raise ValueError('SO/UDA初始CUDA随机状态不一致')
     save(root/'acceptance.json',dict(status='passed',batch=batch,minimum_free_mib=minimum,
          batch_reports=reports,so=so,code=identity,inputs_sha256=sha(root/'inputs/identity.json'),
          report_sha256={str(p):sha(p) for p in (root/'probes').glob('*/result.json')}))
@@ -258,7 +281,7 @@ def main(args):
                     task['process']=spawn('evaluate',entry/'config.json',entry,task['lease'],data)
                 else:
                     cfg=read(entry/'config.json')
-                    artifacts=[entry/x for x in ('config.json','runtime_config.json','metrics.jsonl','termination.json',
+                    artifacts=[entry/x for x in ('config.json','runtime_config.json','seed_proof.json','metrics.jsonl','termination.json',
                         'best.pt','latest.pt','train_gpu.json','evaluate_gpu.json',
                         'evaluation/source_val.json','evaluation/target_val.json','evaluation/manifest.json')]
                     save(entry/'complete.json',dict(schema=SCHEMA,shift=task['shift'],regime=task['regime'],
@@ -301,6 +324,8 @@ if __name__=='__main__':
     p.add_argument('--batch-size',type=int,choices=[2,4],default=None,
                    help='指定时冻结已有batch协议，只做对应batch验收，不重新选择')
     p.add_argument('--reference-root',type=Path,help='逐项核对只改变种子的已完成12项根')
+    p.add_argument('--allow-reference-batch-change',action='store_true',help='用户明确授权的batch更改；其余数值协议保持一致')
+    p.add_argument('--tmpdir',type=Path,default=Path('/vepfs/vlms/tmp/sada_baseline'))
     p.add_argument('--prepare-only',action='store_true')
     p.add_argument('--child',choices=['probe','train','evaluate'])
     p.add_argument('--config',type=Path);p.add_argument('--entry',type=Path);p.add_argument('--report',type=Path)
