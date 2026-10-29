@@ -1,6 +1,12 @@
 from tools.compare_qwen_source_holdout import evaluation_label,score_predictions
 
 
+def test_source_subset_order_does_not_change_membership():
+    from tools.compare_qwen_source_holdout import same_source_splits
+    assert same_source_splits(['brown','dark','other','white'],['white','dark','brown','other'])
+    assert not same_source_splits(['brown','dark'],['white','dark'])
+
+
 def test_gt_is_only_scoring_and_ambiguous_or_low_overlap_is_reported():
     rows=[dict(segment=[1.,3.],label_id=2),dict(segment=[5.,7.],label_id=4)]
     assert evaluation_label([1.,3.],rows)==(2,1.)

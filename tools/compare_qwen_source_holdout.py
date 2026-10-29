@@ -29,6 +29,11 @@ def temporal_iou(a,b):
     return intersection/max(1e-12,max(a[1],b[1])-min(a[0],b[0]))
 
 
+def same_source_splits(left,right):
+    # 子集顺序不改变视频成员；不能把同一集合的不同排列当作换了划分。
+    return sorted(left)==sorted(right)
+
+
 def evaluation_label(proposal,annotations):
     scores=[temporal_iou(proposal,a['segment']) for a in annotations]
     if not scores or max(scores)<.5:return None,max(scores,default=0.)
@@ -68,7 +73,7 @@ def prepare(root,baseline):
         shift='S'+str(i)
         p=Path('/vepfs/vlms/rq4_source_seed6_ec7882a_1011/inputs/S1/requests.json') if i==1 else Path('/vepfs/vlms/rq4_source_seed6_b08c147_1011/inputs')/shift/'requests.json'
         old=read(p);cfg=read(baseline/'formal'/shift/'uda/config.json');db=read(cfg['dataset']['json_file'])['database']
-        if old['split']!='source_validation' or old['source_subsets']!=cfg['src_val_split']:raise ValueError('不是当前源验证split')
+        if old['split']!='source_validation' or not same_source_splits(old['source_subsets'],cfg['src_val_split']):raise ValueError('不是当前源验证split')
         train={v for v,d in db.items() if d['subset'].lower() in cfg['src_train_split']}
         val={v for v,d in db.items() if d['subset'].lower() in cfg['src_val_split']}
         if train&val:raise ValueError('源训练/留出视频交叉')
@@ -209,7 +214,12 @@ def summarize(root):
 def supervisor(args):
     os.chdir(args.data_root);args.output.mkdir(parents=True,exist_ok=False)
     identity=code_identity();save(args.output/'state.json',dict(phase='preparing',pid=os.getpid(),code=identity))
-    prepare(args.output,args.baseline)
+    try:
+        prepare(args.output,args.baseline)
+    except BaseException as error:
+        save(args.output/'error.json',dict(type=type(error).__name__,message=str(error),cuda_started=False))
+        save(args.output/'state.json',dict(phase='failed_preparation',pid=os.getpid()))
+        raise
     # 处理器完全相同才将差异归因到教师；模型架构维度允许不同。
     for name in ['tokenizer.json','tokenizer_config.json','chat_template.json','preprocessor_config.json','video_preprocessor_config.json']:
         if sha(model_path('8b')/name)!=sha(model_path('32b')/name):raise ValueError('两教师处理器协议不同: '+name)
