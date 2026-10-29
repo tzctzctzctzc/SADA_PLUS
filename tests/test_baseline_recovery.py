@@ -60,3 +60,33 @@ def test_private_tmpdir_supports_unix_communication():
     with tempfile.TemporaryDirectory(prefix='br_') as name:
         path=Path(name)/'t';check_tmpdir(path)
         assert path.exists() and list(path.iterdir())==[]
+
+
+def test_s5_relocation_requires_explicit_identity(tmp_path):
+    source=partial(tmp_path)
+    cfg=json.loads((source/'config.json').read_text());cfg['baseline'].update(shift='S5',regime='uda')
+    (source/'config.json').write_text(json.dumps(cfg))
+    for name in ('best.pt','latest.pt'):
+        saved=torch.load(source/name);saved['config']=cfg;torch.save(saved,source/name)
+    with pytest.raises(ValueError):inspect_partial(source)
+    assert inspect_partial(source,('S5','uda'))['start_epoch']==11
+
+
+def test_threads_share_physical_card_locks(tmp_path,monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    from tools import baseline_gpu
+    monkeypatch.setattr(baseline_gpu,'snapshot',lambda i:dict(index=i,uuid='gpu'+str(i),free_mib=24000))
+    barrier=threading.Barrier(2)
+    def acquire_one(_):
+        for index in (1,2):
+            context=baseline_gpu.slot(index,tmp_path,tmp_path/'out',12288,'code')
+            try:lease=context.__enter__()
+            except BlockingIOError:continue
+            try:
+                barrier.wait(timeout=5)
+                return lease['index']
+            finally:context.__exit__(None,None,None)
+        raise AssertionError('未获得独立卡锁')
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        assert set(executor.map(acquire_one,range(2)))=={1,2}

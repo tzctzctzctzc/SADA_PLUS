@@ -1,5 +1,6 @@
-"""等待健康任务完成，仅恢复S2 SO；训练仍使用原90bdce0代码和配置。"""
+"""接续S2 SO，必要时迁移慢卡S5 UDA；训练仍使用原90bdce0代码和配置。"""
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import hashlib
 import json
@@ -11,11 +12,12 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 TRAINING_COMMIT='90bdce09660b820df7d527aabf1d43df1350bc4b'
 EXPECTED={(s,r) for s in ('S1','S2','S3','S4','S5','S6') for r in ('so','uda')}
-ACTIVE=None
+ACTIVE={}
 
 
 def read(path):return json.loads(Path(path).read_text())
@@ -53,32 +55,36 @@ def group_members(group):
 def stop_own_parent(old,state):
     """只在原监督仅剩已知S2挂起项时停止，避免打断健康任务。"""
     task=state['active']
-    if state.get('pending') or set(task)!={'S2_so'}:raise ValueError('尚有其他活跃任务')
-    parent=int(state['pid']);child=int(task['S2_so']['pid'])
-    for pid,required in ((parent,str(old)),(child,str(old/'formal/S2/so'))):
+    if state.get('pending') or not set(task)<={'S2_so','S5_uda'} or 'S2_so' not in task:
+        raise ValueError('尚有其他活跃任务')
+    parent=int(state['pid']);groups=[int(x['pid']) for x in task.values()]
+    identities=[(parent,str(old))]+[(int(row['pid']),str(old/'formal'/key.split('_')[0]/key.split('_')[1]))
+                                  for key,row in task.items()]
+    for pid,required in identities:
         args=Path('/proc/%d/cmdline'%pid).read_bytes().split(b'\0')
         if required.encode() not in args:raise ValueError('进程身份不符，拒绝停止')
-    if os.getpgid(child)!=child:raise ValueError('原训练不是独立自有进程组')
+    if any(os.getpgid(child)!=child for child in groups):raise ValueError('原训练不是独立自有进程组')
     os.kill(parent,signal.SIGTERM)
     deadline=time.monotonic()+30
-    while time.monotonic()<deadline and (process_alive(parent) or group_members(child)):
+    while time.monotonic()<deadline and (process_alive(parent) or any(group_members(g) for g in groups)):
         time.sleep(1)
-    if group_members(child):os.killpg(child,signal.SIGKILL)
+    for child in groups:
+        if group_members(child):os.killpg(child,signal.SIGKILL)
     if process_alive(parent):raise ValueError('原监督未退出，拒绝接续')
     deadline=time.monotonic()+15
-    while group_members(child) and time.monotonic()<deadline:time.sleep(1)
-    if group_members(child):raise ValueError('原自有训练组未退出')
-    return dict(parent_pid=parent,training_group=child,remaining_group_members=[])
+    while any(group_members(g) for g in groups) and time.monotonic()<deadline:time.sleep(1)
+    if any(group_members(g) for g in groups):raise ValueError('原自有训练组未退出')
+    return dict(parent_pid=parent,training_groups=groups,remaining_group_members=[])
 
 
-def inspect_partial(entry):
+def inspect_partial(entry,identity=('S2','so')):
     import torch
     entry=Path(entry)
     if (entry/'complete.json').exists() or (entry/'termination.json').exists():
         raise ValueError('不能重训已完整或已合法停止的条目')
     cfg=read(entry/'config.json')
-    if (cfg['baseline']['shift'],cfg['baseline']['regime'],cfg['seed'])!=('S2','so',123):
-        raise ValueError('恢复只允许本次S2 SO seed123')
+    if identity not in {('S2','so'),('S5','uda')} or (cfg['baseline']['shift'],cfg['baseline']['regime'],cfg['seed'])!=(*identity,123):
+        raise ValueError('恢复只允许本次S2 SO或S5 UDA seed123')
     saved=torch.load(entry/'latest.pt',map_location='cpu')
     required=('state_dict','ema_state_dict','model_controls','ema_controls','optimizers','schedulers','rng','history')
     if any(k not in saved for k in required) or saved['config']!=cfg:raise ValueError('保存点缺状态或配置不同')
@@ -144,16 +150,18 @@ def child(args):
 
 
 def main(args):
-    global ACTIVE
     root=args.output_root.resolve();old=args.previous_root.resolve()
     root.mkdir(parents=True,exist_ok=False)
     save(root/'state.json',dict(phase='waiting_healthy_entries',pid=os.getpid(),previous_root=str(old)))
     check_tmpdir(args.tmpdir)
+    allowed={('S2','so')}|({('S5','uda')} if args.relocate_s5 else set())
     while True:
         state=read(old/'state.json')
         completed={(x['shift'],x['regime']) for x in state['completed']}
         if completed==EXPECTED:raise ValueError('旧矩阵已完整，无需恢复')
-        if completed==EXPECTED-{('S2','so')} and not state.get('pending') and set(state['active'])=={'S2_so'}:
+        missing=EXPECTED-completed
+        if missing<=allowed and not state.get('pending') and set(state['active'])=={s+'_'+r for s,r in missing} and all(
+                x['stage']=='train' for x in state['active'].values()):
             break
         if not process_alive(state['pid']):raise ValueError('原监督意外退出，需重新检查剩余集合')
         print('WAIT_HEALTHY_ENTRIES',len(completed),sorted(state['active']),flush=True)
@@ -161,61 +169,75 @@ def main(args):
     stopped=stop_own_parent(old,state)
     save(root/'stopped_previous.json',stopped)
     engine,protocol,gpu=training_modules(args.training_code)
-    inspection=inspect_partial(old/'formal/S2/so')
-    recovered=root/'formal/S2/so';clone_partial(old/'formal/S2/so',recovered,inspection)
+    inspections={}
+    for shift,regime in sorted(missing):
+        inspection=inspect_partial(old/'formal'/shift/regime,(shift,regime))
+        inspections[(shift,regime)]=inspection
+        clone_partial(old/'formal'/shift/regime,root/'formal'/shift/regime,inspection)
     for name in ('acceptance.json','plan.json','seed_reference.json'):shutil.copyfile(old/name,root/name)
     helper=Path(__file__).resolve()
     helper_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=helper.parents[1],text=True).strip()
     if subprocess.check_output(['git','status','--porcelain'],cwd=helper.parents[1],text=True).strip():
         raise ValueError('恢复代码不是clean版本')
-    provenance=deepcopy(inspection);provenance.pop('metrics_prefix')
-    provenance.update(source_entry=str(old/'formal/S2/so'),training_commit=TRAINING_COMMIT,
-        recovery_code_commit=helper_commit,recovery_script_sha256=sha(helper),tmpdir=str(args.tmpdir),
-        prior_completed_entries=state['completed'],previous_stop=stopped,
-        recomputed_complete_epochs=list(range(inspection['start_epoch'],inspection['old_complete_epochs']+1)))
-    save(recovered/'recovery.json',provenance)
+    provenances={}
+    for (shift,regime),inspection in inspections.items():
+        provenance=deepcopy(inspection);provenance.pop('metrics_prefix')
+        provenance.update(source_entry=str(old/'formal'/shift/regime),training_commit=TRAINING_COMMIT,
+            recovery_code_commit=helper_commit,recovery_script_sha256=sha(helper),tmpdir=str(args.tmpdir),
+            prior_completed_entries=state['completed'],previous_stop=stopped,
+            recomputed_complete_epochs=list(range(inspection['start_epoch'],inspection['old_complete_epochs']+1)))
+        save(root/'formal'/shift/regime/'recovery.json',provenance)
+        provenances[shift+'_'+regime]=provenance
     completed=[]
     for item in state['completed']:
         completed.append(protocol.audit_entry(Path(item['complete']).parent))
-    save(root/'predecessor.json',dict(status='passed',count=11,results=completed,partial=provenance))
-    cfg=read(recovered/'config.json');minimum=read(root/'acceptance.json')['minimum_free_mib']
-    while True:
-        found=None
-        for index in [int(x) for x in args.gpus.split(',')]:
-            context=gpu.slot(index,args.data_root,root,minimum,TRAINING_COMMIT)
-            try:lease=context.__enter__()
-            except BlockingIOError:continue
-            found=(context,lease);break
-        if found:break
-        save(root/'state.json',dict(phase='waiting_gpu',pid=os.getpid(),completed=completed))
-        time.sleep(15)
-    context,lease=found
-    try:
-        for stage in ('train','evaluate'):
-            env=dict(os.environ,PYTHONPATH=str(args.training_code),PYTHONDONTWRITEBYTECODE='1',PYTHONUNBUFFERED='1',
-                PYTHONHASHSEED=str(cfg['seed']),CUDA_VISIBLE_DEVICES=lease['uuid'],OMP_NUM_THREADS='8',MKL_NUM_THREADS='8',
-                TMPDIR=str(args.tmpdir),TMP=str(args.tmpdir),TEMP=str(args.tmpdir),CUBLAS_WORKSPACE_CONFIG=':4096:8',
-                SADA_BASELINE_LEASE=lease['lease'],SADA_BASELINE_LEASE_SHA256=lease['lease_sha256'])
-            for key in ('RQ3_EXTERNAL_GPU_LEASE','RQ3_EXTERNAL_GPU_LEASE_SHA256','RQ3_COHORT_LEASE'):env.pop(key,None)
-            command=[sys.executable,'-B',str(helper),'--child',stage,'--entry',str(recovered),
-                '--training-code',str(args.training_code),'--data-root',str(args.data_root),'--tmpdir',str(args.tmpdir)]
-            with (recovered/(stage+'.log')).open('x') as log:
-                ACTIVE=subprocess.Popen(command,cwd=args.training_code,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
-            save(root/'state.json',dict(phase='recover_'+stage,pid=os.getpid(),completed=completed,
-                active=dict(pid=ACTIVE.pid,gpu=lease['index'],entry=str(recovered))))
-            if ACTIVE.wait():raise RuntimeError('恢复阶段失败: '+stage)
-            ACTIVE=None
-        proof=read(recovered/'restore_proof.json')
-        if proof['status']!='passed' or proof['start_epoch']!=inspection['start_epoch']:
-            raise ValueError('缺少真实GPU恢复一致性证明')
-        artifacts=('config.json','runtime_config.json','metrics.jsonl','termination.json','best.pt','latest.pt',
-            'train_gpu.json','evaluate_gpu.json','evaluation/source_val.json','evaluation/target_val.json',
-            'evaluation/manifest.json','restore_proof.json','recovery.json','train.log','evaluate.log')
-        save(recovered/'complete.json',dict(schema=protocol.SCHEMA,shift='S2',regime='so',code=cfg['baseline']['code'],
-            acceptance_sha256=sha(root/'acceptance.json'),artifacts={str(recovered/n):sha(recovered/n) for n in artifacts},
-            recovery_code_commit=helper_commit,recovery_sha256=sha(recovered/'recovery.json')))
-        completed.append(protocol.audit_entry(recovered))
-    finally:context.__exit__(None,None,None)
+    save(root/'predecessor.json',dict(status='passed',count=len(completed),results=completed,partials=provenances))
+    lock=threading.Lock();active_info={}
+    def record():
+        save(root/'state.json',dict(phase='recovering',pid=os.getpid(),completed=completed,active=active_info))
+    def recover_one(identity):
+        shift,regime=identity;key=shift+'_'+regime
+        inspection=inspections[identity];recovered=root/'formal'/shift/regime
+        cfg=read(recovered/'config.json');minimum=read(root/'acceptance.json')['minimum_free_mib']
+        while True:
+            found=None
+            for index in [int(x) for x in args.gpus.split(',')]:
+                context=gpu.slot(index,args.data_root,root,minimum,TRAINING_COMMIT)
+                try:lease=context.__enter__()
+                except BlockingIOError:continue
+                found=(context,lease);break
+            if found:break
+            time.sleep(15)
+        context,lease=found
+        try:
+            for stage in ('train','evaluate'):
+                env=dict(os.environ,PYTHONPATH=str(args.training_code),PYTHONDONTWRITEBYTECODE='1',PYTHONUNBUFFERED='1',
+                    PYTHONHASHSEED=str(cfg['seed']),CUDA_VISIBLE_DEVICES=lease['uuid'],OMP_NUM_THREADS='8',MKL_NUM_THREADS='8',
+                    TMPDIR=str(args.tmpdir),TMP=str(args.tmpdir),TEMP=str(args.tmpdir),CUBLAS_WORKSPACE_CONFIG=':4096:8',
+                    SADA_BASELINE_LEASE=lease['lease'],SADA_BASELINE_LEASE_SHA256=lease['lease_sha256'])
+                for k in ('RQ3_EXTERNAL_GPU_LEASE','RQ3_EXTERNAL_GPU_LEASE_SHA256','RQ3_COHORT_LEASE'):env.pop(k,None)
+                command=[sys.executable,'-B',str(helper),'--child',stage,'--entry',str(recovered),
+                    '--training-code',str(args.training_code),'--data-root',str(args.data_root),'--tmpdir',str(args.tmpdir)]
+                with (recovered/(stage+'.log')).open('x') as log:
+                    process=subprocess.Popen(command,cwd=args.training_code,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+                with lock:
+                    ACTIVE[key]=process;active_info[key]=dict(pid=process.pid,gpu=lease['index'],stage=stage,entry=str(recovered));record()
+                if process.wait():raise RuntimeError('恢复阶段失败: '+key+'/'+stage)
+                with lock:ACTIVE.pop(key);active_info.pop(key);record()
+            proof=read(recovered/'restore_proof.json')
+            if proof['status']!='passed' or proof['start_epoch']!=inspection['start_epoch']:
+                raise ValueError('缺少真实GPU恢复一致性证明')
+            artifacts=('config.json','runtime_config.json','metrics.jsonl','termination.json','best.pt','latest.pt',
+                'train_gpu.json','evaluate_gpu.json','evaluation/source_val.json','evaluation/target_val.json',
+                'evaluation/manifest.json','restore_proof.json','recovery.json','train.log','evaluate.log')
+            save(recovered/'complete.json',dict(schema=protocol.SCHEMA,shift=shift,regime=regime,code=cfg['baseline']['code'],
+                acceptance_sha256=sha(root/'acceptance.json'),artifacts={str(recovered/n):sha(recovered/n) for n in artifacts},
+                recovery_code_commit=helper_commit,recovery_sha256=sha(recovered/'recovery.json')))
+            result=protocol.audit_entry(recovered)
+            with lock:completed.append(result);record()
+        finally:context.__exit__(None,None,None)
+    with ThreadPoolExecutor(max_workers=len(missing)) as executor:
+        list(executor.map(recover_one,sorted(missing)))
     paths={(x['shift'],x['regime']):Path(x['complete']).parent for x in completed}
     if set(paths)!=EXPECTED:raise ValueError('并非精确12项')
     for shift in ('S1','S2','S3','S4','S5','S6'):
@@ -226,7 +248,8 @@ def main(args):
 
 
 def stop(signum,frame):
-    if ACTIVE is not None and ACTIVE.poll() is None:os.killpg(ACTIVE.pid,signal.SIGTERM)
+    for process in list(ACTIVE.values()):
+        if process.poll() is None:os.killpg(process.pid,signal.SIGTERM)
     raise SystemExit(128+signum)
 
 
@@ -236,6 +259,7 @@ if __name__=='__main__':
     p.add_argument('--training-code',type=Path,required=True)
     p.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'))
     p.add_argument('--gpus',default='1,0,2,3')
+    p.add_argument('--relocate-s5',action='store_true',help='连同慢卡S5 UDA保存点迁移，仍只做精确缺失集合')
     p.add_argument('--tmpdir',type=Path,default=Path('/vepfs/vlms/tmp/sada_seed123_1029'))
     p.add_argument('--child',choices=['train','evaluate']);p.add_argument('--entry',type=Path)
     args=p.parse_args();signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
