@@ -546,6 +546,11 @@ class SADA(nn.Module):
         n_classes = self.num_classes if not self.align_bkg else self.num_classes + 1
         
         self.learnable_embeddings = nn.Parameter(torch.randn(n_classes, embd_dim), requires_grad=True)
+        self.rq3_capacity=None
+        if cfg.get('prototype_capacity'):
+            from .prototype_capacity import build_capacity
+            self.rq3_capacity=build_capacity(cfg['prototype_capacity'],fpn_dim,self.num_classes,
+                self.fpn_strides,self.reg_range,self.device)
         
     @property
     def device(self):
@@ -827,6 +832,12 @@ class SADA(nn.Module):
                 curr_epoch=curr_epoch
             )
             
+            if mode=='train' and self.rq3_capacity is not None:
+                auxiliary=self.rq3_capacity(video_list_src,video_list_tgt,fpn_feats_src,fpn_feats_tgt,curr_epoch)
+                for key,value in auxiliary.items():
+                    losses['rq3_'+key]=torch.as_tensor(value,device=self.device).detach()
+                losses['downstream_loss']=losses['downstream_loss']+auxiliary['loss']
+
             # Return the GTs of the target domain as well, to be used to compute the anchors
             gt_tgt_cls = torch.stack(gt_cls_labels[bs:])   # shape: List of B elements B x FT x C
             gt_tgt_cls = gt_tgt_cls[valid_mask_tgt_pl]  # T' x C

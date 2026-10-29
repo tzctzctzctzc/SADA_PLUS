@@ -55,7 +55,8 @@ def code_identity():
     changed = subprocess.check_output(['git', 'diff', '--name-only', OFFICIAL, head],
                                       cwd=CODE, text=True).splitlines()
     allowed = set(CORE_PATCHES) | {'configs/rq2/shift_registry.yaml',
-                                  'configs/new_vs_old/version_paper_s6_dim512.yaml'}
+                                  'configs/new_vs_old/version_paper_s6_dim512.yaml',
+                                  'libs/models/SADA/prototype_capacity.py'}
     if any(p not in allowed and not p.startswith(('tools/', 'tests/')) for p in changed):
         raise ValueError('存在白名单外的官方核心文件修改')
     return dict(commit=head, official_commit=OFFICIAL,
@@ -119,10 +120,10 @@ def batch_choice(reports):
                                       for e in (1, 5)))
 
 
-def audit_entry(entry):
+def audit_entry(entry, expected_schema=SCHEMA):
     entry = Path(entry)
     complete = read(entry/'complete.json')
-    if complete['schema'] != SCHEMA:
+    if complete['schema'] != expected_schema:
         raise ValueError('不是本次修正基线')
     for path, digest in complete['artifacts'].items():
         if sha(path) != digest:

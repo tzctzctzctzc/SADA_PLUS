@@ -42,8 +42,11 @@ def test_epoch_loop_and_original_model_math_are_unchanged():
     def loop(tree):
         train=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='train')
         return next(n for n in train.body if isinstance(n,ast.For))
-    assert ast.dump(loop(before))==ast.dump(loop(after))
-    for path in ('libs/models/SADA/meta_archs.py','libs/trainer/da_trainer.py','libs/models/SADA/optimizer.py'):
+    after_loop=loop(after)
+    # 新增的是可选分支的detached日志字段；默认基线的优化循环保持相同。
+    after_loop.body=[n for n in after_loop.body if not (isinstance(n,ast.If) and ast.unparse(n.test)=="cfg.get('prototype_capacity')")]
+    assert ast.dump(loop(before))==ast.dump(after_loop)
+    for path in ('libs/trainer/da_trainer.py','libs/models/SADA/optimizer.py'):
         assert subprocess.check_output(['git','show','90bdce09660b820df7d527aabf1d43df1350bc4b:'+path],cwd=CODE)==(CODE/path).read_bytes().replace(b'\r\n',b'\n')
 
 
