@@ -9,6 +9,9 @@ from torch.nn import functional as F
 
 
 def specification(variant):
+    if variant == 'temporal_roles':
+        from .prototype_temporal_roles import role_specification
+        return role_specification()
     if variant in ('temporal_pool','multi_prototype'):
         from .prototype_methods import method_specification
         return method_specification(variant)
@@ -34,6 +37,10 @@ def build_capacity(cfg,fpn_dim,num_classes,strides,regression_ranges,device):
             from .prototype_methods import make_method_branch
             torch.manual_seed(0)
             result.branch=make_method_branch(cfg['variant'],fpn_dim,num_classes)
+        if cfg['variant'] == 'temporal_roles':
+            from .prototype_temporal_roles import TemporalRoleBranch
+            torch.manual_seed(0)
+            result.branch=TemporalRoleBranch(fpn_dim,num_classes,confidence_threshold=0.)
         if cfg['variant']=='wide_deep':
             torch.manual_seed(0)
             result.branch=VLMProposalCoAdaptationBranch(fpn_dim,num_classes,

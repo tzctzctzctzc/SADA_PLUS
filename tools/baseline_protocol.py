@@ -58,6 +58,7 @@ def code_identity():
                                   'configs/new_vs_old/version_paper_s6_dim512.yaml',
                                   'libs/models/SADA/prototype_capacity.py',
                                   'libs/models/SADA/prototype_methods.py'}
+    allowed.add('libs/models/SADA/prototype_temporal_roles.py')
     if any(p not in allowed and not p.startswith(('tools/', 'tests/')) for p in changed):
         raise ValueError('存在白名单外的官方核心文件修改')
     return dict(commit=head, official_commit=OFFICIAL,
