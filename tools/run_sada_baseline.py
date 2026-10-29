@@ -14,7 +14,7 @@ import time
 CODE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CODE))
 from tools.baseline_protocol import (SCHEMA, CODE, POLICY, audit_entry, batch_choice,
-    code_identity, read, save, sanitized_inputs, sha, termination)
+    audit_pair,code_identity, read, save, sanitized_inputs, sha, termination)
 from tools.baseline_gpu import slot, snapshot
 
 ACTIVE = {}
@@ -65,6 +65,21 @@ def prepare(root, data, identity):
             s6_provenance=row.get('config_provenance','official-release'),
             batch_comparison='new_batch_protocol_not_strictly_paired_to_old_batch2')
         configs[shift] = cfg
+        # 真实数据CPU预检，不用合成张量替代特征文件/成员/无标签检查。
+        from libs.datasets import make_dataset
+        source_options=deepcopy(cfg['dataset'])
+        source_ds=make_dataset('epic',True,cfg['src_train_split'],**source_options)
+        target_options=dict(source_options,json_file=str(target_file),unlabeled=True)
+        target_ds=make_dataset('epic',True,cfg['tgt_train_split'],**target_options)
+        first_source,first_target=source_ds[0],target_ds[0]
+        from tools.baseline_protocol import assert_no_target_gt
+        assert_no_target_gt([first_target])
+        if any(v['feats'].shape[0]!=2304 for v in (first_source,first_target)):
+            raise ValueError('不是冻结SlowFast2304维特征')
+        if raw['opt']['epochs']!=50 or not raw['train_cfg']['ema_active'] or not raw['model']['weight_sharing']:
+            raise ValueError('官方配置偏离本次冻结的预算/EMA/共享架构')
+        save(root/'inputs'/shift/'preflight.json',dict(status='passed',source_videos=len(source_ds),
+            target_videos=len(target_ds),feature_dim=2304,target_gt_fields_empty=True))
         members = {k for k,v in db.items() if any(v['subset'].lower() in raw[s] for s in
                    ['src_train_split','src_val_split','tgt_train_split','tgt_val_split'])}
         for vid in members:
@@ -100,7 +115,7 @@ def runtime_config(template,batch,regime):
 
 def spawn(mode,cfg_path,entry,lease,data,report=None):
     env=dict(os.environ,PYTHONPATH=str(CODE),PYTHONDONTWRITEBYTECODE='1',
-             PYTHONUNBUFFERED='1',CUDA_VISIBLE_DEVICES=lease['uuid'],OMP_NUM_THREADS='8',MKL_NUM_THREADS='8',
+             PYTHONUNBUFFERED='1',PYTHONHASHSEED='6',CUDA_VISIBLE_DEVICES=lease['uuid'],OMP_NUM_THREADS='8',MKL_NUM_THREADS='8',
              SADA_BASELINE_LEASE=lease['lease'],SADA_BASELINE_LEASE_SHA256=lease['lease_sha256'],
              CUBLAS_WORKSPACE_CONFIG=':4096:8')
     for name in ['RQ3_EXTERNAL_GPU_LEASE','RQ3_EXTERNAL_GPU_LEASE_SHA256','RQ3_COHORT_LEASE']:
@@ -230,6 +245,8 @@ def main(args):
         save(root/'error.json',dict(type=type(error).__name__,error=str(error)))
         raise
     if {(x['shift'],x['regime']) for x in completed} != set(jobs):raise ValueError('不是精确12项')
+    for shift in configs:
+        save(root/'formal'/shift/'pair_audit.json',audit_pair(root/'formal'/shift/'so',root/'formal'/shift/'uda'))
     save(root/'final_audit.json',dict(status='passed',count=12,schema=SCHEMA,batch=batch,results=completed))
     save(root/'state.json',dict(phase='complete',completed=completed,active={},pid=os.getpid()))
 

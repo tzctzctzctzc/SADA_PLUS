@@ -120,6 +120,12 @@ def audit_entry(entry):
         if sha(path) != digest:
             raise ValueError('完成工件SHA改变: '+path)
     cfg = read(entry/'config.json')
+    root=entry.parents[2]
+    if sha(root/'acceptance.json')!=complete['acceptance_sha256']:
+        raise ValueError('真实验收凭证改变')
+    acceptance=read(root/'acceptance.json')
+    if acceptance['status']!='passed' or cfg['loader']['batch_size']!=acceptance['batch']:
+        raise ValueError('没有对应batch的真实验收')
     if cfg['baseline']['policy'] != POLICY:
         raise ValueError('早停协议改变')
     if complete['code']['commit'] != cfg['baseline']['code']['commit']:
@@ -174,3 +180,14 @@ def audit_entry(entry):
     return dict(shift=complete['shift'], regime=complete['regime'],
                 map=result['map_0.1_to_0.5'], complete=str(entry/'complete.json'),
                 complete_sha256=sha(entry/'complete.json'))
+
+
+def audit_pair(source_only,adaptation):
+    configs=[read(Path(e)/'config.json') for e in (source_only,adaptation)]
+    for cfg,regime in zip(configs,('so','uda')):
+        if cfg['baseline'].pop('regime')!=regime:raise ValueError('SO/UDA身份不符')
+    if configs[0]!=configs[1]:raise ValueError('SO/UDA除对齐开关外配置不同')
+    states=[read(Path(e)/'termination.json')['initial_state_sha'] for e in (source_only,adaptation)]
+    if states[0]!=states[1]:raise ValueError('SO/UDA模型初始化不配对')
+    return dict(status='passed',initial_model_sha256=states[0],policy=POLICY,
+                batch=configs[0]['loader']['batch_size'],shift=configs[0]['baseline']['shift'])
