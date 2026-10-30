@@ -23,19 +23,20 @@ def worker(args):
         if p.sha(ref/name)!=complete['artifacts'][str(ref/name)]:raise ValueError('参考工件改变: '+name)
     checkpoint_sha=p.sha(ref/'best.pt');annotation=Path(cfg['baseline']['annotation_for_offline_evaluation'])
     if p.sha(annotation)!=cfg['baseline']['annotation_sha256']:raise ValueError('离线标注改变')
-    os.chdir(args.data_root);guard=first_cuda_guard()
-    torch.manual_seed(cfg['seed']);torch.cuda.manual_seed(cfg['seed'])
+    os.chdir(args.data_root);device='cpu' if args.cpu else 'cuda:0';guard=None if args.cpu else first_cuda_guard()
+    torch.manual_seed(cfg['seed'])
+    if not args.cpu:torch.cuda.manual_seed(cfg['seed'])
     saved=torch.load(ref/'best.pt',map_location='cpu')
     if saved['config']!=cfg or saved['epoch']!=p.termination(p.read(ref/'termination.json')['history'])['best_epoch']:raise ValueError('不是源选best')
     models={}
     for role,key in [('student','state_dict'),('ema','ema_state_dict')]:
-        model=make_meta_arch('sada',deepcopy(cfg),device='cuda:0').to('cuda:0');model.load_state_dict(saved[key],strict=True);model.eval()
+        model=make_meta_arch('sada',deepcopy(cfg),device=device).to(device);model.load_state_dict(saved[key],strict=True);model.eval()
         if model.use_trident_head or cfg['model'].get('use_ce_cls',False):raise ValueError('本诊断仅支持冻结普通回归/独立sigmoid头')
         models[role]=model
     del saved
     before=tensor_digest({k:m.state_dict() for k,m in models.items()})
     plan=dict(schema=SCHEMA,spec=SPEC,code=identity,shift=args.shift,checkpoint_sha256=checkpoint_sha,
-        annotation_sha256=p.sha(annotation),reference_complete_sha256=p.sha(ref/'complete.json'),gpu_guard=guard,gpu_guard_sha256=p.sha(guard),
+        annotation_sha256=p.sha(annotation),reference_complete_sha256=p.sha(ref/'complete.json'),backend=device,gpu_guard=guard,gpu_guard_sha256=None if guard is None else p.sha(guard),
         classification_threshold=cfg['model'].get('pl_threshold',.7),background_class_weight=cfg['model'].get('weight_no_class_adv',1.),
         target_gt_used_for_training=False,exploratory_target_gt_analysis=True)
     p.save(args.output/'plan.json',plan)
@@ -44,15 +45,15 @@ def worker(args):
     for domain,splits in [('source',cfg['src_val_split']),('target',cfg['tgt_val_split'])]:
         ds=dataset(cfg,annotation,splits,False)
         for i in range(len(ds)):
-            original=ds[i];vid=original['metadata']['video_id'];clean,_=prepare_source_video(original,'cuda:0')
+            original=ds[i];vid=original['metadata']['video_id'];clean,_=prepare_source_video(original,device)
             p.assert_no_target_gt([clean]);ema_data=None
             with torch.no_grad():
                 for role,model in models.items():
                     obs,logits=source_dense_observation(model,clean)
                     # GT从此处开始仅用于诊断，不传给模型的特征前向。
-                    classes,_=model.label_points(obs['points'],[original['segments'].to('cuda:0')],[original['labels'].to('cuda:0')])
+                    classes,_=model.label_points(obs['points'],[original['segments'].to(device)],[original['labels'].to(device)])
                     sizes=[len(x) for x in obs['points']];assigned=[x.sum(-1)>0 for x in classes[0].split(sizes)]
-                    occupied=[torch.as_tensor(occupancy(grid[:,0].cpu().numpy(),original['segments'].cpu().numpy()),device='cuda:0') for grid in obs['points']]
+                    occupied=[torch.as_tensor(occupancy(grid[:,0].cpu().numpy(),original['segments'].cpu().numpy()),device=device) for grid in obs['points']]
                     for level in range(len(logits)):
                         counts=routing_counts(logits[level][0].sigmoid().T.cpu().numpy(),obs['masks'][level][0].reshape(-1).cpu().numpy(),
                             assigned[level].cpu().numpy(),occupied[level].cpu().numpy(),plan['classification_threshold'])
@@ -96,7 +97,8 @@ def worker(args):
     if abs(maps['original']['map_0.1_to_0.5']-reference)>1e-6:raise ValueError('未复算原mAP；拒绝据此解释oracle: '+str((reference,maps)))
     if before!=tensor_digest({k:m.state_dict() for k,m in models.items()}):raise ValueError('只读诊断改变模型')
     aggregate={domain:{role:sum_counts([x['counts'] for x in routing if x['domain']==domain and x['role']==role and x['active_alignment_level']]) for role in models} for domain in ['source','target']}
-    result=dict(schema=SCHEMA,status='passed_read_only_audit',code=identity,shift=args.shift,maps=maps,reference_map=reference,
+    if args.cpu and torch.cuda.is_initialized():raise ValueError('CPU诊断意外初始化CUDA')
+    result=dict(schema=SCHEMA,status='passed_read_only_audit',code=identity,backend=device,shift=args.shift,maps=maps,reference_map=reference,
         errors_by_tiou={str(t):error_counts(predictions['original'],gt,t) for t in SPEC['tiou']},routing=aggregate,
         reference_map_reproduced=True,single_stream_null_check_passed=null_checked,weights_unchanged=True,
         checkpoint_sha256=checkpoint_sha,feature_inputs=feature_inputs,
@@ -106,7 +108,7 @@ def worker(args):
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--shift',required=True)
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--shift',required=True);parser.add_argument('--cpu',action='store_true')
     parser.add_argument('--output',type=Path,required=True);parser.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'))
     parser.add_argument('--control',type=Path,default=Path('/vepfs/vlms/prototype_capacity12_5f9a157_1029'))
     args=parser.parse_args()
