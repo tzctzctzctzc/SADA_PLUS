@@ -74,7 +74,8 @@ def build(cfg):
     ema_model = make_meta_arch('sada', ctx.cfg, device='cuda:0').to('cuda:0')
     ctx.model_ema = ModelEma2(ema_model, decay=cfg['train_cfg']['ema_decay'])
     ctx.initial_state_sha = tensor_digest(ctx.model.state_dict())
-    ctx.initial_detector_sha=tensor_digest({k:v for k,v in ctx.model.state_dict().items() if not k.startswith('rq3_capacity.')})
+    ctx.initial_detector_sha=tensor_digest({k:v for k,v in ctx.model.state_dict().items()
+                                          if not k.startswith(('rq3_capacity.','endpoint_risk.'))})
     if cfg['baseline']['regime'] == 'so':
         # 模型参数构造与UDA完全相同；仅关闭对抗目标，保持检测与优化器阶段。
         ctx.cfg['model']['adv_method'] = ['None']
@@ -97,7 +98,8 @@ def build(cfg):
     for key in ('source', 'alignment', 'discriminator'):
         is_disc = key == 'discriminator'
         opt = make_optimizer(ctx.model, cfg['opt'], cfg['opt']['disc_learning_rate' if is_disc else 'learning_rate'],
-                             include_params=exclude if is_disc else [], exclude_params=[] if is_disc else exclude)
+                             include_params=exclude if is_disc else [],
+                             exclude_params=[] if is_disc else exclude+(['endpoint_risk.'] if cfg.get('endpoint_risk') else []))
         sched = make_scheduler(opt, cfg['opt'], budget)
         setattr(ctx, {'source':'optimizer_gen_source', 'alignment':'optimizer_gen_source_alignment',
                        'discriminator':'optimizer_disc'}[key], opt)
@@ -132,6 +134,9 @@ def build(cfg):
                     raise ValueError('非有限loss: '+name)
         return result
     ctx.model.forward = checked_forward
+    if cfg.get('endpoint_risk'):
+        from tools.endpoint_risk_engine import attach
+        attach(ctx,cfg)
     return ctx
 
 
@@ -170,13 +175,17 @@ def schedulers(ctx):
 
 
 def capture(ctx, cfg, epoch, history):
-    return dict(schema=SCHEMA, config=cfg, epoch=epoch, history=deepcopy(history),
+    result=dict(schema=cfg.get('endpoint_risk',{}).get('schema',SCHEMA), config=cfg, epoch=epoch, history=deepcopy(history),
         state_dict=ctx.model.state_dict(), ema_state_dict=ctx.model_ema.module.state_dict(),
         model_controls=controls(ctx.model), ema_controls=controls(ctx.model_ema.module),
         optimizers=[x.state_dict() for x in optimizers(ctx)],
         schedulers=[x.state_dict() for x in schedulers(ctx)],
         rng=dict(python=random.getstate(), numpy=np.random.get_state(), cpu=torch.get_rng_state(),
                  cuda=[torch.cuda.get_rng_state(0)], loaders={k:g.get_state() for k,g in ctx.generators.items()}))
+    if cfg.get('endpoint_risk'):
+        from tools.endpoint_risk_engine import capture_extra
+        result['endpoint_risk']=capture_extra(ctx)
+    return result
 
 
 def checkpoint(path, state):
@@ -186,6 +195,8 @@ def checkpoint(path, state):
 
 
 def restore(ctx, saved):
+    if bool(ctx.cfg.get('endpoint_risk'))!=('endpoint_risk' in saved):
+        raise ValueError('风险模型不能从缺少独立优化器/校准/随机状态的保存点恢复')
     ctx.model.load_state_dict(saved['state_dict'], strict=True)
     ctx.model_ema.module.load_state_dict(saved['ema_state_dict'], strict=True)
     for m, key in [(ctx.model, 'model_controls'), (ctx.model_ema.module, 'ema_controls')]:
@@ -197,6 +208,9 @@ def restore(ctx, saved):
             else: setattr(m, name, value)
     for current, value in zip(optimizers(ctx), saved['optimizers']): current.load_state_dict(value)
     for current, value in zip(schedulers(ctx), saved['schedulers']): current.load_state_dict(value)
+    if ctx.cfg.get('endpoint_risk'):
+        from tools.endpoint_risk_engine import restore_extra
+        restore_extra(ctx,saved['endpoint_risk'])
     rng = saved['rng']
     random.setstate(rng['python']); np.random.set_state(rng['numpy']); torch.set_rng_state(rng['cpu'].cpu())
     validate_cuda_rng(rng['cuda'])
@@ -281,8 +295,10 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
                       diagnostic_steps_per_phase=timed_steps))
 
 
-def train(cfg, entry, resume=None):
+def train(cfg, entry, resume=None, pause_after=None):
     entry = Path(entry)
+    if pause_after is not None and (not cfg.get('endpoint_risk') or pause_after%5 or not 0<pause_after<50):
+        raise ValueError('仅端点风险可在完整源验证保存点暂停待机制审计')
     ctx = build(cfg)
     save(entry/'runtime_config.json',ctx.cfg)
     save(entry/'seed_proof.json',ctx.cuda_seed_proof)
@@ -319,6 +335,8 @@ def train(cfg, entry, resume=None):
                    target_gt_cls_loss=0., target_gt_reg_loss=0., target_gt_downstream_loss=0.)
         if cfg.get('prototype_capacity'):
             row['auxiliary']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_rq3_')}
+        if cfg.get('endpoint_risk'):
+            row['endpoint_risk']={k[len('t_endpoint_'):]:float(v) for k,v in metrics.items() if k.startswith('t_endpoint_')}
         if epoch%5 == 0:
             ctx.valid_metrics_src.reset()
             value = float(ctx._valid_epoch(epoch, ctx.val_loader_src, domain='src'))
@@ -331,6 +349,10 @@ def train(cfg, entry, resume=None):
         if epoch%5 == 0:
             checkpoint(entry/'latest.pt', capture(ctx,cfg,epoch,history))
             result = decision(history)
+            if epoch==pause_after and result['reason']=='running':
+                save(entry/'paused_for_source_audit.json',dict(epoch=epoch,
+                    checkpoint_sha256=sha(entry/'latest.pt'),reason='requires_source_teacher_advantage_before_target_regression'))
+                return
             if result['reason'] != 'running':
                 save(entry/'termination.json', dict(history=history, decision=result,
                                                     initial_state_sha=ctx.initial_state_sha))

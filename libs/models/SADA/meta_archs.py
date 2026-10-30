@@ -222,13 +222,14 @@ class RegHead(nn.Module):
             stride=1, padding=kernel_size // 2
         )
 
-    def forward(self, fpn_feats, fpn_masks):
+    def forward(self, fpn_feats, fpn_masks, return_features=False):
         assert len(fpn_feats) == len(fpn_masks)
         assert len(fpn_feats) == self.fpn_levels
 
         # apply the classifier for each pyramid level
         out_offsets = tuple()
         out_actionness = tuple()
+        regression_features = []
         for l, (cur_feat, cur_mask) in enumerate(zip(fpn_feats, fpn_masks)):
             cur_out = cur_feat
             for idx in range(len(self.head)):
@@ -239,8 +240,12 @@ class RegHead(nn.Module):
             
             cur_actionness, _ = self.actionness_head(cur_out, cur_mask)
             out_actionness += (F.relu(self.scale[l](cur_actionness)),)
+            if return_features:
+                regression_features.append(cur_out.detach())
 
         # fpn_masks remains the same
+        if return_features:
+            return out_offsets, out_actionness, regression_features
         return out_offsets, out_actionness
 
 
@@ -551,6 +556,12 @@ class SADA(nn.Module):
             from .prototype_capacity import build_capacity
             self.rq3_capacity=build_capacity(cfg['prototype_capacity'],fpn_dim,self.num_classes,
                 self.fpn_strides,self.reg_range,self.device)
+        self.endpoint_risk = None
+        if cfg.get('endpoint_risk'):
+            if self.rq3_capacity is None or cfg['prototype_capacity']['variant']!='control' or self.use_trident_head:
+                raise ValueError('端点风险只适配当前原版Prototype与普通左右回归头')
+            from .endpoint_risk import EndpointRisk
+            self.endpoint_risk=EndpointRisk(head_dim,cfg['endpoint_risk'])
         
     @property
     def device(self):
@@ -656,7 +667,7 @@ class SADA(nn.Module):
     
     
 
-    def forward(self, video_list_src, video_list_tgt, mode=None, domain='src', curr_epoch=0, cls_static_anchors=None, mean_class_conf=None):
+    def forward(self, video_list_src, video_list_tgt, mode=None, domain='src', curr_epoch=0, cls_static_anchors=None, mean_class_conf=None, risk_teacher=None, risk_generator=None):
         
         # Note: The domain is by default src, which indicates in the case of training that we care about applying supervision on the source domain (upper part of the architecture)
         # While during validation, we may want to evaluate the losses on the target domain only (lower part of the architecture)
@@ -741,8 +752,12 @@ class SADA(nn.Module):
             out_rb_logits = None
 
         # out_offset: List[B, 2, T_i]
-        out_offsets_src, out_actionness_src = self.reg_head(fpn_feats_src, fpn_masks_src)
-        out_offsets_tgt, out_actionness_tgt= self.reg_head_target(fpn_feats_tgt, fpn_masks_tgt)
+        if self.endpoint_risk is not None and mode=='train':
+            out_offsets_src,out_actionness_src,risk_features_src=self.reg_head(fpn_feats_src,fpn_masks_src,return_features=True)
+            out_offsets_tgt,out_actionness_tgt,risk_features_tgt=self.reg_head_target(fpn_feats_tgt,fpn_masks_tgt,return_features=True)
+        else:
+            out_offsets_src, out_actionness_src = self.reg_head(fpn_feats_src, fpn_masks_src)
+            out_offsets_tgt, out_actionness_tgt= self.reg_head_target(fpn_feats_tgt, fpn_masks_tgt)
         
         out_offsets = [torch.cat((out_offsets_src[i], out_offsets_tgt[i]), dim=0) for i in range(len(out_offsets_src))]
         out_actionness = [torch.cat((out_actionness_src[i], out_actionness_tgt[i]), dim=0) for i in range(len(out_offsets_src))]
@@ -846,6 +861,22 @@ class SADA(nn.Module):
                     losses['rq3_'+key]=torch.as_tensor(value,device=self.device).detach()
                 losses['downstream_loss']=losses['downstream_loss']+auxiliary['loss']
 
+            if mode=='train' and self.endpoint_risk is not None:
+                source_variance=self.endpoint_risk(risk_features_src)
+                target_variance=self.endpoint_risk(risk_features_tgt)
+                self.endpoint_risk.source_loss(source_variance,
+                    [x.permute(0,2,1) for x in out_offsets_src],fpn_masks_src,
+                    gt_cls_labels_src,gt_offsets_src)
+                observation=dict(points=points,offsets=[x.permute(0,2,1) for x in out_offsets_tgt],
+                    masks=fpn_masks_tgt,variance=target_variance,
+                    logits=[x.permute(0,2,1) for x in out_cls_logits_tgt],
+                    metadata=[dict(v['metadata']) for v in video_list_tgt])
+                boundary_loss=self.endpoint_risk.target_loss(video_list_tgt,self.rq3_capacity.cache,
+                    self.rq3_capacity.confidence_threshold,observation,risk_teacher,curr_epoch,risk_generator)
+                losses['downstream_loss']=losses['downstream_loss']+boundary_loss
+                for key,value in self.endpoint_risk.statistics.items():
+                    losses['endpoint_'+key]=torch.as_tensor(value,device=self.device).detach()
+
             # Return the GTs of the target domain as well, to be used to compute the anchors
             gt_tgt_cls = torch.stack(gt_cls_labels[bs:])   # shape: List of B elements B x FT x C
             gt_tgt_cls = gt_tgt_cls[valid_mask_tgt_pl]  # T' x C
@@ -896,6 +927,24 @@ class SADA(nn.Module):
             return results_src, results_tgt
         
         
+    @torch.no_grad()
+    def endpoint_observation(self, videos, mode='train'):
+        """显式EMA单流前向；不能用共享source/target名称冒充独立教师。"""
+        if self.training or self.endpoint_risk is None or self.use_trident_head:
+            raise ValueError('必须是eval状态、带误差头的独立EMA模型')
+        if self.input_noise or self.cfg['model'].get('dropout',0):
+            raise ValueError('本版教师只支持冻结的无输入噪声/dropout配置')
+        if any(v['segments'].numel() or v['labels'].numel() for v in videos):
+            raise ValueError('教师观测不接受GT；source诊断也须独立去标注')
+        x,mask=self.preprocessing(videos,mode=mode)
+        features,masks,_=self.backbone_target(self.dropout(x),mask)
+        features,masks=self.neck_target(features,masks)
+        offsets,_,regression_features=self.reg_head_target(features,masks,return_features=True)
+        logits,_=self.cls_head_target(features,masks)
+        return dict(points=self.point_generator(features),offsets=[v.permute(0,2,1) for v in offsets],
+            masks=masks,variance=self.endpoint_risk(regression_features),
+            logits=[v.permute(0,2,1) for v in logits],metadata=[dict(v['metadata']) for v in videos])
+
     @torch.no_grad()
     def preprocessing(self, video_list, padding_val=0.0, mode=None):
         """
