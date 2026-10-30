@@ -5,6 +5,7 @@ import math
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -15,6 +16,40 @@ from tools.prototype_refresh import (SCHEMA,POLICY,SHIFTS,BASELINE,CONTROL,DIAGN
     prepare,freeze_scores,validate_cache,config_for,assert_pair,audit_entry)
 
 ACTIVE={}
+
+
+def reuse_frames(previous,root):
+    """只复用已完整抽取、但从未评分/训练的前序；不覆盖旧目录。"""
+    plan=read(previous/'plan.json');state=read(previous/'state.json')
+    proof=read(previous/'monitor/stopped_for_single_teacher.json')
+    if (plan['policy']!=POLICY or state['phase']!='waiting_four_gpu_teacher'
+            or proof['remaining_pids'] or proof['scored']!=0 or proof['formal_completed']!=0):
+        raise ValueError('前序并非已安全退出的纯CPU准备')
+    stat=Path('/proc')/str(state['pid'])/'stat'
+    if stat.exists() and stat.read_text().split(') ')[1][0]!='Z':raise ValueError('旧监督仍存活')
+    if list(previous.glob('teacher/predictions.jsonl')) or list(previous.glob('formal/*/*/metrics.jsonl')):
+        raise ValueError('前序已有评分/训练，不能使用零完成接续入口')
+    old=read(previous/'candidate_audit.json')
+    if old['status']!='passed' or old['count']!=1200 or set(old['shifts'])!=set(SHIFTS):
+        raise ValueError('前序帧准备不完整')
+    for s,item in old['shifts'].items():
+        path=Path(item['manifest'])
+        if sha(path)!=item['sha256'] or item['candidate_count']!=200:raise ValueError('前序帧清单改变')
+        m=read(path)
+        if m['target_gt_used'] is not False or m['frame_protocol']!=POLICY['frame_protocol']:
+            raise ValueError('前序帧协议不符')
+        if len(m['candidates'])!=200 or len({x['candidate_id'] for x in m['candidates']})!=200:
+            raise ValueError('前序实际候选不是200个唯一身份')
+        for row in m['candidates']:
+            if len(row['frames'])!=8 or len(set(row['frames']))!=8:raise ValueError('八帧输入不完整')
+            for index in row['frames']:
+                if not (path.parent/'frames'/row['candidate_id']/(str(index)+'.png')).is_file():
+                    raise ValueError('实际帧文件缺失')
+    shutil.copyfile(previous/'candidate_audit.json',root/'candidate_audit.json')
+    save(root/'predecessor.json',dict(previous_root=str(previous),frames_reused_without_requery=True,
+        previous_plan_sha256=sha(previous/'plan.json'),candidate_audit_sha256=sha(previous/'candidate_audit.json'),
+        stop_proof_sha256=sha(previous/'monitor/stopped_for_single_teacher.json'),
+        old_code=plan['code'],new_code=code_identity(),only_resource_placement_changed=True))
 
 
 def stop(signum,frame):
@@ -107,23 +142,33 @@ def main(args):
     from tools.qwen_shard_gpu import acquire_four
     root=args.output_root.resolve();data=args.data_root.resolve();identity=code_identity()
     root.mkdir(parents=True,exist_ok=False);(root/'tmp').mkdir()
-    save(root/'plan.json',dict(schema=SCHEMA,policy=POLICY,code=identity,jobs=list(SHIFTS),gpus=[0,1,2,3],
+    save(root/'plan.json',dict(schema=SCHEMA,policy=POLICY,code=identity,jobs=list(SHIFTS),gpus=[0,1,2,3],teacher_mode=args.teacher_mode,
         control_root=str(CONTROL),new_student_trainings=6,source_only_model_selection=True))
     save(root/'state.json',dict(phase='audit_static_controls',pid=os.getpid()))
     refs={s:audit_control(CONTROL/'formal/control'/s) for s in SHIFTS}
     env=dict(os.environ,PYTHONPATH=str(CODE),PYTHONDONTWRITEBYTECODE='1',CUDA_VISIBLE_DEVICES='',
         PYTHONUNBUFFERED='1',OMP_NUM_THREADS='8',MKL_NUM_THREADS='8')
     save(root/'state.json',dict(phase='exact_frame_preparation',pid=os.getpid()))
-    run_cpu([str(args.teacher_python),'-B',str(Path(__file__).resolve()),'--prepare-only',
-        '--output-root',str(root),'--video-root',str(args.video_root),'--recovery-root',str(args.recovery_root)],root,'frames',env)
+    if args.prepared_root:reuse_frames(args.prepared_root.resolve(),root)
+    else:
+        run_cpu([str(args.teacher_python),'-B',str(Path(__file__).resolve()),'--prepare-only',
+            '--output-root',str(root),'--video-root',str(args.video_root),'--recovery-root',str(args.recovery_root)],root,'frames',env)
     if args.prepare_only:return
-    save(root/'state.json',dict(phase='waiting_four_gpu_teacher',pid=os.getpid()))
-    while not (found:=acquire_four([0,1,2,3],data,root,identity['commit'])):time.sleep(15)
-    context,cards=found;teacher=root/'teacher';teacher.mkdir()
+    save(root/'state.json',dict(phase='waiting_'+args.teacher_mode+'_gpu_teacher',pid=os.getpid()))
+    if args.teacher_mode=='four':
+        while not (found:=acquire_four([0,1,2,3],data,root,identity['commit'])):time.sleep(15)
+        context,cards=found
+    else:
+        # BF16权重约16GiB，单卡额外留激活空间；不改精度、帧数或像素上限。
+        while not (found:=acquire([3,0,1,2],data,root,22528,identity['commit'])):time.sleep(15)
+        context,card=found;cards=[card]
+    teacher=root/'teacher';teacher.mkdir()
     save(teacher/'active_leases.json',cards)
     scoring_env=dict(env,CUDA_VISIBLE_DEVICES=','.join(c['uuid'] for c in cards),HF_HUB_OFFLINE='1',
         TRANSFORMERS_OFFLINE='1',QWEN_SHARD_LEASES=str(teacher/'active_leases.json'),
         QWEN_SHARD_LEASES_SHA256=sha(teacher/'active_leases.json'))
+    if args.teacher_mode=='single':
+        scoring_env.update(SADA_BASELINE_LEASE=cards[0]['lease'],SADA_BASELINE_LEASE_SHA256=cards[0]['lease_sha256'])
     with (teacher/'inference.log').open('x') as f:
         p=subprocess.Popen([str(args.teacher_python),'-B',str(CODE/'tools/score_prototype_refresh.py'),'--root',str(root)],
             cwd=CODE,env=scoring_env,stdout=f,stderr=subprocess.STDOUT,start_new_session=True)
@@ -203,6 +248,8 @@ if __name__=='__main__':
     p.add_argument('--video-root',type=Path,default=Path('/vepfs/vlms/data/EPIC_KITCHENS/videos'))
     p.add_argument('--recovery-root',type=Path,default=Path('/vepfs/vlms/data/EPIC_KITCHENS/rq2_frame_recovery_qwen_0924'))
     p.add_argument('--teacher-python',type=Path,default=Path('/vepfs/vlms/envs/rq1-cu121/bin/python'))
+    p.add_argument('--teacher-mode',choices=['single','four'],default='single')
+    p.add_argument('--prepared-root',type=Path)
     p.add_argument('--prepare-only',action='store_true');p.add_argument('--child',choices=['probe','train','evaluate'])
     p.add_argument('--entry',type=Path)
     args=p.parse_args();signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)

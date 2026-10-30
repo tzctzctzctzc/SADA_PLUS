@@ -1,4 +1,4 @@
-"""四卡分片承载同一Qwen8B；沿用原native-video十类单token读出。"""
+"""单卡或四卡承载同一Qwen8B；沿用原native-video十类单token读出。"""
 import argparse
 import hashlib
 import importlib.metadata
@@ -39,14 +39,21 @@ def worker(root):
     processor=AutoProcessor.from_pretrained(MODEL,local_files_only=True)
     tokens=resolve_digit_token_ids(processor.tokenizer)
     torch.set_num_threads(8)
-    proof=first_cuda_guard_four(teacher)
+    mode=read(root/'plan.json').get('teacher_mode','four')
+    if mode=='four':
+        proof=first_cuda_guard_four(teacher)
+        placement=dict(device_map='balanced',max_memory={i:f'{WEIGHT_BUDGET_MIB}MiB' for i in range(4)})
+    else:
+        from tools.baseline_gpu import first_cuda_guard
+        proof=first_cuda_guard();placement=dict(device_map={'':0})
     model,info=Qwen3VLForConditionalGeneration.from_pretrained(MODEL,dtype=torch.bfloat16,
         attn_implementation='sdpa',local_files_only=True,output_loading_info=True,
-        device_map='balanced',max_memory={i:f'{WEIGHT_BUDGET_MIB}MiB' for i in range(4)})
+        **placement)
     if any(info.get(k) for k in ('missing_keys','unexpected_keys','mismatched_keys','error_msgs')):
         raise ValueError('Qwen模型加载不完整')
     used={str(v).replace('cuda:','') for v in model.hf_device_map.values()}
-    if used!={'0','1','2','3'}:raise ValueError('必须真实四卡分片且禁止CPU/disk卸载')
+    expected={'0','1','2','3'} if mode=='four' else {'0'}
+    if used!=expected:raise ValueError('实际放置不符合租约，禁止CPU/disk卸载')
     model.eval().requires_grad_(False)
     save(teacher/'device_map.json',dict(map={k:str(v) for k,v in model.hf_device_map.items()},
         uuids=os.environ['CUDA_VISIBLE_DEVICES']))
@@ -77,13 +84,13 @@ def worker(root):
                 stream.write(json.dumps(out,allow_nan=False)+'\n');stream.flush();count+=1
                 if count==1 or count%20==0:
                     save(teacher/'progress.json',dict(scored=count,total=1200,seconds=time.monotonic()-started,
-                        peak_reserved_mib={str(i):torch.cuda.max_memory_reserved(i)/2**20 for i in range(4)}))
+                        peak_reserved_mib={str(i):torch.cuda.max_memory_reserved(i)/2**20 for i in range(len(expected))}))
                     print('TEACHER_SCORED',count,1200,flush=True)
     if count!=1200:raise ValueError('评分数量不是1200')
     save(teacher/'inference_complete.json',dict(status='passed',count=count,
         code=code_identity(),candidate_audit_sha256=sha(root/'candidate_audit.json'),
         predictions_sha256=sha(teacher/'predictions.jsonl'),model_identity_sha256=sha(teacher/'model_identity.json'),
-        device_map_sha256=sha(teacher/'device_map.json'),guard_sha256=sha(proof),seconds=time.monotonic()-started,
+        device_map_sha256=sha(teacher/'device_map.json'),guard_path=proof,guard_sha256=sha(proof),seconds=time.monotonic()-started,
         target_gt_used=False,policy=POLICY))
 
 

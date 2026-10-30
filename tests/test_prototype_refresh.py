@@ -105,7 +105,7 @@ def test_teacher_predictions_are_recomputed_and_frozen(tmp_path):
     save(teacher/'inference_complete.json',dict(status='passed',count=1200,
         predictions_sha256=sha(prediction),candidate_audit_sha256=sha(tmp_path/'candidate_audit.json'),
         policy=POLICY,target_gt_used=False,model_identity_sha256=sha(teacher/'model_identity.json'),
-        device_map_sha256=sha(teacher/'device_map.json'),guard_sha256=sha(teacher/'first_cuda_four.json')))
+        device_map_sha256=sha(teacher/'device_map.json'),guard_path=str(teacher/'first_cuda_four.json'),guard_sha256=sha(teacher/'first_cuda_four.json')))
     out=freeze_scores(tmp_path);assert len(out)==6
     for row in out.values():assert validate_cache(row['path'])['selected_count']==40
     pred[0]['digit_logits'][0]=99.
@@ -113,3 +113,26 @@ def test_teacher_predictions_are_recomputed_and_frozen(tmp_path):
     done=json.loads((teacher/'inference_complete.json').read_text());done['predictions_sha256']=sha(prediction)
     save(teacher/'inference_complete.json',done)
     with pytest.raises(ValueError):freeze_scores(tmp_path)
+
+
+def test_prepared_only_reuse_preserves_frames_and_rejects_prior_scoring(tmp_path):
+    from tools.run_prototype_refresh import reuse_frames
+    from tools.prototype_refresh import SHIFTS
+    old=tmp_path/'old';new=tmp_path/'new';new.mkdir()
+    save(old/'plan.json',dict(policy=POLICY,code={'commit':'old'}))
+    save(old/'state.json',dict(phase='waiting_four_gpu_teacher',pid=99999999))
+    save(old/'monitor/stopped_for_single_teacher.json',dict(remaining_pids=[],scored=0,formal_completed=0))
+    shifts={}
+    for s in SHIFTS:
+        path=old/'candidates'/s/'manifest.json'
+        rows=[dict(candidate_id=str(i),frames=list(range(8))) for i in range(200)]
+        for row in rows:
+            for i in row['frames']:
+                p=path.parent/'frames'/row['candidate_id']/(str(i)+'.png');p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(b'preserved')
+        save(path,dict(candidates=rows,target_gt_used=False,frame_protocol=POLICY['frame_protocol']))
+        shifts[s]=dict(manifest=str(path),sha256=sha(path),candidate_count=200)
+    save(old/'candidate_audit.json',dict(status='passed',count=1200,shifts=shifts))
+    before=sha(old/'candidate_audit.json');reuse_frames(old,new)
+    assert sha(new/'candidate_audit.json')==before==sha(old/'candidate_audit.json')
+    p=old/'teacher/predictions.jsonl';p.parent.mkdir();p.write_text('one existing prediction')
+    with pytest.raises(ValueError):reuse_frames(old,new)

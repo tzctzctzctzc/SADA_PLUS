@@ -121,8 +121,8 @@ def freeze_scores(root):
         raise ValueError('教师评分协议或GT隔离不符')
     for name,key in [('model_identity.json','model_identity_sha256'),('device_map.json','device_map_sha256')]:
         if sha(root/'teacher'/name) != proof[key]: raise ValueError('真实VLM身份/放置证明改变')
-    if sha(root/'teacher/first_cuda_four.json') != proof['guard_sha256']:
-        raise ValueError('真实四卡首CUDA证明改变')
+    if sha(proof['guard_path']) != proof['guard_sha256']:
+        raise ValueError('真实首CUDA证明改变')
     audit = read(root/'candidate_audit.json')
     rows = [json.loads(line) for line in predictions_path.read_text().splitlines()]
     by = {(x['shift'], x['candidate_id']): x for x in rows}
