@@ -51,3 +51,12 @@ def test_export_keeps_fixed_anchor_level_while_pool_uses_strongest_level():
     pool,fixed=raw_video(Model(),video,[anchor])
     assert pool[0]['level']==1 and fixed[0]['level']==0
     assert pool[0]['interval']==[.5,4.5] and fixed[0]['interval']==[2.,3.]
+
+
+def test_actual_batch_device_interface_preserves_video_dictionary_and_empty_gt():
+    import torch
+    from tools.check_candidate_refresh import to_device
+    video=dict(feats=torch.ones(3,4),segments=torch.empty(0,2),labels=torch.empty(0,dtype=torch.long),metadata={'video_id':'v'})
+    result=to_device(video,'cpu')
+    assert isinstance(result,dict) and result is not video
+    assert result['metadata']==video['metadata'] and result['segments'].shape==(0,2)

@@ -78,6 +78,12 @@ def raw_video(model,video,anchors):
     return pool,anchored
 
 
+def to_device(video,device):
+    from libs.trainer.da_trainer import move_to_device
+    # 官方接口接收batch列表；导出器逐视频处理，取回batch中的唯一元素。
+    return move_to_device([video],device)[0]
+
+
 def pool_metrics(rows,db):
     values=[];class_values=[];gt_count=0;recall={t:0 for t in [.3,.5,.7]};class_recall=dict(recall)
     by=defaultdict(list)
@@ -139,7 +145,7 @@ def worker(args):
     with torch.inference_mode():
         for i,video in enumerate(target):
             assert_no_target_gt([video]);vid=video['metadata']['video_id'];visited.append(vid)
-            rows,local=raw_video(model,move_to_device(video,'cuda:0'),anchors.get(vid,[]))
+            rows,local=raw_video(model,to_device(video,'cuda:0'),anchors.get(vid,[]))
             pool+=rows;fixed+=local
             if (i+1)%20==0:print('VIDEOS',i+1,len(target),flush=True)
     if set(visited)!=set(read(cfg['baseline']['target_manifest'])['database']):raise ValueError('目标训练视频未完整推理')
