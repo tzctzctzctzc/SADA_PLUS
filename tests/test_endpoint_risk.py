@@ -114,10 +114,9 @@ def test_unfrozen_invalid_options_rejected(key,value):
     with pytest.raises(ValueError):EndpointRisk(4,spec)
 
 
-def test_target_fixture(tmp_path):
+def target_case(mode='relative'):
     # 一个真实grid点对应一个原名单proposal，不需要GT。
-    from tools.baseline_protocol import save
-    head=EndpointRisk(4,options('relative'));head.install_calibration(certificate())
+    head=EndpointRisk(4,options(mode));head.install_calibration(certificate())
     head.options['warmup_epochs']=0
     x=torch.arange(64.).reshape(-1,1)
     grid=torch.cat((x,x*0,x*0+10000,x*0+1),1)
@@ -131,7 +130,12 @@ def test_target_fixture(tmp_path):
     video=dict(feats=torch.randn(4,64),segments=torch.empty(0,2),labels=torch.empty(0,dtype=torch.long),metadata=student['metadata'][0])
     row=dict(proposal_start_sec=16.,proposal_end_sec=36.,source_fpn_levels=[0],candidate_id='a',
         semantic_label='TAKE',class_probabilities=[.9]+[.1/9]*9,participation_selected=True)
-    cache={'t':[row]};before=deepcopy(cache)
+    cache={'t':[row]}
+    return head,video,cache,student,teacher
+
+
+def test_target_fixture(tmp_path):
+    head,video,cache,student,teacher=target_case();before=deepcopy(cache)
     loss=head.target_loss([video],cache,0.,student,teacher,6)
     assert loss>0 and head.statistics['selected_endpoints']==2 and cache==before
     loss.backward();assert teacher['offsets'][0].grad is None
@@ -141,6 +145,27 @@ def test_target_fixture(tmp_path):
     assert head.target_loss([video],cache,0.,student,teacher,6)==0
     video['labels']=torch.tensor([0])
     with pytest.raises(ValueError):head.target_loss([video],cache,0.,student,teacher,6)
+
+
+def test_single_candidate_random_control_is_reported_as_identity():
+    head,video,cache,student,teacher=target_case('random')
+    head.target_loss([video],cache,0.,student,teacher,6,torch.Generator().manual_seed(123))
+    assert head.statistics['random_swappable_groups']==0
+    assert head.statistics['random_changed_endpoints']==0
+
+
+def test_random_control_preserves_count_and_can_change_candidates():
+    head,video,cache,student,teacher=target_case('random')
+    cache['t'].append(dict(cache['t'][0],candidate_id='b',proposal_start_sec=38.,proposal_end_sec=58.))
+    # 同视频/同层/同类别/同时长箱，仅第二候选的预测师生风险顺序相反。
+    student['variance'][0]=torch.cat((torch.ones(1,40,2)*4,torch.ones(1,24,2)*.25),1)
+    changed=False
+    for seed in range(10):
+        head.target_loss([video],cache,0.,student,teacher,6,torch.Generator().manual_seed(seed))
+        assert head.statistics['selected_endpoints']==2
+        assert head.statistics['random_swappable_groups']==2
+        changed|=head.statistics['random_changed_endpoints']>0
+    assert changed
 
 
 def cpu_context(tmp_path, risk):
@@ -184,15 +209,26 @@ def test_true_original_training_loop_head_only_preserves_primary_and_rng(tmp_pat
     old=cpu_context(tmp_path,False);new=cpu_context(tmp_path,True)
     # 两次构造后固定同一输入，避免合成样本创建消耗的随机流差异。
     new.train_loader_src=deepcopy(old.train_loader_src);new.train_loader_tgt=deepcopy(old.train_loader_tgt)
+    for name,value in old.model.state_dict().items():assert torch.equal(value,new.model.state_dict()[name])
     before=tensor_digest(new.model.endpoint_risk.state_dict())
     torch.manual_seed(777);old._train_epoch(epoch);rng=torch.get_rng_state().clone()
     torch.manual_seed(777);new._train_epoch(epoch)
     assert torch.equal(rng,torch.get_rng_state())
     for name,value in old.model.state_dict().items():
-        assert torch.equal(value,new.model.state_dict()[name]),name
+        # 原版-vs-原版也有CPU反传累加尾数差；沿用官方loss/gradient对照的严格浮点容差。
+        torch.testing.assert_close(value,new.model.state_dict()[name],rtol=1e-6,atol=1e-8,msg=name)
     for name,value in old.model_ema.module.state_dict().items():
-        assert torch.equal(value,new.model_ema.module.state_dict()[name]),name
-    assert tensor_digest([x.state_dict() for x in optimizers(old)])==tensor_digest([x.state_dict() for x in optimizers(new)])
+        torch.testing.assert_close(value,new.model_ema.module.state_dict()[name],rtol=1e-6,atol=1e-8,msg=name)
+    def compare(a,b):
+        if torch.is_tensor(a):torch.testing.assert_close(a,b,rtol=1e-6,atol=1e-8)
+        elif isinstance(a,dict):
+            assert a.keys()==b.keys()
+            for key in a:compare(a[key],b[key])
+        elif isinstance(a,(tuple,list)):
+            assert len(a)==len(b)
+            for x,y in zip(a,b):compare(x,y)
+        else:assert a==b
+    compare([x.state_dict() for x in optimizers(old)],[x.state_dict() for x in optimizers(new)])
     assert before!=tensor_digest(new.model.endpoint_risk.state_dict())
     assert all(p.grad is None for p in new.model_ema.module.parameters())
     assert new.train_metrics.result()['t_endpoint_head_gradient_norm']>0

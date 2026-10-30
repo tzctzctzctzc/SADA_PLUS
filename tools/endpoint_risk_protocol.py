@@ -29,7 +29,18 @@ def audit_certificate(path):
         raise ValueError('不是实际训练保存点的独立源诊断')
     for key in ('checkpoint','source_manifest','source_pool','requests'):
         if sha(cert[key])!=cert[key+'_sha256']:raise ValueError('源机制绑定输入改变: '+key)
+    for feature,digest in cert['feature_inputs'].items():
+        if sha(feature)!=digest:raise ValueError('源诊断实际特征改变')
     return cert
+
+
+def validate_installed_certificate(cert):
+    if sha(cert['calibration_path'])!=cert['calibration_sha256']:
+        raise ValueError('源校准工件改变')
+    original=audit_certificate(cert['calibration_path'])
+    if any(cert.get(k)!=v for k,v in original.items()):
+        raise ValueError('保存点内风险尺度与原校准工件不一致')
+    return original
 
 
 def assert_pair(cfg, control):
@@ -82,6 +93,7 @@ def gate_audit(rows, factors, margin):
         if factor is None:continue
         for side in (0,1):
             if not factor['available'][side]:continue
+            if not row.get('allowed',[True,True])[side]:continue
             duration=row['duration']
             predicted=(row['student_sigma'][side]*factor['student'][side]-
                        row['teacher_sigma'][side]*factor['teacher'][side])/duration
@@ -158,7 +170,7 @@ def promote_checkpoint(source, calibration_path, output):
         raise ValueError('提升证据时改动了模型/历史/原优化器/RNG')
     if tensor_digest({k:v for k,v in loaded['endpoint_risk'].items() if k!='calibration'})!=extra_before:
         raise ValueError('提升证据时改动了误差头优化器/独立随机流')
-    proof=dict(status='passed',source=str(source.resolve()),source_sha256=sha(source),
+    proof=dict(status='passed',source=cert['checkpoint'],source_sha256=sha(source),
         promoted_sha256=sha(output),calibration_sha256=sha(calibration_path),
         all_training_state_unchanged=True)
     save(output.with_suffix('.promotion.json'),proof)
@@ -172,9 +184,7 @@ def assert_formal_ready(cfg, saved, acceptance):
     extra=saved.get('endpoint_risk',{});cert=extra.get('calibration')
     if not cert or cert['status']!='passed' or cert['code']!=cfg['baseline']['code']:
         raise ValueError('缺少当前代码的源机制证据')
-    if sha(cert['calibration_path'])!=cert['calibration_sha256']:
-        raise ValueError('校准来源改变')
-    audit_certificate(cert['calibration_path'])
+    validate_installed_certificate(cert)
     if not acceptance or acceptance.get('status')!='passed' or acceptance.get('device')!='cuda':
         raise ValueError('缺少真实GPU验收，CPU测试不能正式放行')
     if (acceptance['code']!=cfg['baseline']['code'] or acceptance['config_sha256']!=tensor_digest(cfg)
@@ -182,10 +192,17 @@ def assert_formal_ready(cfg, saved, acceptance):
         raise ValueError('验收未绑定本配置/代码/校准')
     required=['target_gt_zero','risk_head_updated','teacher_detached','rng_roundtrip']
     required+=['head_only_no_pseudo'] if cfg['endpoint_risk']['mode']=='head_only' else ['pseudo_gradient_nonzero']
+    if cfg['endpoint_risk']['mode']=='random':required.append('random_gate_actually_changed')
     for key in required:
         if acceptance.get(key) is not True:raise ValueError('GPU验收缺少真实检查: '+key)
+    if len(acceptance['reports'])!=1:raise ValueError('必须绑定唯一原始GPU验收报告')
     for path,digest in acceptance['reports'].items():
         if sha(path)!=digest:raise ValueError('真实GPU诊断记录改变')
+        report=read(path)
+        if {k:v for k,v in acceptance.items() if k!='reports'}!=report:
+            raise ValueError('放行凭证与原始GPU验收报告不一致')
+    if sha(acceptance['checkpoint_path'])!=acceptance['checkpoint_sha256']:
+        raise ValueError('真实验收的起始保存点改变')
     if sha(acceptance['gpu_guard'])!=acceptance['gpu_guard_sha256']:
         raise ValueError('首CUDA凭证改变')
     guard=read(acceptance['gpu_guard']);lease=read(guard['lease'])
@@ -202,6 +219,8 @@ def audit_entry(entry):
     reference=Path(record['control_complete'])
     if sha(reference)!=record['control_complete_sha256']:raise ValueError('原版配对完成凭证改变')
     assert_pair(cfg,read(reference.parent/'config.json'))
+    if read(entry/'detector_initialization.json')['sha256']!=read(reference.parent/'detector_initialization.json')['sha256']:
+        raise ValueError('新增头改变了原版检测器冷初始化')
     acceptance_path=Path(record['gpu_acceptance'])
     latest=torch.load(entry/'latest.pt',map_location='cpu')
     assert_formal_ready(cfg,latest,read(acceptance_path))

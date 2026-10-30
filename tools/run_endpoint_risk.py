@@ -45,6 +45,15 @@ def main(args):
         saved=torch.load(args.checkpoint,map_location='cpu') if args.checkpoint else {}
         acceptance=protocol.read(args.acceptance) if args.acceptance else None
         assert_formal_ready(cfg,saved,acceptance)
+        if protocol.sha(args.checkpoint)!=acceptance['checkpoint_sha256']:
+            raise ValueError('只能从真实GPU验收所验证的精确保存点开始')
+        if (args.output/'termination.json').exists() or (args.output/'complete.json').exists():
+            raise ValueError('已停止训练只允许补评估，不得重复训练')
+        import json
+        rows=[json.loads(x) for x in (args.output/'metrics.jsonl').read_text().splitlines()]
+        if [r['epoch'] for r in rows]!=list(range(1,saved['epoch']+1)):
+            raise ValueError('保存点落后于条目已完成轮次，或历史不完整；拒绝丢弃/重复训练')
+        if protocol.read(args.output/'config.json')!=cfg:raise ValueError('只能精确接续同一预热条目')
     if args.mode=='source_warmup':
         warm=cfg['endpoint_risk']['warmup_epochs']
         if not 0<warm<50 or warm%5:raise ValueError('预热需在显式冻结的源验证保存点暂停')
@@ -54,7 +63,6 @@ def main(args):
     guard=first_cuda_guard()
     if args.mode=='source_warmup':engine.train(cfg,args.output,pause_after=warm)
     elif args.mode=='train':
-        if protocol.read(args.output/'config.json')!=cfg:raise ValueError('只能精确接续同一预热条目')
         engine.train(cfg,args.output,resume=args.checkpoint)
     elif args.mode=='evaluate':
         saved=torch.load(args.output/'latest.pt',map_location='cpu')

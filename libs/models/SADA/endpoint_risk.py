@@ -131,6 +131,7 @@ class EndpointRisk(nn.Module):
             raise ValueError('目标GT不可进入定位辅助')
         mode=self.options['mode'];zero=student['offsets'][0].sum()*0.
         self.last_target_loss=zero
+        self.statistics.update(random_swappable_groups=0,random_changed_endpoints=0)
         if mode=='head_only' or epoch<=self.options['warmup_epochs']:
             self.statistics.update(eligible_proposals=0,selected_endpoints=0,pseudo_boundary_loss=0.,
                 left_selected=0,right_selected=0,pseudo_gradient_norm=0.)
@@ -158,7 +159,8 @@ class EndpointRisk(nn.Module):
                 semantic=int(teacher['logits'][level][batch,index].argmax())==cls
                 visible=torch.stack((tb>=0,tb<=length)).all(0)  # 左右分别拒绝越界端点。
                 candidates.append(dict(student=sb,teacher=tb,s_sigma=ss,t_sigma=ts,
-                    duration=b-a,level=level,allowed=visible & semantic,batch=batch,label=cls))
+                    duration=b-a,level=level,allowed=visible & semantic,batch=batch,label=cls,
+                    candidate_id=row['candidate_id']))
         n=len(candidates)
         if not n:
             self.statistics.update(eligible_proposals=0,selected_endpoints=0,pseudo_boundary_loss=0.,
@@ -177,15 +179,22 @@ class EndpointRisk(nn.Module):
                 if random_generator is None:raise ValueError('随机门控对照必须使用独立可恢复随机流')
                 # 在本批同层/类别/时长箱/左右中等数量抽样；教师坐标保持不变。
                 mixed=torch.zeros_like(gate)
+                swappable=0
                 for side in (0,1):
                     groups={}
                     for i,x in enumerate(candidates):
-                        groups.setdefault((x['level'],x['label'],math.floor(math.log2(x['duration']))),[]).append(i)
+                        groups.setdefault((x['batch'],x['level'],x['label'],math.floor(math.log2(x['duration']))),[]).append(i)
                     for indices in groups.values():
                         pool=[i for i in indices if bool(allowed[i,side])]
                         count=sum(bool(gate[i,side]) for i in indices)
+                        if len({candidates[i]['candidate_id'] for i in pool})<2:
+                            for i in indices:mixed[i,side]=gate[i,side]
+                            continue
+                        swappable+=int(0<count<len(pool))
                         order=torch.randperm(len(pool),generator=random_generator).tolist()
                         for j in order[:count]:mixed[pool[j],side]=True
+                self.statistics.update(random_swappable_groups=swappable,
+                    random_changed_endpoints=int((mixed!=gate).sum()))
                 gate=mixed
         loss=endpoint_loss(sb,tb,gate,duration,n)*self.options['target_weight']
         self.last_target_loss=loss
