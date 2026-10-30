@@ -134,7 +134,8 @@ def audit_entry(entry, expected_schema=SCHEMA, acceptance_path=None):
         if sha(path) != digest:
             raise ValueError('完成工件SHA改变: '+path)
     cfg = read(entry/'config.json')
-    if cfg.get('phase_alignment') and expected_schema!='prototype-relative-phase-alignment-v1':
+    phase_schema='prototype-phase-mechanism-control-v1' if cfg.get('phase_control') else 'prototype-relative-phase-alignment-v1'
+    if cfg.get('phase_alignment') and expected_schema!=phase_schema:
         raise ValueError('角色对齐不是旧基线/Prototype身份，必须使用专项审计')
     if cfg.get('background_oracle') and expected_schema!='rq3-background-positive-exclusion-oracle-v1':
         raise ValueError('使用目标GT的背景oracle不能冒充普通UDA/Prototype结果')

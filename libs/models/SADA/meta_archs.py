@@ -1512,8 +1512,16 @@ class SADA(nn.Module):
                             beta = self.cfg['model'].get('beta', 1.0)
                             if self.cfg.get('phase_alignment'):
                                 predict=lambda features: self.compute_level_dom_preds(features, reverse=True, level=l, curr_epoch=curr_epoch, beta=beta)
+                                role_options={};role_statistics={}
+                                if self.cfg.get('phase_control'):
+                                    from .phase_alignment import model_role_permuter
+                                    role_options=dict(role_mode=self.cfg['phase_control']['mode'],
+                                        permuter=model_role_permuter(self),statistics=role_statistics)
                                 domain_loss_src,domain_loss_tgt,n_roles=balanced_domain_losses(
-                                    predict,out_features_src,out_features_tgt,q_src,q_tgt,c==self.num_class_orig)
+                                    predict,out_features_src,out_features_tgt,q_src,q_tgt,c==self.num_class_orig,**role_options)
+                                for key,value in role_statistics.items():
+                                    name='phase_control_'+key+'_'+str(l)
+                                    losses[name]=losses.get(name,value*0)+value.detach()
                                 if c != self.num_class_orig:
                                     key='phase_common_roles_'+str(l)
                                     losses[key]=losses.get(key,domain_loss_src.new_zeros(()))+n_roles

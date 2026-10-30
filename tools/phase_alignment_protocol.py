@@ -142,7 +142,7 @@ def verify_source_gate(path):
     return gate
 
 
-def verify_probe(report,initial_detector_sha):
+def verify_probe(report,initial_detector_sha,role_mode='semantic'):
     """读取baseline_engine的真实报告命名，不去掉保留的rq3_前缀。"""
     if report['rng_roundtrip']['status']!='passed':raise ValueError('GPU完整恢复核验失败')
     if report['diagnostic_epochs']!=[1,2,3,4,5] or report['extra_timing_warmup_steps']!=0:
@@ -152,7 +152,15 @@ def verify_probe(report,initial_detector_sha):
     if not phase['branch_parameters_updated'] or phase['auxiliary']['rq3_target_gradient_norm']<=0:
         raise ValueError('原Prototype没有实际有效更新')
     if phase['target_gt_losses']!=[0.,0.,0.]:raise ValueError('目标GT监督不为0')
-    if sum(phase['phase_weight_separation'])<=0:raise ValueError('角色D仍然恒等')
+    if role_mode!='role_blind' and sum(phase['phase_weight_separation'])<=0:raise ValueError('角色D仍然恒等')
+    if role_mode!='semantic':
+        if not phase['phase_discriminator_updated']:raise ValueError('机制对照判别器未优化')
+        stats=phase['phase_alignment']
+        total=lambda key:sum(v for k,v in stats.items() if k.startswith('phase_control_'+key+'_'))
+        if total('condition_calls')<=0:raise ValueError('机制对照没有真正执行')
+        if role_mode=='role_blind' and total('nonuniform_input')!=0:raise ValueError('角色盲D仍读取角色信息')
+        if role_mode=='role_permuted' and (total('permutation_l1')<=0 or total('nonuniform_input')<=0):
+            raise ValueError('角色置换没有改变有效角色对应关系')
     if sum(v for k,v in phase['phase_alignment'].items() if k.startswith('phase_common_roles_'))<=0:
         raise ValueError('没有实际跨域角色对齐')
     if sum(v for k,v in phase['phase_alignment'].items() if k.startswith('phase_common_side_roles_'))<=0:

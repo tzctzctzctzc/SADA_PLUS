@@ -167,6 +167,7 @@ def tensor_digest(value):
 def controls(model):
     fields = ('loss_normalizer', 'loss_normalizer_pseudo_labels', 'train_label_smoothing',
               'cls_thres_prob', 'cls_thres_ti', 'ema_src_centroids', 'ema_tgt_centroids')
+    if getattr(model,'cfg',{}).get('phase_control'):fields+=('phase_permutation_counter',)
     return {k: deepcopy(getattr(model, k)) for k in fields}
 
 
@@ -179,7 +180,7 @@ def schedulers(ctx):
 
 
 def capture(ctx, cfg, epoch, history):
-    result=dict(schema=cfg.get('phase_alignment',{}).get('schema',cfg.get('background_oracle',{}).get('schema',cfg.get('endpoint_risk',{}).get('schema',SCHEMA))), config=cfg, epoch=epoch, history=deepcopy(history),
+    result=dict(schema=cfg.get('phase_control',{}).get('schema',cfg.get('phase_alignment',{}).get('schema',cfg.get('background_oracle',{}).get('schema',cfg.get('endpoint_risk',{}).get('schema',SCHEMA)))), config=cfg, epoch=epoch, history=deepcopy(history),
         state_dict=ctx.model.state_dict(), ema_state_dict=ctx.model_ema.module.state_dict(),
         model_controls=controls(ctx.model), ema_controls=controls(ctx.model_ema.module),
         optimizers=[x.state_dict() for x in optimizers(ctx)],
@@ -250,6 +251,7 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
         epoch_setup(ctx, epoch)
         originals = ctx.train_loader_src, ctx.train_loader_tgt
         before = tensor_digest(ctx.model.state_dict())
+        if cfg.get('phase_control'):disc_before=tensor_digest(ctx.model.disc_dom_conditional_adv.state_dict())
         if cfg.get('prototype_capacity'):
             branch_before=tensor_digest(dict(ctx.model.rq3_capacity.named_parameters()))
             special_before=tensor_digest({k:v for k,v in ctx.model.rq3_capacity.named_parameters()
@@ -277,6 +279,8 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
             if cfg.get('phase_alignment'):
                 reports[str(epoch)]['phase_alignment']={k[2:]:float(v) for k,v in values.items() if k.startswith('t_phase_')}
                 reports[str(epoch)]['phase_weight_separation']=phase_weight_separation(ctx.model)
+                if cfg.get('phase_control'):
+                    reports[str(epoch)]['phase_discriminator_updated']=disc_before!=tensor_digest(ctx.model.disc_dom_conditional_adv.state_dict())
             if cfg.get('background_oracle'):
                 reports[str(epoch)]['background_oracle']={k[2:]:float(v) for k,v in values.items() if k.startswith('t_oracle_')}
             reports[str(epoch)]['auxiliary']={k[2:]:float(v) for k,v in values.items() if k.startswith('t_rq3_')}
@@ -345,6 +349,7 @@ def train(cfg, entry, resume=None, pause_after=None):
         if history and decision(history)['reason'] != 'running': break
         print('BASELINE_EPOCH', cfg['baseline']['regime'], cfg['baseline']['shift'], epoch, flush=True)
         epoch_setup(ctx, epoch)
+        if cfg.get('phase_control'):disc_before=tensor_digest(ctx.model.disc_dom_conditional_adv.state_dict())
         previous_checked=ctx.checked_steps
         started = time.monotonic(); ctx._train_epoch(epoch); torch.cuda.synchronize()
         metrics = ctx.train_metrics.result()
@@ -364,6 +369,9 @@ def train(cfg, entry, resume=None, pause_after=None):
         if cfg.get('phase_alignment'):
             row['phase_alignment']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_phase_')}
             row['phase_weight_separation']=phase_weight_separation(ctx.model)
+            if cfg.get('phase_control'):
+                row['phase_discriminator_updated']=disc_before!=tensor_digest(ctx.model.disc_dom_conditional_adv.state_dict())
+                row['phase_permutation_counter']=ctx.model.phase_permutation_counter
         if epoch%5 == 0:
             ctx.valid_metrics_src.reset()
             value = float(ctx._valid_epoch(epoch, ctx.val_loader_src, domain='src'))
