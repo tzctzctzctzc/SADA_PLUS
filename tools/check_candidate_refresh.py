@@ -197,7 +197,8 @@ def evaluate_entry(entry):
 
 def supervisor(args):
     from tools.run_sada_baseline import acquire
-    root=args.output.resolve();root.mkdir(parents=True,exist_ok=False);identity=code_identity();active={};completed=[]
+    root=args.output.resolve();args.data_root=args.data_root.resolve();os.chdir(args.data_root)
+    root.mkdir(parents=True,exist_ok=False);identity=code_identity();active={};completed=[]
     save(root/'plan.json',dict(schema=SCHEMA,policy=POLICY,code=identity,gpus=[0,1,2,3]))
     def stop(signum,frame):
         signal.signal(signal.SIGTERM,signal.SIG_IGN);signal.signal(signal.SIGINT,signal.SIG_IGN)
