@@ -52,3 +52,27 @@ def test_zero_batch_statistic_is_a_lower_bound_not_unique_coverage(tmp_path):
     out=training_audit(tmp_path);row=out['epoch_statistics'][0]
     assert row['selected_exposures']==3 and row['minimum_fraction_batches_without_selected']==.7
     assert row['effective_target_coefficient']==.2 and out['unique_exposures_not_recorded']
+
+
+def test_gradient_groups_distinguish_backbone_from_detection_heads_without_updating_weights():
+    import torch
+    from torch import nn
+    from tools.audit_prototype_gradients import parameter_groups,gradients
+    m=nn.Module();m.backbone_source=nn.Linear(4,3);m.neck_source=nn.Identity()
+    m.cls_head=nn.Linear(3,2);m.cls_head_target=m.cls_head
+    m.reg_head=nn.Linear(3,2);m.reg_head_target=m.reg_head;m.rq3_capacity=nn.Linear(3,2)
+    before={k:v.clone() for k,v in m.state_dict().items()}
+    params,groups=parameter_groups(m);x=m.backbone_source(torch.ones(2,4))
+    auxiliary=m.rq3_capacity(x).square().mean();detection=m.reg_head(x).square().mean()
+    a=gradients(auxiliary,params,groups,True);b=gradients(detection,params,groups,False)
+    assert a['norms']['shared_fpn']>0 and a['norms']['auxiliary']>0
+    assert a['norms']['detection_regression']==a['norms']['detection_classification']==0
+    assert b['norms']['detection_regression']>0 and len(groups['detection_regression'])>0
+    assert all(torch.equal(v,m.state_dict()[k]) for k,v in before.items())
+
+
+def test_gradient_cosine_does_not_treat_zero_as_agreement():
+    import torch
+    from tools.audit_prototype_gradients import cosine
+    x=torch.tensor([1.,0.]);assert cosine(x,x)==1. and cosine(x,-x)==-1.
+    assert cosine(x,torch.zeros(2)) is None
