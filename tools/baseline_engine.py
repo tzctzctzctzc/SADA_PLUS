@@ -243,8 +243,10 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
     # 固定40/200名单不能用前6批覆盖来代表；诊断遍历完整原始epoch，不补抽候选。
     if cfg.get('prototype_capacity'):
         timed_steps=max(len(ctx.train_loader_src),len(ctx.train_loader_tgt))
+    diagnostic_epochs=list(range(1,6)) if cfg.get('phase_alignment') else [1,5]
+    if cfg.get('phase_alignment'):warmup_steps=0
     reports = {}
-    for epoch in (1, 5):
+    for epoch in diagnostic_epochs:
         epoch_setup(ctx, epoch)
         originals = ctx.train_loader_src, ctx.train_loader_tgt
         before = tensor_digest(ctx.model.state_dict())
@@ -254,8 +256,9 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
                                            if any(n in k for n in ('attention','pool_fusion'))})
             pool_before={name:tensor_digest(dict(module.named_parameters())) for name,module in
                 ctx.model.rq3_capacity.branch.named_children() if name in ('inside_attention','outside_attention','pool_fusion')}
-        ctx.train_loader_src, ctx.train_loader_tgt = [StepLoader(x, warmup_steps) for x in originals]
-        ctx._train_epoch(epoch)
+        if warmup_steps:
+            ctx.train_loader_src, ctx.train_loader_tgt = [StepLoader(x, warmup_steps) for x in originals]
+            ctx._train_epoch(epoch)
         ctx.train_metrics.reset()
         ctx.train_loader_src, ctx.train_loader_tgt = [StepLoader(x, timed_steps) for x in originals]
         torch.cuda.synchronize(); torch.cuda.reset_peak_memory_stats()
@@ -309,6 +312,7 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
                       cuda_seed_proof=ctx.cuda_seed_proof,
                       rng_roundtrip=dict(status='passed',cuda_rng_count=1,full_state_sha=tensor_digest(saved),
                                          replayed_draw_sha=expected_draw),
+                      diagnostic_epochs=diagnostic_epochs,extra_timing_warmup_steps=warmup_steps,
                       diagnostic_steps_per_phase=timed_steps))
 
 

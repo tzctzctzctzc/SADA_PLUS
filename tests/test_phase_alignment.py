@@ -211,9 +211,57 @@ def test_source_gate_recomputes_six_reports_and_receipts(tmp_path,drift):
 
 def test_probe_reads_engine_rq3_names_without_stripping_prefix():
     from tools.phase_alignment_protocol import verify_probe
-    report=dict(rng_roundtrip={'status':'passed'},initial_detector_sha='same',phases={'5':dict(
+    report=dict(rng_roundtrip={'status':'passed'},diagnostic_epochs=[1,2,3,4,5],extra_timing_warmup_steps=0,initial_detector_sha='same',phases={'5':dict(
         branch_parameters_updated=True,auxiliary={'rq3_target_gradient_norm':.001},target_gt_losses=[0.,0.,0.],
         phase_weight_separation=[1.,0.],phase_alignment={'phase_common_roles_0':.3,'phase_common_side_roles_0':.1})})
     verify_probe(report,'same')
     bad=copy.deepcopy(report);bad['phases']['5']['auxiliary']['rq3_target_gradient_norm']=0.
     with pytest.raises(ValueError):verify_probe(bad,'same')
+    bad=copy.deepcopy(report);bad['diagnostic_epochs']=[1,5]
+    with pytest.raises(ValueError,match='连续完整预热'):verify_probe(bad,'same')
+
+
+def test_no_formal_training_before_all_six_gpu_acceptances(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from tools import run_phase_alignment as runner
+    from tools import baseline_protocol as p
+    shifts=['S'+str(i) for i in range(1,7)]
+    args=SimpleNamespace(output_root=tmp_path/'run',data_root=tmp_path,control=tmp_path/'old',
+                         gpus=[0,1,2,3],minimum_free_mib=8192)
+    p.save(args.control/'final_audit.json',dict(status='passed'))
+    for shift in shifts:p.save(args.control/'formal/control'/shift/'detector_initialization.json',{'sha256':'same'})
+    monkeypatch.setattr(p,'code_identity',lambda:dict(commit='clean'))
+    monkeypatch.setattr(runner,'prepare',lambda *a:{s:{} for s in shifts})
+    monkeypatch.setattr(runner.time,'sleep',lambda seconds:None)
+    monkeypatch.setattr(runner,'terminate_owned',lambda:None)
+    monkeypatch.chdir(tmp_path)
+    class ReachedFormal(Exception):pass
+    class Process:
+        pid=999999
+        def poll(self):return 0
+    class Context:
+        def __exit__(self,*args):pass
+    def launch(shift,stage,entry,cfg,args,identity):
+        if stage=='train':
+            group=p.read(args.output_root/'acceptance_all6.json')
+            assert len(group['acceptance'])==6
+            assert all(p.read(args.output_root/'formal'/s/'acceptance.json')['status']=='passed' for s in shifts)
+            raise ReachedFormal()
+        if len(runner.ACTIVE)>=4:return False
+        entry.mkdir(parents=True);p.save(entry/'config.json',{})
+        if stage=='sourcecheck':
+            p.save(entry/'source_report.json',dict(shift=shift,rows=[{},{}],positive_points=100,true_phase_std=.1,
+                side_role_support_videos=[2,2],video_equal_mae=.05,video_equal_constant_mae=.1))
+            p.save(entry/'sourcecheck_gpu.json',{})
+        else:
+            p.save(entry/'probe_result.json',dict(rng_roundtrip={'status':'passed'},diagnostic_epochs=[1,2,3,4,5],
+                extra_timing_warmup_steps=0,initial_detector_sha='same',peak_reserved_mib=4000,
+                phases={'5':dict(branch_parameters_updated=True,auxiliary={'rq3_target_gradient_norm':.001},
+                    target_gt_losses=[0.,0.,0.],phase_weight_separation=[1.],
+                    phase_alignment={'phase_common_roles_0':.3,'phase_common_side_roles_0':.1})}))
+        runner.ACTIVE[shift]=dict(entry=entry,stage=stage,context=Context(),lease={'index':0},process=Process())
+        return True
+    monkeypatch.setattr(runner,'launch',launch)
+    try:
+        with pytest.raises(ReachedFormal):runner.main(args)
+    finally:runner.ACTIVE.clear()

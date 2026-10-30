@@ -145,6 +145,8 @@ def verify_source_gate(path):
 def verify_probe(report,initial_detector_sha):
     """读取baseline_engine的真实报告命名，不去掉保留的rq3_前缀。"""
     if report['rng_roundtrip']['status']!='passed':raise ValueError('GPU完整恢复核验失败')
+    if report['diagnostic_epochs']!=[1,2,3,4,5] or report['extra_timing_warmup_steps']!=0:
+        raise ValueError('必须按正式顺序连续完整预热1至5轮，不能跳过2至4轮')
     if report['initial_detector_sha']!=initial_detector_sha:raise ValueError('共同检测器冷初始化不配对')
     phase=report['phases']['5']
     if not phase['branch_parameters_updated'] or phase['auxiliary']['rq3_target_gradient_norm']<=0:
@@ -170,6 +172,11 @@ def audit(entry):
     if p.sha(record['source_gate'])!=record['source_gate_sha256']:
         raise ValueError('源角色门禁未过或改变')
     verify_source_gate(record['source_gate'])
+    group=p.read(record['group_acceptance'])
+    if p.sha(record['group_acceptance'])!=record['group_acceptance_sha256'] or group['status']!='passed' or len(group['acceptance'])!=6:
+        raise ValueError('缺少正式启动前六路全部验收证明')
+    for path,digest in group['acceptance'].items():
+        if p.sha(path)!=digest:raise ValueError('六路验收工件改变')
     acceptance=p.read(entry/'acceptance.json');probe=p.read(entry/'probe_result.json')
     if acceptance['report_sha256']!=p.sha(entry/'probe_result.json') or acceptance['source_gate_sha256']!=record['source_gate_sha256']:
         raise ValueError('真实验收未绑定当前GPU/source证明')

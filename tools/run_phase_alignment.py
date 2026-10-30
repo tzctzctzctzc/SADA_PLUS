@@ -79,11 +79,19 @@ def observed(root,phase,completed,pending):
 
 
 def launch(shift,stage,entry,cfg,args,identity):
-    found=acquire(args.gpus,args.data_root,args.output_root,args.minimum_free_mib,identity['commit'])
+    minimum=args.minimum_free_mib
+    if stage=='train':minimum=p.read(entry/'acceptance.json')['minimum_free_mib']
+    found=acquire(args.gpus,args.data_root,args.output_root,minimum,identity['commit'])
     if not found:return False
     context,lease=found
     try:
-        entry.mkdir(parents=True,exist_ok=False);p.save(entry/'config.json',cfg)
+        if stage=='train':
+            if p.read(entry/'config.json')!=cfg:raise ValueError('正式前配置改变')
+            refresh=dict(entry=entry,lease=lease)
+            formal_admission(refresh,p.read(entry/'probe_result.json'),args.output_root,identity,args.minimum_free_mib)
+            lease=refresh['lease']
+        else:
+            entry.mkdir(parents=True,exist_ok=False);p.save(entry/'config.json',cfg)
         process=spawn(stage,entry,lease,args.data_root,args.control/'formal/control'/shift)
     except BaseException:
         context.__exit__(None,None,None);raise
@@ -131,22 +139,34 @@ def main(args):
         if gate['status']!='passed':
             observed(root,'stopped_source_gate',[],[]);return
         pending=list(configs)
+        accepted=[]
+        # 全六路完成真实连续预热验收后才放行任何正式项。
+        while pending or ACTIVE:
+            for shift,task in list(ACTIVE.items()):
+                if task['process'].poll() is None:continue
+                if task['process'].returncode:raise RuntimeError(shift+' probe failed; outputs preserved')
+                entry=task['entry'];report=p.read(entry/'probe_result.json')
+                ref=args.control/'formal/control'/shift
+                verify_probe(report,p.read(ref/'detector_initialization.json')['sha256'])
+                required=max(args.minimum_free_mib,math.ceil(report['peak_reserved_mib']+2048))
+                p.save(entry/'acceptance.json',dict(status='passed',schema=SCHEMA,code=identity,batch=2,seed=123,
+                    source_gate_sha256=p.sha(root/'source_gate.json'),report_sha256=p.sha(entry/'probe_result.json'),
+                    minimum_free_mib=required,probe_peak_reserved_mib=report['peak_reserved_mib'],target_gt_used=False))
+                accepted.append(shift);task['context'].__exit__(None,None,None);del ACTIVE[shift]
+                print('ACCEPTANCE_PASSED',shift,flush=True)
+            for shift in list(pending):
+                if not launch(shift,'probe',root/'formal'/shift,configs[shift],args,identity):break
+                pending.remove(shift)
+            observed(root,'real_acceptance',[],pending);time.sleep(5)
+        if set(accepted)!=set(configs):raise ValueError('验收不是精确六方向')
+        p.save(root/'acceptance_all6.json',dict(status='passed',code=identity,
+            acceptance={str(root/'formal'/s/'acceptance.json'):p.sha(root/'formal'/s/'acceptance.json') for s in accepted}))
+        pending=list(configs)
         while pending or ACTIVE:
             for shift,task in list(ACTIVE.items()):
                 if task['process'].poll() is None:continue
                 if task['process'].returncode:raise RuntimeError(shift+' '+task['stage']+' failed; outputs preserved')
                 entry=task['entry'];cfg=configs[shift]
-                if task['stage']=='probe':
-                    report=p.read(entry/'probe_result.json')
-                    ref=args.control/'formal/control'/shift
-                    verify_probe(report,p.read(ref/'detector_initialization.json')['sha256'])
-                    required=formal_admission(task,report,root,identity,args.minimum_free_mib)
-                    p.save(entry/'acceptance.json',dict(status='passed',schema=SCHEMA,code=identity,batch=2,seed=123,
-                        source_gate_sha256=p.sha(root/'source_gate.json'),report_sha256=p.sha(entry/'probe_result.json'),
-                        minimum_free_mib=required,probe_peak_reserved_mib=report['peak_reserved_mib'],
-                        target_gt_used=False))
-                    task['stage']='train';task['process']=spawn('train',entry,task['lease'],args.data_root,ref)
-                    print('FORMAL_STARTED',shift,task['process'].pid,task['lease']['index'],flush=True);continue
                 if task['stage']=='train':
                     task['stage']='evaluate';task['process']=spawn('evaluate',entry,task['lease'],args.data_root,args.control/'formal/control'/shift);continue
                 paths=['config.json','runtime_config.json','seed_proof.json','detector_initialization.json','metrics.jsonl',
@@ -156,13 +176,15 @@ def main(args):
                 p.save(entry/'complete.json',dict(schema=SCHEMA,shift=shift,regime='uda',variant='relative_phase',code=identity,
                     target_gt_used=False,control_complete=str(reference),control_complete_sha256=p.sha(reference),
                     acceptance_sha256=p.sha(entry/'acceptance.json'),source_gate=str(root/'source_gate.json'),
+                    group_acceptance=str(root/'acceptance_all6.json'),group_acceptance_sha256=p.sha(root/'acceptance_all6.json'),
                     source_gate_sha256=p.sha(root/'source_gate.json'),artifacts={str(entry/n):p.sha(entry/n) for n in paths}))
                 os.chdir(args.data_root);completed.append(audit(entry));os.chdir(CODE)
                 task['context'].__exit__(None,None,None);del ACTIVE[shift]
                 print('PHASE_COMPLETE',shift,completed[-1]['map'],flush=True)
             for shift in list(pending):
-                if not launch(shift,'probe',root/'formal'/shift,configs[shift],args,identity):break
+                if not launch(shift,'train',root/'formal'/shift,configs[shift],args,identity):break
                 pending.remove(shift)
+                print('FORMAL_STARTED',shift,ACTIVE[shift]['process'].pid,ACTIVE[shift]['lease']['index'],flush=True)
             observed(root,'formal',completed,pending);time.sleep(5)
     except BaseException as error:
         p.save(root/'error.json',dict(error=repr(error),completed=completed,pending=pending))
