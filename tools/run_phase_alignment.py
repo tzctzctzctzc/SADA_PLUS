@@ -1,6 +1,7 @@
 """四卡共享的有限六方向实验：源坐标核验→真实验收→fresh训练→源选模全审。"""
 import argparse
 from copy import deepcopy
+import math
 import os
 from pathlib import Path
 import signal
@@ -11,14 +12,33 @@ CODE=Path(__file__).resolve().parents[1];sys.path.insert(0,str(CODE))
 from tools import baseline_protocol as p
 from tools.phase_alignment_protocol import prepare,audit,diagnose,source_decision,SOURCE_GATE
 from tools.run_sada_baseline import acquire
+from tools.baseline_gpu import snapshot
 from libs.models.SADA.phase_alignment import SCHEMA,POLICY
 
 ACTIVE={}
+STOPPING=False
+
+
+def terminate_owned():
+    processes=[t['process'] for t in list(ACTIVE.values())]
+    for process in processes:
+        if process.poll() is None:
+            try:os.killpg(process.pid,signal.SIGTERM)
+            except ProcessLookupError:pass
+    deadline=time.monotonic()+30
+    for process in processes:
+        try:process.wait(timeout=max(0,deadline-time.monotonic()))
+        except subprocess.TimeoutExpired:
+            try:os.killpg(process.pid,signal.SIGKILL)
+            except ProcessLookupError:pass
+            process.wait()
 
 
 def stop(signum,frame):
-    for task in list(ACTIVE.values()):
-        if task['process'].poll() is None:os.killpg(task['process'].pid,signal.SIGTERM)
+    global STOPPING
+    if STOPPING:return
+    STOPPING=True
+    terminate_owned()
     raise SystemExit(128+signum)
 
 
@@ -71,6 +91,18 @@ def launch(shift,stage,entry,cfg,args,identity):
     return True
 
 
+def formal_admission(task,report,root,identity,minimum):
+    # 继续持有同一物理锁；新阶段重新绑定实测峰值及首CUDA前动态复核。
+    required=max(minimum,math.ceil(report['peak_reserved_mib']+2048))
+    old=p.read(task['lease']['lease']);path=root/'gpu_admissions'/('formal_%d_%d.json'%(os.getpid(),time.time_ns()))
+    p.save(path,dict(owner_pid=os.getpid(),lock=old['lock'],observed=snapshot(task['lease']['index']),
+        minimum_free_mib=required,commit=identity['commit'],probe_peak_reserved_mib=report['peak_reserved_mib'],
+        additional_margin_mib=2048,probe_report=str(task['entry']/'probe_result.json'),
+        probe_report_sha256=p.sha(task['entry']/'probe_result.json')))
+    task['lease']=dict(index=task['lease']['index'],uuid=task['lease']['uuid'],lease=str(path),lease_sha256=p.sha(path))
+    return required
+
+
 def main(args):
     root=args.output_root;identity=p.code_identity();root.mkdir(exist_ok=False);(root/'tmp').mkdir()
     observed(root,'input_audit',[],[]);os.chdir(args.data_root)
@@ -115,8 +147,12 @@ def main(args):
                     if sum(phase['phase_weight_separation'])<=0:raise ValueError('角色D仍然恒等')
                     if sum(v for k,v in phase['phase_alignment'].items() if k.startswith('phase_common_roles_'))<=0:
                         raise ValueError('没有实际跨域角色对齐')
+                    if sum(v for k,v in phase['phase_alignment'].items() if k.startswith('phase_common_side_roles_'))<=0:
+                        raise ValueError('只有中间角色，不能冒充起中末对齐')
+                    required=formal_admission(task,report,root,identity,args.minimum_free_mib)
                     p.save(entry/'acceptance.json',dict(status='passed',schema=SCHEMA,code=identity,batch=2,seed=123,
                         source_gate_sha256=p.sha(root/'source_gate.json'),report_sha256=p.sha(entry/'probe_result.json'),
+                        minimum_free_mib=required,probe_peak_reserved_mib=report['peak_reserved_mib'],
                         target_gt_used=False))
                     task['stage']='train';task['process']=spawn('train',entry,task['lease'],args.data_root,ref)
                     print('FORMAL_STARTED',shift,task['process'].pid,task['lease']['index'],flush=True);continue
@@ -140,13 +176,15 @@ def main(args):
     except BaseException as error:
         p.save(root/'error.json',dict(error=repr(error),completed=completed,pending=pending))
         observed(root,'failed',completed,pending)
-        for task in ACTIVE.values():
-            if task['process'].poll() is None:os.killpg(task['process'].pid,signal.SIGTERM)
+        terminate_owned()
         raise
     if {r['shift'] for r in completed}!=set(configs):raise ValueError('不是精确六方向')
     comparison=[]
     for row in sorted(completed,key=lambda r:r['shift']):
-        old=p.read(args.control/'formal/control'/row['shift']/'evaluation/target_val.json')['map_0.1_to_0.5']
+        ref=args.control/'formal/control'/row['shift'];done=p.read(ref/'complete.json')
+        if p.sha(ref/'evaluation/target_val.json')!=done['artifacts'][str(ref/'evaluation/target_val.json')]:
+            raise ValueError('最终比较的原版结果SHA改变')
+        old=p.read(ref/'evaluation/target_val.json')['map_0.1_to_0.5']
         comparison.append(dict(shift=row['shift'],control=old,new=row['map'],delta_pp=100*(row['map']-old)))
     p.save(root/'comparison.json',dict(results=comparison,mean_delta_pp=sum(r['delta_pp'] for r in comparison)/6,
         target_gt_used_for_training=False,exploratory=True))

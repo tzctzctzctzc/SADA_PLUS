@@ -127,7 +127,58 @@ def test_pair_rejects_method_parameters_or_old_schema():
     bad=copy.deepcopy(cfg);bad['phase_alignment']['policy']['target']='target_gt'
     with pytest.raises(ValueError):assert_pair(bad,base)
     reports=[dict(shift='S'+str(i),rows=[{},{}],positive_points=100,true_phase_std=.1,
-                  video_equal_constant_mae=.1,video_equal_mae=.05) for i in range(1,7)]
+                  video_equal_constant_mae=.1,video_equal_mae=.05,side_role_support_videos=[2,2]) for i in range(1,7)]
     assert source_decision(reports)['status']=='passed'
     reports[0]['positive_points']=0
     assert source_decision(reports)['status']=='rejected_uninformative_source_phase'
+
+
+def test_reference_target_evaluation_drift_is_rejected(tmp_path):
+    from tools.phase_alignment_protocol import prepare
+    from tools import baseline_protocol as p
+    shared=tmp_path/'input.json';shared.write_text('{}');digest=p.sha(shared)
+    control=tmp_path/'control';results=[]
+    for shift in ['S'+str(i) for i in range(1,7)]:
+        ref=control/'formal/control'/shift;ref.mkdir(parents=True)
+        base=dict(seed=123,loader={'batch_size':2},dataset={'json_file':str(shared)},
+            prototype_capacity=dict(variant='control',prepared_cache=str(shared),prepared_cache_sha256=digest),
+            baseline=dict(code={'commit':'old'},tmpdir='/old',target_gt_used=False,
+                source_manifest_sha256=digest,target_manifest=str(shared),target_manifest_sha256=digest))
+        p.save(ref/'config.json',base);p.save(ref/'evaluation/target_val.json',{'map_0.1_to_0.5':.5})
+        p.save(ref/'detector_initialization.json',{'sha256':'cold'});(ref/'best.pt').write_text('weights')
+        paths=[ref/n for n in ['config.json','evaluation/target_val.json','detector_initialization.json','best.pt']]
+        p.save(ref/'complete.json',dict(artifacts={str(q):p.sha(q) for q in paths}))
+        results.append(dict(shift=shift,variant='control',complete=str(ref/'complete.json'),complete_sha256=p.sha(ref/'complete.json')))
+    p.save(control/'final_audit.json',dict(status='passed',count=12,results=results))
+    assert len(prepare(tmp_path/'new',control,{'commit':'new'}))==6
+    (control/'formal/control/S1/evaluation/target_val.json').write_text('drift')
+    with pytest.raises(ValueError,match='冻结原输入改变'):prepare(tmp_path/'bad',control,{'commit':'new'})
+
+
+def test_formal_admission_uses_measured_peak_and_same_lock(tmp_path,monkeypatch):
+    from tools import run_phase_alignment as runner
+    from tools import baseline_protocol as p
+    e=tmp_path/'entry';e.mkdir();p.save(e/'probe_result.json',dict(peak_reserved_mib=9000))
+    lease=tmp_path/'lease.json';p.save(lease,dict(lock='/data/.rq2_gpu0.lock'))
+    task=dict(entry=e,lease=dict(index=0,uuid='gpu',lease=str(lease)))
+    monkeypatch.setattr(runner,'snapshot',lambda index:dict(uuid='gpu',free_mib=10000))
+    required=runner.formal_admission(task,{'peak_reserved_mib':9000},tmp_path,{'commit':'clean'},8192)
+    record=p.read(task['lease']['lease'])
+    assert required==11048 and record['minimum_free_mib']==11048
+    assert record['lock']=='/data/.rq2_gpu0.lock' and p.sha(task['lease']['lease'])==task['lease']['lease_sha256']
+
+
+def test_stop_cleans_real_owned_process_groups():
+    import os,sys,subprocess
+    if os.name!='posix':pytest.skip('真实进程组只在Linux验证')
+    from tools import run_phase_alignment as runner
+    children=[subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],start_new_session=True) for _ in range(2)]
+    saved=runner.ACTIVE
+    try:
+        runner.ACTIVE={str(i):dict(process=p) for i,p in enumerate(children)}
+        runner.terminate_owned()
+        assert all(p.poll() is not None for p in children)
+    finally:
+        runner.ACTIVE=saved
+        for p in children:
+            if p.poll() is None:p.kill();p.wait()

@@ -8,6 +8,7 @@ from tools import baseline_protocol as p
 
 SOURCE_GATE=dict(videos_per_shift=12, minimum_videos=2, minimum_positive_points=64,
                  minimum_true_phase_std=.03, mean_mae_advantage_over_constant_must_be_positive=True,
+                 minimum_independent_videos_with_unit_mass_per_side_role=2,
                  target_gt_used=False, purpose='reject_uninformative_coordinate_not_target_gain_proof')
 
 
@@ -24,9 +25,17 @@ def assert_pair(cfg,base):
 
 def prepare(root,control,identity):
     configs={}
+    final=p.read(control/'final_audit.json')
+    previous={r['shift']:r for r in final.get('results',[]) if r.get('variant')=='control'}
+    if final['status']!='passed' or set(previous)!={'S'+str(i) for i in range(1,7)}:
+        raise ValueError('原版六方向没有完整终审')
     for shift in ['S'+str(i) for i in range(1,7)]:
         ref=control/'formal/control'/shift;base=p.read(ref/'config.json');done=p.read(ref/'complete.json')
+        if previous[shift]['complete']!=str(ref/'complete.json') or previous[shift]['complete_sha256']!=p.sha(ref/'complete.json'):
+            raise ValueError('原版完成项与原终审SHA不符')
         for path,digest in [(ref/'config.json',done['artifacts'][str(ref/'config.json')]),
+            (ref/'evaluation/target_val.json',done['artifacts'][str(ref/'evaluation/target_val.json')]),
+            (ref/'detector_initialization.json',done['artifacts'][str(ref/'detector_initialization.json')]),
             (Path(base['baseline']['target_manifest']),base['baseline']['target_manifest_sha256']),
             (Path(base['dataset']['json_file']),base['baseline']['source_manifest_sha256']),
             (Path(base['prototype_capacity']['prepared_cache']),base['prototype_capacity']['prepared_cache_sha256']),
@@ -98,6 +107,7 @@ def diagnose(cfg,reference,output):
         checkpoint=str(reference/'best.pt'),checkpoint_sha256=p.sha(reference/'best.pt'),
         selected_epoch=saved['epoch'],diagnostic_checkpoint_written=False,
         peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20)
+    report['side_role_support_videos']=[sum(sum(level['role_mass'][role] for level in row['levels'])>=1. for row in rows) for role in [0,2]]
     p.save(output,report)
 
 
@@ -105,7 +115,8 @@ def source_decision(reports):
     if len(reports)!=6 or {r['shift'] for r in reports}!={'S'+str(i) for i in range(1,7)}:
         raise ValueError('源预检不是精确六方向')
     support=all(len(r['rows'])>=SOURCE_GATE['minimum_videos'] and r['positive_points']>=SOURCE_GATE['minimum_positive_points']
-                and r['true_phase_std']>=SOURCE_GATE['minimum_true_phase_std'] for r in reports)
+                and r['true_phase_std']>=SOURCE_GATE['minimum_true_phase_std']
+                and min(r['side_role_support_videos'])>=SOURCE_GATE['minimum_independent_videos_with_unit_mass_per_side_role'] for r in reports)
     advantage=sum(r['video_equal_constant_mae']-r['video_equal_mae'] for r in reports)/6
     return dict(status='passed' if support and advantage>0 else 'rejected_uninformative_source_phase',
                 support_passed=support,equal_shift_mae_advantage=advantage,gate=SOURCE_GATE,
@@ -118,6 +129,8 @@ def audit(entry):
     ref=Path(record['control_complete'])
     if p.sha(ref)!=record['control_complete_sha256']:raise ValueError('原对照完成工件改变')
     assert_pair(cfg,p.read(ref.parent/'config.json'))
+    reference_eval=ref.parent/'evaluation/target_val.json'
+    if p.sha(reference_eval)!=p.read(ref)['artifacts'][str(reference_eval)]:raise ValueError('原版目标评估改变')
     if p.read(entry/'detector_initialization.json')['sha256']!=p.read(ref.parent/'detector_initialization.json')['sha256']:
         raise ValueError('共同检测器冷初始化不配对')
     if p.sha(record['source_gate'])!=record['source_gate_sha256'] or p.read(record['source_gate'])['status']!='passed':

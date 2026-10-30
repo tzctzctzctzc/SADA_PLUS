@@ -1517,6 +1517,9 @@ class SADA(nn.Module):
                                 if c != self.num_class_orig:
                                     key='phase_common_roles_'+str(l)
                                     losses[key]=losses.get(key,domain_loss_src.new_zeros(()))+n_roles
+                                    side=((q_src.sum(0)>=1)&(q_tgt.sum(0)>=1))[[0,2]].sum().detach().float()
+                                    key='phase_common_side_roles_'+str(l)
+                                    losses[key]=losses.get(key,domain_loss_src.new_zeros(()))+side
                             else:
                                 da_cond_pred_src = self.compute_level_dom_preds(out_features_src, reverse=True, level=l, curr_epoch=curr_epoch, beta=beta)
                                 da_cond_pred_tgt = self.compute_level_dom_preds(out_features_tgt, reverse=True, level=l, curr_epoch=curr_epoch, beta=beta)
