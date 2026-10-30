@@ -1,5 +1,9 @@
 import math
 import unittest
+import os
+from pathlib import Path
+import tempfile
+from unittest.mock import patch
 from tools.qwen_information import (mapping, prompt, inference_row, scores, offline_truth,
                                     complementarity, top20, binary_summary, STATES)
 
@@ -66,6 +70,33 @@ class InformationTests(unittest.TestCase):
         self.assertEqual([r['candidate_id'] for r in chosen],['x0','x1'])
         p=binary_summary(values,lambda r:r['score'],lambda r:r['truth'])
         self.assertEqual(p['auroc'],.5);self.assertEqual(p['precision_at_20percent'],.5)
+
+    @unittest.skipIf(os.name=='nt','物理flock在Linux执行')
+    def test_four_card_real_locks_and_parent_identity(self):
+        import fcntl
+        from tools.run_qwen_information import guard_four, MIN_FREE
+        from tools.baseline_protocol import save,sha
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);cards=[];locks=[]
+            try:
+                for i in range(4):
+                    lock=(root/f'card{i}.lock').open('a');locks.append(lock)
+                    fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                    lease=root/f'lease{i}.json'
+                    save(lease,dict(owner_pid=os.getppid(),lock=str(root/f'card{i}.lock'),minimum_free_mib=MIN_FREE))
+                    cards.append(dict(index=i,uuid=f'uuid-{i}',lease=str(lease),lease_sha256=sha(lease)))
+                save(root/'active_leases.json',cards)
+                env=dict(CUDA_VISIBLE_DEVICES=','.join(c['uuid'] for c in cards),QWEN_INFORMATION_LEASE_SHA=sha(root/'active_leases.json'))
+                observe=lambda i:dict(index=i,uuid=f'uuid-{i}',free_mib=MIN_FREE)
+                with patch.dict(os.environ,env),patch('tools.baseline_gpu.snapshot',side_effect=observe):
+                    guard_four(root)
+                    self.assertTrue((root/'validity/first_cuda.json').exists())
+                    locks[-1].close()
+                    with self.assertRaisesRegex(ValueError,'物理卡锁'):guard_four(root)
+                with patch.dict(os.environ,dict(env,CUDA_VISIBLE_DEVICES='uuid-0')):
+                    with self.assertRaisesRegex(ValueError,'可见GPU'):guard_four(root)
+            finally:
+                for lock in locks:lock.close()
 
 
 if __name__=='__main__':unittest.main()

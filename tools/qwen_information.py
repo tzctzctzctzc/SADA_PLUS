@@ -159,6 +159,13 @@ def analyze(root):
                 available = [r for r in subset if student in r['students']]
                 values[key] = {label: complementarity(available, student, teacher, label)
                     for label in ['unique_majority', 'clean_reference_label']}
+                values[key]['teacher_confidence_top20'] = complementarity(
+                    top20(available, lambda r:r[teacher]['confidence']), student, teacher, 'unique_majority')
+                values[key]['fixed_SHA20'] = complementarity(
+                    [r for r in available if r['fixed_20pct']], student, teacher, 'unique_majority')
+                values[key]['per_class'] = {str(c):complementarity(
+                    [r for r in available if r['truth']['unique_majority']==c], student, teacher, 'unique_majority')
+                    for c in range(10)}
                 values[key]['confidence_bins'] = []
                 for lo, hi in [(0., .5), (.5, .7), (.7, .9), (.9, 1.000001)]:
                     bins = [r for r in available if lo <= r['students'][student]['score'] < hi]
