@@ -9,6 +9,9 @@ from torch.nn import functional as F
 
 
 def specification(variant):
+    if variant=='geometry_weighted':
+        from .prototype_geometry import POLICY
+        return dict(specification('control'),variant=variant,geometry=dict(POLICY))
     if variant in ('temporal_pool','multi_prototype'):
         from .prototype_methods import method_specification
         return method_specification(variant)
@@ -32,7 +35,19 @@ def build_capacity(cfg,fpn_dim,num_classes,strides,regression_ranges,device):
     devices=[0] if torch.device(device).type=='cuda' else []
     with torch.random.fork_rng(devices=devices):
         torch.manual_seed(0)
-        result=RQ3ProposalPrototype(fpn_dim,num_classes,payload['by_video'],strides,regression_ranges,0.)
+        if cfg['variant']=='geometry_weighted':
+            from .prototype_geometry import GeometryPrototype,SCHEMA,POLICY
+            calibration=Path(cfg['geometry_calibration'])
+            if hashlib.sha256(calibration.read_bytes()).hexdigest()!=cfg['geometry_calibration_sha256']:
+                raise ValueError('几何源域校准凭证改变')
+            proof=json.loads(calibration.read_text())
+            if oracle or proof['schema']!=SCHEMA or proof['policy']!=POLICY or proof['target_gt_used']:
+                raise ValueError('几何分支必须普通VLM缓存和源域校准')
+            if proof['shift']!=payload['shift'] or proof['status']!='passed':
+                raise ValueError('几何尺度shift不符或源校准未通过')
+            result=GeometryPrototype(fpn_dim,num_classes,payload['by_video'],strides,regression_ranges,0.,tau=proof['tau'])
+        else:
+            result=RQ3ProposalPrototype(fpn_dim,num_classes,payload['by_video'],strides,regression_ranges,0.)
         if cfg['variant'] in ('temporal_pool','multi_prototype'):
             from .prototype_methods import make_method_branch
             torch.manual_seed(0)
@@ -440,7 +455,7 @@ class RQ3ProposalPrototype(nn.Module):
         self.confidence_threshold = confidence_threshold
 
     def forward(self, source_videos, target_videos, source_features, target_features, epoch,
-                source_masks=None,target_masks=None):
+                source_masks=None,target_masks=None,target_geometry=None):
         source = source_gt_proposals(source_videos, self.num_classes, len(self.strides), self.regression_ranges)
         encoded_source = (self.branch.encode_masked(source_features,source,self.strides,source_masks)
                           if hasattr(self.branch,'encode_masked') else self.branch.encode(source_features,source,self.strides))
@@ -461,6 +476,7 @@ class RQ3ProposalPrototype(nn.Module):
                           if hasattr(self.branch,'encode_masked') else self.branch.encode(target_features,target,self.strides))
         selection = self.branch.select_vlm_target(target)
         if 'valid' in encoded_target:selection['selected'] &= encoded_target['valid']
+        geometry = self.geometry_selection(target,selection,target_geometry) if hasattr(self,'geometry_selection') else {}
         if epoch >= 1:
             alignment, classes, _ = self.branch.prototype_alignment(
                 encoded_source, source_targets, encoded_target, selection)
@@ -480,4 +496,5 @@ class RQ3ProposalPrototype(nn.Module):
         for domain,encoded in [('source',encoded_source),('target',encoded_target)]:
             result.update({domain+'_'+k:v for k,v in encoded.get('statistics',{}).items()})
         if hasattr(self.branch,'diagnostics'):result.update(self.branch.diagnostics())
+        result.update(geometry)
         return result
