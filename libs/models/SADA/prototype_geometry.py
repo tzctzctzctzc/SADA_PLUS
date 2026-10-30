@@ -73,6 +73,14 @@ class GeometryBranch(VLMProposalCoAdaptationBranch):
         selected = selection['selected'].clone()
         labels = selection['labels']
         selected &= self.source_prototype_ready[labels]
+        # 更新原型之后才统计实际参与者，不能把尚无源原型的候选计成有效降权。
+        q=selection['geometry_weights'][selected].detach()
+        evidence=selected & (selection['geometry_point_counts']>=POLICY['minimum_points'])
+        self.geometry_statistics=dict(geometry_evidence=int(evidence.sum()),
+            geometry_missing=int((selected & ~evidence).sum()),
+            geometry_weight_mean=float(q.mean()) if q.numel() else 1.,
+            geometry_weighted_candidates=int((q<1.).sum()),
+            geometry_uncertainty_mean=float(selection['geometry_uncertainty'][evidence].mean()) if evidence.any() else 0.)
         zero = source['embedding'].sum() * 0. + target['embedding'].sum() * 0.
         if not selected.any():
             return zero, 0, zero.detach()
@@ -96,11 +104,6 @@ class GeometryPrototype(RQ3ProposalPrototype):
             raise ValueError('几何分支缺少本次普通前向的真实回归观测')
         result = proposal_weights(target, observation, self.geometry_tau)
         selection['geometry_weights'] = result['weights']
-        used = selection['selected'] & self.branch.source_prototype_ready[selection['labels']]
-        valid = used & (result['point_counts'] >= POLICY['minimum_points'])
-        q = result['weights'][used]
-        return dict(geometry_evidence=int(valid.sum()), geometry_missing=int((used & ~valid).sum()),
-                    geometry_weight_mean=float(q.mean()) if q.numel() else 1.,
-                    geometry_weighted_candidates=int((q < 1.).sum()),
-                    geometry_uncertainty_mean=float(result['uncertainty'][valid].mean()) if valid.any() else 0.,
-                    geometry_single_candidate_crop=sum(int(len(p['segments']) == 1) for p in target))
+        selection['geometry_point_counts']=result['point_counts']
+        selection['geometry_uncertainty']=result['uncertainty']
+        return dict(geometry_single_candidate_crop=sum(int(len(p['segments']) == 1) for p in target))

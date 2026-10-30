@@ -6,6 +6,18 @@ from tools import baseline_protocol as protocol
 from tools.prototype_geometry_protocol import source_summary
 
 
+def source_dense_observation(model,video):
+    """复用正式eval的源流模块；省去不用于此诊断的另一域与NMS。"""
+    x,mask=model.preprocessing([video],mode='test')
+    x=model.dropout(x)
+    feats,masks,_=model.backbone_source(x,mask)
+    fpn,masks=model.neck_source(feats,masks)
+    points=model.point_generator(fpn)
+    offsets,_=model.reg_head(fpn,masks)
+    logits,_=model.cls_head(fpn,masks)
+    return dict(points=points,offsets=[v.permute(0,2,1) for v in offsets],masks=masks),logits
+
+
 def calibrate(control_entry,source_pool,output,identity):
     import torch
     from libs.models.SADA import make_meta_arch
@@ -62,14 +74,7 @@ def calibrate(control_entry,source_pool,output,identity):
             gt=video['segments'].clone();video['segments']=gt.new_empty((0,2))
             video['labels']=video['labels'].new_empty((0,))
             video=move_to_device(video,'cuda:0')
-            x,mask=model.preprocessing([video],mode='test')
-            x=model.dropout(x)
-            feats,masks,_=model.backbone_source(x,mask)
-            fpn,masks=model.neck_source(feats,masks)
-            points=model.point_generator(fpn)
-            offsets,_=model.reg_head(fpn,masks)
-            logits,_=model.cls_head(fpn,masks)
-            observation=dict(points=points,offsets=[v.permute(0,2,1) for v in offsets],masks=masks)
+            observation,logits=source_dense_observation(model,video)
             for c in by_video[vid]:
                 entry=dict(proposal_start_sec=c['proposal'][0],proposal_end_sec=c['proposal'][1])
                 interval=feature_interval(entry,video['metadata'])

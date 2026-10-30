@@ -497,4 +497,5 @@ class RQ3ProposalPrototype(nn.Module):
             result.update({domain+'_'+k:v for k,v in encoded.get('statistics',{}).items()})
         if hasattr(self.branch,'diagnostics'):result.update(self.branch.diagnostics())
         result.update(geometry)
+        if geometry:result.update(getattr(self.branch,'geometry_statistics',{}))
         return result

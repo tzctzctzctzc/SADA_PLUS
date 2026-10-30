@@ -58,7 +58,8 @@ def test_single_candidate_weight_not_renormalized():
     s=dict(embedding=torch.empty(0,128,requires_grad=True))
     t=dict(embedding=torch.nn.functional.normalize(torch.ones(1,128),dim=-1).requires_grad_())
     target=torch.empty(0,2)
-    selection=dict(selected=torch.tensor([True]),labels=torch.tensor([0]),geometry_weights=torch.tensor([.25]))
+    selection=dict(selected=torch.tensor([True]),labels=torch.tensor([0]),geometry_weights=torch.tensor([.25]),
+        geometry_point_counts=torch.tensor([7]),geometry_uncertainty=torch.tensor([.5]))
     loss,_,_=b.prototype_alignment(s,target,t,selection)
     expected=.25*(1.-t['embedding'][0,0])
     torch.testing.assert_close(loss,expected)
@@ -177,3 +178,42 @@ def test_pairing_rejects_method_or_training_changes(tmp_path):
     cfg=config_for(old,proof,{'commit':'new'},tmp_path);assert_pair(cfg,old)
     cfg['opt']['learning_rate']=.2
     with pytest.raises(ValueError):assert_pair(cfg,old)
+
+
+def test_source_dense_calibration_matches_actual_test_forward():
+    from runpy import run_path
+    from pathlib import Path
+    from libs.models.SADA.meta_archs import SADA
+    from tools.calibrate_prototype_geometry import source_dense_observation
+    cfg=run_path(str(Path(__file__).with_name('test_corrected_baseline.py')))['small_config']()
+    video=run_path(str(Path(__file__).with_name('test_prototype_capacity.py')))['videos']()[0]
+    video['metadata']['duration']=64.;video['metadata']['video_length']=64
+    # inference读取与正式dataset相同的顶层元数据。
+    for key in ['video_id','fps','duration','feat_stride','feat_num_frames']:
+        video[key]=video['metadata'][key]
+    video['use_temporal_grid_feats']=False
+    model=SADA(cfg,'cpu');model.eval();captured=[]
+    hook=model.reg_head.register_forward_hook(lambda m,args,out:captured.append([v.detach().clone() for v in out[0]]))
+    with torch.no_grad():
+        model(video_list_src=[video],video_list_tgt=[video],mode='test',domain='source',curr_epoch=5)
+        before=torch.get_rng_state().clone()
+        observation,_=source_dense_observation(model,video)
+    hook.remove();assert torch.equal(before,torch.get_rng_state())
+    for reference,actual in zip(captured[0],observation['offsets']):
+        torch.testing.assert_close(reference.permute(0,2,1),actual,rtol=0,atol=0)
+
+
+@pytest.mark.skipif(__import__('os').name=='nt',reason='Linux实际进程组停止')
+def test_cleanup_only_stops_owned_process_group():
+    import subprocess,sys
+    from tools import run_prototype_geometry as queue
+    class Context:
+        released=False
+        def __exit__(self,*args):self.released=True
+    child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(300)'],start_new_session=True)
+    context=Context();queue.ACTIVE['test']=dict(process=child,context=context)
+    try:
+        queue.cleanup()
+        assert child.poll() is not None and context.released and not queue.ACTIVE
+    finally:
+        if child.poll() is None:child.kill();child.wait()
