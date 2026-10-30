@@ -238,6 +238,7 @@ def test_no_formal_training_before_all_six_gpu_acceptances(tmp_path,monkeypatch)
     class ReachedFormal(Exception):pass
     class Process:
         pid=999999
+        returncode=0
         def poll(self):return 0
     class Context:
         def __exit__(self,*args):pass
