@@ -5,7 +5,8 @@ import torch
 SCHEMA='rq3-background-positive-exclusion-oracle-v1'
 POLICY=dict(target_gt_used=True,scope='exclude-GT-positive-from-target-background-alignment-only',
     reassign_foreground_class=False,target_detection_supervision=False,
-    change_crop=False,change_sampling=False,source_routing_unchanged=True)
+    change_crop=False,change_sampling=False,source_routing_unchanged=True,
+    positive_definition='original-label_points-after-original-trunc_thresh-on-already-fixed-crop')
 
 
 def crop_annotations(record,metadata,task_classes,trunc_thresh):
