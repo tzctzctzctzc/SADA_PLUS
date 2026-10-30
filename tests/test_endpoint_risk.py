@@ -249,6 +249,30 @@ def test_risk_optimizer_scheduler_independent_rng_strict_roundtrip(tmp_path,monk
     with pytest.raises(ValueError):restore_extra(ctx,saved)
 
 
+def test_true_training_loop_relative_risk_updates_regression_and_separate_head(tmp_path,monkeypatch):
+    # 合成可控师生用于核验整条反传接线，不代表真实源校准/收益。
+    native=torch.tensor
+    monkeypatch.setattr(torch,'tensor',lambda *a,**kw:(lambda v:v.clone() if v.requires_grad and v.device.type=='cpu' else v)(native(*a,**kw)))
+    ctx=cpu_context(tmp_path,True)
+    ctx.cfg['endpoint_risk'].update(mode='relative',warmup_epochs=0)
+    student,teacher=ctx.model,ctx.model_ema.module
+    for model in (student,teacher):
+        model.endpoint_risk.options.update(mode='relative',warmup_epochs=0)
+        model.endpoint_risk.install_calibration(certificate())
+    with torch.no_grad():
+        student.endpoint_risk.head.weight.zero_();student.endpoint_risk.head.bias.fill_(2.)
+        teacher.endpoint_risk.head.weight.zero_();teacher.endpoint_risk.head.bias.fill_(-2.)
+        teacher.cls_head.cls_head.conv.weight.zero_()
+        teacher.cls_head.cls_head.conv.bias.fill_(-10.)
+        teacher.cls_head.cls_head.conv.bias[0]=10.
+    before=deepcopy(student.reg_head.state_dict());ctx._train_epoch(1)
+    metrics=ctx.train_metrics.result()
+    assert metrics['t_endpoint_selected_endpoints']>0 and metrics['t_endpoint_pseudo_gradient_norm']>0
+    assert metrics['t_endpoint_head_gradient_norm']>0
+    assert any(not torch.equal(v,student.reg_head.state_dict()[k]) for k,v in before.items())
+    assert all(p.grad is None for p in teacher.parameters())
+
+
 def test_teacher_observation_matches_real_head_and_never_reads_gt(tmp_path):
     from tools.calibrate_prototype_geometry import source_dense_observation,prepare_source_video
     ctx=cpu_context(tmp_path,True);teacher=ctx.model_ema.module;teacher.eval()
