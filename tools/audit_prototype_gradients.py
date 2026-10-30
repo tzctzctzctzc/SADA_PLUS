@@ -57,6 +57,13 @@ def gradients(loss,params,groups,retain):
     return dict(norms=norms,shared_vector=torch.cat(chunks))
 
 
+def offline_detection_loss(model,videos,epoch):
+    # 官方验证入口按单视频(src/tgt为同一视频)填充；不传入异长的验证batch。
+    losses=[model(video_list_src=[v],video_list_tgt=[v],mode='validation',domain='tgt',
+                  curr_epoch=epoch)[0]['downstream_loss'] for v in videos]
+    return sum(losses)/len(losses)
+
+
 def select_samples(ds,count,selected_cache=None):
     """按视频ID固定排序；目标选择只看缓存/特征长度，不看GT正确与否。"""
     from libs.models.SADA.prototype_capacity import fully_visible_cache
@@ -141,14 +148,14 @@ def worker(root,data):
             for a,b in zip(gt_cpu,targets[2*batch:2*batch+2]):
                 if not torch.equal(a['feats'],b['feats']):raise ValueError('GT评价与无标签路径特征不一致')
             gt=move_to_device(gt_cpu,'cuda:0')
-            gt_out=model(video_list_src=src,video_list_tgt=gt,mode='validation',domain='tgt',curr_epoch=saved['epoch'])[0]
-            g_gt=gradients(gt_out['downstream_loss'],params,groups,False)
+            gt_loss=offline_detection_loss(model,gt,saved['epoch'])
+            g_gt=gradients(gt_loss,params,groups,False)
             stats.update(norms={k:g['norms'] for k,g in [('SADA',g_base),('source_aux_ce',g_source),('target_alignment',g_target),('offline_target_GT_detection',g_gt)]},
                 cosine_with_target_GT={k:cosine(g['shared_vector'],g_gt['shared_vector']) for k,g in
                     [('SADA',g_base),('source_aux_ce',g_source),('target_alignment',g_target)]},
                 target_alignment_cosine_with_SADA=cosine(g_target['shared_vector'],g_base['shared_vector']),
-                offline_target_gt_detection_loss=float(gt_out['downstream_loss']))
-            batches.append(stats);del gt_out,g_base,g_source,g_target,g_gt,src,tgt,gt;gc.collect()
+                offline_target_gt_detection_loss=float(gt_loss),offline_GT_aggregation='mean_official_single_video_validation')
+            batches.append(stats);del gt_loss,g_base,g_source,g_target,g_gt,src,tgt,gt;gc.collect()
             print('GRADIENT_BATCH',s,batch,json.dumps(stats['cosine_with_target_GT']),flush=True)
         model.load_state_dict(saved['ema_state_dict'],strict=True);restore_controls(model,saved['ema_controls'])
         if tensor_digest(dict(model.named_parameters()))!=parameter_before:raise ValueError('诊断改变了模型参数')

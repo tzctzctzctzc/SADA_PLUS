@@ -76,3 +76,18 @@ def test_gradient_cosine_does_not_treat_zero_as_agreement():
     from tools.audit_prototype_gradients import cosine
     x=torch.tensor([1.,0.]);assert cosine(x,x)==1. and cosine(x,-x)==-1.
     assert cosine(x,torch.zeros(2)) is None
+
+
+def test_offline_gt_path_preserves_official_single_video_validation():
+    import torch
+    from tools.audit_prototype_gradients import offline_detection_loss
+    calls=[]
+    def model(**kw):
+        assert len(kw['video_list_src'])==len(kw['video_list_tgt'])==1
+        assert kw['video_list_src'][0] is kw['video_list_tgt'][0]
+        assert kw['mode']=='validation' and kw['domain']=='tgt'
+        v=kw['video_list_src'][0];calls.append(v['length']);return [dict(downstream_loss=v['loss'])]
+    x=torch.tensor(2.,requires_grad=True);y=torch.tensor(4.,requires_grad=True)
+    loss=offline_detection_loss(model,[dict(length=100,loss=x),dict(length=400,loss=y)],20)
+    assert calls==[100,400] and loss.item()==3.
+    assert tuple(float(g) for g in torch.autograd.grad(loss,[x,y]))==(.5,.5)
