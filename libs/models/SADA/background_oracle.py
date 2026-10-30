@@ -36,6 +36,7 @@ class BackgroundOracle:
         if set(self.database)!=set(manifest):raise ValueError('oracle成员必须精确等于原无标注target_train')
         if any(x['subset'].lower() not in cfg['tgt_train_split'] for x in self.database.values()):raise ValueError('oracle GT混入非target_train')
         self.task_classes=set(range(10));self.trunc_thresh=cfg['dataset']['trunc_thresh']
+        self.default_fps=cfg['dataset'].get('default_fps')
         if cfg['dataset']['action_subsampling']!='10_majority_classes':raise ValueError('oracle范围只允许当前10类任务')
 
     @torch.no_grad()
@@ -44,7 +45,9 @@ class BackgroundOracle:
         segments=[];labels=[]
         for video in videos:
             meta=video['metadata'];record=self.database[meta['video_id']]
-            if float(record['fps'])!=float(meta['fps']):raise ValueError('oracle视频时间单位不符')
+            # 与原dataset一致：配置固定fps优先，JSON可没有逐视频fps。
+            fps=self.default_fps if self.default_fps is not None else record['fps']
+            if float(fps)!=float(meta['fps']):raise ValueError('oracle视频时间单位不符')
             s,l=crop_annotations(record,meta,self.task_classes,self.trunc_thresh)
             segments.append(s.to(model.device));labels.append(l.to(model.device))
         classes,_=model.label_points(points,segments,labels)

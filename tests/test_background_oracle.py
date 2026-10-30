@@ -82,6 +82,16 @@ def test_training_entry_compiles():
     path=CODE/'tools/run_background_oracle.py';compile(path.read_text(encoding='utf8'),str(path),'exec')
 
 
+def test_configured_fps_takes_precedence_over_missing_json_fps(tmp_path):
+    from libs.models.SADA.meta_archs import SADA
+    cfg=model_config(tmp_path);cfg['dataset']['default_fps']=1.
+    model=SADA(cfg,'cpu');obj=model.background_oracle
+    obj.database['t'].pop('fps')
+    _,target=run_path(str(CODE/'tests/test_prototype_capacity.py'))['videos']()
+    x=torch.arange(64.).reshape(-1,1);points=[torch.cat((x,x*0,x*0+10000,x*0+1),1)]
+    assert obj.positive_masks(model,[target],points,[torch.ones(1,1,64,dtype=torch.bool)])[0].any()
+
+
 def test_oracle_configuration_cannot_change_training_budget(tmp_path):
     from tools.background_oracle_protocol import config_for,assert_pair
     base=dict(seed=123,loader=dict(batch_size=2),opt=dict(learning_rate=.0001),baseline=dict(code={},tmpdir='old',target_gt_used=False),prototype_capacity=dict(variant='control'))
