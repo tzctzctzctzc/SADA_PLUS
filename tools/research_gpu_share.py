@@ -20,7 +20,22 @@ def process_status(pid):
 
 def public_owner(path):
     result=subprocess.check_output(['lslocks','--json','--output','PID,PATH'],text=True)
-    owners={int(x['pid']) for x in json.loads(result).get('locks',[]) if x.get('path')==str(path)}
+    owners=set()
+    for row in json.loads(result).get('locks',[]):
+        if row.get('path')==str(path):owners.add(int(row['pid']));continue
+        if row.get('path') not in (None,'','/...'):continue
+        # overlay等文件系统上lslocks可能只显示/…；按真实FD身份识别，不猜路径。
+        directory=Path('/proc/%d/fd'%row['pid'])
+        try:descriptors=list(directory.iterdir())
+        except (FileNotFoundError,PermissionError):continue
+        for descriptor in descriptors:
+            try:
+                if not os.path.samefile(descriptor,path):continue
+                lines=(directory.parent/'fdinfo'/descriptor.name).read_text().splitlines()
+                for line in lines:
+                    if line.startswith('lock:') and ' FLOCK ' in line and ' WRITE ' in line:
+                        parts=line.split();owners.add(int(parts[parts.index('WRITE')+1]))
+            except (FileNotFoundError,PermissionError):continue
     if len(owners)>1:raise ValueError('公共锁存在多个拥有者')
     return next(iter(owners),None)
 
