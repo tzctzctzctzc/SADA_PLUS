@@ -9,6 +9,9 @@ from torch.nn import functional as F
 
 
 def specification(variant):
+    if variant in ('multi_stable','weight_020','weight_040'):
+        from .prototype_methods import revision_specification
+        return revision_specification(variant)
     if variant in ('temporal_pool','multi_prototype'):
         from .prototype_methods import method_specification
         return method_specification(variant)
@@ -37,6 +40,12 @@ def build_capacity(cfg,fpn_dim,num_classes,strides,regression_ranges,device):
             from .prototype_methods import make_method_branch
             torch.manual_seed(0)
             result.branch=make_method_branch(cfg['variant'],fpn_dim,num_classes)
+        if cfg['variant']=='multi_stable':
+            from .prototype_methods import StableMultiPrototypeBranch
+            torch.manual_seed(0)
+            result.branch=StableMultiPrototypeBranch(fpn_dim,num_classes,confidence_threshold=0.)
+        if cfg['variant'] in ('multi_stable','weight_020','weight_040'):
+            result.alignment_weight=spec['target_alignment_weight']
         if cfg['variant']=='wide_deep':
             torch.manual_seed(0)
             result.branch=VLMProposalCoAdaptationBranch(fpn_dim,num_classes,
@@ -467,7 +476,8 @@ class RQ3ProposalPrototype(nn.Module):
         else:
             self.branch._update_source_prototypes(encoded_source['embedding'], source_targets)
             alignment, classes = source_loss * 0.0, 0
-        loss = source_loss + 0.1 * alignment
+        target_weight=getattr(self,'alignment_weight',0.1)
+        loss = source_loss + target_weight * alignment
         result = {
             'loss': loss, 'source_loss': source_loss.detach(), 'alignment_loss': alignment.detach(),
             'eligible': len(encoded_target['embedding']),
@@ -475,8 +485,9 @@ class RQ3ProposalPrototype(nn.Module):
             'selected': int(selection['selected'].sum()) if epoch >= 1 else 0,
             'aligned_classes': classes,
             'gradient_norm': gradient_norm(loss, source_features + target_features),
-            'target_gradient_norm': gradient_norm(0.1 * alignment, target_features),
+            'target_gradient_norm': gradient_norm(target_weight * alignment, target_features),
         }
+        if hasattr(self,'alignment_weight'):result['target_alignment_weight']=target_weight
         for domain,encoded in [('source',encoded_source),('target',encoded_target)]:
             result.update({domain+'_'+k:v for k,v in encoded.get('statistics',{}).items()})
         if hasattr(self.branch,'diagnostics'):result.update(self.branch.diagnostics())

@@ -147,3 +147,95 @@ class MultiPrototypeBranch(VLMProposalCoAdaptationBranch):
         return dict(prototypes_ready=self.source_prototype_ready.sum().detach(),
             prototype_classes_with_multiple=(self.source_prototype_ready.sum(dim=1)>1).sum().detach(),
             prototype_source_updates=self.source_prototype_counts.sum().detach())
+
+
+REVISION_VARIANTS=('multi_stable','weight_020','weight_040')
+
+
+def revision_specification(variant):
+    if variant not in REVISION_VARIANTS:raise ValueError('未知新版独立实验')
+    spec=dict(variant=variant,embedding_dim=128,hidden_dim=256,layers=1,heads=4,dropout=0.,
+        pooling='mean',prototype_momentum=.9,source_weight=1.,
+        target_alignment_weight={'multi_stable':.1,'weight_020':.2,'weight_040':.4}[variant],
+        prototypes_per_class=3 if variant=='multi_stable' else 1,
+        target_negative_supervision=False)
+    if variant=='multi_stable':
+        spec.update(initialization_epoch=5,initialization='current_model_source_train_only_eval_snapshot',
+            warmup='epochs1_4_exact_single_prototype_alignment',source_vectors_per_class=256,
+            per_video_class_cap=16,cluster_steps=20,minimum_cluster_samples=8,
+            minimum_cluster_videos=2,maximum_center_cosine=.98,backoff=[3,2,1],
+            source_update='original_hard_assignment_batch_mean_EMA',target_match='same_class_hard_nearest',
+            target_used_to_fit_centers=False,forced_equal_occupancy=False)
+    return spec
+
+
+class StableMultiPrototypeBranch(MultiPrototypeBranch):
+    """先保留单中心；由源训练快照一次性建簇，禁止首批随机向量填满槽位。"""
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs)
+        self.register_buffer('source_bank_initialized',torch.tensor(False))
+        self.register_buffer('source_bank_support',torch.zeros(self.num_classes,3))
+        self.register_buffer('source_bank_videos',torch.zeros(self.num_classes,3))
+        self.register_buffer('target_prototype_counts',torch.zeros(self.num_classes,3))
+
+    @torch.no_grad()
+    def install_source_bank(self,banks):
+        if self.source_bank_initialized:raise ValueError('同一正式训练不能重复初始化源簇')
+        for c,bank in banks.items():
+            centers=bank['centers'].to(self.source_prototypes)
+            k=len(centers)
+            if not 1<=k<=3:raise ValueError('源簇数量非法')
+            self.source_prototypes[c].zero_();self.source_prototype_ready[c].zero_()
+            self.source_prototypes[c,:k].copy_(centers);self.source_prototype_ready[c,:k]=True
+            self.source_bank_support[c,:k].copy_(bank['counts'].to(self.source_bank_support))
+            self.source_bank_videos[c,:k].copy_(bank['videos'].to(self.source_bank_videos))
+        self.source_prototype_counts.zero_();self.target_prototype_counts.zero_()
+        self.source_bank_initialized.fill_(True)
+
+    @torch.no_grad()
+    def _update_source_prototypes(self,embeddings,targets):
+        if self.source_bank_initialized:
+            # 不再启用旧版“遇到不同向量就补槽位”的规则。
+            if targets is None or not targets.numel():return
+            for c in range(self.num_classes):
+                vectors=F.normalize(embeddings[targets[:,c]>0].detach(),dim=-1)
+                ready=self.source_prototype_ready[c]
+                if not len(vectors) or not ready.any():continue
+                assignments=(vectors@self.source_prototypes[c].T).masked_fill(~ready[None],-2.).argmax(1)
+                weights=F.one_hot(assignments,3).to(vectors);counts=weights.sum(0)
+                centers=weights.T@vectors/counts[:,None].clamp(min=1.)
+                changed=ready & (counts>0);old=self.source_prototypes[c]
+                new=F.normalize(self.prototype_momentum*old+(1-self.prototype_momentum)*centers,dim=-1)
+                self.source_prototypes[c].copy_(torch.where(changed[:,None],new,old))
+                self.source_prototype_counts[c].add_(counts)
+            return
+        # 前四轮逐步、逐算式保持原单原型更新；不更改早期目标辅助强度。
+        if targets is None or not targets.numel():return
+        sums=targets.T@embeddings.detach();counts=targets.sum(0)
+        for c in range(self.num_classes):
+            if float(counts[c])<=1e-6:continue
+            center=sums[c]/counts[c]
+            if self.source_prototype_ready[c,0]:
+                center=self.prototype_momentum*self.source_prototypes[c,0]+(1-self.prototype_momentum)*center
+            self.source_prototypes[c,0].copy_(F.normalize(center,dim=0));self.source_prototype_ready[c,0]=True
+            self.source_prototype_counts[c,0].add_(counts[c])
+
+    def prototype_alignment(self,source,source_targets,target,selection):
+        loss,classes,similarity=super().prototype_alignment(source,source_targets,target,selection)
+        with torch.no_grad():
+            selected=selection['selected'] & self.source_prototype_ready[selection['labels']].any(1)
+            if selected.any():
+                labels=selection['labels'][selected];vectors=target['embedding'][selected]
+                sim=(vectors[:,None]*self.source_prototypes[labels]).sum(-1)
+                index=sim.masked_fill(~self.source_prototype_ready[labels],-2.).argmax(1)
+                flat=labels*3+index
+                self.target_prototype_counts.add_(torch.bincount(flat,minlength=self.num_classes*3).reshape(self.num_classes,3))
+        return loss,classes,similarity
+
+    def diagnostics(self):
+        result=super().diagnostics();counts=self.source_prototype_counts
+        shares=counts/counts.sum(1,keepdim=True).clamp(min=1.)
+        result.update(source_bank_initialized=self.source_bank_initialized.float(),
+            source_centers_below_one_percent=((shares<.01)&self.source_prototype_ready).sum().detach(),
+            target_centers_used=(self.target_prototype_counts>0).sum().detach())
+        return result
