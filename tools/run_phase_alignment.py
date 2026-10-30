@@ -126,6 +126,7 @@ def main(args):
             observed(root,'source_mechanism',[],pending);time.sleep(3)
         gate=source_decision(reports)
         gate['reports']={str(root/'sourcecheck'/r['shift']/'source_report.json'):p.sha(root/'sourcecheck'/r['shift']/'source_report.json') for r in reports}
+        gate['gpu_receipts']={str(root/'sourcecheck'/r['shift']/'sourcecheck_gpu.json'):p.sha(root/'sourcecheck'/r['shift']/'sourcecheck_gpu.json') for r in reports}
         p.save(root/'source_gate.json',gate)
         if gate['status']!='passed':
             observed(root,'stopped_source_gate',[],[]);return

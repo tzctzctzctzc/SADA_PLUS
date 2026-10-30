@@ -182,3 +182,28 @@ def test_stop_cleans_real_owned_process_groups():
         runner.ACTIVE=saved
         for p in children:
             if p.poll() is None:p.kill();p.wait()
+
+
+@pytest.mark.parametrize('drift',[None,'report','receipt','decision'])
+def test_source_gate_recomputes_six_reports_and_receipts(tmp_path,drift):
+    from tools.phase_alignment_protocol import source_decision,verify_source_gate
+    from tools import baseline_protocol as p
+    reports=[];paths={};receipts={}
+    for i in range(1,7):
+        e=tmp_path/('S'+str(i));e.mkdir()
+        report=dict(shift='S'+str(i),rows=[{},{}],positive_points=100,true_phase_std=.1,
+            video_equal_constant_mae=.1,video_equal_mae=.05,side_role_support_videos=[2,2])
+        p.save(e/'source_report.json',report);reports.append(report)
+        p.save(e/'config.json',{});p.save(e/'lease.json',{})
+        p.save(e/'guard.json',dict(lease=str(e/'lease.json'),lease_sha256=p.sha(e/'lease.json')))
+        p.save(e/'sourcecheck_gpu.json',dict(guard=str(e/'guard.json'),guard_sha256=p.sha(e/'guard.json'),config_sha256=p.sha(e/'config.json')))
+        paths[str(e/'source_report.json')]=p.sha(e/'source_report.json')
+        receipts[str(e/'sourcecheck_gpu.json')]=p.sha(e/'sourcecheck_gpu.json')
+    gate=source_decision(reports);gate.update(reports=paths,gpu_receipts=receipts)
+    if drift=='decision':gate['equal_shift_mae_advantage']=1.
+    p.save(tmp_path/'gate.json',gate)
+    if drift=='report':p.save(tmp_path/'S1/source_report.json',{})
+    if drift=='receipt':p.save(tmp_path/'S1/sourcecheck_gpu.json',{})
+    if drift is None:assert verify_source_gate(tmp_path/'gate.json')['status']=='passed'
+    else:
+        with pytest.raises(ValueError):verify_source_gate(tmp_path/'gate.json')

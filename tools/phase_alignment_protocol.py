@@ -123,6 +123,25 @@ def source_decision(reports):
                 target_gt_used=False,not_target_gain_proof=True)
 
 
+def verify_source_gate(path):
+    gate=p.read(path);reports=[]
+    if len(gate['reports'])!=6 or len(gate['gpu_receipts'])!=6:raise ValueError('源门禁凭证不是六方向')
+    for report_path,digest in gate['reports'].items():
+        if p.sha(report_path)!=digest:raise ValueError('源诊断报告改变')
+        reports.append(p.read(report_path))
+        receipt_path=str(Path(report_path).parent/'sourcecheck_gpu.json')
+        if p.sha(receipt_path)!=gate['gpu_receipts'][receipt_path]:raise ValueError('源诊断GPU凭证改变')
+        receipt=p.read(receipt_path);guard=p.read(receipt['guard'])
+        if p.sha(receipt['guard'])!=receipt['guard_sha256'] or p.sha(guard['lease'])!=guard['lease_sha256']:
+            raise ValueError('源诊断锁/首CUDA凭证改变')
+        if receipt['config_sha256']!=p.sha(Path(report_path).parent/'config.json'):
+            raise ValueError('源诊断配置改变')
+    decision=source_decision(reports)
+    if decision['status']!='passed' or any(gate[k]!=v for k,v in decision.items()):
+        raise ValueError('源角色门禁无法独立复算')
+    return gate
+
+
 def audit(entry):
     import torch
     entry=Path(entry);record=p.read(entry/'complete.json');cfg=p.read(entry/'config.json')
@@ -133,8 +152,16 @@ def audit(entry):
     if p.sha(reference_eval)!=p.read(ref)['artifacts'][str(reference_eval)]:raise ValueError('原版目标评估改变')
     if p.read(entry/'detector_initialization.json')['sha256']!=p.read(ref.parent/'detector_initialization.json')['sha256']:
         raise ValueError('共同检测器冷初始化不配对')
-    if p.sha(record['source_gate'])!=record['source_gate_sha256'] or p.read(record['source_gate'])['status']!='passed':
+    if p.sha(record['source_gate'])!=record['source_gate_sha256']:
         raise ValueError('源角色门禁未过或改变')
+    verify_source_gate(record['source_gate'])
+    acceptance=p.read(entry/'acceptance.json');probe=p.read(entry/'probe_result.json')
+    if acceptance['report_sha256']!=p.sha(entry/'probe_result.json') or acceptance['source_gate_sha256']!=record['source_gate_sha256']:
+        raise ValueError('真实验收未绑定当前GPU/source证明')
+    minimum=max(8192,math.ceil(probe['peak_reserved_mib']+2048))
+    receipt=p.read(entry/'train_gpu.json');lease=p.read(p.read(receipt['guard'])['lease'])
+    if lease['minimum_free_mib']<minimum or lease['minimum_free_mib']!=acceptance['minimum_free_mib']:
+        raise ValueError('正式显存准入未覆盖真实峰值')
     rows=[json.loads(x) for x in (entry/'metrics.jsonl').read_text().splitlines()]
     active=[r for r in rows if r['epoch']>=cfg['train_cfg']['warmup_adv']]
     if not active or not any(sum(r['phase_weight_separation'])>0 for r in active):raise ValueError('角色判别器未更新')
