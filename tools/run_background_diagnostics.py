@@ -40,7 +40,7 @@ def worker(args):
         classification_threshold=cfg['model'].get('pl_threshold',.7),background_class_weight=cfg['model'].get('weight_no_class_adv',1.),
         target_gt_used_for_training=False,exploratory_target_gt_analysis=True)
     p.save(args.output/'plan.json',plan)
-    routing=[];predictions={name:[] for name in ['original','assigned_anchor_oracle','occupied_anchor_oracle','post_nms_background_oracle']}
+    routing=[];point_index=[];predictions={name:[] for name in ['original','assigned_anchor_oracle','occupied_anchor_oracle','post_nms_background_oracle']}
     null_checked=False;video_ids=[];feature_inputs={}
     for domain,splits in [('source',cfg['src_val_split']),('target',cfg['tgt_val_split'])]:
         ds=dataset(cfg,annotation,splits,False)
@@ -50,6 +50,7 @@ def worker(args):
             with torch.no_grad():
                 for role,model in models.items():
                     obs,logits=source_dense_observation(model,clean)
+                    point_data={}
                     # GT从此处开始仅用于诊断，不传给模型的特征前向。
                     classes,_=model.label_points(obs['points'],[original['segments'].to(device)],[original['labels'].to(device)])
                     sizes=[len(x) for x in obs['points']];assigned=[x.sum(-1)>0 for x in classes[0].split(sizes)]
@@ -59,6 +60,13 @@ def worker(args):
                             assigned[level].cpu().numpy(),occupied[level].cpu().numpy(),plan['classification_threshold'])
                         routing.append(dict(video_id=vid,domain=domain,role=role,level=level,
                             active_alignment_level=level in cfg['model'].get('semantic_alignment_levels',list(range(6))),counts=counts))
+                        scores=logits[level][0].sigmoid().T.cpu().numpy()
+                        for key,value in dict(confidence=scores.max(-1),category=scores.argmax(-1).astype(np.int16),
+                            valid=obs['masks'][level][0].reshape(-1).cpu().numpy().astype(bool),assigned=assigned[level].cpu().numpy(),inside=occupied[level].cpu().numpy()).items():
+                            point_data['l%d_%s'%(level,key)]=value
+                    point_file=args.output/'points'/domain/role/(vid+'.npz');point_file.parent.mkdir(parents=True,exist_ok=True)
+                    np.savez_compressed(point_file,**point_data)
+                    point_index.append(dict(video_id=vid,domain=domain,role=role,path=str(point_file),sha256=p.sha(point_file)))
                     if role=='ema':ema_data=(obs,logits,assigned,occupied)
                 if domain=='target':
                     obs,logits,assigned,occupied=ema_data;model=models['ema']
@@ -85,14 +93,14 @@ def worker(args):
     for row in predictions['original']:
         overlaps=iou(row['segment'],[g['segment'] for g in gt[row['video_id']]])
         if len(overlaps) and overlaps.max()>=SPEC['background_iou']:predictions['post_nms_background_oracle'].append(row)
-    p.save(args.output/'predictions.json',predictions);p.save(args.output/'ground_truth_for_diagnosis.json',gt);p.save(args.output/'routing.json',routing)
+    p.save(args.output/'predictions.json',predictions);p.save(args.output/'ground_truth_for_diagnosis.json',gt);p.save(args.output/'routing.json',routing);p.save(args.output/'point_index.json',point_index)
     maps={}
     for name,rows in predictions.items():
         columns={'video-id':np.asarray([r['video_id'] for r in rows]),'t-start':np.asarray([r['segment'][0] for r in rows]),
             't-end':np.asarray([r['segment'][1] for r in rows]),'label':np.asarray([r['label'] for r in rows]),'score':np.asarray([r['score'] for r in rows])}
         evaluator=ANETdetection(str(annotation),cfg['tgt_val_split'],num_workers=2,action_subsampling='10_majority_classes')
         ap,mean,*_=evaluator.evaluate(columns,verbose=False)
-        maps[name]=dict(map_0.1_to_0.5=float(mean),map_by_tiou=[float(x) for x in ap])
+        maps[name]={'map_0.1_to_0.5':float(mean),'map_by_tiou':[float(x) for x in ap]}
     reference=p.read(ref/'evaluation/target_val.json')['map_0.1_to_0.5']
     if abs(maps['original']['map_0.1_to_0.5']-reference)>1e-6:raise ValueError('未复算原mAP；拒绝据此解释oracle: '+str((reference,maps)))
     if before!=tensor_digest({k:m.state_dict() for k,m in models.items()}):raise ValueError('只读诊断改变模型')
@@ -103,7 +111,9 @@ def worker(args):
         reference_map_reproduced=True,single_stream_null_check_passed=null_checked,weights_unchanged=True,
         checkpoint_sha256=checkpoint_sha,feature_inputs=feature_inputs,
         limitations=['routing snapshots on validation data, not accumulated training gradients','point counts do not equal loss weights','oracles use target GT and are exploratory, not deployable methods','error counts are not additive AP contributions'],
-        training_performed=False,artifacts={str(args.output/name):p.sha(args.output/name) for name in ['plan.json','predictions.json','ground_truth_for_diagnosis.json','routing.json']})
+        training_performed=False,artifacts={str(args.output/name):p.sha(args.output/name) for name in ['plan.json','predictions.json','ground_truth_for_diagnosis.json','routing.json','point_index.json']})
+    from tools.background_routing_replay import replay
+    result['routing_replay']=replay(args.output,plan)
     p.save(args.output/'result.json',result);print('DIAGNOSTIC_DONE',args.shift,maps,flush=True)
 
 
