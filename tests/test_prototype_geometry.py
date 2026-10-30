@@ -204,6 +204,16 @@ def test_source_dense_calibration_matches_actual_test_forward():
         torch.testing.assert_close(reference.permute(0,2,1),actual,rtol=0,atol=0)
 
 
+def test_calibration_single_video_transfer_and_gt_copy():
+    from tools.calibrate_prototype_geometry import prepare_source_video
+    video=dict(feats=torch.ones(4,64),segments=torch.tensor([[10.,20.]]),labels=torch.tensor([0]),
+               metadata={'video_id':'source'})
+    clean,gt=prepare_source_video(video,'cpu')
+    assert clean['segments'].numel()==clean['labels'].numel()==0
+    assert torch.equal(gt,video['segments']) and gt.data_ptr()!=video['segments'].data_ptr()
+    assert video['labels'].tolist()==[0] and video['segments'].shape==(1,2)
+
+
 @pytest.mark.skipif(__import__('os').name=='nt',reason='Linux实际进程组停止')
 def test_cleanup_only_stops_owned_process_group():
     import subprocess,sys

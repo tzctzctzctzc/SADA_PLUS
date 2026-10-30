@@ -119,10 +119,12 @@ def main(args):
         teacher='qwen3_vl_8b',seed=123,batch=2,source_only_gate=True,old_control_reused=True))
     # 在任何新GPU训练前独立重审六个原版；不读取新方法target结果选择方案。
     references={s:audit_control(control/'formal/control'/s) for s in shifts}
+    from tools.calibrate_prototype_geometry import cpu_source_preflight
+    preflight={s:cpu_source_preflight(control/'formal/control'/s) for s in shifts}
     pool=read(args.source_pool)
     if pool['target_data_used']:raise ValueError('机制核验不能读取target GT')
     save(root/'inputs.json',dict(code=identity,control_root=str(control),references=references,
-        source_pool=str(args.source_pool),source_pool_sha256=sha(args.source_pool)))
+        cpu_source_preflight=preflight,source_pool=str(args.source_pool),source_pool_sha256=sha(args.source_pool)))
     phase='calibrate';pending=list(shifts);reports={};completed=[];minimum=12288
     try:
         while True:

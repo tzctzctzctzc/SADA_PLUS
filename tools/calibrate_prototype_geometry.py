@@ -6,6 +6,28 @@ from tools import baseline_protocol as protocol
 from tools.prototype_geometry_protocol import source_summary
 
 
+def prepare_source_video(video,device):
+    """搬运函数的参数是batch列表；GT只保留在独立的离线审计副本中。"""
+    from libs.trainer.da_trainer import move_to_device
+    clean=dict(video)
+    ground_truth=video['segments'].detach().clone().cpu()
+    clean['segments']=video['segments'].new_empty((0,2))
+    clean['labels']=video['labels'].new_empty((0,))
+    return move_to_device([clean],device)[0],ground_truth
+
+
+def cpu_source_preflight(control_entry):
+    from tools.baseline_engine import dataset
+    cfg=protocol.read(Path(control_entry)/'config.json')
+    ds=dataset(cfg,cfg['dataset']['json_file'],cfg['src_val_split'],False)
+    original=ds[0];clean,gt=prepare_source_video(original,'cpu')
+    protocol.assert_no_target_gt([clean])  # 同样要求送入几何模型的source副本无标注。
+    if not gt.numel() or original['segments'].numel()!=gt.numel():
+        raise ValueError('真实source入口缺GT审计副本或修改了原样本')
+    return dict(status='passed',video_id=clean['metadata']['video_id'],source_videos=len(ds),
+        feature_shape=list(clean['feats'].shape),single_video_transfer_via_batch=True,source_gt_copy_separate=True)
+
+
 def source_dense_observation(model,video):
     """复用正式eval的源流模块；省去不用于此诊断的另一域与NMS。"""
     x,mask=model.preprocessing([video],mode='test')
@@ -24,7 +46,6 @@ def calibrate(control_entry,source_pool,output,identity):
     from libs.models.SADA.prototype_capacity import feature_interval
     from libs.models.SADA.prototype_geometry import boundary_dispersion,SCHEMA,POLICY
     from tools.baseline_engine import dataset
-    from libs.trainer.da_trainer import move_to_device
     from libs.utils import fix_random_seed
 
     read,save,sha=protocol.read,protocol.save,protocol.sha
@@ -73,9 +94,7 @@ def calibrate(control_entry,source_pool,output,identity):
             video=ds[index];vid=video['metadata']['video_id']
             if vid not in by_video:continue
             # 保存源GT用于离线质量检查；从输入副本移除，模型只得到真实特征与元数据。
-            gt=video['segments'].clone();video['segments']=gt.new_empty((0,2))
-            video['labels']=video['labels'].new_empty((0,))
-            video=move_to_device(video,'cuda:0')
+            video,gt=prepare_source_video(video,'cuda:0')
             observation,logits=source_dense_observation(model,video)
             for c in by_video[vid]:
                 entry=dict(proposal_start_sec=c['proposal'][0],proposal_end_sec=c['proposal'][1])
