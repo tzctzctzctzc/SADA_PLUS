@@ -27,7 +27,7 @@ def point_record(student,teacher,teacher_logits,classes,targets,segment,level,le
     gt=decode(targets[level][index]);predicted=int(teacher_logits[level][0,:,index].argmax())
     semantic=bool(classes[level][index,predicted]>0)
     allowed=torch.stack((tb>=0,tb<=length)).all(0) & semantic
-    return dict(level=level,duration=float(b-a),absolute_point=float(point[0]),
+    return dict(level=level,duration=float(b-a),absolute_point=float(point[0]),class_index=predicted,
         student_error=(sb-gt).abs().cpu().tolist(),teacher_error=(tb-gt).abs().cpu().tolist(),
         student_boundary=sb.cpu().tolist(),teacher_boundary=tb.cpu().tolist(),reference_gt=gt.cpu().tolist(),
         allowed=allowed.cpu().tolist()),None

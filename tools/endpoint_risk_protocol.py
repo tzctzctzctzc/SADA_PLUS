@@ -98,11 +98,11 @@ def gate_audit(rows, factors, margin):
             predicted=(row['student_sigma'][side]*factor['student'][side]-
                        row['teacher_sigma'][side]*factor['teacher'][side])/duration
             gain=(row['student_error'][side]-row['teacher_error'][side])/duration
-            key=(row['video_id'],row['level'],side,math.floor(math.log2(duration)))
+            key=(row['video_id'],row['level'],row.get('class_index',-1),side,math.floor(math.log2(duration)))
             groups.setdefault(key,[]).append(dict(selected=predicted>margin,gain=gain,
                 teacher_risk=row['teacher_sigma'][side]*factor['teacher'][side]/duration))
     by_video={};selected=available=0
-    for (video,level,side,duration_bin),values in groups.items():
+    for (video,level,category,side,duration_bin),values in groups.items():
         chosen=[x for x in values if x['selected']];n=len(chosen);available+=len(values);selected+=n
         if not n:continue
         gain=sum(x['gain'] for x in chosen)
