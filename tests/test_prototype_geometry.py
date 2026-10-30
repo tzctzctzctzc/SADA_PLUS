@@ -118,3 +118,62 @@ def test_calibration_tamper_and_missing_observation_rejected(tmp_path):
     with pytest.raises(ValueError):g.geometry_selection([],dict(),None)
     with open(cfg['geometry_calibration'],'a') as f:f.write(' ')
     with pytest.raises(ValueError):build_capacity(cfg,8,10,[1],[[0,10000]],'cpu')
+
+
+def test_true_sada_geometry_reuses_forward_and_preserves_detector(tmp_path,monkeypatch):
+    from runpy import run_path
+    from pathlib import Path
+    from libs.models.SADA.meta_archs import SADA
+    from libs.models.SADA.optimizer import make_optimizer
+    small_config=run_path(str(Path(__file__).with_name('test_corrected_baseline.py')))['small_config']
+    videos=run_path(str(Path(__file__).with_name('test_prototype_capacity.py')))['videos']
+    native=torch.tensor
+    def cpu_copy(*args,**kwargs):
+        v=native(*args,**kwargs)
+        return v.clone() if v.requires_grad and v.device.type=='cpu' else v
+    monkeypatch.setattr(torch,'tensor',cpu_copy)
+    cfg=small_config();cfg['prototype_capacity']=config(tmp_path)
+    plain=deepcopy(cfg);plain['prototype_capacity']['variant']='control'
+    torch.manual_seed(123);old=SADA(plain,'cpu')
+    torch.manual_seed(123);new=SADA(cfg,'cpu')
+    assert all(torch.equal(v,new.state_dict()[k]) for k,v in old.state_dict().items())
+    calls=[]
+    hook=new.reg_head.register_forward_hook(lambda *x:calls.append(1))
+    s,t=videos()
+    torch.manual_seed(777);before=old(video_list_src=[s],video_list_tgt=[t],mode='train',curr_epoch=5)[0]
+    torch.manual_seed(777);after=new(video_list_src=[s],video_list_tgt=[t],mode='train',curr_epoch=5)[0]
+    hook.remove();assert len(calls)==3  # source/target/pl原有三次，无新增检测前向。
+    assert torch.equal(before['cls_loss'],after['cls_loss']) and torch.equal(before['reg_loss'],after['reg_loss'])
+    assert after['rq3_alignment_loss']<before['rq3_alignment_loss'] and after['rq3_target_gradient_norm']>0
+    opt=make_optimizer(new,cfg['opt'],.0001,exclude_params=['disc_dom_adv','disc_dom_conditional_adv','learnable_embeddings'])
+    ids={id(p) for g in opt.param_groups for p in g['params']}
+    assert all(id(p) in ids for p in new.rq3_capacity.parameters())
+    w=new.rq3_capacity.branch.input_projection.weight.detach().clone()
+    after['downstream_loss'].backward();opt.step()
+    assert not torch.equal(w,new.rq3_capacity.branch.input_projection.weight)
+
+
+def test_source_partition_tau_and_source_only_gate():
+    from tools.prototype_geometry_protocol import source_partitions,source_summary,mechanism_gate
+    fit,check=source_partitions(['a','b','c','d'])
+    assert not fit&check
+    rows=[dict(video_id=v,level=0,duration=10.,confidence=.8,
+        uncertainty=float(i),iou=1.-i/10) for v in fit|check for i in range(1,5)]
+    r=source_summary(rows);assert r['tau']==2.5 and r['audit_concordance']==1.
+    reports={'S'+str(i):{'summary':r} for i in range(1,7)}
+    assert mechanism_gate(reports)['status']=='passed'
+    for row in rows:row['iou']=row['uncertainty']/10.
+    bad=source_summary(rows);reports={s:{'summary':bad} for s in reports}
+    assert mechanism_gate(reports)['status']=='no_source_mechanism_signal'
+    with pytest.raises(ValueError):source_summary([dict(x,uncertainty=0.) for x in rows])
+
+
+def test_pairing_rejects_method_or_training_changes(tmp_path):
+    from tools.prototype_geometry_protocol import config_for,assert_pair
+    proof=tmp_path/'cal.json';proof.write_text(json.dumps(dict(code={'commit':'new'},shift='S1')))
+    old=dict(seed=123,loader=dict(batch_size=2),opt={'learning_rate':.1},
+        baseline=dict(code={'commit':'old'},shift='S1',tmpdir='/old',target_gt_used=False),
+        prototype_capacity=dict(variant='control',specification={},prepared_cache='/f',prepared_cache_sha256='sha'))
+    cfg=config_for(old,proof,{'commit':'new'},tmp_path);assert_pair(cfg,old)
+    cfg['opt']['learning_rate']=.2
+    with pytest.raises(ValueError):assert_pair(cfg,old)

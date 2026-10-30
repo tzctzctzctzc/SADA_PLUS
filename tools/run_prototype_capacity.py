@@ -44,6 +44,8 @@ def assert_pair(cfg,base):
 
 def audit(entry):
     entry=Path(entry);cfg=read(entry/'config.json');record=read(entry/'complete.json')
+    if cfg['prototype_capacity']['variant'] not in ('control','wide_deep'):
+        raise ValueError('此审计器仅接受原版/加宽加深，不能计入其他方法')
     base_entry=Path(record['baseline_complete']).parent
     if sha(base_entry/'complete.json')!=record['baseline_complete_sha256']:raise ValueError('配对基线完成凭证改变')
     base=read(base_entry/'config.json');assert_pair(cfg,base)
