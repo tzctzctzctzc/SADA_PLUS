@@ -567,6 +567,9 @@ class SADA(nn.Module):
                 raise ValueError('端点风险只适配当前原版Prototype与普通左右回归头')
             from .endpoint_risk import EndpointRisk
             self.endpoint_risk=EndpointRisk(head_dim,cfg['endpoint_risk'])
+        if cfg.get('phase_alignment'):
+            from .phase_alignment import expand_discriminators
+            expand_discriminators(self)
         
     @property
     def device(self):
@@ -1394,6 +1397,13 @@ class SADA(nn.Module):
                     
                     valid_mask_l_src = fpn_masks_src[l] # shape: B x T
                     valid_mask_l_tgt = fpn_masks_tgt[l] # shape: B x T
+                    if self.cfg.get('phase_alignment'):
+                        from .phase_alignment import role_probabilities, balanced_domain_losses
+                        start = sum(mask.shape[-1] for mask in fpn_masks_src[:l])
+                        width = valid_mask_l_src.shape[-1]
+                        # 只读源GT分配；target的gt_offsets从不用于角色。
+                        phase_gt = torch.stack(gt_offsets_src)[:, start:start+width][valid_mask_l_src]
+                        phase_pred = out_offsets_tgt[l][valid_mask_l_tgt].detach()
                     
                     # 1. Optional filtering of the anchors
                     out_cls_logits_tgt2 = out_cls_logits_tgt[l][valid_mask_l_tgt].sigmoid()  # shape: B(T_i) x C
@@ -1484,21 +1494,36 @@ class SADA(nn.Module):
                         # 2.3) Concatenate the learnable embedding of this class
                         out_features_src = torch.cat((out_features_src, self.learnable_embeddings[c].unsqueeze(0).expand(out_features_src.size(0), -1)), dim=-1)  # shape: N' x 2F
                         out_features_tgt = torch.cat((out_features_tgt, self.learnable_embeddings[c].unsqueeze(0).expand(out_features_tgt.size(0), -1)), dim=-1)  # shape: N'' x 2F
+                        if self.cfg.get('phase_alignment'):
+                            if c == self.num_class_orig:
+                                q_src = out_features_src.new_full((len(out_features_src), 3), 1/3)
+                                q_tgt = out_features_tgt.new_full((len(out_features_tgt), 3), 1/3)
+                            else:
+                                q_src, u_src = role_probabilities(phase_gt[class_c_mask_src])
+                                q_tgt, u_tgt = role_probabilities(phase_pred[class_c_mask_tgt])
+                                for tag, u in [('src', u_src), ('tgt', u_tgt)]:
+                                    prefix = 'phase_'+tag+'_'+str(l)+'_'
+                                    losses[prefix+'count'] = losses.get(prefix+'count', u.new_zeros(())) + u.numel()
+                                    losses[prefix+'sum'] = losses.get(prefix+'sum', u.new_zeros(())) + u.sum()
+                                    losses[prefix+'sum2'] = losses.get(prefix+'sum2', u.new_zeros(())) + u.square().sum()
                         
                         if 'conditional_rev' in self.cfg['model']['adv_method']:
                             # 2.4) Predict the domain of each of the embeddings (forward pass)
                             beta = self.cfg['model'].get('beta', 1.0)
-                            da_cond_pred_src = self.compute_level_dom_preds(out_features_src, reverse=True, level=l, curr_epoch=curr_epoch, beta=beta)  # shape: N' x 1
-                            da_cond_pred_tgt = self.compute_level_dom_preds(out_features_tgt, reverse=True, level=l, curr_epoch=curr_epoch, beta=beta)  # shape: N'' x 1
-                            
-                            # 2.5) Apply the reverse gradient strategy
-                            # Prepare the domain annotations
-                            source_domain_label = torch.zeros(da_cond_pred_src.size(0), dtype=torch.float32).to(self.device) # shape: T'
-                            target_domain_label = torch.ones(da_cond_pred_tgt.size(0), dtype=torch.float32).to(self.device)  # shape: T''
-                            
-                            # Compute the adversarial domain loss
-                            domain_loss_src = self.criterion_domain(torch.squeeze(da_cond_pred_src, -1), source_domain_label)
-                            domain_loss_tgt = self.criterion_domain(torch.squeeze(da_cond_pred_tgt, -1), target_domain_label)
+                            if self.cfg.get('phase_alignment'):
+                                predict=lambda features: self.compute_level_dom_preds(features, reverse=True, level=l, curr_epoch=curr_epoch, beta=beta)
+                                domain_loss_src,domain_loss_tgt,n_roles=balanced_domain_losses(
+                                    predict,out_features_src,out_features_tgt,q_src,q_tgt,c==self.num_class_orig)
+                                if c != self.num_class_orig:
+                                    key='phase_common_roles_'+str(l)
+                                    losses[key]=losses.get(key,domain_loss_src.new_zeros(()))+n_roles
+                            else:
+                                da_cond_pred_src = self.compute_level_dom_preds(out_features_src, reverse=True, level=l, curr_epoch=curr_epoch, beta=beta)
+                                da_cond_pred_tgt = self.compute_level_dom_preds(out_features_tgt, reverse=True, level=l, curr_epoch=curr_epoch, beta=beta)
+                                source_domain_label = torch.zeros(da_cond_pred_src.size(0), dtype=torch.float32).to(self.device)
+                                target_domain_label = torch.ones(da_cond_pred_tgt.size(0), dtype=torch.float32).to(self.device)
+                                domain_loss_src = self.criterion_domain(torch.squeeze(da_cond_pred_src, -1), source_domain_label)
+                                domain_loss_tgt = self.criterion_domain(torch.squeeze(da_cond_pred_tgt, -1), target_domain_label)
 
                             # Check for nan values and replace with 0
                             if torch.isnan(domain_loss_src).any():

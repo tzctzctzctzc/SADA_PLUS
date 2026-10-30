@@ -74,8 +74,12 @@ def build(cfg):
     ema_model = make_meta_arch('sada', ctx.cfg, device='cuda:0').to('cuda:0')
     ctx.model_ema = ModelEma2(ema_model, decay=cfg['train_cfg']['ema_decay'])
     ctx.initial_state_sha = tensor_digest(ctx.model.state_dict())
-    ctx.initial_detector_sha=tensor_digest({k:v for k,v in ctx.model.state_dict().items()
-                                          if not k.startswith(('rq3_capacity.','endpoint_risk.'))})
+    detector_state={k:v for k,v in ctx.model.state_dict().items()
+                    if not k.startswith(('rq3_capacity.','endpoint_risk.'))}
+    if cfg.get('phase_alignment'):
+        from libs.models.SADA.phase_alignment import canonical_initial_state
+        detector_state=canonical_initial_state(detector_state)
+    ctx.initial_detector_sha=tensor_digest(detector_state)
     if cfg['baseline']['regime'] == 'so':
         # 模型参数构造与UDA完全相同；仅关闭对抗目标，保持检测与优化器阶段。
         ctx.cfg['model']['adv_method'] = ['None']
@@ -175,7 +179,7 @@ def schedulers(ctx):
 
 
 def capture(ctx, cfg, epoch, history):
-    result=dict(schema=cfg.get('background_oracle',{}).get('schema',cfg.get('endpoint_risk',{}).get('schema',SCHEMA)), config=cfg, epoch=epoch, history=deepcopy(history),
+    result=dict(schema=cfg.get('phase_alignment',{}).get('schema',cfg.get('background_oracle',{}).get('schema',cfg.get('endpoint_risk',{}).get('schema',SCHEMA))), config=cfg, epoch=epoch, history=deepcopy(history),
         state_dict=ctx.model.state_dict(), ema_state_dict=ctx.model_ema.module.state_dict(),
         model_controls=controls(ctx.model), ema_controls=controls(ctx.model_ema.module),
         optimizers=[x.state_dict() for x in optimizers(ctx)],
@@ -226,6 +230,14 @@ def epoch_setup(ctx, epoch):
     ctx.first_gradient_norm = None
 
 
+def phase_weight_separation(model):
+    values=[]
+    for disc in model.disc_dom_conditional_adv:
+        a,b,c=disc.initial_layers[0].weight.detach().chunk(3,dim=1)
+        values.append(float(((a-b).square().sum()+(b-c).square().sum()).sqrt()))
+    return values
+
+
 def probe(cfg, output, warmup_steps=2, timed_steps=6):
     ctx = build(cfg)
     # 固定40/200名单不能用前6批覆盖来代表；诊断遍历完整原始epoch，不补抽候选。
@@ -259,6 +271,9 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
             model_updated=changed, source_gradient_norm=ctx.first_gradient_norm,target_gt_losses=[0.,0.,0.])
         if cfg.get('prototype_capacity'):
             values=ctx.train_metrics.result()
+            if cfg.get('phase_alignment'):
+                reports[str(epoch)]['phase_alignment']={k[2:]:float(v) for k,v in values.items() if k.startswith('t_phase_')}
+                reports[str(epoch)]['phase_weight_separation']=phase_weight_separation(ctx.model)
             if cfg.get('background_oracle'):
                 reports[str(epoch)]['background_oracle']={k[2:]:float(v) for k,v in values.items() if k.startswith('t_oracle_')}
             reports[str(epoch)]['auxiliary']={k[2:]:float(v) for k,v in values.items() if k.startswith('t_rq3_')}
@@ -342,6 +357,9 @@ def train(cfg, entry, resume=None, pause_after=None):
         if cfg.get('background_oracle'):
             row['background_oracle']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_oracle_')}
             row['target_gt_used_for_background_alignment']=True
+        if cfg.get('phase_alignment'):
+            row['phase_alignment']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_phase_')}
+            row['phase_weight_separation']=phase_weight_separation(ctx.model)
         if epoch%5 == 0:
             ctx.valid_metrics_src.reset()
             value = float(ctx._valid_epoch(epoch, ctx.val_loader_src, domain='src'))

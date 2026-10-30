@@ -60,6 +60,7 @@ def code_identity():
                                   'libs/models/SADA/prototype_geometry.py',
                                   'libs/models/SADA/endpoint_risk.py',
                                   'libs/models/SADA/background_oracle.py',
+                                  'libs/models/SADA/phase_alignment.py',
                                   'libs/models/SADA/prototype_methods.py'}
     if any(p not in allowed and not p.startswith(('tools/', 'tests/')) for p in changed):
         raise ValueError('存在白名单外的官方核心文件修改')
@@ -133,6 +134,8 @@ def audit_entry(entry, expected_schema=SCHEMA, acceptance_path=None):
         if sha(path) != digest:
             raise ValueError('完成工件SHA改变: '+path)
     cfg = read(entry/'config.json')
+    if cfg.get('phase_alignment') and expected_schema!='prototype-relative-phase-alignment-v1':
+        raise ValueError('角色对齐不是旧基线/Prototype身份，必须使用专项审计')
     if cfg.get('background_oracle') and expected_schema!='rq3-background-positive-exclusion-oracle-v1':
         raise ValueError('使用目标GT的背景oracle不能冒充普通UDA/Prototype结果')
     if cfg.get('endpoint_risk') and expected_schema!='sada-endpoint-relative-risk-v1':
