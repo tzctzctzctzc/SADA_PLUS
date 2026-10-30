@@ -30,8 +30,13 @@ def audit_results(root):
             raise ValueError('逐候选记录SHA改变')
         if report['code']!=plan['code'] or report['policy']!=POLICY or report['target_data_used']:
             raise ValueError('报告身份或GT边界不符')
-        if sha(report['gpu_guard'])!=report['gpu_guard_sha256']:
-            raise ValueError('GPU首CUDA凭证改变')
+        if report['backend']!=plan['backend']:
+            raise ValueError('诊断硬件混用')
+        if report['backend']=='cuda':
+            if sha(report['gpu_guard'])!=report['gpu_guard_sha256']:
+                raise ValueError('GPU首CUDA凭证改变')
+        elif plan.get('backend')!='cpu' or report['cuda_initialized']:
+            raise ValueError('未声明的CPU替代或CPU诊断意外触发CUDA')
         if not all(report[x] for x in ['model_unchanged','rng_unchanged','identical_window_exact']):
             raise ValueError('真实等价负对照不通过')
         if summarize(rows)!=report['summary']:
@@ -122,22 +127,24 @@ def run_shift(args, identity):
     for row in candidates:by_video.setdefault(row['video_id'],[]).append(row)
     available={x['id'] for x in ds.data_list}
     if not set(by_video)<=available:raise ValueError('候选不在本方向源验证集')
-    guard=first_cuda_guard()  # imports/CPU成员检查之后、首seed/模型CUDA之前。
-    fix_random_seed(cfg['seed'],include_cuda=True)
-    torch.cuda.manual_seed(cfg['seed'])
+    device='cpu' if args.cpu else 'cuda:0'
+    guard=None if args.cpu else first_cuda_guard()
+    fix_random_seed(cfg['seed'],include_cuda=not args.cpu)
+    if not args.cpu:torch.cuda.manual_seed(cfg['seed'])
     checkpoint_sha=sha(reference/'best.pt')
     saved=torch.load(reference/'best.pt',map_location='cpu')
     terminal=read(reference/'termination.json')
     if saved['epoch']!=protocol.termination(terminal['history'])['best_epoch']:
         raise ValueError('不是原版源选best EMA')
-    model=make_meta_arch('sada',deepcopy(cfg),device='cuda:0').to('cuda:0')
+    model=make_meta_arch('sada',deepcopy(cfg),device=device).to(device)
     model.load_state_dict(saved['ema_state_dict'],strict=True)
     del saved
     model.eval()
     if model.use_trident_head or model.max_seq_len!=POLICY['maximum_window']:
         raise ValueError('仅适用于当前冻结的原始回归头/2304窗口')
     before=tensor_digest(model.state_dict())
-    rng_before=tensor_digest(dict(cpu=torch.get_rng_state(),cuda=torch.cuda.get_rng_state(0)))
+    rng_before=tensor_digest(dict(cpu=torch.get_rng_state(),
+        cuda=None if args.cpu else torch.cuda.get_rng_state(0)))
     records=[];feature_inputs={};null_checked=False
     with torch.no_grad():
         for i,item in enumerate(ds.data_list):
@@ -161,7 +168,7 @@ def run_shift(args, identity):
             for start,length in windows:
                 clean=clean_window(video,start,length)
                 protocol.assert_no_target_gt([clean])
-                moved=move_to_device([clean],'cuda:0')[0]
+                moved=move_to_device([clean],device)[0]
                 observation,logits=source_dense_observation(model,moved)
                 wanted=[(c,p) for c,segment,p in plans if p['valid'] and p['length']==length and start in p['starts']]
                 for c,p in wanted:
@@ -191,7 +198,8 @@ def run_shift(args, identity):
             print('SOURCE_WINDOWS',args.shift,vid,'windows',len(windows),'records',len(records),flush=True)
     if not null_checked:raise ValueError('无有效真实窗口，不能出通过记录')
     after=tensor_digest(model.state_dict())
-    rng_after=tensor_digest(dict(cpu=torch.get_rng_state(),cuda=torch.cuda.get_rng_state(0)))
+    rng_after=tensor_digest(dict(cpu=torch.get_rng_state(),
+        cuda=None if args.cpu else torch.cuda.get_rng_state(0)))
     if before!=after or rng_before!=rng_after:raise ValueError('诊断修改了模型或CPU/CUDA RNG')
     if {x['candidate_id'] for x in records}!={x['candidate_id'] for x in candidates}:
         raise ValueError('诊断遗漏候选')
@@ -209,7 +217,9 @@ def run_shift(args, identity):
         reference_best_epoch=protocol.termination(terminal['history'])['best_epoch'],
         source_selection_history=terminal['history'],
         rows_sha256=sha(output/'rows.json'),feature_inputs=feature_inputs,
-        gpu_guard=guard,gpu_guard_sha256=sha(guard),peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20))
+        backend='cpu' if args.cpu else 'cuda',cuda_initialized=torch.cuda.is_initialized(),
+        gpu_guard=guard,gpu_guard_sha256=None if args.cpu else sha(guard),
+        peak_reserved_mib=0 if args.cpu else torch.cuda.max_memory_reserved()/2**20))
 
 
 def stop(signum,frame):
@@ -223,6 +233,7 @@ def main(args):
     identity=protocol.code_identity()
     root=args.output_root;root.mkdir(parents=True,exist_ok=False)
     save(root/'plan.json',dict(schema=SCHEMA,policy=POLICY,code=identity,shifts=['S'+str(i) for i in range(1,7)],
+        backend='cpu' if args.cpu else 'cuda',
         data_scope='source_validation_only',no_new_training=True,
         source_pool_sha256=sha(args.source_pool)))
     save(root/'state.json',dict(phase='source_reference_audit',pid=os.getpid(),active={},completed=[]))
@@ -242,23 +253,33 @@ def main(args):
                 report=read(root/s/'report.json')
                 if report['status']!='passed' or report['code']!=identity:raise ValueError('完成报告不符')
                 completed[s]=dict(report_sha256=sha(root/s/'report.json'),summary=report['summary'])
-                t['context'].__exit__(None,None,None);del ACTIVE[s]
+                if t['context'] is not None:t['context'].__exit__(None,None,None)
+                del ACTIVE[s]
             for s in list(pending):
-                acquired=acquire([0,1,2,3],args.data_root,root,12288,identity['commit'])
-                if not acquired:break
-                context,lease=acquired;entry=root/s;entry.mkdir()
+                if args.cpu:
+                    if len(ACTIVE)>=2:break
+                    context=None;lease=dict(uuid='',index=None)
+                else:
+                    acquired=acquire([0,1,2,3],args.data_root,root,12288,identity['commit'])
+                    if not acquired:break
+                    context,lease=acquired
+                entry=root/s;entry.mkdir()
                 env=dict(os.environ,PYTHONPATH=str(CODE),PYTHONDONTWRITEBYTECODE='1',PYTHONUNBUFFERED='1',
-                    CUDA_VISIBLE_DEVICES=lease['uuid'],OMP_NUM_THREADS='8',MKL_NUM_THREADS='8',
-                    SADA_BASELINE_LEASE=lease['lease'],SADA_BASELINE_LEASE_SHA256=lease['lease_sha256'],
+                    CUDA_VISIBLE_DEVICES=lease['uuid'],OMP_NUM_THREADS='4' if args.cpu else '8',
+                    MKL_NUM_THREADS='4' if args.cpu else '8',
                     CUBLAS_WORKSPACE_CONFIG=':4096:8')
+                if not args.cpu:
+                    env.update(SADA_BASELINE_LEASE=lease['lease'],SADA_BASELINE_LEASE_SHA256=lease['lease_sha256'])
                 cmd=[sys.executable,'-B',str(Path(__file__).resolve()),'--child','--shift',s,
                     '--output-root',str(root),'--control-root',str(args.control_root),
                     '--source-pool',str(args.source_pool),'--data-root',str(args.data_root)]
+                if args.cpu:cmd.append('--cpu')
                 try:
                     with (entry/'run.log').open('x') as log:
                         process=subprocess.Popen(cmd,cwd=CODE,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
                 except BaseException:
-                    context.__exit__(None,None,None);raise
+                    if context is not None:context.__exit__(None,None,None)
+                    raise
                 ACTIVE[s]=dict(process=process,context=context,gpu=lease['index']);pending.remove(s)
             save(root/'state.json',dict(phase='source_windows',pid=os.getpid(),pending=pending,completed=completed,
                 active={s:dict(pid=t['process'].pid,gpu=t['gpu']) for s,t in ACTIVE.items()}))
@@ -279,7 +300,7 @@ def main(args):
             try:t['process'].wait(timeout=30)
             except subprocess.TimeoutExpired:
                 os.killpg(t['process'].pid,signal.SIGKILL);t['process'].wait()
-            t['context'].__exit__(None,None,None)
+            if t['context'] is not None:t['context'].__exit__(None,None,None)
         ACTIVE.clear()
 
 
@@ -291,6 +312,7 @@ if __name__=='__main__':
     p.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'))
     p.add_argument('--child',action='store_true');p.add_argument('--shift',choices=['S'+str(i) for i in range(1,7)])
     p.add_argument('--audit-only',action='store_true')
+    p.add_argument('--cpu',action='store_true',help='只读源诊断可在CPU完成；不创建CUDA或绕过卡锁')
     args=p.parse_args()
     for k in ('output_root','control_root','source_pool','data_root'):setattr(args,k,getattr(args,k).resolve())
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
