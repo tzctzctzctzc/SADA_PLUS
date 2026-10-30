@@ -142,6 +142,21 @@ def verify_source_gate(path):
     return gate
 
 
+def verify_probe(report,initial_detector_sha):
+    """读取baseline_engine的真实报告命名，不去掉保留的rq3_前缀。"""
+    if report['rng_roundtrip']['status']!='passed':raise ValueError('GPU完整恢复核验失败')
+    if report['initial_detector_sha']!=initial_detector_sha:raise ValueError('共同检测器冷初始化不配对')
+    phase=report['phases']['5']
+    if not phase['branch_parameters_updated'] or phase['auxiliary']['rq3_target_gradient_norm']<=0:
+        raise ValueError('原Prototype没有实际有效更新')
+    if phase['target_gt_losses']!=[0.,0.,0.]:raise ValueError('目标GT监督不为0')
+    if sum(phase['phase_weight_separation'])<=0:raise ValueError('角色D仍然恒等')
+    if sum(v for k,v in phase['phase_alignment'].items() if k.startswith('phase_common_roles_'))<=0:
+        raise ValueError('没有实际跨域角色对齐')
+    if sum(v for k,v in phase['phase_alignment'].items() if k.startswith('phase_common_side_roles_'))<=0:
+        raise ValueError('只有中间角色，不能冒充起中末对齐')
+
+
 def audit(entry):
     import torch
     entry=Path(entry);record=p.read(entry/'complete.json');cfg=p.read(entry/'config.json')

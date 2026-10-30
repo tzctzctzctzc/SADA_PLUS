@@ -207,3 +207,13 @@ def test_source_gate_recomputes_six_reports_and_receipts(tmp_path,drift):
     if drift is None:assert verify_source_gate(tmp_path/'gate.json')['status']=='passed'
     else:
         with pytest.raises(ValueError):verify_source_gate(tmp_path/'gate.json')
+
+
+def test_probe_reads_engine_rq3_names_without_stripping_prefix():
+    from tools.phase_alignment_protocol import verify_probe
+    report=dict(rng_roundtrip={'status':'passed'},initial_detector_sha='same',phases={'5':dict(
+        branch_parameters_updated=True,auxiliary={'rq3_target_gradient_norm':.001},target_gt_losses=[0.,0.,0.],
+        phase_weight_separation=[1.,0.],phase_alignment={'phase_common_roles_0':.3,'phase_common_side_roles_0':.1})})
+    verify_probe(report,'same')
+    bad=copy.deepcopy(report);bad['phases']['5']['auxiliary']['rq3_target_gradient_norm']=0.
+    with pytest.raises(ValueError):verify_probe(bad,'same')

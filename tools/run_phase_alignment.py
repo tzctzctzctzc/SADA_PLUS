@@ -10,7 +10,7 @@ import sys
 import time
 CODE=Path(__file__).resolve().parents[1];sys.path.insert(0,str(CODE))
 from tools import baseline_protocol as p
-from tools.phase_alignment_protocol import prepare,audit,diagnose,source_decision,SOURCE_GATE
+from tools.phase_alignment_protocol import prepare,audit,diagnose,source_decision,verify_probe,SOURCE_GATE
 from tools.run_sada_baseline import acquire
 from tools.baseline_gpu import snapshot
 from libs.models.SADA.phase_alignment import SCHEMA,POLICY
@@ -138,18 +138,8 @@ def main(args):
                 entry=task['entry'];cfg=configs[shift]
                 if task['stage']=='probe':
                     report=p.read(entry/'probe_result.json')
-                    if report['rng_roundtrip']['status']!='passed':raise ValueError('GPU完整恢复核验失败')
                     ref=args.control/'formal/control'/shift
-                    if report['initial_detector_sha']!=p.read(ref/'detector_initialization.json')['sha256']:
-                        raise ValueError('共同检测器冷初始化不配对')
-                    phase=report['phases']['5']
-                    if not phase['branch_parameters_updated'] or phase['auxiliary']['target_gradient_norm']<=0:
-                        raise ValueError('原Prototype没有实际有效更新')
-                    if sum(phase['phase_weight_separation'])<=0:raise ValueError('角色D仍然恒等')
-                    if sum(v for k,v in phase['phase_alignment'].items() if k.startswith('phase_common_roles_'))<=0:
-                        raise ValueError('没有实际跨域角色对齐')
-                    if sum(v for k,v in phase['phase_alignment'].items() if k.startswith('phase_common_side_roles_'))<=0:
-                        raise ValueError('只有中间角色，不能冒充起中末对齐')
+                    verify_probe(report,p.read(ref/'detector_initialization.json')['sha256'])
                     required=formal_admission(task,report,root,identity,args.minimum_free_mib)
                     p.save(entry/'acceptance.json',dict(status='passed',schema=SCHEMA,code=identity,batch=2,seed=123,
                         source_gate_sha256=p.sha(root/'source_gate.json'),report_sha256=p.sha(entry/'probe_result.json'),
