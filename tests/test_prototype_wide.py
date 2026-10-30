@@ -10,7 +10,7 @@ import torch
 
 from libs.models.SADA.prototype_capacity import specification,build_capacity,VLMProposalCoAdaptationBranch
 from tools.run_prototype_wide import (assert_control_pair,validate_probe,memory_policy,
-                                     finish_process,SHIFTS,VARIANT)
+                                     finish_process,assert_alignment_weight,SHIFTS,VARIANT)
 
 
 def test_only_width_changes_and_all_parameter_shapes_match(tmp_path):
@@ -62,7 +62,7 @@ def test_pair_rejects_other_scientific_changes(change):
 def report():
     phase=dict(branch_parameters_updated=True,model_updated=True,target_gt_losses=[0.,0.,0.],
         source_gradient_norm=.2,peak_reserved_mib=4500.,auxiliary=dict(rq3_target_gradient_norm=.001,
-        rq3_alignment_loss=.1,rq3_source_loss=.5,rq3_selected=1.,rq3_target_alignment_weight=.1))
+        rq3_alignment_loss=.1,rq3_source_loss=.5,rq3_loss=.51,rq3_selected=1.))
     return dict(status='passed',batch=2,initial_detector_sha='same',rng_roundtrip={'status':'passed'},
         checked_target_batches=10,phases={'1':deepcopy(phase),'5':deepcopy(phase)},peak_reserved_mib=6000.)
 
@@ -81,9 +81,20 @@ def test_acceptance_rejects_unreal_or_mismatched_evidence(change):
     elif change=='rng':r['rng_roundtrip']['status']='failed'
     elif change=='gradient':r['phases']['5']['auxiliary']['rq3_target_gradient_norm']=0.
     elif change=='branch':r['phases']['5']['branch_parameters_updated']=False
-    elif change=='weight':r['phases']['5']['auxiliary']['rq3_target_alignment_weight']=.2
+    elif change=='weight':r['phases']['5']['auxiliary']['rq3_loss']=.52
     else:r['phases']['5']['auxiliary']['rq3_selected']=0.
     with pytest.raises(ValueError):validate_probe(r,'same')
+
+
+def test_actual_control_style_log_has_no_explicit_weight_but_loss_is_checked():
+    aux=dict(rq3_loss=.398184301437072,rq3_source_loss=.3904998915375404,
+             rq3_alignment_loss=.07684411530224781)
+    assert_alignment_weight(aux)
+    aux['rq3_loss']=aux['rq3_source_loss']+.2*aux['rq3_alignment_loss']
+    with pytest.raises(ValueError):assert_alignment_weight(aux)
+    aux['rq3_loss']=aux['rq3_source_loss']+.1*aux['rq3_alignment_loss']
+    aux['rq3_target_alignment_weight']=.2
+    with pytest.raises(ValueError):assert_alignment_weight(aux)
 
 
 @pytest.mark.skipif(os.name=='nt',reason='真实Linux进程组停止')

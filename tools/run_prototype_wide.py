@@ -51,7 +51,16 @@ def validate_probe(report,expected_initial):
     if not all(math.isfinite(aux[k]) and aux[k]>0 for k in
                ('rq3_target_gradient_norm','rq3_alignment_loss','rq3_source_loss','rq3_selected')):
         raise ValueError('适配阶段没有真实候选/源分类/目标原型梯度')
-    if abs(aux['rq3_target_alignment_weight']-.1)>1e-6:raise ValueError('目标权重不是0.1')
+    assert_alignment_weight(aux)
+
+
+def assert_alignment_weight(aux):
+    # 原版默认0.1不单独记录权重字段；直接核实际损失分解，不能猜测缺失字段。
+    if 'rq3_target_alignment_weight' in aux and abs(aux['rq3_target_alignment_weight']-.1)>1e-6:
+        raise ValueError('目标权重不是0.1')
+    expected=aux['rq3_source_loss']+.1*aux['rq3_alignment_loss']
+    if not math.isfinite(aux['rq3_loss']) or abs(aux['rq3_loss']-expected)>1e-5*max(1.,abs(expected)):
+        raise ValueError('实际辅助损失不符合源分类+0.1原型对齐')
 
 
 def memory_policy(report):
@@ -90,8 +99,7 @@ def audit(entry):
     assert_control_pair(cfg,read(control/'config.json'))
     result=capacity.audit(entry)
     rows=[json.loads(x) for x in (entry/'metrics.jsonl').read_text().splitlines()]
-    if any(abs(r['auxiliary']['rq3_target_alignment_weight']-.1)>1e-6 for r in rows):
-        raise ValueError('正式训练目标权重改变')
+    for r in rows:assert_alignment_weight(r['auxiliary'])
     initial=read(entry/'detector_initialization.json')
     if initial['specification']!=specification(VARIANT):raise ValueError('实际模型分支配置不符')
     result['control_map']=read(control/'evaluation/target_val.json')['map_0.1_to_0.5']
