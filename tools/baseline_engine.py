@@ -339,7 +339,7 @@ def train(cfg, entry, resume=None):
         raise ValueError('未生成合法停止证明')
 
 
-def evaluate(cfg, entry, annotation):
+def evaluate(cfg, entry, annotation, export_predictions=False, observer=None):
     from libs.evaluation import ANETdetection
     entry = Path(entry)
     saved = torch.load(entry/'best.pt', map_location='cpu')
@@ -350,6 +350,7 @@ def evaluate(cfg, entry, annotation):
     torch.cuda.manual_seed(cfg['seed'])
     model = make_meta_arch('sada', deepcopy(cfg), device='cuda:0').to('cuda:0')
     model.load_state_dict(saved['ema_state_dict'], strict=True); model.eval()
+    if observer is not None: observer.attach(model)
     results = {}
     for domain, splits in [('source',cfg['src_val_split']), ('target',cfg['tgt_val_split'])]:
         ds = dataset(cfg, annotation, splits, False)
@@ -358,13 +359,19 @@ def evaluate(cfg, entry, annotation):
         with torch.no_grad():
             for video in dl:
                 video = move_to_device(video,'cuda:0')
+                if observer is not None: observer.before(domain,video)
                 prediction = model(video_list_src=video,video_list_tgt=video,mode='test',domain=domain,
                                    curr_epoch=saved['epoch'])[0 if domain=='source' else 1]
+                if observer is not None: observer.after(domain,video)
                 for item in prediction:
                     n = len(item['scores']); columns['video-id'].extend([item['video_id']]*n)
                     for k,v in [('t-start',item['segments'][:,0]),('t-end',item['segments'][:,1]),
                                 ('label',item['labels']),('score',item['scores'])]:
                         columns[k].extend(v.detach().cpu().tolist())
+        if export_predictions:
+            save(entry/'evaluation'/('%s_predictions.json' % domain),dict(columns=columns,
+                video_ids=[x['id'] for x in ds.data_list],checkpoint_sha256=sha(entry/'best.pt'),
+                config_sha256=sha(entry/'config.json'),annotation_sha256=sha(annotation),state='ema_state_dict'))
         evaluator = ANETdetection(str(annotation),splits,num_workers=4,action_subsampling='10_majority_classes')
         ap,mean,*_ = evaluator.evaluate({k:np.asarray(v) for k,v in columns.items()},verbose=True)
         result = dict(map_by_tiou=[float(x) for x in ap],
@@ -374,3 +381,4 @@ def evaluate(cfg, entry, annotation):
         save(entry/'evaluation'/('%s_val.json' % domain),result);results[domain]=result
     save(entry/'evaluation/manifest.json',dict(config_sha256=sha(entry/'config.json'),
          checkpoint_sha256=sha(entry/'best.pt'),annotation_sha256=sha(annotation),results=results))
+    if observer is not None: observer.finish(entry/'evaluation/pseudo_label_diagnostic.json')
