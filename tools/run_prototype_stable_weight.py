@@ -156,7 +156,9 @@ def supervisor(args):
                 if t['stage']=='probe':
                     report=read(e/'result.json');bank=read(e/'source_bank.json') if v=='multi_stable' else None
                     acceptance(report,v,read(BASE/'formal/S1/uda/termination.json')['initial_state_sha'],bank)
-                    reports[v]=report;minimum[v]=max(12288,math.ceil(report['peak_reserved_mib']+4096))
+                    reports[v]=report
+                    peak=max(report['peak_reserved_mib'],bank['peak_reserved_mib'] if bank else 0.)
+                    minimum[v]=max(12288,math.ceil(peak+4096))
                 elif t['stage']=='train':
                     t['stage']='evaluate';t['p']=spawn('evaluate',e,t['card'],data);continue
                 else:

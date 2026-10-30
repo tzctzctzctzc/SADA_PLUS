@@ -132,6 +132,7 @@ def initialize_source_bank(ctx,entry):
         source_manifest_sha256=sha(cfg['dataset']['json_file']),source_videos=sorted(train),source_feature_sha256=features,
         source_validation_loaded=False,target_data_loaded=False,parameters_sha256=parameters_before,
         rng_preserved=True,classes=reports,centers_sha256=tensor_digest(branch.source_prototypes),
+        peak_reserved_mib=torch.cuda.max_memory_reserved(device)/2**20 if device.type=='cuda' else None,
         actual_prototypes=branch.source_prototypes.cpu().tolist(),specification=spec))
     print('SOURCE_BANK_INITIALIZED', {c:r['active_centers'] for c,r in reports.items()},flush=True)
 
