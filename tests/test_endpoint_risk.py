@@ -155,12 +155,12 @@ def cpu_context(tmp_path, risk):
     code=Path(__file__).resolve().parents[1]
     cfg=run_path(str(code/'tests/test_corrected_baseline.py'))['small_config']()
     cfg['prototype_capacity']=run_path(str(code/'tests/test_prototype_capacity.py'))['configuration'](tmp_path,'control')
-    cfg.update(seed=123);cfg['baseline']=dict(epoch_budget=dict(iterations_per_epoch=1))
+    cfg.update(seed=123);cfg['baseline']=dict(epoch_budget=dict(iterations_per_epoch=2))
     if risk:cfg['endpoint_risk']=options()
     ctx=object.__new__(Trainer);ctx.cfg=deepcopy(cfg);ctx.ema_active=True
     torch.manual_seed(123);ctx.model=SADA(cfg,'cpu');ctx.model_ema=ModelEma2(SADA(cfg,'cpu'),decay=.9)
     s,t=run_path(str(code/'tests/test_prototype_capacity.py'))['videos']()
-    ctx.train_loader_src=[[s]];ctx.train_loader_tgt=[[t]]
+    ctx.train_loader_src=[[s],[deepcopy(s)]];ctx.train_loader_tgt=[[t],[deepcopy(t)]]
     excludes=['disc_dom_adv','disc_dom_conditional_adv','learnable_embeddings']
     for key,optname,schedname in [('source','optimizer_gen_source','lr_scheduler_gen_source'),
             ('alignment','optimizer_gen_source_alignment','lr_scheduler_gen_source_alignment'),
@@ -168,7 +168,7 @@ def cpu_context(tmp_path, risk):
         disc=key=='discriminator'
         optimizer=make_optimizer(ctx.model,cfg['opt'],cfg['opt']['disc_learning_rate' if disc else 'learning_rate'],
             include_params=excludes if disc else [],exclude_params=[] if disc else excludes+(['endpoint_risk.'] if risk else []))
-        setattr(ctx,optname,optimizer);setattr(ctx,schedname,make_scheduler(optimizer,cfg['opt'],1))
+        setattr(ctx,optname,optimizer);setattr(ctx,schedname,make_scheduler(optimizer,cfg['opt'],2))
     ctx.train_metrics=MetricTracker('t_loss')
     if risk:attach(ctx,cfg)
     return ctx

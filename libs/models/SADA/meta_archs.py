@@ -873,7 +873,9 @@ class SADA(nn.Module):
                     metadata=[dict(v['metadata']) for v in video_list_tgt])
                 boundary_loss=self.endpoint_risk.target_loss(video_list_tgt,self.rq3_capacity.cache,
                     self.rq3_capacity.confidence_threshold,observation,risk_teacher,curr_epoch,risk_generator)
-                losses['downstream_loss']=losses['downstream_loss']+boundary_loss
+                # 零项不能把原先grad=None的回归参数连成grad=0，后者会触发AdamW状态/衰减。
+                if float(boundary_loss.detach())>0:
+                    losses['downstream_loss']=losses['downstream_loss']+boundary_loss
                 for key,value in self.endpoint_risk.statistics.items():
                     losses['endpoint_'+key]=torch.as_tensor(value,device=self.device).detach()
 

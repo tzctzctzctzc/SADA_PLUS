@@ -57,7 +57,8 @@ def collect(checkpoint, source_pool, output, margin, device, identity):
             for c in by_video[vid]:
                 segment=feature_interval(dict(proposal_start_sec=c['proposal'][0],proposal_end_sec=c['proposal'][1]),meta)
                 level=int(c['fpn_level']);grid=so['points'][level]
-                anchor=(c['anchor_sec']*meta['fps']-.5*meta['feat_num_frames'])/meta['feat_stride']
+                # 与正式target完全相同：原proposal内部、原层、最接近中点的真实grid。
+                anchor=(segment[0]+segment[1])/2
                 index=int((grid[:,0]-anchor).abs().argmin())
                 valid=bool(so['masks'][level][0].reshape(-1)[index] & to['masks'][level][0].reshape(-1)[index])
                 if not valid or not bool(classes[level][index].sum()>0):
