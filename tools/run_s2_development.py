@@ -73,6 +73,15 @@ def audit(entry):
     if sha(reference/'complete.json') != record['reference_complete_sha256']:
         raise ValueError('原参考完成SHA改变')
     assert_config(cfg, read(reference/'config.json'), candidate, method)
+    root = entry.parents[2]
+    acceptance = read(root/'acceptance.json')
+    inputs = read(root/'inputs.json')
+    if (acceptance['inputs_sha256'] != sha(root/'inputs.json') or
+            inputs['split_sha256'] != sha(root/'split.json') or
+            cfg != inputs['configurations'][candidate][method] or acceptance['code'] != record['code']):
+        raise ValueError('配置/开发划分/验收代码绑定改变')
+    for path, digest in acceptance['report_sha256'].items():
+        if sha(path) != digest: raise ValueError('验收或参考推理证明改变')
     result = protocol.audit_entry(entry, expected_schema=SCHEMA)
     initial = read(REFERENCES['uda']/'termination.json')['initial_state_sha']
     if method == 'prototype':
@@ -90,7 +99,8 @@ def audit(entry):
         raise ValueError('UDA冷初始化改变')
     for domain in ('source', 'target'):
         pred = read(entry/'evaluation'/(domain+'_predictions.json'))
-        if pred['config_sha256'] != sha(entry/'config.json') or pred['checkpoint_sha256'] != sha(entry/'best.pt'):
+        if (pred['config_sha256'] != sha(entry/'config.json') or
+                pred['checkpoint_sha256'] != read(entry/'evaluation'/(domain+'_val.json'))['checkpoint_sha256']):
             raise ValueError('预测导出不属于当前配置/checkpoint')
     return dict(result, candidate=candidate, method=method)
 

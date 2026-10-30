@@ -123,7 +123,7 @@ def test_observer_uses_second_head_and_original_assignment(tmp_path):
             assert len(points)==1 and labels[0].tolist()==[0]
             return [torch.tensor([[1,0],[0,0]],dtype=torch.float)],[]
     observer=dev.PointObserver(['video']);observer.model=Model()
-    video=[dict(video_id='video',segments=torch.tensor([[0.,1.]]),labels=torch.tensor([0]))]
+    video=[dict(metadata=dict(video_id='video'),segments=torch.tensor([[0.,1.]]),labels=torch.tensor([0]))]
     observer.before('target',video)
     mask=[torch.ones(1,1,2,dtype=torch.bool)]
     source=[torch.zeros(1,2,2)]
@@ -134,7 +134,7 @@ def test_observer_uses_second_head_and_original_assignment(tmp_path):
     observer.after('target',video);observer.finish(tmp_path/'diagnostic.json')
     row=read_json(tmp_path/'diagnostic.json')['per_level_threshold']['0/0.5']
     assert row['correct_foreground']==1 and row['background_predicted_foreground']==1
-    observer.before('target',[dict(video_id='confirmation')])
+    observer.before('target',[dict(metadata=dict(video_id='confirmation'))])
     assert not observer.enabled
 
 
@@ -150,7 +150,8 @@ def test_real_sada_observer_hooks_do_not_change_predictions_or_rng(monkeypatch,t
     cfg=small();cfg['test_cfg']['min_score']=.0
     torch.manual_seed(123);model=SADA(cfg,'cpu');model.eval()
     video=[dict(feats=torch.randn(8,64),segments=torch.tensor([[10.,35.]]),labels=torch.tensor([0]),
-        video_id='real',metadata=dict(video_id='real',feat_stride=16,feat_num_frames=32,fps=30,duration=60))]
+        metadata=dict(video_id='real',feat_stride=16,feat_num_frames=32,fps=30,duration=60,
+                      use_temporal_grid_feats=False,video_length=64))]
     with torch.no_grad():
         before=model(video_list_src=video,video_list_tgt=video,mode='test',domain='target',curr_epoch=20)
         rng=torch.get_rng_state().clone();state={k:v.clone() for k,v in model.state_dict().items()}
@@ -162,3 +163,42 @@ def test_real_sada_observer_hooks_do_not_change_predictions_or_rng(monkeypatch,t
     for a,b in zip(before[1],after[1]):
         for key in ('segments','labels','scores'):assert torch.equal(a[key],b[key])
     assert len(read_json(tmp_path/'real.json')['per_level_threshold'])==18
+
+
+def test_subset_ap_keeps_class_mapping_and_excludes_other_videos(tmp_path):
+    db={v:dict(subset='val',annotations=[dict(label_id=c,segment=[c*2.,c*2.+1.]) for c in range(10)])
+        for v in ('development','confirmation')}
+    annotation=tmp_path/'gt.json';save(annotation,dict(database=db))
+    columns={'video-id':[],'t-start':[],'t-end':[],'label':[],'score':[]}
+    for video in db:
+        for c in range(10):
+            for key,value in [('video-id',video),('t-start',c*2. if video=='development' else 90.),
+                              ('t-end',c*2.+1. if video=='development' else 91.),('label',c),('score',.9)]:
+                columns[key].append(value)
+    predictions=tmp_path/'pred.json'
+    save(predictions,dict(columns=columns,annotation_sha256=sha(annotation),video_ids=list(db)))
+    split=dict(annotation=str(annotation),annotation_sha256=sha(annotation),target_validation_splits=['val'])
+    assert dev.subset_score(predictions,split,['development'])['map']==pytest.approx(1.)
+    assert dev.subset_score(predictions,split,['confirmation'])['map']==pytest.approx(0.)
+
+
+@pytest.mark.skipif(not Path('/vepfs/vlms/sada_baseline12_seed123_b2_08e7c24_1029').exists(),reason='需要远端真实冻结工件')
+def test_real_s2_configs_data_membership_and_fixed_teacher_cache():
+    from tools.run_s2_development import REFERENCES
+    from tools.run_prototype_capacity import assert_pair
+    from tools.baseline_engine import dataset
+    old={m:read_json(p/'config.json') for m,p in REFERENCES.items()}
+    split=dev.freeze_split(old['uda'])
+    assert len(split['development'])==len(split['confirmation'])==25
+    cap=old['prototype']['prototype_capacity']
+    assert sha(cap['prepared_cache'])==cap['prepared_cache_sha256']
+    for name in dev.GRID:
+        configs={m:dev.changed_config(old[m],name,{'commit':'test'},'/tmp') for m in ('uda','prototype')}
+        for method,cfg in configs.items():dev.assert_config(cfg,old[method],name,method)
+        assert_pair(configs['prototype'],configs['uda'])
+        assert configs['uda']['model']['loss_weights']['weight_adv']==2.
+    target=dataset(old['uda'],old['uda']['baseline']['target_manifest'],old['uda']['tgt_train_split'],True,unlabeled=True)
+    item=target[0]
+    assert item['segments'].numel()==item['labels'].numel()==0
+    assert item['feats'].shape[0]==2304
+    assert 'video_id' in item['metadata'] and 'video_id' not in item

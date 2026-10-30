@@ -139,7 +139,7 @@ class PointObserver:
                         model.point_generator.register_forward_hook(point_hook)]
 
     def before(self, domain, videos):
-        self.enabled = domain == 'target' and videos[0]['video_id'] in self.videos
+        self.enabled = domain == 'target' and videos[0]['metadata']['video_id'] in self.videos
         self.heads, self.points = [], []
 
     def after(self, domain, videos):
@@ -160,7 +160,7 @@ class PointObserver:
                 counts = point_counts(probabilities, target, threshold)
                 total = self.counts.setdefault(key, {k: 0 for k in counts})
                 for key2, value in counts.items(): total[key2] += value
-        self.seen.append(videos[0]['video_id'])
+        self.seen.append(videos[0]['metadata']['video_id'])
         self.heads, self.points = [], []
         self.enabled = False
 
