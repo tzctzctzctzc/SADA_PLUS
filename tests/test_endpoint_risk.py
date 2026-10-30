@@ -121,12 +121,12 @@ def test_target_fixture(tmp_path):
     head.options['warmup_epochs']=0
     x=torch.arange(64.).reshape(-1,1)
     grid=torch.cat((x,x*0,x*0+10000,x*0+1),1)
-    offsets=torch.ones(1,64,2,requires_grad=True)*5
+    offsets=(torch.ones(1,64,2)*5).requires_grad_()
     student=dict(points=[grid],offsets=[offsets],masks=[torch.ones(1,1,64,dtype=torch.bool)],
         variance=[torch.ones(1,64,2,requires_grad=True)*4],logits=[torch.zeros(1,64,10)],
         metadata=[dict(video_id='t',fps=1.,feat_stride=1.,feat_num_frames=2,crop_start=0,crop_feat_len=64)])
     teacher=deepcopy({k:v for k,v in student.items() if k not in ('offsets','variance')})
-    teacher.update(offsets=[torch.ones(1,64,2,requires_grad=True)*7],variance=[torch.ones(1,64,2,requires_grad=True)])
+    teacher.update(offsets=[(torch.ones(1,64,2)*7).requires_grad_()],variance=[torch.ones(1,64,2,requires_grad=True)])
     teacher['logits'][0][:,:,0]=10
     video=dict(feats=torch.randn(4,64),segments=torch.empty(0,2),labels=torch.empty(0,dtype=torch.long),metadata=student['metadata'][0])
     row=dict(proposal_start_sec=16.,proposal_end_sec=36.,source_fpn_levels=[0],candidate_id='a',
@@ -141,3 +141,103 @@ def test_target_fixture(tmp_path):
     assert head.target_loss([video],cache,0.,student,teacher,6)==0
     video['labels']=torch.tensor([0])
     with pytest.raises(ValueError):head.target_loss([video],cache,0.,student,teacher,6)
+
+
+def cpu_context(tmp_path, risk):
+    from runpy import run_path
+    from pathlib import Path
+    from libs.models.SADA.meta_archs import SADA
+    from libs.models.SADA.optimizer import make_optimizer,make_scheduler
+    from libs.trainer.da_trainer import Trainer
+    from libs.utils import ModelEma2
+    from libs.evaluation.metrics import MetricTracker
+    from tools.endpoint_risk_engine import attach
+    code=Path(__file__).resolve().parents[1]
+    cfg=run_path(str(code/'tests/test_corrected_baseline.py'))['small_config']()
+    cfg['prototype_capacity']=run_path(str(code/'tests/test_prototype_capacity.py'))['configuration'](tmp_path,'control')
+    cfg.update(seed=123);cfg['baseline']=dict(epoch_budget=dict(iterations_per_epoch=1))
+    if risk:cfg['endpoint_risk']=options()
+    ctx=object.__new__(Trainer);ctx.cfg=deepcopy(cfg);ctx.ema_active=True
+    torch.manual_seed(123);ctx.model=SADA(cfg,'cpu');ctx.model_ema=ModelEma2(SADA(cfg,'cpu'),decay=.9)
+    s,t=run_path(str(code/'tests/test_prototype_capacity.py'))['videos']()
+    ctx.train_loader_src=[[s]];ctx.train_loader_tgt=[[t]]
+    excludes=['disc_dom_adv','disc_dom_conditional_adv','learnable_embeddings']
+    for key,optname,schedname in [('source','optimizer_gen_source','lr_scheduler_gen_source'),
+            ('alignment','optimizer_gen_source_alignment','lr_scheduler_gen_source_alignment'),
+            ('discriminator','optimizer_disc','lr_scheduler_disc')]:
+        disc=key=='discriminator'
+        optimizer=make_optimizer(ctx.model,cfg['opt'],cfg['opt']['disc_learning_rate' if disc else 'learning_rate'],
+            include_params=excludes if disc else [],exclude_params=[] if disc else excludes+(['endpoint_risk.'] if risk else []))
+        setattr(ctx,optname,optimizer);setattr(ctx,schedname,make_scheduler(optimizer,cfg['opt'],1))
+    ctx.train_metrics=MetricTracker('t_loss')
+    if risk:attach(ctx,cfg)
+    return ctx
+
+
+@pytest.mark.parametrize('epoch',[1,5])
+def test_true_original_training_loop_head_only_preserves_primary_and_rng(tmp_path,monkeypatch,epoch):
+    from tools.baseline_engine import tensor_digest,optimizers
+    native=torch.tensor
+    def cpu_copy(*args,**kwargs):
+        v=native(*args,**kwargs);return v.clone() if v.requires_grad and v.device.type=='cpu' else v
+    monkeypatch.setattr(torch,'tensor',cpu_copy)
+    old=cpu_context(tmp_path,False);new=cpu_context(tmp_path,True)
+    # 两次构造后固定同一输入，避免合成样本创建消耗的随机流差异。
+    new.train_loader_src=deepcopy(old.train_loader_src);new.train_loader_tgt=deepcopy(old.train_loader_tgt)
+    before=tensor_digest(new.model.endpoint_risk.state_dict())
+    torch.manual_seed(777);old._train_epoch(epoch);rng=torch.get_rng_state().clone()
+    torch.manual_seed(777);new._train_epoch(epoch)
+    assert torch.equal(rng,torch.get_rng_state())
+    for name,value in old.model.state_dict().items():
+        assert torch.equal(value,new.model.state_dict()[name]),name
+    for name,value in old.model_ema.module.state_dict().items():
+        assert torch.equal(value,new.model_ema.module.state_dict()[name]),name
+    assert tensor_digest([x.state_dict() for x in optimizers(old)])==tensor_digest([x.state_dict() for x in optimizers(new)])
+    assert before!=tensor_digest(new.model.endpoint_risk.state_dict())
+    assert all(p.grad is None for p in new.model_ema.module.parameters())
+    assert new.train_metrics.result()['t_endpoint_head_gradient_norm']>0
+
+
+def test_risk_optimizer_scheduler_independent_rng_strict_roundtrip(tmp_path,monkeypatch):
+    import io
+    from tools.endpoint_risk_engine import capture_extra,restore_extra
+    from tools.baseline_engine import tensor_digest
+    native=torch.tensor
+    monkeypatch.setattr(torch,'tensor',lambda *a,**kw:(lambda v:v.clone() if v.requires_grad and v.device.type=='cpu' else v)(native(*a,**kw)))
+    ctx=cpu_context(tmp_path,True);ctx._train_epoch(1)
+    saved=deepcopy(capture_extra(ctx));stream=io.BytesIO();torch.save(saved,stream);stream.seek(0);saved=torch.load(stream)
+    torch.randperm(20,generator=ctx.endpoint_risk_generator);ctx.endpoint_risk_optimizer.param_groups[0]['lr']=.5
+    restore_extra(ctx,saved)
+    assert tensor_digest(capture_extra(ctx))==tensor_digest(saved)
+    saved['options']['target_weight']=2.
+    with pytest.raises(ValueError):restore_extra(ctx,saved)
+
+
+def test_teacher_observation_matches_real_head_and_never_reads_gt(tmp_path):
+    from tools.calibrate_prototype_geometry import source_dense_observation,prepare_source_video
+    ctx=cpu_context(tmp_path,True);teacher=ctx.model_ema.module;teacher.eval()
+    s=ctx.train_loader_src[0][0];clean,_=prepare_source_video(s,'cpu')
+    before=torch.get_rng_state().clone()
+    obs=teacher.endpoint_observation([clean],mode='test')
+    dense,logits=source_dense_observation(teacher,clean)
+    for a,b in zip(obs['offsets'],dense['offsets']):assert torch.equal(a,b)
+    assert torch.equal(before,torch.get_rng_state())
+    assert all(not x.requires_grad for x in obs['offsets']+obs['variance'])
+    with pytest.raises(ValueError):teacher.endpoint_observation([s],mode='test')
+
+
+def test_strict_model_restore_rejects_missing_risk_head(tmp_path):
+    old=cpu_context(tmp_path,False);new=cpu_context(tmp_path,True)
+    with pytest.raises(RuntimeError):new.model.load_state_dict(old.model.state_dict(),strict=True)
+    new.model.load_state_dict(new.model.state_dict(),strict=True)
+
+
+def test_reference_pair_rejects_budget_lr_seed_or_cache_change(tmp_path):
+    from tools.endpoint_risk_protocol import config_for,assert_pair
+    base=dict(seed=123,loader=dict(batch_size=2),opt=dict(learning_rate=.01),
+        baseline=dict(code={'commit':'old'},tmpdir='/old',target_gt_used=False),
+        prototype_capacity=dict(variant='control',prepared_cache_sha256='fixed'))
+    cfg=config_for(base,options(),{'commit':'new'},tmp_path);assert_pair(cfg,base)
+    for key,value in [('seed',6),('opt',dict(learning_rate=.02)),('loader',dict(batch_size=4))]:
+        bad=deepcopy(cfg);bad[key]=value
+        with pytest.raises(ValueError):assert_pair(bad,base)

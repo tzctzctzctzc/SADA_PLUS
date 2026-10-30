@@ -123,7 +123,7 @@ def batch_choice(reports):
                                       for e in (1, 5)))
 
 
-def audit_entry(entry, expected_schema=SCHEMA):
+def audit_entry(entry, expected_schema=SCHEMA, acceptance_path=None):
     entry = Path(entry)
     complete = read(entry/'complete.json')
     if complete['schema'] != expected_schema:
@@ -132,6 +132,8 @@ def audit_entry(entry, expected_schema=SCHEMA):
         if sha(path) != digest:
             raise ValueError('完成工件SHA改变: '+path)
     cfg = read(entry/'config.json')
+    if cfg.get('endpoint_risk') and expected_schema!='sada-endpoint-relative-risk-v1':
+        raise ValueError('端点风险不是旧基线/Prototype身份，必须使用专项审计')
     if cfg['seed'] != cfg['init_rand_seed']:
         raise ValueError('训练种子与冻结配置不一致')
     if cfg['baseline'].get('random_seeds',random_seeds(cfg['seed'])) != random_seeds(cfg['seed']):
@@ -142,9 +144,10 @@ def audit_entry(entry, expected_schema=SCHEMA):
     if seed_proof['actual_cuda_seed']!=cfg['seed'] or seed_proof['requested_seed']!=cfg['seed']:
         raise ValueError('实际CUDA种子与配置不符')
     root=entry.parents[2]
-    if sha(root/'acceptance.json')!=complete['acceptance_sha256']:
+    acceptance_path=Path(acceptance_path) if acceptance_path else root/'acceptance.json'
+    if sha(acceptance_path)!=complete['acceptance_sha256']:
         raise ValueError('真实验收凭证改变')
-    acceptance=read(root/'acceptance.json')
+    acceptance=read(acceptance_path)
     if acceptance['status']!='passed' or cfg['loader']['batch_size']!=acceptance['batch']:
         raise ValueError('没有对应batch的真实验收')
     if cfg['baseline']['policy'] != POLICY:

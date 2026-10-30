@@ -8,6 +8,30 @@ from libs.models.SADA.endpoint_risk import SCHEMA,POLICY,validate_options
 from tools.baseline_protocol import read,save,sha
 
 
+def config_for(control, options, identity, tmpdir):
+    cfg=deepcopy(control);validate_options(options)
+    cfg['endpoint_risk']=deepcopy(options)
+    cfg['baseline']['code']=identity;cfg['baseline']['tmpdir']=str(tmpdir)
+    assert_pair(cfg,control)
+    return cfg
+
+
+def audit_certificate(path):
+    path=Path(path);cert=read(path);rows=read(path.parent/'source_rows.json')
+    if cert['schema']!=SCHEMA or cert['policy']!=POLICY or cert['target_gt_used']:
+        raise ValueError('源证据身份不符')
+    if sha(path.parent/'source_rows.json')!=cert['source_rows_sha256']:
+        raise ValueError('源逐端点记录改变')
+    recomputed=calibrate(rows,cert['fit_videos'],cert['audit_videos'],cert['train_videos'],cert['margin'])
+    for key in ('status','factors','source_audit'):
+        if recomputed[key]!=cert[key]:raise ValueError('源教师优势证据不能独立复算')
+    if not cert.get('actual_student_and_ema') or not cert.get('models_unchanged'):
+        raise ValueError('不是实际训练保存点的独立源诊断')
+    for key in ('checkpoint','source_manifest','source_pool','requests'):
+        if sha(cert[key])!=cert[key+'_sha256']:raise ValueError('源机制绑定输入改变: '+key)
+    return cert
+
+
 def assert_pair(cfg, control):
     copy=deepcopy(cfg);options=copy.pop('endpoint_risk');validate_options(options)
     copy['baseline']['code']=control['baseline']['code']
@@ -114,7 +138,7 @@ def promote_checkpoint(source, calibration_path, output):
     from tools.baseline_engine import tensor_digest,checkpoint
     source,calibration_path,output=map(Path,(source,calibration_path,output))
     if output.exists() or source.resolve()==output.resolve():raise ValueError('禁止覆盖原保存点')
-    cert=read(calibration_path)
+    cert=audit_certificate(calibration_path)
     if cert['status']!='passed' or cert['schema']!=SCHEMA or cert['checkpoint_sha256']!=sha(source):
         raise ValueError('源教师优势未通过或不对应这个真实师生保存点')
     if sha(calibration_path.parent/'source_rows.json')!=cert['source_rows_sha256']:
@@ -150,6 +174,7 @@ def assert_formal_ready(cfg, saved, acceptance):
         raise ValueError('缺少当前代码的源机制证据')
     if sha(cert['calibration_path'])!=cert['calibration_sha256']:
         raise ValueError('校准来源改变')
+    audit_certificate(cert['calibration_path'])
     if not acceptance or acceptance.get('status')!='passed' or acceptance.get('device')!='cuda':
         raise ValueError('缺少真实GPU验收，CPU测试不能正式放行')
     if (acceptance['code']!=cfg['baseline']['code'] or acceptance['config_sha256']!=tensor_digest(cfg)
@@ -168,3 +193,29 @@ def assert_formal_ready(cfg, saved, acceptance):
         or guard['observed']['uuid']!=lease['observed']['uuid']
         or guard['observed']['free_mib']<lease['minimum_free_mib']):
         raise ValueError('真实GPU准入不符')
+
+
+def audit_entry(entry):
+    import torch
+    from tools import baseline_protocol as base
+    entry=Path(entry);record=read(entry/'complete.json');cfg=read(entry/'config.json')
+    reference=Path(record['control_complete'])
+    if sha(reference)!=record['control_complete_sha256']:raise ValueError('原版配对完成凭证改变')
+    assert_pair(cfg,read(reference.parent/'config.json'))
+    acceptance_path=Path(record['gpu_acceptance'])
+    latest=torch.load(entry/'latest.pt',map_location='cpu')
+    assert_formal_ready(cfg,latest,read(acceptance_path))
+    for name in ('best','latest'):
+        saved=torch.load(entry/(name+'.pt'),map_location='cpu')
+        if saved.get('schema')!=SCHEMA or 'endpoint_risk' not in saved:
+            raise ValueError('保存点缺少风险头/独立优化器/随机流')
+    rows=[__import__('json').loads(x) for x in (entry/'metrics.jsonl').read_text().splitlines()]
+    if not all('endpoint_risk' in r for r in rows):raise ValueError('缺少逐轮风险诊断')
+    if not any(r['endpoint_risk'].get('head_gradient_norm',0)>0 for r in rows):
+        raise ValueError('误差头未真实学习')
+    if cfg['endpoint_risk']['mode']!='head_only' and not any(
+        r['endpoint_risk'].get('pseudo_gradient_norm',0)>0 and r['endpoint_risk'].get('selected_endpoints',0)>0 for r in rows):
+        raise ValueError('目标伪定位监督未生效')
+    result=base.audit_entry(entry,expected_schema=SCHEMA,acceptance_path=acceptance_path)
+    result['variant']=cfg['endpoint_risk']['mode']
+    return result

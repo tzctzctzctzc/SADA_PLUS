@@ -40,6 +40,7 @@ def probe(cfg, checkpoint, output, identity, guard):
     if engine.tensor_digest(engine.capture(ctx,cfg,saved['epoch'],saved['history']))!=reference:
         raise ValueError('GPU整状态/RNG恢复不精确')
     report=dict(status='passed',schema=SCHEMA,code=identity,device='cuda',epoch=epoch,
+        batch=cfg['loader']['batch_size'],seed=cfg['seed'],
         metrics={k:float(v) for k,v in metrics.items()},risk_head_updated=updated,
         teacher_detached=teacher_detached,target_gt_zero=True,
         pseudo_gradient_nonzero=bool(real_gradient),rng_roundtrip=True,

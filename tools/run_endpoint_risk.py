@@ -7,7 +7,7 @@ import sys
 
 CODE=Path(__file__).resolve().parents[1];sys.path.insert(0,str(CODE))
 from tools import baseline_protocol as protocol
-from tools.endpoint_risk_protocol import assert_pair,assert_formal_ready,promote_checkpoint
+from tools.endpoint_risk_protocol import assert_pair,assert_formal_ready,promote_checkpoint,audit_entry
 
 
 def main(args):
@@ -34,6 +34,8 @@ def main(args):
             first_cuda_guard()
         result=collect(args.checkpoint,args.source_pool,args.output,args.margin,args.device,identity)
         print('SOURCE_GATE',result['status']);return
+    if args.mode=='audit':
+        print(audit_entry(args.output));return
     if args.mode=='preflight':
         from tools.calibrate_prototype_geometry import cpu_source_preflight
         print(cpu_source_preflight(control));return
@@ -54,18 +56,33 @@ def main(args):
     elif args.mode=='train':
         if protocol.read(args.output/'config.json')!=cfg:raise ValueError('只能精确接续同一预热条目')
         engine.train(cfg,args.output,resume=args.checkpoint)
-    elif args.mode=='evaluate':engine.evaluate(cfg,args.output,cfg['baseline']['annotation_for_offline_evaluation'])
+    elif args.mode=='evaluate':
+        saved=torch.load(args.output/'latest.pt',map_location='cpu')
+        assert_formal_ready(cfg,saved,protocol.read(args.acceptance))
+        engine.evaluate(cfg,args.output,cfg['baseline']['annotation_for_offline_evaluation'])
     elif args.mode=='probe':
         # 完整专项probe需有真实source保存点/证据，不能用随机头捏造有效门控。
         from tools.endpoint_risk_probe import probe
         probe(cfg,args.checkpoint,args.output,identity,guard)
     protocol.save(args.output/(args.mode+'_gpu.json'),dict(guard=guard,guard_sha256=protocol.sha(guard),
         config_sha256=protocol.sha(args.config)))
+    if args.mode=='evaluate':
+        paths=['config.json','runtime_config.json','seed_proof.json','detector_initialization.json','metrics.jsonl',
+            'termination.json','best.pt','latest.pt','train_gpu.json','evaluate_gpu.json','source_warmup_gpu.json',
+            'paused_for_source_audit.json','restore_proof.json',
+            'evaluation/source_val.json','evaluation/target_val.json','evaluation/manifest.json']
+        reference=control/'complete.json'
+        protocol.save(args.output/'complete.json',dict(schema=cfg['endpoint_risk']['schema'],
+            shift=cfg['baseline']['shift'],regime='uda',variant=cfg['endpoint_risk']['mode'],code=identity,
+            control_complete=str(reference),control_complete_sha256=protocol.sha(reference),
+            gpu_acceptance=str(args.acceptance),acceptance_sha256=protocol.sha(args.acceptance),
+            artifacts={str(args.output/p):protocol.sha(args.output/p) for p in paths}))
+        print(audit_entry(args.output))
 
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--mode',required=True,choices=['preflight','source_warmup','source_audit','promote','probe','train','evaluate'])
+    p.add_argument('--mode',required=True,choices=['preflight','source_warmup','source_audit','promote','probe','train','evaluate','audit'])
     p.add_argument('--config',type=Path)
     p.add_argument('--checkpoint',type=Path)
     p.add_argument('--calibration',type=Path)
