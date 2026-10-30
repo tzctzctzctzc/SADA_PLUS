@@ -39,3 +39,8 @@ def test_four_routing_arms_preserve_random_coverage_and_source_threshold():
     assert result['disable_background'].sum()==0
     assert weighted_lower([np.array([.2,.4])]) is None
     assert weighted_lower([np.array([.2,.4]),np.array([.1,.3])])==.1
+
+
+def test_source_actual_routing_uses_gt_not_classifier_score():
+    counts=routing_counts(np.array([[.01],[.01]]),[True,True],[True,False],[True,False],.6,background=[False,True])
+    assert counts['routed_background']==1 and counts['background_but_assigned_positive']==0

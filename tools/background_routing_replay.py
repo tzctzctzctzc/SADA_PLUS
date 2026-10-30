@@ -24,7 +24,7 @@ def weighted_lower(groups,quantile=.05):
     return float(values[order[min(index,len(values)-1)]])
 
 
-def replay(root,plan):
+def replay(root,plan,save_report=True):
     root=Path(root);index=p.read(root/'point_index.json');roles=['student','ema']
     source=sorted({x['video_id'] for x in index if x['domain']=='source'},key=lambda v:hashlib.sha256(('123:'+v).encode()).hexdigest())
     fit=source[::2];audit=source[1::2];thresholds={};counts={}
@@ -48,6 +48,7 @@ def replay(root,plan):
                 branches=masks(confidence,data[prefix+'category'],data[prefix+'valid'],plan['classification_threshold'],thresholds[entry['role']][str(level)],seed)
                 # 两种保护策略只改target背景分组，关闭背景对齐的对照则同时关闭source/target。
                 if entry['domain']=='source':
+                    branches['original']=data[prefix+'valid']&~assigned
                     branches['protect_ambiguous']=branches['original'];branches['matched_random']=branches['original']
                 if int(branches['protect_ambiguous'].sum())!=int(branches['matched_random'].sum()):raise ValueError('随机对照覆盖率不配对')
                 for arm,mask in branches.items():
@@ -61,4 +62,5 @@ def replay(root,plan):
         target_gt_used_for_threshold=False,random_matching='same video/FPN level/predicted class, exact removed count',
         counts={'/'.join(key):sum_counts(rows) for key,rows in counts.items()},training_performed=False,
         conclusion_limit='routing contamination changes do not establish mAP improvement')
-    p.save(root/'routing_replay.json',report);return report
+    if save_report:p.save(root/'routing_replay.json',report)
+    return report

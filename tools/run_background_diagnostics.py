@@ -23,6 +23,7 @@ def worker(args):
         if p.sha(ref/name)!=complete['artifacts'][str(ref/name)]:raise ValueError('参考工件改变: '+name)
     checkpoint_sha=p.sha(ref/'best.pt');annotation=Path(cfg['baseline']['annotation_for_offline_evaluation'])
     if p.sha(annotation)!=cfg['baseline']['annotation_sha256']:raise ValueError('离线标注改变')
+    if cfg['model'].get('use_source_pseudo_labels',False):raise ValueError('本次source分组审计要求沿用源GT，不接受source伪标签变体')
     os.chdir(args.data_root);device='cpu' if args.cpu else 'cuda:0';guard=None if args.cpu else first_cuda_guard()
     torch.manual_seed(cfg['seed'])
     if not args.cpu:torch.cuda.manual_seed(cfg['seed'])
@@ -38,7 +39,7 @@ def worker(args):
     plan=dict(schema=SCHEMA,spec=SPEC,code=identity,shift=args.shift,checkpoint_sha256=checkpoint_sha,
         annotation_sha256=p.sha(annotation),reference_complete_sha256=p.sha(ref/'complete.json'),backend=device,gpu_guard=guard,gpu_guard_sha256=None if guard is None else p.sha(guard),
         classification_threshold=cfg['model'].get('pl_threshold',.7),background_class_weight=cfg['model'].get('weight_no_class_adv',1.),
-        target_gt_used_for_training=False,exploratory_target_gt_analysis=True)
+        target_gt_used_for_training=False,exploratory_target_gt_analysis=True,source_routing='source_gt',target_routing='score_pseudo_labels')
     p.save(args.output/'plan.json',plan)
     routing=[];point_index=[];predictions={name:[] for name in ['original','assigned_anchor_oracle','occupied_anchor_oracle','post_nms_background_oracle','full_backend_reference']}
     null_checked=False;video_ids=[];feature_inputs={}
@@ -57,7 +58,8 @@ def worker(args):
                     occupied=[torch.as_tensor(occupancy(grid[:,0].cpu().numpy(),original['segments'].cpu().numpy()),device=device) for grid in obs['points']]
                     for level in range(len(logits)):
                         counts=routing_counts(logits[level][0].sigmoid().T.cpu().numpy(),obs['masks'][level][0].reshape(-1).cpu().numpy(),
-                            assigned[level].cpu().numpy(),occupied[level].cpu().numpy(),plan['classification_threshold'])
+                            assigned[level].cpu().numpy(),occupied[level].cpu().numpy(),plan['classification_threshold'],
+                            background=(~assigned[level]).cpu().numpy() if domain=='source' else None)
                         routing.append(dict(video_id=vid,domain=domain,role=role,level=level,
                             active_alignment_level=level in cfg['model'].get('semantic_alignment_levels',list(range(6))),counts=counts))
                         scores=logits[level][0].sigmoid().T.cpu().numpy()

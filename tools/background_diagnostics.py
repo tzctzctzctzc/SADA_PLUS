@@ -47,9 +47,9 @@ def occupancy(points,segments):
     return ((points[:,None]>=segments[:,0]) & (points[:,None]<=segments[:,1])).any(1)
 
 
-def routing_counts(probabilities,valid,assigned,inside,threshold):
+def routing_counts(probabilities,valid,assigned,inside,threshold,background=None):
     valid=np.asarray(valid,dtype=bool);assigned=np.asarray(assigned,dtype=bool);inside=np.asarray(inside,dtype=bool)
-    bg=np.asarray(probabilities).max(-1)<threshold
+    bg=np.asarray(probabilities).max(-1)<threshold if background is None else np.asarray(background,dtype=bool)
     n=int(valid.sum());b=int((valid&bg).sum());p=int((valid&assigned).sum())
     return dict(valid=n,routed_background=b,assigned_positive=p,
         background_but_assigned_positive=int((valid&bg&assigned).sum()),
