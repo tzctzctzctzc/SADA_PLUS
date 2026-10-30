@@ -145,7 +145,8 @@ def test_actual_source_bank_path_preserves_rng_parameters_and_membership(tmp_pat
     cfg=small();cfg['prototype_capacity']=h['configuration'](tmp_path,'multi_stable')
     source=tmp_path/'source.json';source.write_text(json.dumps(dict(database={
         'a':dict(subset='train'),'b':dict(subset='train'),'v':dict(subset='val')})))
-    cfg.update(src_train_split=['train'],src_val_split=['val'],dataset=dict(json_file=str(source),feat_folder=str(tmp_path),file_ext='.npz'))
+    cfg.update(src_train_split=['train'],src_val_split=['val'])
+    cfg['dataset'].update(json_file=str(source),feat_folder=str(tmp_path),file_ext='.npz')
     model=SADA(cfg,'cpu');samples=[]
     for vid in ['a','b']:
         s,_=h['videos']();s['metadata']['video_id']=vid
