@@ -10,13 +10,13 @@ from torch.nn import functional as F
 
 
 def select_source_segments(video,per_class=16):
-    groups=defaultdict(list);vid=video['metadata']['video_id']
+    groups=defaultdict(dict);vid=video['metadata']['video_id']
     for i,(segment,label) in enumerate(zip(video['segments'],video['labels'])):
         c=int(label)
         if 0<=c<10:
             key=hashlib.sha256((vid+':'+str(c)+':'+repr(segment.tolist())).encode()).hexdigest()
-            groups[c].append((key,i))
-    indices=[i for c in sorted(groups) for _,i in sorted(groups[c])[:per_class]]
+            groups[c].setdefault(key,i)
+    indices=[i for c in sorted(groups) for _,i in sorted(groups[c].items())[:per_class]]
     result=dict(video)
     result['segments']=video['segments'][indices];result['labels']=video['labels'][indices]
     return result
@@ -37,6 +37,7 @@ def balanced_cap(rows,limit=256):
 def spherical_clusters(vectors,videos,max_k=3,steps=20,min_count=8,min_videos=2,max_cos=.98):
     x=F.normalize(vectors.float().cpu(),dim=-1)
     if not len(x) or len(videos)!=len(x):raise ValueError('源建簇样本为空或身份不符')
+    if not torch.isfinite(x).all() or (x.norm(dim=1)<1e-8).any():raise ValueError('源建簇特征非有限或全零')
     attempts=[]
     for k in range(max_k,0,-1):
         if len(x)<k:continue
@@ -69,12 +70,13 @@ def spherical_clusters(vectors,videos,max_k=3,steps=20,min_count=8,min_videos=2,
 
 def rng_state(ctx):
     return dict(python=random.getstate(),numpy=np.random.get_state(),cpu=torch.get_rng_state(),
-                cuda=torch.cuda.get_rng_state(0),loaders={k:g.get_state() for k,g in ctx.generators.items()})
+                cuda=torch.cuda.get_rng_state(0) if next(ctx.model.parameters()).device.type=='cuda' else None,
+                loaders={k:g.get_state() for k,g in ctx.generators.items()})
 
 
 def restore_rng(ctx,state):
     random.setstate(state['python']);np.random.set_state(state['numpy']);torch.set_rng_state(state['cpu'])
-    torch.cuda.set_rng_state(state['cuda'],device=0)
+    if state['cuda'] is not None:torch.cuda.set_rng_state(state['cuda'],device=0)
     for k,g in ctx.generators.items():g.set_state(state['loaders'][k])
 
 
@@ -86,6 +88,7 @@ def initialize_source_bank(ctx,entry):
     branch=ctx.model.rq3_capacity.branch
     if bool(branch.source_bank_initialized):return
     cfg=ctx.cfg;cap=ctx.model.rq3_capacity;spec=cap.specification
+    device=next(ctx.model.parameters()).device
     ds=dataset(cfg,cfg['dataset']['json_file'],cfg['src_train_split'],False)
     db=__import__('json').loads(open(cfg['dataset']['json_file']).read())['database']
     train={v for v,x in db.items() if x['subset'].lower() in cfg['src_train_split']}
@@ -99,7 +102,7 @@ def initialize_source_bank(ctx,entry):
             for video in ds:
                 video=select_source_segments(video,spec['per_video_class_cap']);vid=video['metadata']['video_id'];visited.append(vid)
                 if not len(video['labels']):continue
-                v=move_to_device([video],'cuda:0')[0]
+                v=move_to_device([video],device)[0]
                 x,mask=ctx.model.preprocessing([v],mode='validation')
                 f,mask,_=ctx.model.backbone_source(x,mask);f,mask=ctx.model.neck_source(f,mask)
                 proposals=source_gt_proposals([v],cap.num_classes,len(cap.strides),cap.regression_ranges)

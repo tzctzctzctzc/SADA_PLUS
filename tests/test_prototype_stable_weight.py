@@ -76,6 +76,11 @@ def test_source_selection_does_not_mutate_original_video():
     assert torch.equal(first['segments'],second['segments'])
 
 
+def test_duplicate_annotations_do_not_fake_cluster_support():
+    video=dict(segments=torch.tensor([[1.,2.]]*30),labels=torch.zeros(30,dtype=torch.long),metadata=dict(video_id='v'))
+    assert len(select_source_segments(video)['labels'])==1
+
+
 def test_no_random_filling_after_install_and_strict_restore():
     b=StableMultiPrototypeBranch(8,10)
     bank=spherical_clusters(torch.eye(128)[:1].repeat(20,1),['a','b']*10)
@@ -113,10 +118,54 @@ def test_actual_sada_optimizer_and_detection_loss_are_paired(tmp_path,monkeypatc
     assert all(torch.equal(v,model.state_dict()[k]) for k,v in base.state_dict().items())
     opt=make_optimizer(model,cfg['opt'],.0001,exclude_params=['disc_dom_adv','disc_dom_conditional_adv','learnable_embeddings'])
     ids={id(p) for g in opt.param_groups for p in g['params']};assert all(id(p) in ids for p in model.rq3_capacity.parameters())
+    if variant=='multi_stable':
+        bank=spherical_clusters(torch.eye(128)[:3].repeat_interleave(12,0),['a','b']*18)
+        model.rq3_capacity.branch.install_source_bank({0:bank})
     s,t=h['videos']();torch.manual_seed(777);a=base(video_list_src=[s],video_list_tgt=[t],mode='train',curr_epoch=5)[0]
     torch.manual_seed(777);b=model(video_list_src=[s],video_list_tgt=[t],mode='train',curr_epoch=5)[0]
     assert torch.equal(a['cls_loss'],b['cls_loss']) and torch.equal(a['reg_loss'],b['reg_loss'])
     assert b['rq3_target_gradient_norm']>0
+    opt.zero_grad();b['downstream_loss'].backward()
+    assert any(p.grad is not None and p.grad.abs().sum()>0 for p in model.backbone_source.parameters())
+    opt.step()
+    restored=SADA(cfg,'cpu');restored.load_state_dict(model.state_dict(),strict=True)
+    assert all(torch.equal(v,restored.state_dict()[k]) for k,v in model.state_dict().items())
+
+
+def test_actual_source_bank_path_preserves_rng_parameters_and_membership(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    import json
+    from libs.models.SADA.meta_archs import SADA
+    from tools.baseline_engine import tensor_digest
+    from tools.prototype_stable_bank import initialize_source_bank,rng_state
+    small=run_path(str(CODE/'tests/test_corrected_baseline.py'))['small_config'];native=torch.tensor
+    def leaf_copy(*a,**kw):
+        value=native(*a,**kw);return value.clone() if value.requires_grad and value.device.type=='cpu' else value
+    monkeypatch.setattr(torch,'tensor',leaf_copy)
+    cfg=small();cfg['prototype_capacity']=h['configuration'](tmp_path,'multi_stable')
+    source=tmp_path/'source.json';source.write_text(json.dumps(dict(database={
+        'a':dict(subset='train'),'b':dict(subset='train'),'v':dict(subset='val')})))
+    cfg.update(src_train_split=['train'],src_val_split=['val'],dataset=dict(json_file=str(source),feat_folder=str(tmp_path),file_ext='.npz'))
+    model=SADA(cfg,'cpu');samples=[]
+    for vid in ['a','b']:
+        s,_=h['videos']();s['metadata']['video_id']=vid
+        s['segments']=torch.stack([torch.tensor([float(i+8),float(i+14)]) for i in range(20)])
+        s['labels']=torch.zeros(20,dtype=torch.long);samples.append(s)
+        (tmp_path/(vid+'.npz')).write_bytes(b'feature identity fixture')
+    class SourceDataset:
+        data_list=[dict(id='a'),dict(id='b')]
+        def __iter__(self):return iter(samples)
+    def only_source(config,path,splits,training):
+        assert path==str(source) and splits==['train'] and not training
+        return SourceDataset()
+    monkeypatch.setattr('tools.baseline_engine.dataset',only_source)
+    ctx=SimpleNamespace(cfg=cfg,model=model,generators={'source':torch.Generator().manual_seed(123)})
+    before=tensor_digest(rng_state(ctx));parameters=tensor_digest(dict(model.named_parameters()))
+    initialize_source_bank(ctx,tmp_path)
+    assert tensor_digest(rng_state(ctx))==before and tensor_digest(dict(model.named_parameters()))==parameters
+    proof=json.loads((tmp_path/'source_bank.json').read_text())
+    assert proof['source_videos']==['a','b'] and not proof['target_data_loaded'] and not proof['source_validation_loaded']
+    assert bool(model.rq3_capacity.branch.source_bank_initialized)
 
 
 def test_configuration_rejects_other_changes():
