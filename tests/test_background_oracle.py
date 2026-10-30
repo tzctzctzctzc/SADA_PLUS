@@ -17,6 +17,7 @@ def test_oracle_crop_is_fixed_and_does_not_consume_rng():
 
 def model_config(tmp_path,oracle=True,empty=False):
     cfg=run_path(str(CODE/'tests/test_corrected_baseline.py'))['small_config']()
+    cfg['dataset']['default_fps']=1. # 合成videos固定1fps，配置应与输入metadata一致。
     cfg['prototype_capacity']=run_path(str(CODE/'tests/test_prototype_capacity.py'))['configuration'](tmp_path,'control')
     gt=tmp_path/'oracle.json';manifest=tmp_path/'unlabeled.json'
     save(manifest,{'database':{'t':{'subset':'target'}}})
