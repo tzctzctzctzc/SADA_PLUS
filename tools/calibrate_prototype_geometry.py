@@ -35,6 +35,8 @@ def calibrate(control_entry,source_pool,output,identity):
     frozen=read(source_pool)
     if frozen['target_data_used']:
         raise ValueError('源候选池包含target数据')
+    if sha(cfg['dataset']['json_file'])!=frozen['sources'][shift]['source_json_sha256']:
+        raise ValueError('源候选池与当前基线源成员/划分不一致')
     manifest=Path(frozen['sources'][shift]['requests'])
     if sha(manifest)!=frozen['sources'][shift]['sha256']:
         raise ValueError('源真实proposal清单改变')

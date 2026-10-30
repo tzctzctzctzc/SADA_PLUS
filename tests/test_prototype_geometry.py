@@ -188,6 +188,7 @@ def test_source_dense_calibration_matches_actual_test_forward():
     cfg=run_path(str(Path(__file__).with_name('test_corrected_baseline.py')))['small_config']()
     video=run_path(str(Path(__file__).with_name('test_prototype_capacity.py')))['videos']()[0]
     video['metadata']['duration']=64.;video['metadata']['video_length']=64
+    video['metadata']['use_temporal_grid_feats']=False
     # inference读取与正式dataset相同的顶层元数据。
     for key in ['video_id','fps','duration','feat_stride','feat_num_frames']:
         video[key]=video['metadata'][key]
