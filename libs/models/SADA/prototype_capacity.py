@@ -15,9 +15,9 @@ def specification(variant):
     if variant in ('temporal_pool','multi_prototype'):
         from .prototype_methods import method_specification
         return method_specification(variant)
-    if variant not in ('control','wide_deep'):raise ValueError('仅允许原版与直接加宽加深')
+    if variant not in ('control','wide_deep','wide_only'):raise ValueError('未知容量实验身份')
     return dict(variant=variant,embedding_dim=128 if variant=='control' else 256,
-        hidden_dim=256 if variant=='control' else 512,layers=1 if variant=='control' else 2,
+        hidden_dim=256 if variant=='control' else 512,layers=2 if variant=='wide_deep' else 1,
         heads=4,dropout=0.,pooling='mean',prototypes_per_class=1,
         prototype_momentum=.9,source_weight=1.,target_alignment_weight=.1)
 
@@ -46,12 +46,13 @@ def build_capacity(cfg,fpn_dim,num_classes,strides,regression_ranges,device):
             result.branch=StableMultiPrototypeBranch(fpn_dim,num_classes,confidence_threshold=0.)
         if cfg['variant'] in ('multi_stable','weight_020','weight_040'):
             result.alignment_weight=spec['target_alignment_weight']
-        if cfg['variant']=='wide_deep':
+        if cfg['variant'] in ('wide_deep','wide_only'):
             torch.manual_seed(0)
             result.branch=VLMProposalCoAdaptationBranch(fpn_dim,num_classes,
                 hidden_dim=512,embedding_dim=256,confidence_threshold=0.,prototype_momentum=.9)
-            layer=nn.TransformerEncoderLayer(256,4,512,dropout=0.,activation='gelu',batch_first=True,norm_first=True)
-            result.branch.encoder=nn.TransformerEncoder(layer,2)
+            if cfg['variant']=='wide_deep':
+                layer=nn.TransformerEncoderLayer(256,4,512,dropout=0.,activation='gelu',batch_first=True,norm_first=True)
+                result.branch.encoder=nn.TransformerEncoder(layer,2)
     result.specification=spec
     return result
 

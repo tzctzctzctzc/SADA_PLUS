@@ -27,7 +27,7 @@ def videos():
     return source,target
 
 
-@pytest.mark.parametrize('variant',['control','wide_deep'])
+@pytest.mark.parametrize('variant',['control','wide_deep','wide_only'])
 def test_branch_shapes_gradient_optimizer_and_strict_restore(tmp_path,variant):
     cfg=configuration(tmp_path,variant);spec=specification(variant)
     torch.manual_seed(123);before=torch.get_rng_state().clone()
@@ -78,7 +78,7 @@ def test_pairing_rejects_learning_rate_or_seed_changes(tmp_path):
         with pytest.raises(ValueError):assert_pair(bad,base)
 
 
-@pytest.mark.parametrize('variant',['control','wide_deep'])
+@pytest.mark.parametrize('variant',['control','wide_deep','wide_only'])
 def test_true_sada_integration_keeps_detector_initialization_and_source_loss(tmp_path,monkeypatch,variant):
     from runpy import run_path
     small_config=run_path(str(CODE/'tests/test_corrected_baseline.py'))['small_config']
