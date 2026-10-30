@@ -62,6 +62,7 @@ def worker(args):
     import torch
     from tools.baseline_engine import dataset,tensor_digest
     from libs.models.SADA import make_meta_arch
+    from libs.utils import fix_random_seed
     from libs.trainer.da_trainer import move_to_device
     from tools.baseline_gpu import first_cuda_guard
     from tools.calibrate_prototype_geometry import source_dense_observation
@@ -76,7 +77,7 @@ def worker(args):
     guard=first_cuda_guard();os.chdir(args.data_root)
     saved=torch.load(entry/'best.pt',map_location='cpu');decision=p.termination(p.read(entry/'termination.json')['history'])
     if saved['config']!=cfg or saved['epoch']!=decision['best_epoch']:raise ValueError('不是源验证选定的UDA后best')
-    torch.manual_seed(123);torch.cuda.manual_seed(123)
+    fix_random_seed(123,include_cuda=True);torch.cuda.manual_seed(123)
     model=make_meta_arch('sada',deepcopy(cfg),device='cuda:0').to('cuda:0');model.load_state_dict(saved['ema_state_dict'],strict=True);model.eval();del saved
     if model.use_trident_head or cfg['model'].get('use_ce_cls',False):raise ValueError('本轮沿用原普通回归/sigmoid候选协议')
     before=tensor_digest(model.state_dict());ds=dataset(cfg,target,cfg['tgt_train_split'],False,True)
