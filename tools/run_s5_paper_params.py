@@ -13,7 +13,7 @@ CODE=Path(__file__).resolve().parents[1];sys.path.insert(0,str(CODE))
 from tools import baseline_protocol as protocol
 from tools import run_prototype_capacity as capacity
 from tools.run_prototype_wide import assert_alignment_weight,finish_process,memory_policy
-from tools.run_sada_baseline import acquire,spawn
+from tools.run_sada_baseline import acquire as exclusive_acquire,spawn
 from libs.models.SADA.prototype_capacity import specification
 
 SCHEMA='sada-s5-paper-hyperparameters-pair-v1'
@@ -22,7 +22,19 @@ THRESHOLD=.5
 REFERENCES=dict(uda=Path('/vepfs/vlms/sada_baseline12_seed123_b2_08e7c24_1029/formal/S5/uda'),
                 prototype=Path('/vepfs/vlms/prototype_capacity12_5f9a157_1029/formal/control/S5'))
 ACTIVE={}
+COHORT=None
 read,save,sha=protocol.read,protocol.save,protocol.sha
+
+
+def acquire(indices,data,root,minimum,commit):
+    if COHORT is None:return exclusive_acquire(indices,data,root,minimum,commit)
+    from tools.research_gpu_share import slot
+    for index in indices:
+        context=slot(index,data,root,minimum,commit,COHORT)
+        try:lease=context.__enter__()
+        except BlockingIOError:continue
+        return context,lease
+    return None
 
 
 def changed_config(old,identity,tmp):
@@ -110,6 +122,8 @@ def state(root,phase,completed,**extra):
 
 
 def main(args):
+    global COHORT
+    COHORT=args.shared_cohort.resolve() if args.shared_cohort else None
     root=args.output.resolve();data=args.data_root.resolve();identity=protocol.code_identity()
     indices=[int(x) for x in args.gpus.split(',')]
     if len(set(indices))!=len(indices) or not set(indices)<=set(range(4)):raise ValueError('GPU列表不合法')
@@ -117,6 +131,7 @@ def main(args):
     save(root/'plan.json',dict(schema=SCHEMA,code=identity,shift='S5',direction='old_to_new',methods=list(REFERENCES),
         level_weights=list(LEVELS),sada_pseudo_label_threshold=THRESHOLD,prototype_specification=specification('control'),
         physical_gpus=indices,only_declared_parameter_changes=True,source_selection_only=True,
+        shared_cohort=str(COHORT) if COHORT else None,shared_cohort_sha256=sha(COHORT) if COHORT else None,
         note='paired_parameter_experiment_not_an_exact_paper_reproduction'))
     try:
         state(root,'audit_references',completed)
@@ -126,7 +141,8 @@ def main(args):
             cfg=changed_config(read(entry/'config.json'),identity,tmp);assert_declared_changes(cfg,read(entry/'config.json'),method)
             configs[method]=cfg
         capacity.assert_pair(configs['prototype'],configs['uda'])
-        save(root/'inputs.json',dict(code=identity,references=old_results,configurations=configs))
+        save(root/'inputs.json',dict(code=identity,references=old_results,configurations=configs,
+            shared_cohort=str(COHORT) if COHORT else None,shared_cohort_sha256=sha(COHORT) if COHORT else None))
         initial=read(REFERENCES['uda']/'termination.json')['initial_state_sha'];pending=list(REFERENCES)
         while pending or ACTIVE:
             for method,t in list(ACTIVE.items()):
@@ -193,4 +209,5 @@ def main(args):
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'));p.add_argument('--gpus',default='2,1,3,0')
+    p.add_argument('--shared-cohort',type=Path,help='只与用户明确指定的已核实研究监督共享，不修改其活跃源码/锁')
     args=p.parse_args();signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop);main(args)

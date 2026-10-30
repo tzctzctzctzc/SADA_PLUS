@@ -162,6 +162,9 @@ def audit_entry(entry, expected_schema=SCHEMA):
         if receipt['config_sha256']!=sha(entry/'config.json') or sha(receipt['guard'])!=receipt['guard_sha256']:
             raise ValueError('GPU/配置凭证改变')
         guard=read(receipt['guard']);lease=read(guard['lease'])
+        if 'research_share' in lease:
+            from tools.research_gpu_share import audit_guard
+            audit_guard(lease,guard)
         if name=='train' and seed_proof['uuid']!=lease['observed']['uuid']:
             raise ValueError('CUDA种子证明与真实训练GPU不一致')
         if (sha(guard['lease'])!=guard['lease_sha256'] or lease['commit']!=complete['code']['commit']
