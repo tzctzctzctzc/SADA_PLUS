@@ -175,7 +175,7 @@ def schedulers(ctx):
 
 
 def capture(ctx, cfg, epoch, history):
-    result=dict(schema=cfg.get('endpoint_risk',{}).get('schema',SCHEMA), config=cfg, epoch=epoch, history=deepcopy(history),
+    result=dict(schema=cfg.get('background_oracle',{}).get('schema',cfg.get('endpoint_risk',{}).get('schema',SCHEMA)), config=cfg, epoch=epoch, history=deepcopy(history),
         state_dict=ctx.model.state_dict(), ema_state_dict=ctx.model_ema.module.state_dict(),
         model_controls=controls(ctx.model), ema_controls=controls(ctx.model_ema.module),
         optimizers=[x.state_dict() for x in optimizers(ctx)],
@@ -259,6 +259,8 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
             model_updated=changed, source_gradient_norm=ctx.first_gradient_norm,target_gt_losses=[0.,0.,0.])
         if cfg.get('prototype_capacity'):
             values=ctx.train_metrics.result()
+            if cfg.get('background_oracle'):
+                reports[str(epoch)]['background_oracle']={k[2:]:float(v) for k,v in values.items() if k.startswith('t_oracle_')}
             reports[str(epoch)]['auxiliary']={k[2:]:float(v) for k,v in values.items() if k.startswith('t_rq3_')}
             reports[str(epoch)]['branch_parameters_updated']=branch_before!=tensor_digest(dict(ctx.model.rq3_capacity.named_parameters()))
             reports[str(epoch)]['pool_parameters_updated']=special_before!=tensor_digest(
@@ -337,6 +339,9 @@ def train(cfg, entry, resume=None, pause_after=None):
             row['auxiliary']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_rq3_')}
         if cfg.get('endpoint_risk'):
             row['endpoint_risk']={k[len('t_endpoint_'):]:float(v) for k,v in metrics.items() if k.startswith('t_endpoint_')}
+        if cfg.get('background_oracle'):
+            row['background_oracle']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_oracle_')}
+            row['target_gt_used_for_background_alignment']=True
         if epoch%5 == 0:
             ctx.valid_metrics_src.reset()
             value = float(ctx._valid_epoch(epoch, ctx.val_loader_src, domain='src'))

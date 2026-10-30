@@ -557,6 +557,11 @@ class SADA(nn.Module):
             self.rq3_capacity=build_capacity(cfg['prototype_capacity'],fpn_dim,self.num_classes,
                 self.fpn_strides,self.reg_range,self.device)
         self.endpoint_risk = None
+        self.background_oracle = None
+        self.oracle_target_positive = None
+        if cfg.get('background_oracle'):
+            from .background_oracle import BackgroundOracle
+            self.background_oracle=BackgroundOracle(cfg['background_oracle'],cfg)
         if cfg.get('endpoint_risk'):
             if self.rq3_capacity is None or cfg['prototype_capacity']['variant']!='control' or self.use_trident_head:
                 raise ValueError('端点风险只适配当前原版Prototype与普通左右回归头')
@@ -796,6 +801,9 @@ class SADA(nn.Module):
 
             # compute the gt labels for cls & reg
             # list of prediction targets
+            self.oracle_target_positive=None
+            if mode=='train' and self.background_oracle is not None:
+                self.oracle_target_positive=self.background_oracle.positive_masks(self,video_list_tgt,points,fpn_masks_tgt)
             gt_cls_labels, gt_offsets = self.label_points(
                 points, gt_segments, gt_labels)
             
@@ -1451,6 +1459,13 @@ class SADA(nn.Module):
                             # Select all the background embeddings (all zeros in the source), and all the ones below all the thresholds in the pseudo-labels
                             class_c_mask_src = torch.all(source_labels == 0, dim=-1)  # shape: T'
                             class_c_mask_tgt = torch.all(pseudo_gt_cls_target == 0, dim=-1)  # shape: T''
+                            if self.background_oracle is not None and self.oracle_target_positive is not None:
+                                positive=self.oracle_target_positive[l][valid_mask_l_tgt]
+                                before=class_c_mask_tgt
+                                class_c_mask_tgt=before & ~positive
+                                losses['oracle_bg_before_'+str(l)]=before.sum().detach().float()
+                                losses['oracle_bg_removed_'+str(l)]=(before & positive).sum().detach().float()
+                                losses['oracle_bg_after_'+str(l)]=class_c_mask_tgt.sum().detach().float()
                             
                             # Set the influence of the background class to the predefined tunnable parameter
                             class_c_weight = self.cfg['model'].get('weight_no_class_adv', 1.0)
