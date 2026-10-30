@@ -18,6 +18,47 @@ from tools.prototype_refresh import (SCHEMA,POLICY,SHIFTS,BASELINE,CONTROL,DIAGN
 ACTIVE={}
 
 
+def freeze_command(teacher_python,root):
+    # Python3.12与3.9的sum存在末位差异；必须在原评分解释器中严格逐值复算。
+    return [str(teacher_python),'-B',str(CODE/'tools/run_prototype_refresh.py'),
+            '--freeze-only','--output-root',str(root)]
+
+
+def reuse_scores(previous,root):
+    """只复用全部评分已完成且尚未训练的现场，不重新查询教师。"""
+    plan=read(previous/'plan.json');state=read(previous/'state.json')
+    if plan['policy']!=POLICY:raise ValueError('前序评分方法不同')
+    for pid in (state['pid'],state.get('child_pid')):
+        if pid is None:continue
+        p=Path('/proc')/str(pid)/'stat'
+        if p.exists() and p.read_text().split(') ')[1][0]!='Z':raise ValueError('前序自有进程未退出')
+    if list(previous.glob('formal/*/*/metrics.jsonl')) or list(previous.glob('formal/*/*/complete.json')):
+        raise ValueError('前序已有正式训练，必须使用精确部分恢复')
+    proof=read(previous/'teacher/inference_complete.json')
+    if (proof['status']!='passed' or proof['count']!=1200 or proof['code']!=plan['code']
+            or proof['policy']!=POLICY or proof['target_gt_used'] is not False):
+        raise ValueError('前序1200项评分来源或协议不符')
+    for name,key in [('candidate_audit.json','candidate_audit_sha256'),
+                     ('teacher/predictions.jsonl','predictions_sha256'),
+                     ('teacher/model_identity.json','model_identity_sha256'),
+                     ('teacher/device_map.json','device_map_sha256')]:
+        if sha(previous/name)!=proof[key]:raise ValueError('前序评分证据改变: '+name)
+    if sha(proof['guard_path'])!=proof['guard_sha256']:raise ValueError('前序真实GPU证明改变')
+    audit=read(previous/'candidate_audit.json')
+    if audit['status']!='passed' or audit['count']!=1200 or set(audit['shifts'])!=set(SHIFTS):
+        raise ValueError('前序候选不完整')
+    for s,item in audit['shifts'].items():
+        if sha(item['manifest'])!=item['sha256']:raise ValueError('前序候选帧清单改变')
+    (root/'teacher').mkdir()
+    files=['candidate_audit.json','teacher/predictions.jsonl','teacher/model_identity.json',
+           'teacher/device_map.json','teacher/inference_complete.json']
+    for name in files:shutil.copyfile(previous/name,root/name)
+    save(root/'predecessor.json',dict(previous_root=str(previous),old_code=plan['code'],new_code=code_identity(),
+        scoring_complete=True,new_teacher_queries=0,new_trainings=6,probabilities_preserved_without_conversion=True,
+        reused_artifacts={str(previous/n):sha(previous/n) for n in files},
+        old_state_sha256=sha(previous/'state.json'),original_scoring_interpreter='/vepfs/vlms/envs/rq1-cu121/bin/python'))
+
+
 def reuse_frames(previous,root):
     """只复用已完整抽取、但从未评分/训练的前序；不覆盖旧目录。"""
     plan=read(previous/'plan.json');state=read(previous/'state.json')
@@ -136,24 +177,14 @@ def finish(root,task,identity):
     return audit_entry(e)
 
 
-def main(args):
+def prepare_and_score(args,root,data,identity,env):
     from tools.run_sada_baseline import acquire
-    from tools.run_prototype_capacity import audit as audit_control
     from tools.qwen_shard_gpu import acquire_four
-    root=args.output_root.resolve();data=args.data_root.resolve();identity=code_identity()
-    root.mkdir(parents=True,exist_ok=False);(root/'tmp').mkdir()
-    save(root/'plan.json',dict(schema=SCHEMA,policy=POLICY,code=identity,jobs=list(SHIFTS),gpus=[0,1,2,3],teacher_mode=args.teacher_mode,
-        control_root=str(CONTROL),new_student_trainings=6,source_only_model_selection=True))
-    save(root/'state.json',dict(phase='audit_static_controls',pid=os.getpid()))
-    refs={s:audit_control(CONTROL/'formal/control'/s) for s in SHIFTS}
-    env=dict(os.environ,PYTHONPATH=str(CODE),PYTHONDONTWRITEBYTECODE='1',CUDA_VISIBLE_DEVICES='',
-        PYTHONUNBUFFERED='1',OMP_NUM_THREADS='8',MKL_NUM_THREADS='8')
     save(root/'state.json',dict(phase='exact_frame_preparation',pid=os.getpid()))
     if args.prepared_root:reuse_frames(args.prepared_root.resolve(),root)
     else:
         run_cpu([str(args.teacher_python),'-B',str(Path(__file__).resolve()),'--prepare-only',
             '--output-root',str(root),'--video-root',str(args.video_root),'--recovery-root',str(args.recovery_root)],root,'frames',env)
-    if args.prepare_only:return
     save(root/'state.json',dict(phase='waiting_'+args.teacher_mode+'_gpu_teacher',pid=os.getpid()))
     if args.teacher_mode=='four':
         while not (found:=acquire_four([0,1,2,3],data,root,identity['commit'])):time.sleep(15)
@@ -176,7 +207,26 @@ def main(args):
     save(root/'state.json',dict(phase='teacher_rescoring',pid=os.getpid(),child_pid=p.pid))
     if p.wait():raise RuntimeError('新候选8B重评失败，保留已评分记录')
     context.__exit__(None,None,None);del ACTIVE['teacher']
-    prepared=freeze_scores(root)
+
+
+def main(args):
+    from tools.run_sada_baseline import acquire
+    from tools.run_prototype_capacity import audit as audit_control
+    from tools.qwen_shard_gpu import acquire_four
+    root=args.output_root.resolve();data=args.data_root.resolve();identity=code_identity()
+    root.mkdir(parents=True,exist_ok=False);(root/'tmp').mkdir()
+    save(root/'plan.json',dict(schema=SCHEMA,policy=POLICY,code=identity,jobs=list(SHIFTS),gpus=[0,1,2,3],teacher_mode=args.teacher_mode,
+        control_root=str(CONTROL),new_student_trainings=6,source_only_model_selection=True))
+    save(root/'state.json',dict(phase='audit_static_controls',pid=os.getpid()))
+    refs={s:audit_control(CONTROL/'formal/control'/s) for s in SHIFTS}
+    env=dict(os.environ,PYTHONPATH=str(CODE),PYTHONDONTWRITEBYTECODE='1',CUDA_VISIBLE_DEVICES='',
+        PYTHONUNBUFFERED='1',OMP_NUM_THREADS='8',MKL_NUM_THREADS='8')
+    if args.scored_root:reuse_scores(args.scored_root.resolve(),root)
+    else:prepare_and_score(args,root,data,identity,env)
+    save(root/'state.json',dict(phase='exact_score_reproduction',pid=os.getpid()))
+    run_cpu(freeze_command(args.teacher_python,root),root,'score_freeze',env)
+    prepared=read(root/'prepared/audit.json')['entries']
+    teacher=root/'teacher'
     # CPU真实样本只验证输入隔离，不读取目标标注，也不根据目标准确率筛名单。
     os.chdir(data)
     from tools.baseline_engine import dataset
@@ -249,12 +299,16 @@ if __name__=='__main__':
     p.add_argument('--recovery-root',type=Path,default=Path('/vepfs/vlms/data/EPIC_KITCHENS/rq2_frame_recovery_qwen_0924'))
     p.add_argument('--teacher-python',type=Path,default=Path('/vepfs/vlms/envs/rq1-cu121/bin/python'))
     p.add_argument('--teacher-mode',choices=['single','four'],default='single')
-    p.add_argument('--prepared-root',type=Path)
+    reused=p.add_mutually_exclusive_group()
+    reused.add_argument('--prepared-root',type=Path)
+    reused.add_argument('--scored-root',type=Path)
+    p.add_argument('--freeze-only',action='store_true')
     p.add_argument('--prepare-only',action='store_true');p.add_argument('--child',choices=['probe','train','evaluate'])
     p.add_argument('--entry',type=Path)
     args=p.parse_args();signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
     try:
         if args.child:child(args)
+        elif args.freeze_only:freeze_scores(args.output_root.resolve())
         elif args.prepare_only:prepare(args.output_root,args.video_root,args.recovery_root)
         else:main(args)
     except BaseException as error:

@@ -108,6 +108,15 @@ def test_teacher_predictions_are_recomputed_and_frozen(tmp_path):
         device_map_sha256=sha(teacher/'device_map.json'),guard_path=str(teacher/'first_cuda_four.json'),guard_sha256=sha(teacher/'first_cuda_four.json')))
     out=freeze_scores(tmp_path);assert len(out)==6
     for row in out.values():assert validate_cache(row['path'])['selected_count']==40
+    # 不能用float32/低精度转换绕过原始概率的严格复算。
+    import struct
+    original=deepcopy(pred[0]['class_probabilities'])
+    pred[0]['class_probabilities']=[struct.unpack('f',struct.pack('f',x))[0] for x in original]
+    prediction.write_text(''.join(json.dumps(x)+'\n' for x in pred))
+    done=json.loads((teacher/'inference_complete.json').read_text());done['predictions_sha256']=sha(prediction)
+    save(teacher/'inference_complete.json',done)
+    with pytest.raises(ValueError):freeze_scores(tmp_path)
+    pred[0]['class_probabilities']=original
     pred[0]['digit_logits'][0]=99.
     prediction.write_text(''.join(json.dumps(x)+'\n' for x in pred))
     done=json.loads((teacher/'inference_complete.json').read_text());done['predictions_sha256']=sha(prediction)
@@ -136,3 +145,54 @@ def test_prepared_only_reuse_preserves_frames_and_rejects_prior_scoring(tmp_path
     assert sha(new/'candidate_audit.json')==before==sha(old/'candidate_audit.json')
     p=old/'teacher/predictions.jsonl';p.parent.mkdir();p.write_text('one existing prediction')
     with pytest.raises(ValueError):reuse_frames(old,new)
+
+
+def test_freeze_uses_the_actual_teacher_interpreter():
+    from tools.run_prototype_refresh import freeze_command
+    teacher=Path('/vepfs/vlms/envs/rq1-cu121/bin/python')
+    cmd=freeze_command(teacher,Path('/result'))
+    assert cmd[0]==str(teacher) and '--freeze-only' in cmd and cmd[-1]=='/result'
+
+
+def test_scoring_recovery_copies_raw_probabilities_and_refuses_formal_retraining(tmp_path):
+    from tools.run_prototype_refresh import reuse_scores
+    from tools.prototype_refresh import SHIFTS
+    old=tmp_path/'old';new=tmp_path/'new';new.mkdir()
+    save(old/'plan.json',dict(policy=POLICY,code={'commit':'scoring'}))
+    save(old/'state.json',dict(pid=99999999,child_pid=99999998))
+    shifts={}
+    for s in SHIFTS:
+        p=old/'candidates'/s/'manifest.json';save(p,{})
+        shifts[s]=dict(manifest=str(p),sha256=sha(p))
+    save(old/'candidate_audit.json',dict(status='passed',count=1200,shifts=shifts))
+    for name in ['model_identity.json','device_map.json','guard.json']:save(old/'teacher'/name,{})
+    raw=old/'teacher/predictions.jsonl';raw.write_text('{"class_probabilities":[0.9225347256207934]}\n')
+    save(old/'teacher/inference_complete.json',dict(status='passed',count=1200,code={'commit':'scoring'},
+        policy=POLICY,target_gt_used=False,candidate_audit_sha256=sha(old/'candidate_audit.json'),
+        predictions_sha256=sha(raw),model_identity_sha256=sha(old/'teacher/model_identity.json'),
+        device_map_sha256=sha(old/'teacher/device_map.json'),guard_path=str(old/'teacher/guard.json'),
+        guard_sha256=sha(old/'teacher/guard.json')))
+    reuse_scores(old,new)
+    assert (new/'teacher/predictions.jsonl').read_bytes()==raw.read_bytes()
+    assert json.loads((new/'predecessor.json').read_text())['new_teacher_queries']==0
+    p=old/'formal/single_refresh/S1/metrics.jsonl';p.parent.mkdir(parents=True);p.write_text('one complete epoch')
+    with pytest.raises(ValueError):reuse_scores(old,new)
+
+
+def test_real_python312_probability_fixture_reproduces_without_tolerance():
+    import subprocess,os
+    teacher=Path('/vepfs/vlms/envs/rq1-cu121/bin/python')
+    if not teacher.exists():pytest.skip('需要实际评分环境的Python3.12')
+    from tools.baseline_protocol import CODE
+    expected=[0.0005102395376594811,0.00018770663597774496,0.9225347256207934,
+        0.0001138498297520208,0.0003973749514831954,0.00014618607508716693,
+        0.07572626168308169,0.0001138498297520208,0.0002410200914763782,2.8785744936940133e-05]
+    script="""import sys,json
+sys.path.insert(0,sys.argv[1])
+from tools.qwen_source_interface import normalize_digit_logits,digit_to_label
+d=normalize_digit_logits([25.,30.75,25.5,33.25,24.75,24.25,22.875,25.75,24.5,24.25],digit_to_label('P27_103-p0004548'))
+print(json.dumps(d['class_probabilities']))
+"""
+    env=dict(os.environ,PYTHONDONTWRITEBYTECODE='1',CUDA_VISIBLE_DEVICES='')
+    actual=json.loads(subprocess.check_output([str(teacher),'-B','-c',script,str(CODE)],env=env,text=True))
+    assert actual==expected

@@ -5,6 +5,7 @@ from copy import deepcopy
 import hashlib
 import json
 import math
+import sys
 from pathlib import Path
 
 from tools.baseline_protocol import read, save, sha, POLICY as STOP_POLICY
@@ -160,7 +161,9 @@ def freeze_scores(root):
                 str(root/'teacher/inference_complete.json'):sha(root/'teacher/inference_complete.json')},
             policy=POLICY))
         prepared[s] = dict(path=str(output), sha256=sha(output), selected_count=len(chosen))
-    save(root/'prepared/audit.json', dict(status='passed', count=6, entries=prepared, target_gt_used=False))
+    save(root/'prepared/audit.json', dict(status='passed', count=6, entries=prepared, target_gt_used=False,
+        probability_reproduction=dict(python=sys.version,executable=sys.executable,exact_equality=True,
+            candidates=1200,probability_conversion=False)))
     return prepared
 
 
