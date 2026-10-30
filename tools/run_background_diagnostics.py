@@ -40,7 +40,7 @@ def worker(args):
         classification_threshold=cfg['model'].get('pl_threshold',.7),background_class_weight=cfg['model'].get('weight_no_class_adv',1.),
         target_gt_used_for_training=False,exploratory_target_gt_analysis=True)
     p.save(args.output/'plan.json',plan)
-    routing=[];point_index=[];predictions={name:[] for name in ['original','assigned_anchor_oracle','occupied_anchor_oracle','post_nms_background_oracle']}
+    routing=[];point_index=[];predictions={name:[] for name in ['original','assigned_anchor_oracle','occupied_anchor_oracle','post_nms_background_oracle','full_backend_reference']}
     null_checked=False;video_ids=[];feature_inputs={}
     for domain,splits in [('source',cfg['src_val_split']),('target',cfg['tgt_val_split'])]:
         ds=dataset(cfg,annotation,splits,False)
@@ -75,11 +75,14 @@ def worker(args):
                         if extra is not None:masks=[m & x[None] for m,x in zip(masks,extra)]
                         return model.inference([clean],obs['points'],masks,[x.permute(0,2,1) for x in logits],obs['offsets'],None,None)[0]
                     base=infer()
-                    if not null_checked:
+                    if args.cpu or not null_checked:
                         full=model(video_list_src=[clean],video_list_tgt=[clean],mode='test')[1][0]
                         for key in ['segments','scores','labels']:
                             torch.testing.assert_close(base[key],full[key],rtol=1e-6,atol=1e-7)
                         null_checked=True
+                        if args.cpu:
+                            for segment,label,score in zip(full['segments'].tolist(),full['labels'].tolist(),full['scores'].tolist()):
+                                predictions['full_backend_reference'].append(dict(video_id=vid,segment=segment,label=int(label),score=score))
                     for name,data in [('original',base),('assigned_anchor_oracle',infer(assigned)),('occupied_anchor_oracle',infer(occupied))]:
                         for segment,label,score in zip(data['segments'].tolist(),data['labels'].tolist(),data['scores'].tolist()):
                             predictions[name].append(dict(video_id=vid,segment=segment,label=int(label),score=score))
@@ -102,11 +105,13 @@ def worker(args):
         ap,mean,*_=evaluator.evaluate(columns,verbose=False)
         maps[name]={'map_0.1_to_0.5':float(mean),'map_by_tiou':[float(x) for x in ap]}
     reference=p.read(ref/'evaluation/target_val.json')['map_0.1_to_0.5']
-    if abs(maps['original']['map_0.1_to_0.5']-reference)>1e-6:raise ValueError('未复算原mAP；拒绝据此解释oracle: '+str((reference,maps)))
+    backend_reference=maps['full_backend_reference']['map_0.1_to_0.5'] if args.cpu else reference
+    if abs(maps['original']['map_0.1_to_0.5']-backend_reference)>1e-10:raise ValueError('同后端原完整模型与诊断mAP不同: '+str((backend_reference,maps)))
     if before!=tensor_digest({k:m.state_dict() for k,m in models.items()}):raise ValueError('只读诊断改变模型')
     aggregate={domain:{role:sum_counts([x['counts'] for x in routing if x['domain']==domain and x['role']==role and x['active_alignment_level']]) for role in models} for domain in ['source','target']}
     if args.cpu and torch.cuda.is_initialized():raise ValueError('CPU诊断意外初始化CUDA')
     result=dict(schema=SCHEMA,status='passed_read_only_audit',code=identity,backend=device,shift=args.shift,maps=maps,reference_map=reference,
+        same_backend_reference_map=backend_reference,historical_gpu_map_difference=maps['original']['map_0.1_to_0.5']-reference,
         errors_by_tiou={str(t):error_counts(predictions['original'],gt,t) for t in SPEC['tiou']},routing=aggregate,
         reference_map_reproduced=True,single_stream_null_check_passed=null_checked,weights_unchanged=True,
         checkpoint_sha256=checkpoint_sha,feature_inputs=feature_inputs,
