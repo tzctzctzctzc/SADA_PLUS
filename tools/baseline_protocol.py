@@ -137,6 +137,8 @@ def audit_entry(entry, expected_schema=SCHEMA, acceptance_path=None):
         if sha(path) != digest:
             raise ValueError('完成工件SHA改变: '+path)
     cfg = read(entry/'config.json')
+    if cfg.get('boundary_equivariance') and expected_schema!='prototype-boundary-distribution-equivariance-v1':
+        raise ValueError('边界分布必须使用独立审计身份')
     if cfg.get('context_transfer') and expected_schema!='prototype-source-context-transfer-v1':
         raise ValueError('源上下文迁移必须使用专项审计身份')
     phase_schema='prototype-phase-mechanism-control-v1' if cfg.get('phase_control') else 'prototype-relative-phase-alignment-v1'

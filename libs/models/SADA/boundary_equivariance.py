@@ -32,9 +32,12 @@ class BoundaryEquivariance(nn.Module):
 
     def target_loss(self,model,videos,weak_records,weak_base,weak_logits,weak_masks,weak_points,epoch):
         if any(v['segments'].numel() or v['labels'].numel() for v in videos):raise ValueError('时间等变不能读取target GT')
-        zero=weak_records[0]['offsets'].sum()*0.;total=zero;count=0;view_count=0
+        zero=weak_records[0]['offsets'].sum()*0.;total=zero;count=0;view_count=0;feature_gradient=0.;head_gradient=0.
+        normalizers=(model.loss_normalizer,model.loss_normalizer_pseudo_labels)
+        bank=model.rq3_capacity.branch
+        prototypes=bank.source_prototypes.detach().clone();ready=bank.source_prototype_ready.detach().clone()
         if epoch<model.cfg['train_cfg']['warmup_adv']:
-            return dict(loss=zero,points=0,views=0,rng_restored=1)
+            return dict(loss=zero,points=0,views=0,rng_restored=1,feature_gradient_norm=0.,head_gradient_norm=0.,normalizers_unchanged=1,prototype_state_unchanged=1)
         devices=[weak_base[0].device.index] if weak_base[0].is_cuda else []
         cpu_before=torch.get_rng_state().clone()
         cuda_before=torch.cuda.get_rng_state(devices[0]).clone() if devices else None
@@ -68,7 +71,15 @@ class BoundaryEquivariance(nn.Module):
                     eligible &= confidence>=model.cfg['model']['pl_threshold']
                     n=int(eligible.sum());duration=wr['offsets'][batch,:,a].detach().sum(0)*weak_points[level][a,3]
                     loss=temporal_distribution_loss(ws,wp,ss,sp,eligible,duration)
+                    if n and getattr(model,'boundary_gradient_probe',False) and loss.requires_grad:
+                        variables=[fpn[level],self.head.logits.weight]
+                        gradients=torch.autograd.grad(loss,variables,retain_graph=True,allow_unused=True)
+                        feature_gradient+=float(gradients[0].detach().norm()) if gradients[0] is not None else 0.
+                        head_gradient+=float(gradients[1].detach().norm()) if gradients[1] is not None else 0.
                     total=total+loss*n;count+=n
         restored=torch.equal(cpu_before,torch.get_rng_state()) and (not devices or torch.equal(cuda_before,torch.cuda.get_rng_state(devices[0])))
         if not restored:raise ValueError('时间等变分支改变原模型随机流')
-        return dict(loss=total/max(1,count),points=count,views=view_count,rng_restored=1)
+        if normalizers!=(model.loss_normalizer,model.loss_normalizer_pseudo_labels) or not torch.equal(prototypes,bank.source_prototypes) or not torch.equal(ready,bank.source_prototype_ready):
+            raise ValueError('时间等变分支改变原normalizer或Prototype buffer')
+        return dict(loss=total/max(1,count),points=count,views=view_count,rng_restored=1,
+            feature_gradient_norm=feature_gradient,head_gradient_norm=head_gradient,normalizers_unchanged=1,prototype_state_unchanged=1)

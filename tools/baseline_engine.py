@@ -75,7 +75,7 @@ def build(cfg):
     ctx.model_ema = ModelEma2(ema_model, decay=cfg['train_cfg']['ema_decay'])
     ctx.initial_state_sha = tensor_digest(ctx.model.state_dict())
     detector_state={k:v for k,v in ctx.model.state_dict().items()
-                    if not k.startswith(('rq3_capacity.','endpoint_risk.'))}
+                    if not k.startswith(('rq3_capacity.','endpoint_risk.','boundary_equivariance.'))}
     if cfg.get('phase_alignment'):
         from libs.models.SADA.phase_alignment import canonical_initial_state
         detector_state=canonical_initial_state(detector_state)
@@ -190,6 +190,7 @@ def capture(ctx, cfg, epoch, history):
         rng=dict(python=random.getstate(), numpy=np.random.get_state(), cpu=torch.get_rng_state(),
                  cuda=[torch.cuda.get_rng_state(0)], loaders={k:g.get_state() for k,g in ctx.generators.items()}))
     if cfg.get('context_transfer'):result['schema']=cfg['context_transfer']['schema']
+    if cfg.get('boundary_equivariance'):result['schema']=cfg['boundary_equivariance']['schema']
     if cfg.get('endpoint_risk'):
         from tools.endpoint_risk_engine import capture_extra
         result['endpoint_risk']=capture_extra(ctx)
@@ -245,16 +246,18 @@ def phase_weight_separation(model):
 def probe(cfg, output, warmup_steps=2, timed_steps=6):
     ctx = build(cfg)
     if cfg.get('context_transfer'):ctx.model.context_gradient_probe=True
+    if cfg.get('boundary_equivariance'):ctx.model.boundary_gradient_probe=True
     # 固定40/200名单不能用前6批覆盖来代表；诊断遍历完整原始epoch，不补抽候选。
     if cfg.get('prototype_capacity'):
         timed_steps=max(len(ctx.train_loader_src),len(ctx.train_loader_tgt))
-    diagnostic_epochs=list(range(1,6)) if cfg.get('phase_alignment') or cfg.get('context_transfer') else [1,5]
-    if cfg.get('phase_alignment') or cfg.get('context_transfer'):warmup_steps=0
+    diagnostic_epochs=list(range(1,6)) if cfg.get('phase_alignment') or cfg.get('context_transfer') or cfg.get('boundary_equivariance') else [1,5]
+    if cfg.get('phase_alignment') or cfg.get('context_transfer') or cfg.get('boundary_equivariance'):warmup_steps=0
     reports = {}
     for epoch in diagnostic_epochs:
         epoch_setup(ctx, epoch)
         originals = ctx.train_loader_src, ctx.train_loader_tgt
         before = tensor_digest(ctx.model.state_dict())
+        if cfg.get('boundary_equivariance'):boundary_before=tensor_digest(ctx.model.boundary_equivariance.state_dict())
         if cfg.get('phase_control'):disc_before=tensor_digest(ctx.model.disc_dom_conditional_adv.state_dict())
         if cfg.get('prototype_capacity'):
             branch_before=tensor_digest(dict(ctx.model.rq3_capacity.named_parameters()))
@@ -280,6 +283,9 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
             model_updated=changed, source_gradient_norm=ctx.first_gradient_norm,target_gt_losses=[0.,0.,0.])
         if cfg.get('prototype_capacity'):
             values=ctx.train_metrics.result()
+            if cfg.get('boundary_equivariance'):
+                reports[str(epoch)]['boundary_equivariance']={k[len('t_boundary_'):]:float(v) for k,v in values.items() if k.startswith('t_boundary_')}
+                reports[str(epoch)]['boundary_head_updated']=boundary_before!=tensor_digest(ctx.model.boundary_equivariance.state_dict())
             if cfg.get('context_transfer'):
                 reports[str(epoch)]['context_transfer']={k[len('t_context_'):]:float(v) for k,v in values.items() if k.startswith('t_context_')}
             if cfg.get('phase_alignment'):
@@ -369,6 +375,8 @@ def train(cfg, entry, resume=None, pause_after=None):
             row['auxiliary']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_rq3_')}
         if cfg.get('context_transfer'):
             row['context_transfer']={k[len('t_context_'):]:float(v) for k,v in metrics.items() if k.startswith('t_context_')}
+        if cfg.get('boundary_equivariance'):
+            row['boundary_equivariance']={k[len('t_boundary_'):]:float(v) for k,v in metrics.items() if k.startswith('t_boundary_')}
         if cfg.get('endpoint_risk'):
             row['endpoint_risk']={k[len('t_endpoint_'):]:float(v) for k,v in metrics.items() if k.startswith('t_endpoint_')}
         if cfg.get('background_oracle'):
