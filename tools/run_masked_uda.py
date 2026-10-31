@@ -277,9 +277,14 @@ def main(args):
         save(root/'predecessor.json',dict(prototype_final_sha256=sha(base/'final_audit.json'),
             previous_ttt_final_sha256=sha(args.previous_ttt/'monitor/final_independent_audit.json')))
         if args.previous_root:
-            # 仅接续此次验收汇总失败：旧根尚无正式目录，两份完整GPU验收直接按旧身份复用。
+            # 仅接续此次验收汇总失败；复用完整probe，未落盘的无checkpoint诊断才重新验收。
             if (args.previous_root/'formal').exists():raise ValueError('该恢复入口拒绝已有正式/部分训练根')
-            reports=[audit(args.previous_root/'probe'/v/'probe_job.json') for v in ('continuation','ema_masked')]
+            reports=[];pending=[]
+            for v in ('continuation','ema_masked'):
+                old=args.previous_root/'probe'/v
+                if (old/'complete.json').exists():reports.append(audit(old/'probe_job.json'))
+                else:pending.append(make_job(root,'probe/'+v,'probe','S1',v,base,identity))
+            if pending:reports.extend(run_jobs(root,pending,data,identity,'recover_incomplete_gpu_acceptance'))
             save(root/'reused_acceptance.json',dict(status='passed',previous_root=str(args.previous_root),
                 reports=reports,reason='audit summary duplicate-key repair; training/core algorithms unchanged'))
         else:
