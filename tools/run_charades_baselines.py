@@ -11,6 +11,7 @@ import time
 CODE=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(CODE))
 from tools import run_sada_baseline as base
+from tools.prepare_charades_features import relocated_file_name
 from tools.baseline_protocol import (POLICY,CUDA_RNG_POLICY,random_seeds,code_identity,
     read,save,sha,audit_entry,audit_pair,termination)
 
@@ -63,7 +64,7 @@ def input_audit(root,inputs,features,identity,tmpdir):
     cfg=template(inputs,features,identity,tmpdir)
     metadata=read(inputs/'identity.json')
     for name,digest in metadata['files'].items():
-        if sha(inputs/Path(name).name)!=digest:raise ValueError('标注工件SHA变化')
+        if sha(inputs/relocated_file_name(name))!=digest:raise ValueError('标注工件SHA变化')
     db=read(inputs/'offline_evaluation.json')['database']
     members=base.membership_manifest(db,cfg)
     if any(set(a)&set(b) for i,a in enumerate(members.values()) for b in list(members.values())[i+1:]):

@@ -10,12 +10,13 @@ import pytest
 M=run_path(str(Path(__file__).resolve().parents[1]/'tools/prepare_charades_features.py'))
 
 
-def test_container_conversion_exact_and_metadata_relocation(tmp_path):
+@pytest.mark.parametrize('origin',['/old/server/offline_evaluation.json',r'D:\old\server\offline_evaluation.json'])
+def test_container_conversion_exact_and_metadata_relocation(tmp_path,origin):
     inputs=tmp_path/'inputs';inputs.mkdir()
     annotation=inputs/'offline_evaluation.json'
     annotation.write_text(json.dumps(dict(database={'a':dict(subset='third_training')})))
     identity=dict(interval_policy='clean',evaluation_protocol='clean_only',
-        files={'/old/server/offline_evaluation.json':hashlib.sha256(annotation.read_bytes()).hexdigest()})
+        files={origin:hashlib.sha256(annotation.read_bytes()).hexdigest()})
     (inputs/'identity.json').write_text(json.dumps(identity))
     array=np.arange(3*1024,dtype=np.float32).reshape(3,1024);buffer=io.BytesIO();np.save(buffer,array)
     archive=tmp_path/'features.zip'
@@ -44,3 +45,8 @@ def test_spatial_singletons_preserve_temporal_axis_and_exact_bytes(length):
 ])
 def test_invalid_features_are_rejected_without_pooling_or_casting(array):
     with pytest.raises(ValueError):M['temporal_features'](array,'bad')
+
+
+@pytest.mark.parametrize('origin',[r'D:\old server\source.json','/old/server/source.json','source.json'])
+def test_manifest_file_names_are_platform_independent(origin):
+    assert M['relocated_file_name'](origin)=='source.json'

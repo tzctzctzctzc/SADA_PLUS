@@ -9,6 +9,11 @@ import zipfile
 import numpy as np
 
 
+def relocated_file_name(value):
+    # 冻结清单来自Windows；在Linux上Path不会把反斜杠视为分隔符。
+    return Path(str(value).replace('\\','/')).name
+
+
 def temporal_features(array,video_id):
     # 官方包有极短视频保留I3D的1×1空间轴，只移除这两轴，不squeeze时间轴。
     if array.ndim==4 and array.shape[1:]==(1,1,1024):
@@ -27,7 +32,7 @@ def prepare(archive,annotations,output):
     database=json.loads(metadata_path.read_text())['database']
     if hashlib.sha256(metadata_path.read_bytes()).hexdigest()!=identity['files'].get(str(metadata_path)):
         # identity使用生成时路径；迁移时以文件名解析原冻结记录。
-        records={Path(p).name:digest for p,digest in identity['files'].items()}
+        records={relocated_file_name(p):digest for p,digest in identity['files'].items()}
         if hashlib.sha256(metadata_path.read_bytes()).hexdigest()!=records[metadata_path.name]:
             raise ValueError('清洗后评估标注改变')
     output.mkdir(parents=True,exist_ok=False);rows=[]
