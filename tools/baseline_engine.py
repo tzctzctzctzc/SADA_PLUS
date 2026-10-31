@@ -74,6 +74,7 @@ def build(cfg):
     ema_model = make_meta_arch('sada', ctx.cfg, device='cuda:0').to('cuda:0')
     ctx.model_ema = ModelEma2(ema_model, decay=cfg['train_cfg']['ema_decay'])
     ctx.initial_state_sha = tensor_digest(ctx.model.state_dict())
+    ctx.initial_detector_sha=tensor_digest({k:v for k,v in ctx.model.state_dict().items() if not k.startswith("rq3_capacity.")})
     if cfg['baseline']['regime'] == 'so':
         # 模型参数构造与UDA完全相同；仅关闭对抗目标，保持检测与优化器阶段。
         ctx.cfg['model']['adv_method'] = ['None']
@@ -246,11 +247,20 @@ def source_validation_map(ctx, epoch, output=None):
 
 def probe(cfg, output, warmup_steps=2, timed_steps=6):
     ctx = build(cfg)
+    # 固定40/200名单不能用前6批覆盖来代表；诊断遍历完整原始epoch，不补抽候选。
+    if cfg.get('prototype_capacity'):
+        timed_steps=max(len(ctx.train_loader_src),len(ctx.train_loader_tgt))
     reports = {}
     for epoch in (1, 5):
         epoch_setup(ctx, epoch)
         originals = ctx.train_loader_src, ctx.train_loader_tgt
         before = tensor_digest(ctx.model.state_dict())
+        if cfg.get('prototype_capacity'):
+            branch_before=tensor_digest(dict(ctx.model.rq3_capacity.named_parameters()))
+            special_before=tensor_digest({k:v for k,v in ctx.model.rq3_capacity.named_parameters()
+                                           if any(n in k for n in ('attention','pool_fusion'))})
+            pool_before={name:tensor_digest(dict(module.named_parameters())) for name,module in
+                ctx.model.rq3_capacity.branch.named_children() if name in ('inside_attention','outside_attention','pool_fusion')}
         ctx.train_loader_src, ctx.train_loader_tgt = [StepLoader(x, warmup_steps) for x in originals]
         ctx._train_epoch(epoch)
         ctx.train_metrics.reset()
@@ -266,6 +276,14 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
             samples_per_second=timed_steps*cfg['loader']['batch_size']*2/seconds,
             peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,
             model_updated=changed, source_gradient_norm=ctx.first_gradient_norm,target_gt_losses=[0.,0.,0.])
+        if cfg.get('prototype_capacity'):
+            values=ctx.train_metrics.result()
+            reports[str(epoch)]['auxiliary']={k[2:]:float(v) for k,v in values.items() if k.startswith('t_rq3_')}
+            reports[str(epoch)]['branch_parameters_updated']=branch_before!=tensor_digest(dict(ctx.model.rq3_capacity.named_parameters()))
+            reports[str(epoch)]['pool_parameters_updated']=special_before!=tensor_digest(
+                {k:v for k,v in ctx.model.rq3_capacity.named_parameters() if any(n in k for n in ('attention','pool_fusion'))})
+            reports[str(epoch)]['pool_submodules_updated']={name:before!=tensor_digest(
+                dict(getattr(ctx.model.rq3_capacity.branch,name).named_parameters())) for name,before in pool_before.items()}
         ctx.train_loader_src, ctx.train_loader_tgt = originals
     ctx.valid_metrics_src.reset()
     validation = float(ctx._valid_epoch(5, ctx.val_loader_src, domain='src'))
@@ -290,9 +308,11 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
                       source_validation_loss=validation,source_validation_map=source_map,
                       peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,
                       checked_target_batches=ctx.checked_steps, initial_state_sha=ctx.initial_state_sha,
+                      initial_detector_sha=ctx.initial_detector_sha,
                       cuda_seed_proof=ctx.cuda_seed_proof,
                       rng_roundtrip=dict(status='passed',cuda_rng_count=1,full_state_sha=tensor_digest(saved),
-                                         replayed_draw_sha=expected_draw)))
+                                         replayed_draw_sha=expected_draw),
+                      diagnostic_steps_per_phase=timed_steps))
 
 
 def train(cfg, entry, resume=None):
@@ -300,6 +320,10 @@ def train(cfg, entry, resume=None):
     ctx = build(cfg)
     save(entry/'runtime_config.json',ctx.cfg)
     save(entry/'seed_proof.json',ctx.cuda_seed_proof)
+    if cfg.get('prototype_capacity'):
+        save(entry/'detector_initialization.json',dict(sha256=ctx.initial_detector_sha,
+            specification=ctx.model.rq3_capacity.specification,
+            auxiliary_parameters=sum(p.numel() for p in ctx.model.rq3_capacity.parameters())))
     history, start, rows = [], 1, []
     if resume:
         saved = torch.load(resume, map_location='cpu')
@@ -327,6 +351,8 @@ def train(cfg, entry, resume=None):
                    source_cls_loss=float(metrics['t_cls_loss']), source_reg_loss=float(metrics['t_reg_loss']),
                    source_gradient_norm=ctx.first_gradient_norm,
                    target_gt_cls_loss=0., target_gt_reg_loss=0., target_gt_downstream_loss=0.)
+        if cfg.get('prototype_capacity'):
+            row['auxiliary']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_rq3_')}
         if epoch%5 == 0:
             ctx.valid_metrics_src.reset()
             value = float(ctx._valid_epoch(epoch, ctx.val_loader_src, domain='src'))
