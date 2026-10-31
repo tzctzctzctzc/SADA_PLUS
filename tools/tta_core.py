@@ -113,12 +113,16 @@ def candidates(model, output, begin, end, total):
             if not len(choices): continue
             scores=prob[choices[:,0],choices[:,1]]
             order=scores.argsort(descending=True)[:SPEC['max_pseudo']*4]
-            for index in order.tolist():
-                point,label=choices[index].tolist();p=pts[point]
-                seg=torch.stack((p[0]-offset[0,point,0]*p[3],p[0]+offset[0,point,1]*p[3]))+begin
-                if seg[1]<=seg[0] or seg[0]<begin or seg[1]>end: continue
-                if (begin and seg[0]<=begin+1) or (end<total and seg[1]>=end-1):continue
-                rows.append(dict(segment=seg.detach(),score=scores[index].detach(),label=label,level=level))
+            choices=choices[order];scores=scores[order]
+            points=pts[choices[:,0]];off=offset[0,choices[:,0]]
+            segs=torch.stack((points[:,0]-off[:,0]*points[:,3],points[:,0]+off[:,1]*points[:,3]),dim=-1)+begin
+            keep=(segs[:,1]>segs[:,0]) & (segs[:,0]>=begin) & (segs[:,1]<=end)
+            if begin:keep &= segs[:,0]>begin+1
+            if end<total:keep &= segs[:,1]<end-1
+            # 小规模候选匹配在CPU完成，避免逐候选GPU同步和成千上万次小kernel。
+            segs,scores,labels=segs[keep].cpu(),scores[keep].cpu(),choices[keep,1].cpu()
+            rows.extend(dict(segment=seg,score=score,label=int(label),level=level)
+                        for seg,score,label in zip(segs,scores,labels))
         rows.sort(key=lambda x:-float(x['score']))
         result=[]
         for row in rows:
@@ -185,7 +189,7 @@ def adaptation_loss(model, output, rows, begin, end, variant, bank=None):
     cls,loc,pro,cls_weights,loc_weights=[],[],[],[],[]
     proto_rows=[]
     for row in rows:
-        segment=row['segment']-begin
+        segment=row['segment'].to(zero.device)-begin
         if float(segment[0])<=1 or float(segment[1])>=end-begin-1:continue
         level=row['level'];points=output['points'][level]
         middle=segment.mean();idx=int((points[:,0]-middle).abs().argmin())
