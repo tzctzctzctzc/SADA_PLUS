@@ -63,8 +63,30 @@ def test_copied_encoder_and_targets_match_frozen_legacy_source():
         tree=ast.parse(text)
         return {n.name:ast.dump(n) for n in tree.body if isinstance(n,(ast.ClassDef,ast.FunctionDef))}
     a,b=selected(original),selected(current)
-    for name in ('VLMProposalCoAdaptationBranch','source_gt_proposals','cached_proposals_for_videos','_sample_sequence','evidence_vector'):
+    for name in ('VLMProposalCoAdaptationBranch','source_gt_proposals','_sample_sequence'):
         assert a[name]==b[name]
+    # Charades已给两项语义辅助函数增加可选词表参数；核验默认厨房行为逐值一致，
+    # 而非把已授权的兼容参数扩展误判成编码器/监督变化。
+    from torch.nn import functional as F
+    from libs.models.SADA.prototype_capacity import KNOWN_LABELS,evidence_vector,cached_proposals_for_videos
+    tree=ast.parse(original)
+    legacy=dict(torch=torch,F=F,KNOWN_LABELS=KNOWN_LABELS)
+    for name in ('evidence_vector','cached_proposals_for_videos'):
+        node=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name==name)
+        exec(compile(ast.Module(body=[node],type_ignores=[]),'<frozen-legacy>','exec'),legacy)
+    labels=(*KNOWN_LABELS,'UNKNOWN_ACTION','BACKGROUND','ABSTAIN')
+    for label in labels:
+        for probabilities in (None,[.9]+[.1/9]*9):
+            a=legacy['evidence_vector'](label,10,'cpu',torch.float32,probabilities)
+            b=evidence_vector(label,10,'cpu',torch.float32,probabilities)
+            assert torch.equal(a,b)
+    _,target=videos()
+    rows=[dict(proposal_start_sec=16.,proposal_end_sec=36.,source_fpn_levels=[0],candidate_id=str(i),
+               semantic_label=label,class_probabilities=None) for i,label in enumerate(labels)]
+    a=legacy['cached_proposals_for_videos']({'t':rows},[target],10,1,'cpu',torch.float32)
+    b=cached_proposals_for_videos({'t':rows},[target],10,1,'cpu',torch.float32)
+    assert a[0].keys()==b[0].keys()
+    assert all(torch.equal(a[0][key],b[0][key]) for key in a[0])
 
 
 def test_pairing_rejects_learning_rate_or_seed_changes(tmp_path):
