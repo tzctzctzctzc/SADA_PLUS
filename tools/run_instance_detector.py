@@ -43,7 +43,13 @@ def main(args):
         with (root/'run.log').open('x') as stream:child=subprocess.Popen(command,cwd=CODE,env=env,stdout=stream,stderr=subprocess.STDOUT,start_new_session=True)
         protocol.save(root/'state.json',dict(phase='train' if args.train else 'probe',pid=os.getpid(),child=child.pid,gpu=lease['index']))
         if child.wait():raise RuntimeError('新实例结构真实阶段失败')
-        protocol.save(root/'state.json',dict(phase='trained-awaiting-offline-evaluation' if args.train else 'probe_passed',pid=os.getpid()))
+        if args.train:
+            names=('config.json','architecture.json','plan.json','initialization.json','metrics.jsonl','termination.json',
+                'best.pt','latest.pt','gpu.json','evaluation/source_val.json','evaluation/target_val.json','evaluation/manifest.json')
+            protocol.save(root/'complete.json',dict(schema=engine.SCHEMA,shift=args.shift,code=identity,
+                artifacts={n:protocol.sha(root/n) for n in names}))
+            protocol.save(root/'audit.json',engine.audit(root))
+        protocol.save(root/'state.json',dict(phase='complete' if args.train else 'probe_passed',pid=os.getpid()))
     except BaseException as e:protocol.save(root/'error.json',dict(type=type(e).__name__,message=str(e)));raise
     finally:
         if child is not None and child.poll() is None:os.killpg(child.pid,signal.SIGTERM);child.wait()
@@ -63,6 +69,7 @@ if __name__=='__main__':
         cfg=protocol.read(root/'config.json');spec=protocol.read(root/'architecture.json')
         if protocol.sha(cfg['dataset']['json_file'])!=cfg['baseline']['source_manifest_sha256']:raise ValueError('源数据改变')
         os.chdir(args.data_root);proof=first_cuda_guard()
-        (engine.train if args.train else engine.probe)(cfg,spec,root)
+        if args.train:engine.train(cfg,spec,root);engine.evaluate(cfg,spec,root)
+        else:engine.probe(cfg,spec,root)
         protocol.save(root/'gpu.json',dict(guard=proof,guard_sha256=protocol.sha(proof),plan_sha256=protocol.sha(root/'plan.json')))
     else:main(args)

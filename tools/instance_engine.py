@@ -120,7 +120,7 @@ def probe(cfg,spec,root):
     if digest!=data_utils.tensor_digest(state(ctx,1,[])):raise ValueError('完整GPU状态恢复失败')
     video=next(iter(ctx.validation))[0];clip=next(validation_windows(video,ctx.model.max_length))
     ctx.teacher.eval();prediction=ctx.teacher.predict_video(clip)
-    if not torch.isfinite(prediction['scores']).all() or not torch.isfinite(prediction['segments']).all():raise ValueError('预测非有限')
+    if not len(prediction['scores']) or not torch.isfinite(prediction['scores']).all() or not torch.isfinite(prediction['segments']).all():raise ValueError('预测为空或非有限')
     save(root/'probe.json',dict(status='passed',reports=reports,full_state_roundtrip_sha256=digest,
         parameter_count=sum(p.numel() for p in ctx.model.parameters()),peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,
         prediction_count=len(prediction['scores']),quality_parameters_updated=True,no_formal_checkpoint=True,
@@ -141,3 +141,57 @@ def train(cfg,spec,root):
         if epoch%5==0:
             data_utils.checkpoint(root/'latest.pt',state(ctx,epoch,history));result=decision(history)
             if result['reason']!='running':save(root/'termination.json',dict(history=history,decision=result));break
+
+
+def evaluate(cfg,spec,root):
+    """只有训练结束并按源损失选best后，才在独立阶段读取目标GT计算指标。"""
+    from libs.evaluation import ANETdetection
+    from tools.baseline_protocol import termination
+    saved=torch.load(root/'best.pt',map_location='cpu');terminal=read(root/'termination.json')
+    if saved['epoch']!=termination(terminal['history'])['best_epoch']:raise ValueError('没有使用源验证选定的best EMA')
+    model=InstanceTemporalDetector(cfg,spec).cuda();model.load_state_dict(saved['teacher'],strict=True);model.eval()
+    annotation=cfg['baseline']['annotation_for_offline_evaluation']
+    if sha(annotation)!=cfg['baseline']['annotation_sha256']:raise ValueError('离线评估GT版本改变')
+    results={}
+    for domain,splits in [('source',cfg['src_val_split']),('target',cfg['tgt_val_split'])]:
+        dataset=data_utils.dataset(cfg,annotation,splits,False)
+        loader=data_utils.loader(dataset,False,torch.Generator().manual_seed(cfg['seed']),1,cfg['loader']['num_workers'])
+        columns={k:[] for k in ('video-id','t-start','t-end','label','score')}
+        with torch.no_grad():
+            for batch in loader:
+                for video in batch:
+                    result=model.predict_video(video);n=len(result['scores']);columns['video-id'] += [result['video_id']]*n
+                    for k,v in [('t-start',result['segments'][:,0]),('t-end',result['segments'][:,1]),('label',result['labels']),('score',result['scores'])]:columns[k]+=v.tolist()
+        evaluator=ANETdetection(annotation,splits,num_workers=4,action_subsampling='10_majority_classes')
+        ap,mean,*_=evaluator.evaluate({k:np.asarray(v) for k,v in columns.items()},verbose=True)
+        result=dict(map_0.1_to_0.5=float(mean),map_by_tiou=[float(x) for x in ap],videos=len(dataset),
+            prediction_count=len(columns['score']),selected_epoch=saved['epoch'],state='teacher',checkpoint_sha256=sha(root/'best.pt'))
+        save(root/'evaluation'/(domain+'_val.json'),result);results[domain]=result
+    save(root/'evaluation/manifest.json',dict(results=results,annotation_sha256=sha(annotation),checkpoint_sha256=sha(root/'best.pt')))
+
+
+def audit(root):
+    from tools.baseline_protocol import termination
+    record=read(root/'complete.json');cfg=read(root/'config.json');spec=read(root/'architecture.json');plan=read(root/'plan.json')
+    if record['schema']!=SCHEMA or cfg['baseline']['code']!=plan['code'] or spec!=specification(plan['query_budget']['num_queries']):raise ValueError('新结构身份或规格不一致')
+    for n,h in record['artifacts'].items():
+        if sha(root/n)!=h:raise ValueError('完成工件改变: '+n)
+    if sha(cfg['dataset']['json_file'])!=cfg['baseline']['source_manifest_sha256']:raise ValueError('源输入改变')
+    terminal=read(root/'termination.json');expected=termination(terminal['history'])
+    if terminal['decision']!=expected:raise ValueError('未在首次合法源早停边界停止')
+    rows=[json.loads(x) for x in (root/'metrics.jsonl').read_text().splitlines()]
+    if [r['epoch'] for r in rows]!=list(range(1,expected['epoch']+1)):raise ValueError('训练轮不连续')
+    if any(r['target_gt_losses']!=[0.,0.,0.] or not math.isfinite(r['loss']) for r in rows):raise ValueError('GT隔离或有限性失败')
+    history=[[r['epoch'],r['source_validation_detection_loss']] for r in rows if 'source_validation_detection_loss' in r]
+    if history!=terminal['history']:raise ValueError('选模历史不一致')
+    for name,epoch in [('best',expected['best_epoch']),('latest',expected['epoch'])]:
+        saved=torch.load(root/(name+'.pt'),map_location='cpu')
+        if saved['epoch']!=epoch or saved['config']!=cfg or saved['specification']!=spec:raise ValueError('保存点与配置/源选模不一致')
+        validate_cuda_rng(saved['rng']['cuda'])
+        if name=='latest' and saved['history']!=history:raise ValueError('最新保存点缺源历史')
+    gpu=read(root/'gpu.json');guard=read(gpu['guard']);lease=read(guard['lease'])
+    if sha(gpu['guard'])!=gpu['guard_sha256'] or sha(guard['lease'])!=guard['lease_sha256'] or lease['commit']!=plan['code']['commit']:raise ValueError('GPU凭证不一致')
+    for domain in ('source','target'):
+        result=read(root/'evaluation'/(domain+'_val.json'))
+        if result['checkpoint_sha256']!=sha(root/'best.pt') or result['selected_epoch']!=expected['best_epoch'] or not 0<=result['map_0.1_to_0.5']<=1:raise ValueError('离线评估不一致')
+    return dict(status='passed',shift=plan['shift'],map=read(root/'evaluation/target_val.json')['map_0.1_to_0.5'],best_epoch=expected['best_epoch'],stop_epoch=expected['epoch'])
