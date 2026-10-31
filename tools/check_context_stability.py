@@ -48,12 +48,13 @@ def prepare(root):
     from tools.baseline_engine import dataset
     from tools.context_mix import feature_length, patch_record
     root.mkdir(parents=True,exist_ok=False)
+    os.chdir('/vepfs/vlms/SADA_PLUS')
     cfg=read(BASE/'config.json');options=cfg['dataset'];videos=[]
     native=dataset(cfg,options['json_file'],cfg['src_val_split'],False)
     training=read(options['json_file'])['database']
     source_train={v for v,x in training.items() if x['subset'].lower() in cfg['src_train_split']}
-    for item in native.data_list:
-        video=native[list(x['id'] for x in native.data_list).index(item['id'])]
+    for index,item in enumerate(native.data_list):
+        video=native[index]
         path=Path(options['feat_folder'])/((options.get('file_prefix') or '')+item['id']+options['file_ext'])
         videos.append(dict(video_id=item['id'],path=str(path),length=video['feats'].shape[-1],
             segments=video['segments'].tolist(),labels=video['labels'].tolist(),feature_sha256=sha(path)))
@@ -127,7 +128,8 @@ def run(root):
     from libs.utils import fix_random_seed
     from tools.context_mix import FeatureBank
     from tools.baseline_engine import tensor_digest
-    plan=read(root/'plan.json');bank=FeatureBank(dict(videos=plan['videos'],dataset=plan['dataset']))
+    plan=read(root/'plan.json');os.chdir(plan['data_root'])
+    bank=FeatureBank(dict(videos=plan['videos'],dataset=plan['dataset']))
     all_rows={}
     for name,record in plan['models'].items():
         entry=Path(record['entry']);assert sha(entry/'complete.json')==record['complete_sha256']

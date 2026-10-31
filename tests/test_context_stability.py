@@ -49,3 +49,20 @@ def test_class_changes_and_boundary_changes_are_detected():
 def test_iou_no_overlap_and_exact():
     assert iou([1,2],[3,4])==0
     assert iou([1,2],[1,2])==1
+
+
+def test_real_sada_duplicate_views_do_not_change_prediction_or_weights():
+    import torch
+    from runpy import run_path
+    from tools.check_context_stability import CODE,forward
+    from libs.models.SADA.meta_archs import SADA
+    cfg=run_path(str(CODE/'tests/test_corrected_baseline.py'))['small_config']()
+    model=SADA(cfg,'cpu').eval()
+    before={k:v.clone() for k,v in model.state_dict().items()}
+    x=torch.randn(8,48)
+    with torch.no_grad():
+        masks,points,logits,offsets=forward(model,[x,x.clone()])
+    for level in logits+offsets:
+        torch.testing.assert_close(level[0],level[1],rtol=0,atol=0)
+    assert all(torch.equal(v,model.state_dict()[k]) for k,v in before.items())
+    assert all(torch.isfinite(x).all() for x in logits+offsets)
