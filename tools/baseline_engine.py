@@ -52,6 +52,9 @@ def loader(dataset, training, generator, batch, workers):
 def dataset(cfg, path, splits, training, unlabeled=False):
     options = deepcopy(cfg['dataset'])
     options.update(json_file=str(path), unlabeled=unlabeled)
+    if cfg.get('benchmark')=='charades-ego-third-to-first':
+        from libs.datasets.charades_features import CharadesFeatures
+        return CharadesFeatures(training,splits,**options)
     return make_dataset('epic', training, splits, **options)
 
 
@@ -176,7 +179,7 @@ def schedulers(ctx):
 
 
 def capture(ctx, cfg, epoch, history):
-    return dict(schema=SCHEMA, config=cfg, epoch=epoch, history=deepcopy(history),
+    return dict(schema=cfg['baseline']['schema'], config=cfg, epoch=epoch, history=deepcopy(history),
         state_dict=ctx.model.state_dict(), ema_state_dict=ctx.model_ema.module.state_dict(),
         model_controls=controls(ctx.model), ema_controls=controls(ctx.model_ema.module),
         optimizers=[x.state_dict() for x in optimizers(ctx)],
