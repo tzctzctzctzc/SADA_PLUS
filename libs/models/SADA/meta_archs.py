@@ -551,6 +551,14 @@ class SADA(nn.Module):
             from .prototype_capacity import build_capacity
             self.rq3_capacity=build_capacity(cfg['prototype_capacity'],fpn_dim,self.num_classes,
                 self.fpn_strides,self.reg_range,self.device)
+        self.pt_uncertainty=None
+        self.pt_packet=None
+        if cfg.get('probabilistic_teacher'):
+            if self.use_trident_head:raise ValueError('本次概率头只匹配原非trident配置')
+            from .probabilistic_temporal import TemporalVarianceHead
+            with torch.random.fork_rng(devices=[0] if torch.device(device).type=='cuda' else []):
+                torch.manual_seed(0)
+                self.pt_uncertainty=TemporalVarianceHead(fpn_dim)
         
     @property
     def device(self):
@@ -759,6 +767,13 @@ class SADA(nn.Module):
         # out_offset: F List[B, 2 (xC), T_i] -> F List[B, T_i, 2 (xC)]
         out_offsets = [x.permute(0, 2, 1) for x in out_offsets]
         out_offsets_tgt_pl = [x.permute(0, 2, 1) for x in out_offsets_tgt_pl]
+
+        if self.pt_uncertainty is not None:
+            from .probabilistic_temporal import packet
+            self.pt_packet=dict(source=packet(self.pt_uncertainty,fpn_feats_src,fpn_masks_src,
+                out_cls_logits_src,out_offsets_src,points),target=packet(self.pt_uncertainty,
+                fpn_feats_tgt,fpn_masks_tgt,out_cls_logits_tgt,out_offsets_tgt,points))
+            if mode=='pt_raw':return self.pt_packet
         
         # out_offset: F List[B, 2 (xC), T_i] -> F List[B, T_i, 1 (xC)]
         out_actionness = [x.permute(0, 2, 1) for x in out_actionness]
