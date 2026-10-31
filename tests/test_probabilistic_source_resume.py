@@ -32,6 +32,7 @@ def test_clone_keeps_original_files_weights_and_history(tmp_path):
     old=tmp_path/'old';entry=tmp_path/'new';old.mkdir();entry.mkdir();saved,rows=sample()
     cfg=dict(baseline=dict(code={'commit':'old'},tmpdir='/old'),seed=123)
     saved.update(config=cfg,state_dict={'weight':torch.tensor([1.,2.])})
+    (old/'config.json').write_text(json.dumps(cfg))
     for n in ('best','latest'):torch.save(saved,old/(n+'.pt'))
     (old/'metrics.jsonl').write_text(''.join(json.dumps(x)+'\n' for x in rows))
     (old/'train.log').write_text('original log');(old/'initialization.json').write_text('{}')
