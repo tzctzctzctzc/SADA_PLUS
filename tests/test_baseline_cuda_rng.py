@@ -46,11 +46,25 @@ def test_epoch_loop_and_original_model_math_are_unchanged():
     def without_validation(node):
         result=deepcopy(node)
         result.body=[x for x in result.body if not (
-            isinstance(x,ast.If) and 'epoch % 5' in ast.unparse(x.test))]
+            isinstance(x,ast.If) and ('epoch % 5' in ast.unparse(x.test) or
+                (ast.unparse(x.test) == "cfg.get('prototype_capacity')" and
+                 len(x.body) == 1 and "row['auxiliary']" in ast.unparse(x.body[0]))))]
         return result
     assert ast.dump(without_validation(loop(before)))==ast.dump(without_validation(loop(after)))
-    for path in ('libs/models/SADA/meta_archs.py','libs/trainer/da_trainer.py','libs/models/SADA/optimizer.py'):
+    for path in ('libs/trainer/da_trainer.py','libs/models/SADA/optimizer.py'):
         assert subprocess.check_output(['git','show','90bdce09660b820df7d527aabf1d43df1350bc4b:'+path],cwd=CODE)==(CODE/path).read_bytes().replace(b'\r\n',b'\n')
+    # 仅剥离明确新增且受开关控制的辅助接入；原检测计算AST必须完全相同。
+    old_model=ast.parse(subprocess.check_output(['git','show','43ce5b9:libs/models/SADA/meta_archs.py'],cwd=CODE,text=True))
+    new_model=ast.parse((CODE/'libs/models/SADA/meta_archs.py').read_text(encoding='utf-8'))
+    class StripAuxiliary(ast.NodeTransformer):
+        def visit_Assign(self,node):
+            if ast.unparse(node)== 'self.rq3_capacity = None': return None
+            return self.generic_visit(node)
+        def visit_If(self,node):
+            if ast.unparse(node.test) in ("cfg.get('prototype_capacity')", "mode == 'train' and self.rq3_capacity is not None"):
+                return None
+            return self.generic_visit(node)
+    assert ast.dump(old_model)==ast.dump(StripAuxiliary().visit(new_model))
 
 
 def test_direct_cuda_capture_does_not_enumerate_nvml(monkeypatch):
