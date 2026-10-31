@@ -7,7 +7,7 @@ from torch.nn import functional as F
 from tools.tta_core import (assert_unlabeled, unlabeled, dense, crop,
                             adaptable_parameters, parameter_digest, predict_full)
 
-SPEC = dict(schema='temporal-feature-recovery-frozen-preparation-revision1-v1', seed=123,
+SPEC = dict(schema='temporal-feature-recovery-foreground-revision2-v1', seed=123,
     preparation_variants=['reconstruction'],
     preparation_epochs=5, preparation_batch=1, preparation_lr=1e-4,source_encoder_preparation='frozen',
     decoder_lr=1e-3, reconstruction_weight=1., change_weight=.1,
@@ -16,7 +16,15 @@ SPEC = dict(schema='temporal-feature-recovery-frozen-preparation-revision1-v1', 
     reference='frozen-original-prototype-EMA', preparation_selection='minimum-fixed-mask-source-val-reconstruction-epochs-1-to-5',
     test_optimizer='Adam-no-momentum-history-between-videos', learning_rates=[1e-4,1e-3], steps=[1,3],
     calibration_videos_per_shift=8, test_protocol='offline-whole-video-reset-each-video',
-    target_GT_for_adaptation=False, preparation_target_data=False)
+    target_GT_for_adaptation=False, preparation_target_data=False,
+    source_preparation='reuse-exact-frozen-preparation-revision1-heads',
+    recovery_weighting='reference-max10-class-probability-relative-to-masked-mean-clamp5-plus0.1')
+
+
+def foreground_weights(probability,selected):
+    """连续权重，不把低置信位置当负类；无GT、无可调前景阈值。"""
+    scale=probability[selected].mean().clamp(min=1e-6)
+    return (probability/scale).clamp(max=5).detach()+.1
 
 
 def preparation_optimizer(model,head):
@@ -75,11 +83,14 @@ def recovery_loss(student, reference, head, video, seed, change=False):
     marked=temporal_mask(video['feats'].shape[-1],seed,SPEC['mask_fraction'],SPEC['block_tokens'])
     with torch.no_grad():
         target,valid,_=encoded_view(reference,video)
+        logits,_=reference.cls_head_target([target],[valid])
+        foreground=logits[0][:,:10].sigmoid().amax(1)
     encoded,visible_mask,position=encoded_view(student,video,head,marked)
     prediction=head(encoded,position)
     selected=(valid & visible_mask & position).squeeze(1)
     distance=1-F.cosine_similarity(prediction,target.detach(),dim=1)
-    reconstruction=distance[selected].mean()
+    weights=foreground_weights(foreground,selected)
+    reconstruction=(distance[selected]*weights[selected]).sum()/weights[selected].sum()
     delta=reconstruction*0
     adjacent=(valid[:,:,1:] & valid[:,:,:-1] & (position[:,:,1:] | position[:,:,:-1])).squeeze(1)
     if change and adjacent.any():
@@ -89,7 +100,9 @@ def recovery_loss(student, reference, head, video, seed, change=False):
         delta=(pred_delta-target_delta).square().mean(1)[adjacent].mean()
     loss=reconstruction+SPEC['change_weight']*delta
     return loss,dict(reconstruction=float(reconstruction.detach()),change=float(delta.detach()),
-        masked_positions=int(selected.sum()),valid_positions=int(valid.sum()),target_gt_seen=False)
+        masked_positions=int(selected.sum()),valid_positions=int(valid.sum()),target_gt_seen=False,
+        foreground_probability_mean=float(foreground[selected].mean()),
+        foreground_weight_min=float(weights[selected].min()),foreground_weight_max=float(weights[selected].max()))
 
 
 def source_detection_loss(model, video):

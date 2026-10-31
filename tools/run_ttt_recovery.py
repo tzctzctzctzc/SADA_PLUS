@@ -122,17 +122,16 @@ def diagnostic(model,reference,head,named,cfg,job):
     torch.testing.assert_close(ours,official,rtol=1e-5,atol=1e-6)
     frozen={n:p.detach().cpu().clone() for n,p in model.named_parameters() if not p.requires_grad}
     reference_digest=parameter_digest(dict(reference.named_parameters()))
-    optimizer=preparation_optimizer(model,head)
+    # 新修订复用已准备的冻结decoder；真实诊断也使用正式将用的同一份头。
+    for p in head.parameters():p.requires_grad_(False)
     head_before=parameter_digest(dict(head.named_parameters()));encoder_before=parameter_digest(named)
     rec,metrics=recovery_loss(model,reference,head,clean,123,job['variant']=='temporal_change')
     rec.backward()
     grads=[p.grad for p in named.values() if p.grad is not None]
-    if grads:raise ValueError('冻结源准备不应产生检测器梯度')
-    norm=torch.stack([p.grad.norm() for p in head.parameters() if p.grad is not None]).norm()
-    if not torch.isfinite(norm) or float(norm)<=0:raise ValueError('真实恢复头梯度无效')
-    optimizer.step()
-    if head_before==parameter_digest(dict(head.named_parameters())) or encoder_before!=parameter_digest(named):
-        raise ValueError('源准备必须只更新恢复头、保持检测器不变')
+    norm=torch.stack([p.grad.norm() for p in named.values() if p.grad is not None]).norm()
+    if not torch.isfinite(norm) or float(norm)<=0:raise ValueError('加权恢复没有真实共享梯度')
+    if head_before!=parameter_digest(dict(head.named_parameters())) or encoder_before!=parameter_digest(named):
+        raise ValueError('仅检查梯度时参数不应改变')
     if reference_digest!=parameter_digest(dict(reference.named_parameters())):raise ValueError('参考被更新')
     initial=state_cpu(named);head_before=parameter_digest(dict(head.named_parameters()))
     one,a=adapt(model,reference,head,initial,clean,1e-4,1,job['variant']=='temporal_change')
@@ -143,8 +142,8 @@ def diagnostic(model,reference,head,named,cfg,job):
     if any(not torch.equal(p.detach().cpu(),frozen[n]) for n,p in model.named_parameters() if n in frozen):
         raise ValueError('测试头或其他冻结参数改变')
     return dict(status='passed',source_detection_exact=True,inference_exact=True,reference_frozen=True,
-        decoder_frozen_at_test=True,episodic_reset=True,real_decoder_preparation_gradient=float(norm),
-        detector_unchanged_during_preparation=True,
+        decoder_frozen_at_test=True,episodic_reset=True,real_weighted_encoder_gradient=float(norm),
+        reused_prepared_head=True,detector_unchanged_during_preparation=True,
         target_gt_seen=False,source_recovery=metrics,adaptation=a)
 
 
@@ -163,6 +162,9 @@ def worker(args):
     model=load_model(cfg,job['checkpoint']);named,head=initialize(model)
     reference=deepcopy(model).eval()
     for p in reference.parameters():p.requires_grad_(False)
+    if job['kind']=='diagnostic':
+        if sha(job['prepared'])!=job['prepared_sha256']:raise ValueError('诊断复用的恢复头改变')
+        payload=torch.load(job['prepared'],map_location='cpu');apply_prepared(model,head,payload)
     if job['kind']=='diagnostic':result=diagnostic(model,reference,head,named,cfg,job)
     elif job['kind']=='prepare':result=prepare(model,reference,head,named,cfg,job)
     else:
@@ -286,23 +288,23 @@ def main(args):
     identity=code_identity();root.mkdir(parents=True,exist_ok=False);(root/'tmp').mkdir()
     save(root/'runtime_resources.json',prepare_file_limit())
     save(root/'plan.json',dict(specification=SPEC,code=identity,prototype=str(prototype),prior_tta=str(prior),
-        target_jobs=6,reused_original_prototype=6,revision=1,wait_for=str(args.wait_for),
-        hypothesis='Joint source preparation lost original Prototype target gains; freeze detector throughout source decoder preparation to isolate useful test-time recovery signals without that forgetting',
-        route_revisions_remaining=dict(route1=1,route2=1),
+        target_jobs=6,reused_original_prototype=6,revision=2,wait_for=str(args.wait_for),
+        hypothesis='Frozen preparation avoids forgetting but uniform recovery still does not improve detection; weight masked recovery by frozen-reference action confidence while reusing identical prepared heads',
+        route_revisions_remaining=dict(route1=0,route2=0),
         development='exploratory-all-positive-negative-results-retained',
         references=['https://arxiv.org/abs/2411.17869','https://jmlr.org/papers/v26/24-0439.html']))
     try:
         if args.wait_for:
             while not (args.wait_for/'final_audit.json').exists():
                 previous=read(args.wait_for/'state.json')
-                if previous['phase'] in ('failed','stopped'):raise RuntimeError('前序Adam修订异常退出，不抢占GPU')
-                save(root/'state.json',dict(phase='waiting_route1_revision1_complete',pid=os.getpid(),active={}))
+                if previous['phase'] in ('failed','stopped'):raise RuntimeError('前序覆盖率修订异常退出，不抢占GPU')
+                save(root/'state.json',dict(phase='waiting_route1_revision2_complete',pid=os.getpid(),active={}))
                 time.sleep(15)
             previous=read(args.wait_for/'final_audit.json')
-            if previous['status']!='passed' or previous['count']!=24:raise ValueError('前序Adam修订未精确终审')
+            if previous['status']!='passed' or previous['count']!=24:raise ValueError('前序覆盖率修订未精确终审')
         previous_recovery=read(args.previous_recovery/'final_audit.json')
-        if previous_recovery['status']!='passed' or previous_recovery['count']!=30:
-            raise ValueError('恢复原版路线未精确30项终审')
+        if previous_recovery['status']!='passed' or previous_recovery['count']!=12:
+            raise ValueError('冻结准备修订未精确12项终审')
         proto_final=read(prototype/'final_audit.json');tta_final=read(prior/'final_audit.json')
         if (proto_final['count']!=6 or tta_final['count']!=24 or
                 proto_final['status']!='passed' or tta_final['status']!='passed'):
@@ -325,7 +327,9 @@ def main(args):
             manifests[s]=dict(source=prior/'inputs'/s/'source_unlabeled.json',source_gt=prior/'inputs'/s/'source_evaluation.json',
                 target=prior/'inputs'/s/'target_unlabeled.json',target_gt=cfg['baseline']['annotation_for_offline_evaluation'])
         diagnostics=[job_file(root,'diagnostic/'+v,'diagnostic','S1',v,prototype,identity,
-            manifests['S1']['source'],manifests['S1']['source_gt']) for v in ('reconstruction',)]
+            manifests['S1']['source'],manifests['S1']['source_gt'],
+            prepared=str(args.previous_recovery/'prepare/reconstruction/S1/best.pt'),
+            prepared_sha256=sha(args.previous_recovery/'prepare/reconstruction/S1/best.pt')) for v in ('reconstruction',)]
         acceptance=run_jobs(root,diagnostics,data,identity,'real_gpu_diagnostic')
         save(root/'acceptance.json',dict(status='passed',code=identity,results=acceptance))
         all_results={'original_prototype_no_ttt':proto_final['results']}
@@ -333,10 +337,9 @@ def main(args):
             original_final_sha256=sha(prototype/'final_audit.json'),
             reason='Frozen-source preparation preserves all detector parameters; decoder absent from normal prediction'))
         for variant in SPEC['preparation_variants']:
-            jobs=[job_file(root,'prepare/'+variant+'/'+s,'prepare',s,variant,prototype,identity,
-                manifests[s]['source'],manifests[s]['source_gt']) for s in SHIFTS]
-            prepared=run_jobs(root,jobs,data,identity,'source_prepare_'+variant)
-            save(root/'prepare'/variant/'final_audit.json',dict(status='passed',count=6,results=prepared))
+            prepared=[audit(args.previous_recovery/'prepare'/variant/s/'job.json') for s in SHIFTS]
+            save(root/'prepare'/variant/'final_audit.json',dict(status='passed',count=6,results=prepared,
+                reused=True,original_root=str(args.previous_recovery),reason='same frozen source decoder; only test adaptation loss weighting changes'))
             selection_file=None
             if variant!='source_only':
                 trials=[]
@@ -344,7 +347,7 @@ def main(args):
                     for steps in SPEC['steps']:
                         jobs=[]
                         for s in SHIFTS:
-                            prepared_path=root/'prepare'/variant/s/'best.pt'
+                            prepared_path=args.previous_recovery/'prepare'/variant/s/'best.pt'
                             jobs.append(job_file(root,'calibration/%s/lr%s_steps%d/%s'%(variant,lr,steps,s),
                                 'calibration',s,variant,prototype,identity,manifests[s]['source'],manifests[s]['source_gt'],
                                 prepared=str(prepared_path),prepared_sha256=sha(prepared_path),adapt=True,lr=lr,steps=steps))
@@ -355,7 +358,7 @@ def main(args):
             for use_adaptation in [True]:
                 label=variant+('_ttt' if use_adaptation else '_no_ttt');jobs=[]
                 for s in SHIFTS:
-                    prepared_path=root/'prepare'/variant/s/'best.pt'
+                    prepared_path=args.previous_recovery/'prepare'/variant/s/'best.pt'
                     options=dict(prepared=str(prepared_path),prepared_sha256=sha(prepared_path),adapt=use_adaptation)
                     if use_adaptation:options.update(lr=chosen['lr'],steps=chosen['steps'],
                         selection_file=str(selection_file),selection_sha256=sha(selection_file))
