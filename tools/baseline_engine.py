@@ -211,6 +211,39 @@ def epoch_setup(ctx, epoch):
     ctx.first_gradient_norm = None
 
 
+def source_validation_map(ctx, epoch, output=None):
+    """只用源GT，独立loader不消耗训练loader的随机状态。"""
+    from libs.evaluation import ANETdetection
+    cfg=ctx.cfg
+    annotation=cfg['dataset']['json_file']
+    ds=dataset(cfg,annotation,cfg['src_val_split'],False)
+    dl=loader(ds,False,torch.Generator().manual_seed(cfg['seed']+3000009),1,cfg['loader']['num_workers'])
+    model=ctx.get_evaluation_model();model.eval()
+    def rng_digest():
+        return tensor_digest(dict(python=random.getstate(),numpy=np.random.get_state(),
+            cpu=torch.get_rng_state(),cuda=torch.cuda.get_rng_state(0),
+            loaders={k:g.get_state() for k,g in ctx.generators.items()}))
+    before=rng_digest()
+    columns={'video-id':[],'t-start':[],'t-end':[],'label':[],'score':[]}
+    with torch.random.fork_rng(devices=[0]),torch.no_grad():
+        for video in dl:
+            video=move_to_device(video,'cuda:0')
+            prediction=model(video_list_src=video,video_list_tgt=video,mode='test',domain='source',curr_epoch=epoch)[0]
+            for item in prediction:
+                columns['video-id'].extend([item['video_id']]*len(item['scores']))
+                for key,value in [('t-start',item['segments'][:,0]),('t-end',item['segments'][:,1]),
+                                  ('label',item['labels']),('score',item['scores'])]:
+                    columns[key].extend(value.detach().cpu().tolist())
+    evaluator=ANETdetection(str(annotation),cfg['src_val_split'],num_workers=4,action_subsampling='10_majority_classes')
+    ap,score,*_=evaluator.evaluate({k:np.asarray(v) for k,v in columns.items()},verbose=True)
+    if before!=rng_digest():raise ValueError('源mAP验证改变训练随机流')
+    if not math.isfinite(float(score)) or not 0<=float(score)<=1:raise ValueError('源mAP非法')
+    if output:save(output,dict(epoch=epoch,map_0_1_to_0_5=float(score),map_by_tiou=[float(x) for x in ap],
+        videos=len(ds),prediction_count=len(columns['score']),split=cfg['src_val_split'],
+        source_annotation_sha256=sha(annotation),state='ema_state_dict',training_rng_preserved=True))
+    return float(score)
+
+
 def probe(cfg, output, warmup_steps=2, timed_steps=6):
     ctx = build(cfg)
     reports = {}
@@ -236,6 +269,7 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
         ctx.train_loader_src, ctx.train_loader_tgt = originals
     ctx.valid_metrics_src.reset()
     validation = float(ctx._valid_epoch(5, ctx.val_loader_src, domain='src'))
+    source_map=source_validation_map(ctx,5,Path(output).parent/'source_map.json')
     if not math.isfinite(validation) or validation <= 0:
         raise ValueError('真实源验证失败')
     # 内存序列化真实模型/EMA/优化器，不写诊断checkpoint；检查GPU随机流可真正接续。
@@ -253,7 +287,7 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
         raise ValueError('真实GPU完整状态恢复或随机流重放失败')
     restore(ctx,saved)
     save(output, dict(status='passed', batch=cfg['loader']['batch_size'], phases=reports,
-                      source_validation_loss=validation,
+                      source_validation_loss=validation,source_validation_map=source_map,
                       peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,
                       checked_target_batches=ctx.checked_steps, initial_state_sha=ctx.initial_state_sha,
                       cuda_seed_proof=ctx.cuda_seed_proof,
@@ -279,7 +313,7 @@ def train(cfg, entry, resume=None):
         if tensor_digest(actual) != tensor_digest(expected): raise ValueError('完整恢复状态不一致')
         save(entry/'restore_proof.json', dict(status='passed', start_epoch=start,
                                              checkpoint_sha256=sha(resume), full_state_sha=tensor_digest(actual)))
-    best = min([v for _,v in history], default=float('inf'))
+    best = max([v for _,v in history], default=-float('inf'))
     for epoch in range(start, 51):
         if history and decision(history)['reason'] != 'running': break
         print('BASELINE_EPOCH', cfg['baseline']['regime'], cfg['baseline']['shift'], epoch, flush=True)
@@ -296,9 +330,11 @@ def train(cfg, entry, resume=None):
         if epoch%5 == 0:
             ctx.valid_metrics_src.reset()
             value = float(ctx._valid_epoch(epoch, ctx.val_loader_src, domain='src'))
-            history.append([epoch,value]); row['source_validation_loss'] = value
-            if value < best:
-                best = value; checkpoint(entry/'best.pt', capture(ctx,cfg,epoch,history))
+            score=source_validation_map(ctx,epoch,entry/'validation'/('epoch%02d.json'%epoch))
+            history.append([epoch,score]); row['source_validation_loss'] = value
+            row['source_validation_map']=score
+            if score > best:
+                best = score; checkpoint(entry/'best.pt', capture(ctx,cfg,epoch,history))
         rows.append(row)
         (entry/'metrics.jsonl').write_text(''.join(json.dumps(x,allow_nan=False)+'\n' for x in rows))
         print('BASELINE_METRICS', json.dumps(row,allow_nan=False), flush=True)
@@ -345,6 +381,8 @@ def evaluate(cfg, entry, annotation):
                       videos=len(ds),prediction_count=len(columns['score']),selected_epoch=saved['epoch'],
                       checkpoint_sha256=sha(entry/'best.pt'),state='ema_state_dict',split=splits)
         result['map_0.1_to_0.5']=float(mean)
+        if domain=='source' and abs(float(mean)-terminal['decision']['best_map'])>1e-10:
+            raise ValueError('离线源mAP与选模源mAP不一致')
         save(entry/'evaluation'/('%s_val.json' % domain),result);results[domain]=result
     save(entry/'evaluation/manifest.json',dict(config_sha256=sha(entry/'config.json'),
          checkpoint_sha256=sha(entry/'best.pt'),annotation_sha256=sha(annotation),results=results))

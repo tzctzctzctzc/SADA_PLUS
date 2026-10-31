@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 
 OFFICIAL = 'a96a15b0d0c905a553c7a2b14f607c9485ebe758'
-SCHEMA = 'sada-corrected-source-earlystop-cudarng-v2'
+SCHEMA = 'sada-corrected-source-map-earlystop-v1'
 CUDA_RNG_POLICY = dict(visible_devices=1, logical_device=0, explicit_current_device_seed=True,
                        checkpoint_rng='direct_get_rng_state_0', missing_cuda_rng='reject')
 CODE = Path(__file__).resolve().parents[1]
@@ -17,7 +17,7 @@ CORE_PATCHES = (
     'libs/trainer/da_trainer.py',
 )
 POLICY = dict(max_epochs=50, valid_every=5, patience_epochs=15, min_delta=0.,
-              selection='source_validation_cls_plus_reg', state='ema_state_dict',
+              selection='source_validation_map_0.1_to_0.5', state='ema_state_dict',
               learning_rate='official_schedule_unchanged_no_batch_scaling')
 
 
@@ -71,14 +71,14 @@ def decision(history):
     epochs = [int(row[0]) for row in history]
     if epochs != list(range(5, epochs[-1]+1, 5)) or epochs[-1] > 50:
         raise ValueError('源验证历史必须从5轮开始完整连续')
-    best, best_epoch = float('inf'), None
-    for epoch, loss in history:
-        if not math.isfinite(loss):
-            raise ValueError('源验证loss非有限')
-        if loss < best:
-            best, best_epoch = float(loss), int(epoch)
+    best, best_epoch = -float('inf'), None
+    for epoch, score in history:
+        if not math.isfinite(score) or not 0 <= score <= 1:
+            raise ValueError('源验证mAP非法')
+        if score > best:
+            best, best_epoch = float(score), int(epoch)
     epoch = epochs[-1]
-    return dict(epoch=epoch, best_epoch=best_epoch, best_loss=best,
+    return dict(epoch=epoch, best_epoch=best_epoch, best_map=best,
                 reason='source_patience_exhausted' if epoch-best_epoch >= 15
                 else 'max_epochs' if epoch == 50 else 'running')
 
@@ -176,10 +176,16 @@ def audit_entry(entry):
     if any(x['target_gt_cls_loss'] or x['target_gt_reg_loss'] or x['target_gt_downstream_loss']
            for x in rows):
         raise ValueError('目标GT监督不为零')
-    history = [[x['epoch'], x['source_validation_loss']] for x in rows
-               if 'source_validation_loss' in x]
+    history = [[x['epoch'], x['source_validation_map']] for x in rows
+               if 'source_validation_map' in x]
     if history != terminal['history'] or not all(math.isfinite(x['train_loss']) for x in rows):
         raise ValueError('源验证或训练记录不符')
+    for epoch,score in history:
+        report=read(entry/'validation'/('epoch%02d.json'%epoch))
+        if (report['map_0_1_to_0_5']!=score or report['state']!='ema_state_dict'
+                or report['source_annotation_sha256']!=cfg['baseline']['source_manifest_sha256']
+                or report['split']!=cfg['src_val_split'] or not report['training_rng_preserved']):
+            raise ValueError('源mAP选模凭证不符')
     if not all(math.isfinite(x['source_gradient_norm']) and x['source_gradient_norm']>0 for x in rows):
         raise ValueError('缺少有效源监督梯度')
     import torch

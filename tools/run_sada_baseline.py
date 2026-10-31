@@ -256,6 +256,7 @@ def main(args):
     if so['initial_state_sha'] != reports[batch]['initial_state_sha']:
         raise ValueError('SO/UDA初始模型不同')
     for report in (so,reports[batch]):
+        if not 0 <= report['source_validation_map'] <= 1:raise ValueError('源mAP真实验收失败')
         if report['rng_roundtrip']['status']!='passed' or report['rng_roundtrip']['cuda_rng_count']!=1:
             raise ValueError('缺少真实GPU随机流和完整状态恢复验收')
         if report['cuda_seed_proof']['actual_cuda_seed']!=args.seed:raise ValueError('验收CUDA种子不符')
@@ -284,6 +285,7 @@ def main(args):
                     artifacts=[entry/x for x in ('config.json','runtime_config.json','seed_proof.json','metrics.jsonl','termination.json',
                         'best.pt','latest.pt','train_gpu.json','evaluate_gpu.json',
                         'evaluation/source_val.json','evaluation/target_val.json','evaluation/manifest.json')]
+                    artifacts+=sorted((entry/'validation').glob('epoch*.json'))
                     save(entry/'complete.json',dict(schema=SCHEMA,shift=task['shift'],regime=task['regime'],
                         code=identity,acceptance_sha256=sha(root/'acceptance.json'),
                         artifacts={str(p):sha(p) for p in artifacts}))

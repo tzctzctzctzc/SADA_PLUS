@@ -17,12 +17,12 @@ from tools.run_sada_baseline import budget,runtime_config,membership_manifest
 
 
 def test_earlystop_means_epochs_not_validation_counts():
-    history=[[5,1.],[10,.8],[15,.81],[20,.82],[25,.83]]
-    assert termination(history)==dict(epoch=25,best_epoch=10,best_loss=.8,reason='source_patience_exhausted')
+    history=[[5,.1],[10,.8],[15,.79],[20,.78],[25,.77]]
+    assert termination(history)==dict(epoch=25,best_epoch=10,best_map=.8,reason='source_patience_exhausted')
 
 
 def test_no_premature_or_late_terminal():
-    with pytest.raises(ValueError):termination([[5,1.],[10,.8],[15,.9]])
+    with pytest.raises(ValueError):termination([[5,.1],[10,.8],[15,.9]])
     with pytest.raises(ValueError):termination([[5,1.],[10,1.],[15,1.],[20,1.],[25,.5]])
     with pytest.raises(ValueError):decision([[10,1.]])
 
