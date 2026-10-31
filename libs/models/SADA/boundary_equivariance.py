@@ -75,7 +75,7 @@ class BoundaryEquivariance(nn.Module):
                         # 原Trainer交替冻结生成器/判别器，只对当前可求导输入取梯度。
                         variables=[('feature',fpn[level]),('head',self.head.logits.weight)]
                         active=[(name,value) for name,value in variables if value.requires_grad]
-                        gradients=torch.autograd.grad(loss,[value for _,value in active],retain_graph=True,allow_unused=True)
+                        gradients=torch.autograd.grad(loss,[value for _,value in active],retain_graph=True,allow_unused=True) if active else []
                         for (name,_),gradient in zip(active,gradients):
                             if gradient is None:continue
                             if name=='feature':feature_gradient+=float(gradient.detach().norm())

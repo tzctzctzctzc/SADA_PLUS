@@ -82,6 +82,8 @@ def test_real_sada_connects_source_loss_inference_optimizer_and_strict_restore(t
     from libs.models.SADA.boundary_equivariance import SCHEMA,POLICY
     code=Path(__file__).resolve().parents[1]
     cfg=run_path(str(code/'tests/test_corrected_baseline.py'))['small_config']()
+    # 最大FPN stride为32；真实平移分支要求至少四个stride，64-token样例会合法跳过。
+    cfg['model']['max_seq_len']=cfg['dataset']['max_seq_len']=256
     proto=run_path(str(code/'tests/test_prototype_capacity.py'))
     cfg['prototype_capacity']=proto['configuration'](tmp_path,'control');cfg['model']['pl_threshold']=0
     native=torch.tensor
@@ -97,7 +99,8 @@ def test_real_sada_connects_source_loss_inference_optimizer_and_strict_restore(t
     assert all(torch.equal(v,model.state_dict()[k]) for k,v in old.state_dict().items())
     source,target=proto['videos']();results=[];states=[]
     for video in (source,target):
-        video['metadata'].update(duration=65.,use_temporal_grid_feats=False,video_length=65)
+        video['feats']=video['feats'].repeat(1,4)
+        video['metadata'].update(duration=257.,use_temporal_grid_feats=False,video_length=257,crop_feat_len=256)
     for m in (old,model):
         torch.manual_seed(456)
         results.append(m(video_list_src=[source],video_list_tgt=[target],mode='train',curr_epoch=5)[0])
@@ -106,6 +109,7 @@ def test_real_sada_connects_source_loss_inference_optimizer_and_strict_restore(t
     torch.testing.assert_close(results[0]['cls_loss'],results[1]['cls_loss'])
     torch.testing.assert_close(results[0]['reg_loss'],results[1]['reg_loss'])
     assert results[1]['boundary_source_distribution_loss']>0 and results[1]['boundary_target_rng_restored']==1
+    assert results[1]['boundary_target_points']>0
     assert results[1]['boundary_target_feature_gradient_norm']>0
     assert results[1]['boundary_target_head_gradient_norm']>0
     head=model.boundary_equivariance.head.logits.weight;before=head.detach().clone()

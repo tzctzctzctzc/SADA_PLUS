@@ -322,7 +322,7 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
     restore(ctx,saved)
     save(output, dict(status='passed', batch=cfg['loader']['batch_size'], phases=reports,
                       source_validation_loss=validation,
-                      peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,
+                      peak_reserved_mib=max(torch.cuda.max_memory_reserved()/2**20,max(x['peak_reserved_mib'] for x in reports.values())),
                       checked_target_batches=ctx.checked_steps, initial_state_sha=ctx.initial_state_sha,
                       initial_detector_sha=ctx.initial_detector_sha,
                       cuda_seed_proof=ctx.cuda_seed_proof,

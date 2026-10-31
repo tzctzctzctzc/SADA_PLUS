@@ -1,6 +1,7 @@
 """冻结边界分布配方，复用已通过的源支持证据；正式结果使用独立身份。"""
 from copy import deepcopy
 from pathlib import Path
+import json
 import math
 from libs.models.SADA.boundary_equivariance import SCHEMA,POLICY
 from tools import baseline_protocol as p
@@ -65,6 +66,24 @@ def verify_probe(report,initial_detector_sha):
     if active['auxiliary']['rq3_target_gradient_norm']<=0 or not active['branch_parameters_updated']:raise ValueError('原Prototype未有效训练')
 
 
+def verify_group(root,code):
+    group=p.read(root/'acceptance_all6.json')
+    expected={str(root/'formal'/s/'acceptance.json') for s in SHIFTS}
+    if group['status']!='passed' or group['code']!=code or set(group['acceptance'])!=expected:raise ValueError('全六验收身份不符')
+    for path,digest in group['acceptance'].items():
+        path=Path(path);entry=path.parent;cfg=p.read(entry/'config.json');a=p.read(path)
+        if p.sha(path)!=digest or a['schema']!=SCHEMA or a['code']!=code or cfg['baseline']['code']!=code:raise ValueError('验收代码或签名改变')
+        if a['report_sha256']!=p.sha(entry/'probe_result.json') or a['source_gate_sha256']!=p.sha(root/'source_gate.json'):raise ValueError('验收依赖改变')
+        initial=p.read(Path('/vepfs/vlms/prototype_capacity12_5f9a157_1029/formal/control')/entry.name/'detector_initialization.json')['sha256']
+        report=p.read(entry/'probe_result.json');verify_probe(report,initial)
+        budget=cfg['baseline']['epoch_budget']['iterations_per_epoch']
+        if report['checked_target_batches']!=5*budget or any(x['steps']!=budget for x in report['phases'].values()):raise ValueError('验收未走完整预算')
+        receipt=p.read(entry/'probe_gpu.json');guard=p.read(receipt['guard']);lease=p.read(guard['lease'])
+        if receipt['config_sha256']!=p.sha(entry/'config.json') or receipt['guard_sha256']!=p.sha(receipt['guard']) or guard['lease_sha256']!=p.sha(guard['lease']):raise ValueError('验收GPU签名改变')
+        if lease['commit']!=code['commit'] or guard['observed']['uuid']!=lease['observed']['uuid'] or guard['observed']['free_mib']<lease['minimum_free_mib']:raise ValueError('验收GPU准入不符')
+    return group
+
+
 def audit(entry):
     import torch
     entry=Path(entry);done=p.read(entry/'complete.json');cfg=p.read(entry/'config.json');ref=Path(done['control_complete'])
@@ -72,15 +91,23 @@ def audit(entry):
     assert_pair(cfg,p.read(ref.parent/'config.json'))
     gate=p.read(done['source_gate'])
     if p.sha(done['source_gate'])!=done['source_gate_sha256'] or gate['source_proof']!=verify_source():raise ValueError('源支持证据改变')
-    group=p.read(done['group_acceptance'])
-    if p.sha(done['group_acceptance'])!=done['group_acceptance_sha256'] or len(group['acceptance'])!=6:raise ValueError('全六验收不存在')
-    if {Path(path).parent.name for path in group['acceptance']}!=SHIFTS:raise ValueError('验收方向不全')
-    for path,digest in group['acceptance'].items():
-        if p.sha(path)!=digest:raise ValueError('验收SHA漂移')
+    if Path(done['group_acceptance'])!=entry.parents[1]/'acceptance_all6.json' or p.sha(done['group_acceptance'])!=done['group_acceptance_sha256']:raise ValueError('全六验收路径或签名不符')
+    verify_group(entry.parents[1],done['code'])
+    cache=cfg['prototype_capacity']
+    if p.sha(cache['prepared_cache'])!=cache['prepared_cache_sha256']:raise ValueError('固定缓存改变')
+    for path,digest in p.read(cache['prepared_cache'])['source_artifacts'].items():
+        if p.sha(path)!=digest:raise ValueError('缓存来源改变')
     acceptance=p.read(entry/'acceptance.json')
     if acceptance['report_sha256']!=p.sha(entry/'probe_result.json'):raise ValueError('probe报告漂移')
     verify_probe(p.read(entry/'probe_result.json'),p.read(ref.parent/'detector_initialization.json')['sha256'])
     result=p.audit_entry(entry,expected_schema=SCHEMA,acceptance_path=entry/'acceptance.json')
+    rows=[json.loads(x) for x in (entry/'metrics.jsonl').read_text().splitlines()]
+    for row in rows:
+        b=row['boundary_equivariance']
+        if b['source_distribution_loss']<=0 or any(not math.isfinite(v) for v in b.values()):raise ValueError('源分布监督无效')
+        if row['epoch']>=cfg['train_cfg']['warmup_adv']:
+            if any(b[k]<=0 for k in ('target_points','target_views','target_equivariance_loss')):raise ValueError('正式目标等变无效')
+            if any(b[k]!=1 for k in ('target_rng_restored','target_normalizers_unchanged','target_prototype_state_unchanged')):raise ValueError('正式额外视图破坏原状态')
     for name in ('best','latest'):
         saved=torch.load(entry/(name+'.pt'),map_location='cpu')
         if saved['schema']!=SCHEMA or not saved['state_dict']['boundary_equivariance.head.logits.weight'].abs().sum():raise ValueError('新头保存或身份错误')
