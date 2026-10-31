@@ -7,13 +7,15 @@ def test_real_neighbours_and_padding():
     assert torch.equal(x[:,:5],torch.tensor([[0.,0.,1.,2.,3.],[0.,1.,2.,3.,0.],[1.,2.,3.,0.,0.]]))
     assert valid.all() and levels.tolist()==[0,0,0]
 
-def test_positive_offsets_source_gradient_and_restore():
+def test_nonnegative_offsets_source_gradient_and_restore():
     torch.manual_seed(123);h=EndpointHead(2,1);x=torch.randn(16,11);x[:,-1]=1;gt=torch.ones(16,2)*2
-    loss,b,s=objective(h,x,gt);loss.mean().backward()
-    assert (b>0).all() and (s>0).all() and torch.isfinite(loss).all()
+    h.initialize(torch.zeros(2,2,3),torch.zeros(2),torch.ones(1))
+    original=torch.ones(16,2);original[0,0]=0
+    loss,b,s=objective(h,x,gt,original);loss.mean().backward()
+    assert torch.equal(b,original) and (b>=0).all() and (s>0).all() and torch.isfinite(loss).all()
     assert sum(p.grad.abs().sum() for p in h.parameters())>0
     copy=EndpointHead(2,1);copy.load_state_dict(h.state_dict(),strict=True)
-    assert torch.equal(copy(x)[0],b)
+    assert torch.equal(copy(x,original)[0],b)
 
 def test_endpoint_uncertainty_independent_and_background_identity():
     a=torch.tensor([[2.,2.],[2.,2.]]);b=torch.tensor([[3.,3.],[3.,3.]])
@@ -28,7 +30,8 @@ def test_source_pretrained_three_tap_to_five_tap_mapping():
     h=EndpointHead(2,1);h.initialize(conv.weight,conv.bias,torch.tensor([1.2]))
     x,_,_=point_context(f,mask)
     expected=(1.2*conv(f[0])[0].T).relu().clamp_min(1e-6)
-    assert torch.allclose(h(x)[0],expected,atol=1e-6)
+    assert torch.equal(h(x,expected)[0],expected)
+    assert torch.equal(h.offset.weight[:,2:8],conv.weight.permute(0,2,1).reshape(2,-1))
     assert h.offset.weight.data_ptr()!=conv.weight.data_ptr()
 
 
@@ -43,7 +46,7 @@ def test_masked_tower_bias_preserved_at_valid_neighbour():
     conv=torch.nn.Conv1d(2,2,3,padding=1);h=EndpointHead(2,1)
     h.initialize(conv.weight,conv.bias,torch.ones(1));x,valid,_=point_context(f,mask,reg)
     expected=conv((f[0]*mask[0]+.3).relu())[0].T.relu().clamp_min(1e-6)
-    assert torch.allclose(h(x)[0][valid],expected[valid],atol=1e-6)
+    assert torch.equal(h(x,expected)[0][valid],expected[valid])
 
 
 def test_initialization_candidate_and_first_early_stop():

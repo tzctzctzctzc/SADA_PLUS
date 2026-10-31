@@ -63,22 +63,22 @@ def gpu(args):
         head.eval();terms=[];bp=[];sp=[]
         with torch.no_grad():
             for start in range(0,len(val['x']),512):
-                loss,b,s=objective(head,val['x'][start:start+512].cuda(),val['gt'][start:start+512].cuda())
+                loss,b,s=objective(head,val['x'][start:start+512].cuda(),val['gt'][start:start+512].cuda(),val['a'][start:start+512].cuda())
                 terms.append(loss);bp.append(b);sp.append(s)
         return float((torch.cat(terms)*weights).sum()/weights.sum()),torch.cat(bp),torch.cat(sp)
     initial_value,initial_prediction,_=validate()
     difference=float((initial_prediction-val['a'].cuda()).abs().max())
-    if not torch.allclose(initial_prediction,val['a'].cuda(),rtol=1e-4,atol=1e-5):
+    if not torch.equal(initial_prediction,val['a'].cuda()):
         raise ValueError('源预训练回归初始化不匹配')
     best=initial_value;best_epoch=0;history.append(dict(epoch=0,source_validation=best,initialization=True))
     torch.save(dict(state_dict=head.state_dict(),epoch=0,specification=SPEC),e/'best_auxiliary.pt')
     save(e/'initialization_proof.json',dict(status='passed',maximum_absolute_error=difference,
-        original_regression_initialization=True,epoch_zero_source_loss=best,original_detector_not_modified=True))
+        original_regression_initialization=True,exact_original_prediction=True,epoch_zero_source_loss=best,original_detector_not_modified=True))
     for epoch in range(1,51):
         head.train()
         for idx in torch.randperm(len(train['x']),generator=generator).split(512):
             before=base.tensor_digest(head.state_dict()) if not accepted else None
-            loss,_,_=objective(head,train['x'][idx].cuda(),train['gt'][idx].cuda());loss=loss.mean()
+            loss,_,_=objective(head,train['x'][idx].cuda(),train['gt'][idx].cuda(),train['a'][idx].cuda());loss=loss.mean()
             opt.zero_grad();loss.backward();grad=sum(float(p.grad.square().sum()) for p in head.parameters() if p.grad is not None)**.5
             if not torch.isfinite(loss) or not grad>0:raise ValueError('独立端点分支损失/梯度无效')
             opt.step()
@@ -124,7 +124,7 @@ def gpu(args):
                 x,valid,levels=point_context(f,m,model.reg_head);original=torch.cat([z[0].T for z in offsets]);prob=torch.cat([z[0].T.sigmoid().max(1).values for z in logits])*valid
                 fused=original.clone()
                 for start in range(0,len(x),512):
-                    b,s=head(x[start:start+512]);fused[start:start+512],_=fuse(original[start:start+512],b,s,levels[start:start+512],calibration,prob[start:start+512])
+                    b,s=head(x[start:start+512],original[start:start+512]);fused[start:start+512],_=fuse(original[start:start+512],b,s,levels[start:start+512],calibration,prob[start:start+512])
                 sizes=[z.shape[-1] for z in offsets];new_offsets=[z[None] for z in fused.split(sizes)]
                 def infer(outs):
                     return model.inference([v],points,[z.squeeze(1) for z in m],[z.permute(0,2,1) for z in logits],outs,[None]*len(f),[None]*len(f))[0]

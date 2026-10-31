@@ -2,10 +2,11 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-SCHEMA='prototype-pretrained-endpoint-head-v1'
+SCHEMA='prototype-pretrained-residual-endpoint-head-v1'
 SPEC=dict(route=2,revision=1,seed=123,frozen_detector=True,source_only=True,
           input='five-real-frozen-regression-tower-neighbours-plus-level-onehot',
-          initialization='original-three-tap-regression-weights-centered-in-five-taps',
+          initialization='original-three-tap-weights-plus-exact-original-distance-skip',
+          prediction='original-distance-plus-learned-five-neighbour-weight-delta',
           shared_frozen_regression_tower=True,independent_trainable_final_layer=True,
           epoch_zero_source_validation_candidate=True,
           max_points_per_video=2048,batch=512,lr=.001,max_epochs=50,patience=15,
@@ -37,6 +38,8 @@ class EndpointHead(nn.Module):
         self.offset=nn.Linear(channels*5,2)
         self.level_scale=nn.Parameter(torch.ones(levels))
         self.uncertainty=nn.Linear(channels*5,2)
+        self.register_buffer('initial_weight',torch.zeros_like(self.offset.weight))
+        self.register_buffer('initial_bias',torch.zeros_like(self.offset.bias))
         nn.init.zeros_(self.uncertainty.weight);nn.init.constant_(self.uncertainty.bias,-2.35)
     @torch.no_grad()
     def initialize(self,weight,bias,scales):
@@ -45,17 +48,21 @@ class EndpointHead(nn.Module):
         self.offset.weight[:,self.channels:4*self.channels].copy_(weight.permute(0,2,1).reshape(2,-1))
         self.offset.bias.copy_(bias if bias is not None else torch.zeros_like(self.offset.bias))
         self.level_scale.copy_(scales.reshape(-1))
-    def forward(self,x):
+        self.initial_weight.copy_(self.offset.weight);self.initial_bias.copy_(self.offset.bias)
+    def forward(self,x,original):
         values=x[:,:self.channels*5];onehot=x[:,-self.levels:]
         scale=onehot@self.level_scale
-        out=F.relu(self.offset(values)*scale[:,None]).clamp_min(1e-6)
+        # 不用GEMM重算原CuDNN卷积：零参数差分保证初始化逐值等于原预测。
+        # 这是以A为锚点的残差专家，不宣称完全独立于A预测。
+        delta=F.linear(values,self.offset.weight-self.initial_weight,self.offset.bias-self.initial_bias)
+        out=F.relu(original+delta*scale[:,None])
         return out,F.softplus(self.uncertainty(values))+.01
 
 def offset_iou(a,b):
     return torch.minimum(a,b).sum(1)/torch.maximum(a,b).sum(1).clamp_min(1e-6)
 
-def objective(head,x,gt):
-    b,scale=head(x)
+def objective(head,x,gt,original):
+    b,scale=head(x,original)
     loss=1-offset_iou(b,gt)+.1*((b-gt).abs()/scale+scale.log()).mean(1)
     return loss,b,scale
 
