@@ -37,14 +37,15 @@ def test_only_approved_batch_and_rng_protocol_changes_are_allowed():
 
 
 def test_epoch_loop_and_original_model_math_are_unchanged():
-    original=subprocess.check_output(['git','show','90bdce09660b820df7d527aabf1d43df1350bc4b:tools/baseline_engine.py'],cwd=CODE,text=True)
+    # 冻结父版本已含既有可选研究分支；本次仅允许新增detached上下文日志。
+    original=subprocess.check_output(['git','show','aa8172d72c5c4faf455ea494b5fd91cc5245cba6:tools/baseline_engine.py'],cwd=CODE,text=True)
     before=ast.parse(original);after=ast.parse((CODE/'tools/baseline_engine.py').read_text(encoding='utf-8'))
     def loop(tree):
         train=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='train')
         return next(n for n in train.body if isinstance(n,ast.For))
     after_loop=loop(after)
     # 新增的是可选分支的detached日志字段；默认基线的优化循环保持相同。
-    after_loop.body=[n for n in after_loop.body if not (isinstance(n,ast.If) and ast.unparse(n.test)=="cfg.get('prototype_capacity')")]
+    after_loop.body=[n for n in after_loop.body if not (isinstance(n,ast.If) and ast.unparse(n.test)=="cfg.get('context_transfer')")]
     assert ast.dump(loop(before))==ast.dump(after_loop)
     for path in ('libs/trainer/da_trainer.py','libs/models/SADA/optimizer.py'):
         assert subprocess.check_output(['git','show','90bdce09660b820df7d527aabf1d43df1350bc4b:'+path],cwd=CODE)==(CODE/path).read_bytes().replace(b'\r\n',b'\n')

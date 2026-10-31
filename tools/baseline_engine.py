@@ -131,6 +131,8 @@ def build(cfg):
             if kwargs.get('domain', 'src') != 'src':
                 raise ValueError('正式训练只能监督源域')
             ctx.checked_steps += 1
+            if cfg.get('context_transfer'):
+                kwargs['context_iteration']=(ctx.checked_steps-1)%cfg['baseline']['epoch_budget']['iterations_per_epoch']
         result = original(*args, **kwargs)
         if kwargs.get('mode') != 'test':
             for name, value in result[0].items():

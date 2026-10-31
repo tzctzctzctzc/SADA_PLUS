@@ -90,6 +90,29 @@ def test_annotation_cache_only_keeps_training_split_and_rejects_sha_drift(tmp_pa
     with pytest.raises(ValueError):geometry.SourceContextTransfer(cfg,10)
 
 
+def test_selection_replays_with_iteration_and_valid_lengths_without_rng():
+    src,tgt=video('s',64,True),video('t',128)
+    state=torch.get_rng_state().clone()
+    first=geometry.paste_pair(src,tgt,src['segments'],src['labels'],5,0,iteration=2)[1]
+    replay=geometry.paste_pair(src,tgt,src['segments'],src['labels'],5,0,iteration=2)[1]
+    assert first['pasted']==replay['pasted'] and torch.equal(torch.get_rng_state(),state)
+    values={tuple(geometry.paste_pair(src,tgt,src['segments'],src['labels'],5,0,iteration=i)[1]['pasted']) for i in range(12)}
+    assert len(values)>1
+
+
+@pytest.mark.skipif(sys.platform=='win32',reason='真实损失依赖Linux SADA包')
+def test_unknown_logits_and_offsets_have_zero_direct_supervision_gradient():
+    from libs.models.SADA.context_transfer import masked_task_losses
+    logits=torch.zeros(2,5,2,requires_grad=True);offsets=torch.ones(2,5,2,requires_grad=True)
+    labels=torch.zeros(2,5,2);labels[0,2,0]=1
+    truth=torch.ones(2,5,2)*2;known=torch.ones(2,5,dtype=torch.bool);known[0,4]=False
+    cls,reg,count,known,positive=masked_task_losses(logits,offsets,labels,truth,known)
+    assert count==1 and not known[1].any()
+    cls.backward(retain_graph=True);reg.backward()
+    assert logits.grad[~known].abs().sum()==0 and logits.grad[known].abs().sum()>0
+    assert offsets.grad[~positive].abs().sum()==0 and offsets.grad[positive].abs().sum()>0
+
+
 @pytest.mark.skipif(sys.platform=='win32',reason='真实SADA/NMS依赖在Linux独立环境验证')
 def test_real_sada_initialization_warmup_loss_gradients_rng_and_restore(tmp_path,monkeypatch):
     from runpy import run_path
@@ -126,8 +149,11 @@ def test_real_sada_initialization_warmup_loss_gradients_rng_and_restore(tmp_path
     a,b=outputs
     for name in ('cls_loss','reg_loss','rq3_loss'):assert torch.equal(a[name],b[name])
     assert torch.equal(b['downstream_loss'],a['downstream_loss']+b['context_task_loss'])
-    for key in ('positive_points','known_negative_points','feature_gradient_norm','cls_head_gradient_norm','reg_head_gradient_norm'):
+    for key in ('positive_points','known_negative_points','feature_gradient_norm','cls_head_gradient_norm','reg_head_gradient_norm',
+                'cls_backbone_gradient_norm','reg_backbone_gradient_norm','cls_fpn_gradient_norm','reg_fpn_gradient_norm'):
         assert b['context_'+key]>0
+    for key in ('rng_restored','normalizers_unchanged','prototype_state_unchanged'):
+        assert b['context_'+key]==1
     backbone=model.backbone_source.embd[0].conv.weight
     assert torch.autograd.grad(b['context_task_loss'],backbone,retain_graph=True)[0].abs().sum()>0
     before={name:p.detach().clone() for name,p in model.named_parameters() if name.startswith(('cls_head.','reg_head.','backbone_source.'))}

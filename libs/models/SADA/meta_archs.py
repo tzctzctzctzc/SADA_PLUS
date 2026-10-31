@@ -679,7 +679,7 @@ class SADA(nn.Module):
     
     
 
-    def forward(self, video_list_src, video_list_tgt, mode=None, domain='src', curr_epoch=0, cls_static_anchors=None, mean_class_conf=None, risk_teacher=None, risk_generator=None):
+    def forward(self, video_list_src, video_list_tgt, mode=None, domain='src', curr_epoch=0, cls_static_anchors=None, mean_class_conf=None, risk_teacher=None, risk_generator=None, context_iteration=0):
         
         # Note: The domain is by default src, which indicates in the case of training that we care about applying supervision on the source domain (upper part of the architecture)
         # While during validation, we may want to evaluate the losses on the target domain only (lower part of the architecture)
@@ -877,7 +877,7 @@ class SADA(nn.Module):
                 losses['downstream_loss']=losses['downstream_loss']+auxiliary['loss']
 
             if mode=='train' and self.context_transfer is not None and curr_epoch>=self.cfg['train_cfg']['warmup_adv']:
-                mixed=self.context_transfer(self,video_list_src,video_list_tgt,curr_epoch)
+                mixed=self.context_transfer(self,video_list_src,video_list_tgt,curr_epoch,context_iteration)
                 losses['context_task_loss']=mixed['loss']
                 if mixed['loss'].requires_grad:
                     losses['downstream_loss']=losses['downstream_loss']+self.cfg['context_transfer']['policy']['weight']*mixed['loss']

@@ -26,8 +26,11 @@ def source_check(cfg):
     target=dataset(cfg,cfg['baseline']['target_manifest'],cfg['tgt_train_split'],True,True)
     if set(helper.annotations)!={v['id'] for v in source.data_list}:raise ValueError('训练GT混入源val或其它域')
     # 只做真实数据的坐标/成员/完整GT检查，无目标预测、无学习门限。
-    for index in range(min(8,len(source),len(target))):
-        src,tgt=source[index],target[index];p.assert_no_target_gt([tgt])
+    if any(source.label_dict[a['label']]!=int(a['label_id']) for rows in helper.annotations.values() for a in rows):
+        raise ValueError('原Dataset类别映射与source GT不一致')
+    examples=[]
+    for index in range(len(source)):
+        src,tgt=source[index],target[index%len(target)];p.assert_no_target_gt([tgt])
         gt,labels=feature_ground_truth(helper.annotations[src['metadata']['video_id']],src['metadata'],10,'cpu')
         mixed=paste_pair(src,tgt,gt,labels,5,index)
         if mixed is None:continue
@@ -37,12 +40,15 @@ def source_check(cfg):
         if not (len(payload['labels'])>0 and bool(payload['anchor_segment'][0]>=c+1) and bool(payload['anchor_segment'][1]<=d-1)
             and c>=1 and d<=tgt['feats'].shape[-1]-1):
             raise ValueError('混合GT不是完整内部区间')
-        return dict(status='passed',source_video=src['metadata']['video_id'],target_context_video=tgt['metadata']['video_id'],
+        examples.append(dict(status='passed',source_video=src['metadata']['video_id'],target_context_video=tgt['metadata']['video_id'],
             source_gt_from_train_only=True,target_gt_used=False,exact_source_feature_patch=True,
             complete_instances=len(payload['labels']),partial_instances=len(payload['partial']),
             pasted=payload['pasted'],source_patch=payload['original_source_patch'],translation=payload['translation'],
-            source_videos=len(source),target_videos=len(target))
-    raise ValueError('真实源/目标样本中无法构造完整源动作patch；拒绝启动')
+            source_videos=len(source),target_videos=len(target)))
+        if len(examples)==2:
+            return dict(status='passed',examples=examples,source_gt_from_train_only=True,target_gt_used=False,
+                distinct_source_videos=len({r['source_video'] for r in examples}),label_mapping_matches_original_dataset=True)
+    raise ValueError('未取得两个不同真实源视频的完整GT复制证据；证据不足，不宣称该方向无解')
 
 
 def prepare(root,control,identity):
@@ -88,8 +94,11 @@ def verify_probe(report,initial_detector_sha):
     if aux['rq3_target_gradient_norm']<=0 or not active['branch_parameters_updated']:
         raise ValueError('原Prototype未真实更新')
     for key in ('pairs','complete_instances','copied_tokens','positive_points','known_negative_points',
-                'cls_loss','reg_loss','feature_gradient_norm','cls_head_gradient_norm','reg_head_gradient_norm'):
+                'cls_loss','reg_loss','feature_gradient_norm','cls_head_gradient_norm','reg_head_gradient_norm',
+                'cls_backbone_gradient_norm','reg_backbone_gradient_norm','cls_fpn_gradient_norm','reg_fpn_gradient_norm'):
         if not math.isfinite(mix[key]) or mix[key]<=0:raise ValueError('混合监督未真正生效: '+key)
+    if any(mix[k]!=1 for k in ('rng_restored','normalizers_unchanged','prototype_state_unchanged','invariants_checked')):
+        raise ValueError('额外分支随机流/源normalizer/Prototype状态隔离失败')
     if mix['source_gt_only']!=1 or mix['target_gt_used']!=0:raise ValueError('混合监督使用了目标GT')
 
 

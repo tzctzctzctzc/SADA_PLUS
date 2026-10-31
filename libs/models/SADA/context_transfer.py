@@ -9,7 +9,7 @@ SCHEMA = 'prototype-source-context-transfer-v1'
 POLICY = dict(context_fraction=.5, minimum_context_tokens=1, edge_ignore_strides=1,
     target_context_tokens_per_side=1,
     patches_per_pair=1, rescale=False, weight=1., onset='original_warmup_adv',
-    selection='sha256_seed123_video_crop_epoch_pair', target_labels='always_empty',
+    selection='sha256_seed123_video_crop_epoch_iteration_pair_lengths', target_labels='always_empty',
     known_source_background=True, partial_source_instances='ignore_covered_points',
     normalizer='current_known_source_positive_points', extra_forward='one_shared_detector_forward',
     extra_forward_rng='fork_and_restore', teacher=False)
@@ -29,7 +29,7 @@ def feature_ground_truth(annotations, metadata, classes, device):
     return intervals,labels
 
 
-def paste_pair(source, target, intervals, labels, epoch, pair_index):
+def paste_pair(source, target, intervals, labels, epoch, pair_index, iteration=0):
     if target['segments'].numel() or target['labels'].numel(): raise ValueError('真实目标GT必须为空')
     src, tgt=source['feats'],target['feats']; source_length=src.shape[-1];target_length=tgt.shape[-1]
     if src.shape[0]!=tgt.shape[0]: raise ValueError('源/目标特征通道不同')
@@ -42,7 +42,8 @@ def paste_pair(source, target, intervals, labels, epoch, pair_index):
             eligible.append((index,start,end))
     if not eligible: return None
     identity=[source['metadata']['video_id'],source['metadata'].get('crop_start',0),
-              target['metadata']['video_id'],target['metadata'].get('crop_start',0),int(epoch),int(pair_index)]
+              target['metadata']['video_id'],target['metadata'].get('crop_start',0),
+              int(epoch),int(iteration),int(pair_index),int(source_length),int(target_length)]
     anchor,start,end=eligible[stable_index(identity+['instance'],len(eligible))]
     destination=1+stable_index(identity+['destination'],target_length-(end-start)-1)
     shift=destination-start
@@ -75,6 +76,17 @@ def known_points(points, masks, payloads):
     return torch.stack(result)
 
 
+def masked_task_losses(logit,offset,labels,distances,known,gamma=2.):
+    from .losses_aux import sigmoid_focal_loss,ctr_diou_loss_1d
+    positive=known&labels.gt(0).any(-1)
+    known=known&positive.any(-1)[:,None]
+    count=int(positive.sum());zero=logit.new_zeros(())
+    if not count:return zero,zero,count,known,positive
+    cls=sigmoid_focal_loss(logit[known],labels[known],alpha=.25,gamma=gamma,reduction='sum')/count
+    reg=ctr_diou_loss_1d(offset[positive],distances[positive],reduction='sum')/count
+    return cls,reg,count,known,positive
+
+
 class SourceContextTransfer:
     def __init__(self,cfg,classes):
         if cfg['context_transfer']!=dict(schema=SCHEMA,policy=POLICY):raise ValueError('上下文迁移配方改变')
@@ -87,50 +99,68 @@ class SourceContextTransfer:
             if record['subset'].lower() in subsets}
         self.classes=classes
 
-    def __call__(self,model,sources,targets,epoch):
-        from .losses_aux import sigmoid_focal_loss,ctr_diou_loss_1d
+    def __call__(self,model,sources,targets,epoch,iteration=0):
         mixed=[];payloads=[]
         for index,source in enumerate(sources):
             vid=source['metadata']['video_id']
             if vid not in self.annotations:raise ValueError('混合监督只能使用source_train GT')
             intervals,labels=feature_ground_truth(self.annotations[vid],source['metadata'],self.classes,source['feats'].device)
-            pair=paste_pair(source,targets[index%len(targets)],intervals,labels,epoch,index)
+            pair=paste_pair(source,targets[index%len(targets)],intervals,labels,epoch,index,iteration)
             if pair is not None:
                 video,payload=pair; mixed.append(video);payloads.append(payload)
         zero=sources[0]['feats'].new_zeros(())
         stats=dict(pairs=len(mixed),complete_instances=sum(len(p['labels']) for p in payloads),
             partial_instances=sum(len(p['partial']) for p in payloads),positive_points=0,known_negative_points=0,
             source_gt_only=1,target_gt_used=0,copied_tokens=sum(p['pasted'][1]-p['pasted'][0] for p in payloads),
-            cls_loss=zero,reg_loss=zero,feature_gradient_norm=zero,cls_head_gradient_norm=zero,reg_head_gradient_norm=zero)
+            cls_loss=zero,reg_loss=zero,feature_gradient_norm=zero,cls_head_gradient_norm=zero,reg_head_gradient_norm=zero,
+            cls_backbone_gradient_norm=zero,reg_backbone_gradient_norm=zero,cls_fpn_gradient_norm=zero,reg_fpn_gradient_norm=zero,
+            rng_restored=1,normalizers_unchanged=1,prototype_state_unchanged=1,invariants_checked=1)
         if not mixed:return dict(loss=zero,**stats)
         if model.use_trident_head:raise ValueError('当前配方只适配原普通左右回归头')
         devices=[sources[0]['feats'].device.index] if sources[0]['feats'].is_cuda else []
+        diagnostic=getattr(model,'context_gradient_probe',False)
+        normalizers=tuple(float(getattr(model,k)) for k in ('loss_normalizer','loss_normalizer_pseudo_labels','train_label_smoothing'))
+        prototype=[(k,v.detach().clone()) for k,v in model.rq3_capacity.named_buffers()]
+        cpu_rng=torch.get_rng_state().clone()
+        gpu_rng=torch.cuda.get_rng_state(devices[0]).clone() if devices else None
+        seed=stable_index([epoch,int(iteration),'extra_forward',
+            [(s['metadata']['video_id'],s['metadata'].get('crop_start',0),int(s['feats'].shape[-1]),
+              t['metadata']['video_id'],t['metadata'].get('crop_start',0),int(t['feats'].shape[-1]))
+             for s,t in zip(sources,targets)]],2**63-1)
         # 新前向不改变下一次原source/target/dropout的随机流；选择过程本身不抽样。
         with torch.random.fork_rng(devices=devices):
+            torch.manual_seed(seed)
+            if devices:torch.cuda.manual_seed(seed)
             inputs,masks=model.preprocessing(mixed,mode='train');inputs=model.dropout(inputs)
             feats,masks,_=model.backbone_source(inputs,masks);fpn,masks=model.neck_source(feats,masks)
             logits,_=model.cls_head(fpn,masks);offsets,_=model.reg_head(fpn,masks)
             points=model.point_generator(fpn)
+        if not torch.equal(cpu_rng,torch.get_rng_state()) or (devices and not torch.equal(gpu_rng,torch.cuda.get_rng_state(devices[0]))):
+            raise ValueError('额外前向未恢复原CPU/CUDA随机流')
+        if normalizers!=tuple(float(getattr(model,k)) for k in ('loss_normalizer','loss_normalizer_pseudo_labels','train_label_smoothing')):
+            raise ValueError('额外前向改动原source normalizer')
+        after=dict(model.rq3_capacity.named_buffers())
+        if any(not torch.equal(value,after[name]) for name,value in prototype):raise ValueError('额外前向改动原Prototype')
         labels,distances=model.label_points(points,[p['segments'] for p in payloads],[p['labels'] for p in payloads])
         labels=torch.stack(labels);distances=torch.stack(distances)
-        known=known_points(points,masks,payloads);positive=known&labels.gt(0).any(-1)
-        supported=positive.any(-1)
-        known&=supported[:,None]  # 不把没有正点的混合对变成纯背景训练。
-        stats['pairs']=int(supported.sum())
-        count=int(positive.sum());stats.update(positive_points=count,known_negative_points=int((known&~positive).sum()))
-        if not count:return dict(loss=zero,**stats)
         logit=torch.cat([x.permute(0,2,1) for x in logits],1)
         offset=torch.cat([x.permute(0,2,1) for x in offsets],1)
-        cls=sigmoid_focal_loss(logit[known],labels[known],alpha=.25,
-            gamma=model.cfg['model'].get('focal_loss_gamma',2.),reduction='sum')/count
-        reg=ctr_diou_loss_1d(offset[positive],distances[positive],reduction='sum')/count
+        cls,reg,count,known,positive=masked_task_losses(logit,offset,labels,distances,
+            known_points(points,masks,payloads),model.cfg['model'].get('focal_loss_gamma',2.))
+        stats.update(pairs=int(positive.any(-1).sum()),positive_points=count,known_negative_points=int((known&~positive).sum()))
+        if not count:return dict(loss=zero,**stats)
         loss=cls+model.cfg['model']['loss_weights']['weight_reg']*reg
         feature_count=len(fpn);cls_parameters=[];reg_parameters=[]
-        if getattr(model,'context_gradient_probe',False):
+        if diagnostic:
             cls_parameters=list(model.cls_head.parameters());reg_parameters=list(model.reg_head.parameters())
         gradients=torch.autograd.grad(loss,[*fpn,*cls_parameters,*reg_parameters],retain_graph=True,allow_unused=True)
         norm=lambda values:sum((g.detach().square().sum() for g in values if g is not None),zero).sqrt()
         stats.update(cls_loss=cls.detach(),reg_loss=reg.detach(),feature_gradient_norm=norm(gradients[:feature_count]),
             cls_head_gradient_norm=norm(gradients[feature_count:feature_count+len(cls_parameters)]),
             reg_head_gradient_norm=norm(gradients[feature_count+len(cls_parameters):]))
+        if diagnostic:
+            backbone=model.backbone_source.embd[0].conv.weight
+            for name,component in [('cls',cls),('reg',reg)]:
+                values=torch.autograd.grad(component,[*fpn,backbone],retain_graph=True,allow_unused=True)
+                stats[name+'_fpn_gradient_norm']=norm(values[:-1]);stats[name+'_backbone_gradient_norm']=norm(values[-1:])
         return dict(loss=loss,**stats)
