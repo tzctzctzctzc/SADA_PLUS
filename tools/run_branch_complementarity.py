@@ -38,9 +38,10 @@ def state(root, phase, completed, pending):
 
 
 def main(args):
-    global SPEC,GATE,source_decision,audit_source
+    global SPEC,GATE,SCHEMA,source_decision,audit_source
     if args.diagnostic=='boundary':
         from tools.check_boundary_support import SPEC,GATE,source_decision,audit_source
+        SCHEMA=SPEC['schema']
     identity=p.code_identity(); root=args.output_root; root.mkdir(exist_ok=False)
     inputs(args,identity)
     if args.preflight_only: state(root,'cpu_preflight_passed',[],[]); return
@@ -78,7 +79,7 @@ def main(args):
                     pending.remove(shift);used.add(gpu);launched=True
                     print('COMPLEMENTARITY_STARTED',shift,process.pid,gpu,flush=True);break
                 if not launched: break
-            state(root,'source_complementarity',completed,pending);time.sleep(5)
+            state(root,'source_'+args.diagnostic,completed,pending);time.sleep(5)
     except BaseException as error:
         p.save(root/'error.json',dict(error=repr(error),completed=completed,pending=pending))
         owned.terminate_owned();state(root,'failed',completed,pending);raise

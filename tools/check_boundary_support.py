@@ -94,7 +94,7 @@ def worker(args):
     after=tensor_digest(model.state_dict())
     if before!=after:raise ValueError('源检查未恢复原模型')
     p.save(entry/'rows.json',rows);metrics={k:sum(r[k] for r in rows) for k in ('endpoints','zero_base','inside','below','above','temporal_points')}
-    p.save(entry/'result.json',dict(status='completed_source_boundary_support',shift=args.child,specification=SPEC,metrics=metrics,
+    p.save(entry/'result.json',dict(status='completed_source_boundary_support',schema=SPEC['schema'],shift=args.child,specification=SPEC,metrics=metrics,
         gpu_head_probe=probe or dict(passed=False),model_unchanged=True,model_sha256_before=before,model_sha256_after=after,target_data_read=False,input_proof_sha256=p.sha(args.output_root/'inputs.json'),
         gpu_guard=guard,gpu_guard_sha256=p.sha(guard),feature_inputs=features,artifacts={str(entry/'rows.json'):p.sha(entry/'rows.json')},peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20))
 
@@ -102,7 +102,7 @@ def worker(args):
 def audit_source(entry):
     entry=Path(entry);d=p.read(entry/'result.json')
     root=entry.parents[1];proof=p.read(root/'inputs.json')
-    if p.sha(root/'inputs.json')!=d['input_proof_sha256'] or d['specification']!=SPEC:raise ValueError('诊断身份漂移')
+    if proof['schema']!=SPEC['schema'] or d['schema']!=SPEC['schema'] or p.sha(root/'inputs.json')!=d['input_proof_sha256'] or d['specification']!=SPEC:raise ValueError('诊断身份漂移')
     source=proof['sources'][d['shift']]
     for name,digest in source['reference_artifacts'].items():
         if p.sha(Path(source['reference'])/name)!=digest:raise ValueError('原参考改变')
