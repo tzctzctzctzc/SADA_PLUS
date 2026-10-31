@@ -178,6 +178,12 @@ def worker(args):
         guard=guard,guard_sha256=sha(guard),result=result,artifacts=artifacts))
 
 
+def summary_record(job,path,record,complete_path):
+    # worker结果本身已带variant；先合并映射，再绑定job身份，避免重复keyword报错。
+    return dict(record['result'],shift=job['shift'],variant=job['variant'],job=str(path),
+        complete_sha256=sha(complete_path))
+
+
 def audit(path):
     job=read(path);out=Path(job['output']);record=read(out/('train_complete.json' if job['kind']=='train' else 'complete.json'))
     if record['job_sha256']!=sha(path) or record['code']!=job['code'] or record['status']!='passed':raise ValueError('续训身份改变')
@@ -202,8 +208,7 @@ def audit(path):
         if any(select(term['source_history'][:i])[1] for i in range(1,len(term['source_history']))):
             raise ValueError('错过首次合法停止点')
         if any(x['target_GT_used'] or x['target_annotations'] for x in term['epochs']):raise ValueError('目标GT泄漏')
-    return dict(shift=job['shift'],variant=job['variant'],job=str(path),
-        complete_sha256=sha(out/('train_complete.json' if job['kind']=='train' else 'complete.json')),**record['result'])
+    return summary_record(job,path,record,out/('train_complete.json' if job['kind']=='train' else 'complete.json'))
 
 
 def run_jobs(root,jobs,data,identity,phase):
@@ -271,8 +276,15 @@ def main(args):
                 raise ValueError('原完整项身份改变')
         save(root/'predecessor.json',dict(prototype_final_sha256=sha(base/'final_audit.json'),
             previous_ttt_final_sha256=sha(args.previous_ttt/'monitor/final_independent_audit.json')))
-        probes=[make_job(root,'probe/'+v,'probe','S1',v,base,identity) for v in ('continuation','ema_masked')]
-        reports=run_jobs(root,probes,data,identity,'real_gpu_acceptance')
+        if args.previous_root:
+            # 仅接续此次验收汇总失败：旧根尚无正式目录，两份完整GPU验收直接按旧身份复用。
+            if (args.previous_root/'formal').exists():raise ValueError('该恢复入口拒绝已有正式/部分训练根')
+            reports=[audit(args.previous_root/'probe'/v/'probe_job.json') for v in ('continuation','ema_masked')]
+            save(root/'reused_acceptance.json',dict(status='passed',previous_root=str(args.previous_root),
+                reports=reports,reason='audit summary duplicate-key repair; training/core algorithms unchanged'))
+        else:
+            probes=[make_job(root,'probe/'+v,'probe','S1',v,base,identity) for v in ('continuation','ema_masked')]
+            reports=run_jobs(root,probes,data,identity,'real_gpu_acceptance')
         if len({x['initial_state_sha256'] for x in reports})!=1:raise ValueError('对照/新方法起点不同')
         if not all(x['student_updated'] and x['teacher_updated'] for x in reports):raise ValueError('模型或教师未更新')
         save(root/'acceptance.json',dict(status='passed',code=identity,results=reports))
@@ -321,6 +333,7 @@ def stop(signum,frame):
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--prototype',type=Path);p.add_argument('--previous-ttt',type=Path)
     p.add_argument('--output',type=Path);p.add_argument('--job',type=Path)
+    p.add_argument('--previous-root',type=Path)
     p.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'));args=p.parse_args()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
     if args.job:worker(args)

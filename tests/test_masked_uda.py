@@ -58,3 +58,11 @@ def test_consistency_ignores_student_regression_outputs_and_unselected_classes()
     loss,proof=core.positive_kl(student,teacher);loss.backward()
     assert logits.grad[:,:,2].abs().sum()>0 and logits.grad[:,:,:2].abs().sum()==0
     assert student['offsets'][0].grad is None and not proof['target_gt_used']
+
+
+def test_audit_result_variant_collision_is_preserved_without_duplicate_keyword(tmp_path):
+    from tools.run_masked_uda import summary_record
+    path=tmp_path/'complete.json';path.write_text('{}')
+    result=summary_record(dict(shift='S1',variant='ema_masked'),tmp_path/'probe_job.json',
+        dict(result=dict(status='passed',variant='ema_masked',steps=53)),path)
+    assert result['variant']=='ema_masked' and result['steps']==53 and result['complete_sha256']
