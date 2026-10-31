@@ -42,3 +42,22 @@ def test_target_label_changes_do_not_change_training_inputs(tmp_path):
 def test_bad_source_interval_requires_explicit_policy(tmp_path):
     path=tmp_path/'a.zip';fixture(path,source_action='c000 3 2')
     with pytest.raises(ValueError,match='区间'):M['convert'](path,tmp_path/'out')
+
+
+def test_explicit_clean_policy_preserves_original_for_second_evaluation(tmp_path):
+    path=tmp_path/'a.zip';fixture(path,target_action='c000 8 12',source_action='c000 3 2')
+    p=M['convert'](path,tmp_path/'out','clean')
+    assert len(p['corrections'])==2
+    source=json.loads((tmp_path/'out/source.json').read_text())['database']
+    clean=json.loads((tmp_path/'out/offline_evaluation.json').read_text())['database']
+    raw=json.loads((tmp_path/'out/offline_evaluation_raw.json').read_text())['database']
+    assert source['s']['annotations']==[]
+    assert clean['tEGO']['annotations'][0]['segment']==[8.,10.]
+    assert raw['tEGO']['annotations'][0]['segment']==[8.,12.]
+
+
+def test_explicit_author_policy_does_not_silently_clean(tmp_path):
+    path=tmp_path/'a.zip';fixture(path,source_action='c000 3 2')
+    p=M['convert'](path,tmp_path/'out','author')
+    source=json.loads((tmp_path/'out/source.json').read_text())['database']
+    assert source['s']['annotations'][0]['segment']==[3.,2.] and p['corrections']==[]
