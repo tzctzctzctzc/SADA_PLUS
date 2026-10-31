@@ -48,6 +48,8 @@ def gpu(args):
     def to_grid(box,v):
         m=v['metadata'];return (box*float(m['fps'])-.5*float(m['feat_num_frames']))/float(m['feat_stride'])
     def source_data(role):
+        if (e/(role+'_examples.pt')).exists():
+            return torch.load(e/(role+'_examples.pt'),map_location='cpu')
         ds=base.dataset(cfg,e/(role+'_gt.json'),cfg['src_train_split'] if role=='source_train' else cfg['src_val_split'],False,False)
         xs=[];bs=[];gs=[];ids=[]
         for index in range(len(ds)):
@@ -86,8 +88,13 @@ def gpu(args):
         return dict(loss=sum(a*n for a,n in losses)/sum(n for _,n in losses),
             mean_iou_before=float(np.mean(before)),mean_iou_after=float(np.mean(after)),
             endpoint_error=errors,endpoint_scale=scales)
-    history=[];best=float('inf');best_epoch=0;accepted=False
-    for epoch in range(1,51):
+    history=[];best=float('inf');best_epoch=0;accepted=False;skip_training=False
+    if (e/'recovery.json').exists():
+        history=read(e/'training_history.json');saved_head=torch.load(e/'best_refiner.pt',map_location='cpu')
+        best_epoch=saved_head['epoch'];epoch=history[-1]['epoch']
+        assert epoch==50 or epoch-best_epoch>=15
+        head.load_state_dict(saved_head['state_dict'],strict=True);skip_training=True
+    for epoch in ([] if skip_training else range(1,51)):
         head.train();order=torch.randperm(len(train['boxes']),generator=generator);total=0.
         for indices in order.split(256):
             x,b,g=[train[k][indices].cuda() for k in ['x','boxes','gt']]
@@ -109,7 +116,7 @@ def gpu(args):
                         generator=generator.get_state(),cuda_rng=torch.cuda.get_rng_state(0)),e/'latest_refiner.pt')
         save(e/'training_history.json',history);print('REFINER_EPOCH',epoch,report['loss'],report['mean_iou_before'],report['mean_iou_after'],flush=True)
         if epoch-best_epoch>=15:break
-    head.load_state_dict(torch.load(e/'best_refiner.pt')['state_dict'],strict=True);head.eval()
+    head.load_state_dict(torch.load(e/'best_refiner.pt',map_location='cpu')['state_dict'],strict=True);head.eval()
     save(e/'source_mechanism.json',validation())
     for domain in ['source','target']:
         ds=base.dataset(cfg,e/(domain+'_val_unlabeled.json'),cfg['src_val_split'] if domain=='source' else cfg['tgt_val_split'],False,True)
@@ -172,6 +179,18 @@ def main(args):
         db=read(cfg['baseline']['annotation_for_offline_evaluation'])['database']
         for role,splits in [('source_train',cfg['src_train_split']),('source_val',cfg['src_val_split'])]:
             wanted={s.lower() for s in splits};save(e/(role+'_gt.json'),dict(database={k:v for k,v in db.items() if v['subset'].lower() in wanted}),sort_keys=False)
+    if args.previous:
+        import shutil
+        for old in args.previous.glob('formal/*'):
+            if not (old/'best_refiner.pt').exists():continue
+            if (old/'complete.json').exists():raise ValueError('完整项需独立复用接口，拒绝重复评估')
+            hist=read(old/'training_history.json');saved=__import__('torch').load(old/'best_refiner.pt',map_location='cpu')
+            if hist[-1]['epoch']!=50 and hist[-1]['epoch']-saved['epoch']<15:
+                raise ValueError('部分头训练不允许从头重跑')
+            new=args.output/'formal'/old.name;copied={}
+            for name in ['best_refiner.pt','latest_refiner.pt','training_history.json','source_train_examples.pt','source_val_examples.pt','acceptance.json']:
+                p=old/name;assert p.exists();shutil.copyfile(p,new/name);copied[str(p)]=sha(p)
+            save(new/'recovery.json',dict(previous=str(old),previous_code=read(args.previous/'plan.json')['code'],artifacts=copied,training_reused=True,only_evaluation_restarted=True))
     active={};pending=list(SHIFTS);evals=[];complete=[]
     def spawn(shift,stage,lease=None):
         e=args.output/'formal'/shift;env=dict(os.environ,PYTHONPATH=str(CODE),PYTHONDONTWRITEBYTECODE='1',CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='8',MKL_NUM_THREADS='8')
@@ -218,6 +237,7 @@ def main(args):
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--entry',type=Path)
     p.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'));p.add_argument('--stage',choices=['gpu','evaluate'])
+    p.add_argument('--previous',type=Path)
     a=p.parse_args();a.output=a.output.resolve()
     if a.stage=='gpu':gpu(a)
     elif a.stage=='evaluate':evaluate(a)
