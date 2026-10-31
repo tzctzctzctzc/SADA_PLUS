@@ -71,7 +71,7 @@ def worker(args):
     from tools.baseline_gpu import first_cuda_guard
     root=args.output;plan=read(root/'plan.json')
     if plan['code']!=code_identity():raise ValueError('代码改变')
-    inputs=verify_parent_inputs(root);banks=read(inputs['banks'])['banks']
+    inputs=verify_parent_inputs(root);banks=None
     for file,stat in inputs['model_files'].items():
         current=(MODEL/file).stat()
         if [current.st_size,current.st_mtime_ns]!=stat:raise ValueError('已校验模型文件改变')
@@ -85,7 +85,15 @@ def worker(args):
     verified=set();accepted={};path=root/('predictions_shard%d.jsonl'%args.shard)
     with path.open('x') as stream:
         for i,job in enumerate(selected):
-            row=job['row'];bank=[] if job['arm']=='B' else banks[job['shift']]
+            row=job['row']
+            if job['arm']=='C' and banks is None:
+                ready=root/'source_banks_ready.json'
+                while not ready.exists():
+                    print('WAITING_FOR_REVIEWED_SOURCE_EXAMPLES',flush=True);time.sleep(10)
+                frozen=read(ready)
+                if sha(inputs['banks'])!=frozen['bank_sha256']:raise ValueError('源示例冻结SHA改变')
+                banks=read(inputs['banks'])['banks']
+            bank=[] if job['arm']=='B' else banks[job['shift']]
             if bank and len(bank)!=10:raise ValueError('C须每类一个示例')
             for item in [row]+bank:
                 for p,h in zip(item['frame_paths'],item['frame_sha256']):
@@ -104,11 +112,12 @@ def worker(args):
             if (i+1)%10==0:print('SCORED',i+1,len(selected),job['arm'],job['shift'],flush=True)
     save(root/('complete_shard%d.json'%args.shard),dict(status='passed',count=len(selected),prediction_sha256=sha(path),
         jobs_sha256=sha(root/'jobs.json'),inputs_sha256=sha(root/'inputs.json'),guard=str(guard),guard_sha256=sha(guard),
-        acceptance_sha256=sha(root/('acceptance_shard%d.json'%args.shard))))
+        acceptance_sha256=sha(root/('acceptance_shard%d.json'%args.shard)),source_banks_ready_sha256=sha(root/'source_banks_ready.json')))
 
 
 def summarize(root):
     inputs=verify_parent_inputs(root);old=Path(inputs['previous_root']);labels=read(old/'evaluation_labels.json')
+    if sha(inputs['banks'])!=read(root/'source_banks_ready.json')['bank_sha256']:raise ValueError('源示例改变')
     previous=[json.loads(x) for x in (old/'predictions.jsonl').read_text().splitlines()]
     a={x['candidate_id']:x for x in previous};rows=[json.loads(x) for x in (root/'predictions.jsonl').read_text().splitlines()]
     if len(rows)!=len({x['job_id'] for x in rows}):raise ValueError('重复评分')
@@ -131,7 +140,7 @@ def summarize(root):
         macro_accuracy={arm:sum(r[arm]['all']['accuracy'] for r in results.values())/6 for arm in ('A','B','C')},
         unique_B=645,C_direction_queries=1200,A_reused=True,target_gt_in_prompts=False,no_student_training=True,
         exploratory_after_target_error_analysis=True,independent_across_shifts=False,
-        artifacts={n:sha(root/n) for n in ('plan.json','inputs.json','jobs.json','predictions.jsonl','inference_complete.json')}))
+        artifacts={n:sha(root/n) for n in ('plan.json','inputs.json','jobs.json','source_banks_ready.json','predictions.jsonl','inference_complete.json')}))
 
 
 def main(args):
@@ -142,13 +151,11 @@ def main(args):
         if sha(previous/name)!=digest:raise ValueError('A组工件改变')
     selected=jobs(read(previous/'manifest.json'),read(previous/'evaluation_labels.json'))
     if len([x for x in selected if x['arm']=='B'])!=645 or len([x for x in selected if x['arm']=='C'])!=1200:raise ValueError('不是原六方向精确集合')
-    bankdata=read(banks)
-    if set(bankdata['banks'])!={'S%d'%s for s in range(1,7)} or any([x['label'] for x in bank]!=list(LABELS) for bank in bankdata['banks'].values()):raise ValueError('示例未冻结/缺类别')
     weights=read(previous/'inference_complete.json')['shards']['0']['model_weights']
     for name,digest in weights.items():
         if sha(MODEL/name)!=digest:raise ValueError('8B模型版本改变')
     save(root/'inputs.json',dict(previous_root=str(previous),banks=str(banks),
-        artifacts={str(p):sha(p) for p in [previous/'final_audit.json',previous/'manifest.json',previous/'evaluation_labels.json',previous/'predictions.jsonl',banks]},
+        artifacts={str(p):sha(p) for p in [previous/'final_audit.json',previous/'manifest.json',previous/'evaluation_labels.json',previous/'predictions.jsonl']},
         model_weights=weights,model_files={n:[(MODEL/n).stat().st_size,(MODEL/n).stat().st_mtime_ns] for n in weights}))
     save(root/'jobs.json',selected)
     save(root/'plan.json',dict(code=identity,schema='qwen8-definition-source-examples-BC-v1',arms=['B','C'],reuse_A=True,
@@ -159,6 +166,10 @@ def main(args):
     active={};pending=list(range(4));completed=[]
     try:
         while pending or active:
+            if banks.exists() and not (root/'source_banks_ready.json').exists():
+                bankdata=read(banks)
+                if set(bankdata['banks'])!={'S%d'%s for s in range(1,7)} or any([x['label'] for x in bank]!=list(LABELS) for bank in bankdata['banks'].values()):raise ValueError('示例未冻结/缺类别')
+                save(root/'source_banks_ready.json',dict(bank_sha256=sha(banks),source_pool=bankdata['selection_sha256'],review=bankdata['review'],source_only=True))
             for s,t in list(active.items()):
                 if t['process'].poll() is None:continue
                 if t['process'].returncode:raise RuntimeError('B/C分片失败: '+str(s))
@@ -183,7 +194,7 @@ def main(args):
         lines=[];records={}
         for s in range(4):
             record=read(root/('complete_shard%d.json'%s));path=root/('predictions_shard%d.jsonl'%s)
-            if record['status']!='passed' or sha(path)!=record['prediction_sha256'] or record['jobs_sha256']!=sha(root/'jobs.json') or record['inputs_sha256']!=sha(root/'inputs.json'):raise ValueError('分片SHA不符')
+            if record['status']!='passed' or sha(path)!=record['prediction_sha256'] or record['jobs_sha256']!=sha(root/'jobs.json') or record['inputs_sha256']!=sha(root/'inputs.json') or record['source_banks_ready_sha256']!=sha(root/'source_banks_ready.json'):raise ValueError('分片SHA不符')
             records[str(s)]=record;lines+=path.read_text().splitlines()
         (root/'predictions.jsonl').write_text('\n'.join(lines)+'\n');save(root/'inference_complete.json',records);summarize(root)
         save(root/'state.json',dict(pid=os.getpid(),phase='complete'))
