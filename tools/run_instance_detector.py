@@ -17,16 +17,25 @@ from libs.models.SADA.instance_detector import specification
 
 
 def main(args):
+    if args.train and args.acceptance is None:raise ValueError('正式训练须绑定本方向当前代码的真实GPU验收目录')
     root=args.output.resolve();root.mkdir(parents=True,exist_ok=False);identity=protocol.code_identity()
     cfg=protocol.read(Path('/vepfs/vlms/sada_baseline12_seed123_b2_08e7c24_1029/formal')/args.shift/'so/config.json')
     cfg=deepcopy(cfg);cfg['model']['adv_method']=['None']
     budget=engine.query_budget(cfg);spec=specification(budget['num_queries'])
     cfg['baseline'].update(code=identity,schema=engine.SCHEMA,regime='so',initialization='copied-student-EMA-instance-query')
     cfg['instance_detector']=spec
+    acceptance=None
+    if args.train:
+        accepted=args.acceptance.resolve();report=protocol.read(accepted/'probe.json');old_plan=protocol.read(accepted/'plan.json')
+        if report['status']!='passed' or old_plan['code']!=identity or protocol.read(accepted/'config.json')!=cfg or report['specification']!=spec:
+            raise ValueError('GPU验收不匹配当前代码/方向/配置')
+        if not (accepted/'gpu.json').exists():raise ValueError('GPU验收尚未正常退出')
+        acceptance={str(accepted/n):protocol.sha(accepted/n) for n in ('probe.json','gpu.json','plan.json','config.json','architecture.json')}
     protocol.save(root/'config.json',cfg);protocol.save(root/'architecture.json',spec)
     protocol.save(root/'plan.json',dict(schema=engine.SCHEMA,code=identity,shift=args.shift,source_only=True,
         mode='train' if args.train else 'probe',query_budget=budget,source_selection='cls+5*L1+2*(1-tIoU)',
         quality_supervised_separately=True,student_target_gt=False))
+    if acceptance:protocol.save(root/'acceptance.json',acceptance)
     child=None;context=None
     try:
         while context is None:
@@ -58,7 +67,8 @@ def main(args):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',type=Path,required=True);p.add_argument('--shift',choices=['S%d'%i for i in range(1,7)],default='S1')
-    p.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'));p.add_argument('--gpus',default='0,1');p.add_argument('--train',action='store_true');p.add_argument('--worker',action='store_true');args=p.parse_args()
+    p.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'));p.add_argument('--gpus',default='0,1');p.add_argument('--train',action='store_true')
+    p.add_argument('--acceptance',type=Path);p.add_argument('--worker',action='store_true');args=p.parse_args()
     def stop(signum,frame):
         signal.signal(signal.SIGTERM,signal.SIG_IGN);signal.signal(signal.SIGINT,signal.SIG_IGN);raise SystemExit(128+signum)
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
