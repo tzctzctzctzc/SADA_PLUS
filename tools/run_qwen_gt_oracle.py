@@ -26,6 +26,10 @@ BASE=Path('/vepfs/vlms/sada_baseline12_seed123_b2_08e7c24_1029/formal')
 VLM_PY='/vepfs/vlms/envs/rq1-cu121/bin/python'
 
 
+def shard_id(key):
+    return int(key[:16],16)%4
+
+
 def cid(video,start,end):
     return hashlib.sha256(('gt-oracle-v1:%s:%.9f:%.9f'%(video,start,end)).encode()).hexdigest()
 
@@ -171,15 +175,15 @@ def worker(args):
         device_map={'':'cuda:0'},local_files_only=True,output_loading_info=True)
     if any(loading.get(k) for k in ('missing_keys','unexpected_keys','mismatched_keys','error_msgs')):raise ValueError('8B加载不完整')
     model.eval().requires_grad_(False);processor=AutoProcessor.from_pretrained(MODEL,local_files_only=True)
-    rows=read(args.output/'manifest.json')['candidates']
-    with (args.output/'predictions.jsonl').open('x') as stream:
+    rows=[x for x in read(args.output/'manifest.json')['candidates'] if shard_id(x['candidate_id'])==args.shard]
+    with (args.output/('predictions_shard%d.jsonl'%args.shard)).open('x') as stream:
         for i,row in enumerate(rows):
             for p,h in zip(row['frame_paths'],row['frame_sha256']):
                 if sha(p)!=h:raise ValueError('输入帧改变')
             result=infer((processor,model,process_vision_info),row);stream.write(json.dumps(result)+'\n');stream.flush()
             if (i+1)%20==0:print('SCORED',i+1,len(rows),flush=True)
-    save(args.output/'inference_complete.json',dict(status='passed',count=len(rows),guard=str(proof),guard_sha256=sha(proof),
-        model_weights=identity,manifest_sha256=sha(args.output/'manifest.json'),predictions_sha256=sha(args.output/'predictions.jsonl')))
+    save(args.output/('inference_complete_shard%d.json'%args.shard),dict(status='passed',shard=args.shard,count=len(rows),guard=str(proof),guard_sha256=sha(proof),
+        model_weights=identity,manifest_sha256=sha(args.output/'manifest.json'),predictions_sha256=sha(args.output/('predictions_shard%d.jsonl'%args.shard))))
 
 
 def metrics(rows,predictions):
@@ -215,7 +219,7 @@ def main(args):
     identity=code_identity();save(args.output/'plan.json',dict(code=identity,model='Qwen3-VL-8B-Instruct',model_revision=MODEL.name,
         scope='S1-S6-target-training-GT-intervals-only',maximum_per_shift=200,student_training=False,options=OPTIONS,
         prompt_example=prompt('0'*64),physical_gpus=[0,1,2,3]))
-    child=None;context=None
+    active={}
     def stop(signum,frame):
         signal.signal(signal.SIGTERM,signal.SIG_IGN);signal.signal(signal.SIGINT,signal.SIG_IGN)
         raise SystemExit(128+signum)
@@ -224,30 +228,53 @@ def main(args):
         save(args.output/'state.json',dict(phase='CPU_preparation',pid=os.getpid()));prepare(args)
         from tools.baseline_gpu import slot
         save(args.output/'state.json',dict(phase='waiting_gpu',pid=os.getpid()))
-        while context is None:
-            for index in (0,1,2,3):
-                candidate=slot(index,args.data_root,args.output,24576,identity['commit'])
-                try:lease=candidate.__enter__()
-                except BlockingIOError:continue
-                context=candidate;break
-            if context is None:time.sleep(15)
-        env=dict(os.environ,PYTHONPATH=str(CODE),PYTHONDONTWRITEBYTECODE='1',CUDA_VISIBLE_DEVICES=lease['uuid'],OMP_NUM_THREADS='8',MKL_NUM_THREADS='8',
-            SADA_BASELINE_LEASE=lease['lease'],SADA_BASELINE_LEASE_SHA256=lease['lease_sha256'])
-        with (args.output/'inference.log').open('x') as log:child=subprocess.Popen([VLM_PY,'-u','-B',str(Path(__file__).resolve()),'--worker','--output',str(args.output)],
-            cwd=CODE,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
-        save(args.output/'state.json',dict(phase='inference',pid=os.getpid(),child=child.pid,gpu=lease['index']))
-        if child.wait():raise RuntimeError('8B oracle推理失败')
-        context.__exit__(None,None,None);context=None;summarize(args.output)
+        pending=list(range(4));completed=[]
+        while pending or active:
+            for shard,t in list(active.items()):
+                if t['process'].poll() is None:continue
+                if t['process'].returncode:raise RuntimeError('8B oracle分片失败: '+str(shard))
+                record=read(args.output/('inference_complete_shard%d.json'%shard))
+                if record['status']!='passed':raise ValueError('分片未全审')
+                t['context'].__exit__(None,None,None);del active[shard];completed.append(shard)
+            for shard in list(pending):
+                found=None
+                for index in (0,1,2,3):
+                    candidate=slot(index,args.data_root,args.output,24576,identity['commit'])
+                    try:lease=candidate.__enter__()
+                    except BlockingIOError:continue
+                    found=candidate,lease;break
+                if found is None:break
+                context,lease=found
+                env=dict(os.environ,PYTHONPATH=str(CODE),PYTHONDONTWRITEBYTECODE='1',CUDA_VISIBLE_DEVICES=lease['uuid'],OMP_NUM_THREADS='8',MKL_NUM_THREADS='8',
+                    SADA_BASELINE_LEASE=lease['lease'],SADA_BASELINE_LEASE_SHA256=lease['lease_sha256'])
+                try:
+                    with (args.output/('inference_shard%d.log'%shard)).open('x') as log:
+                        child=subprocess.Popen([VLM_PY,'-u','-B',str(Path(__file__).resolve()),'--worker','--shard',str(shard),'--output',str(args.output)],
+                            cwd=CODE,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+                except BaseException:context.__exit__(None,None,None);raise
+                active[shard]=dict(process=child,context=context,gpu=lease['index']);pending.remove(shard)
+            save(args.output/'state.json',dict(phase='inference_or_waiting_gpu',pid=os.getpid(),pending=pending,completed=completed,
+                active={str(k):dict(pid=t['process'].pid,gpu=t['gpu']) for k,t in active.items()}));time.sleep(3)
+        records={};lines=[]
+        for shard in range(4):
+            record=read(args.output/('inference_complete_shard%d.json'%shard));p=args.output/('predictions_shard%d.jsonl'%shard)
+            if record['manifest_sha256']!=sha(args.output/'manifest.json') or record['predictions_sha256']!=sha(p):raise ValueError('分片SHA改变')
+            lines+=p.read_text().splitlines();records[str(shard)]=record
+        keys=[json.loads(x)['candidate_id'] for x in lines]
+        if len(keys)!=len(set(keys)):raise ValueError('分片重复评分')
+        (args.output/'predictions.jsonl').write_text('\n'.join(lines)+'\n')
+        save(args.output/'inference_complete.json',dict(status='passed',shards=records,count=len(lines)));summarize(args.output)
         save(args.output/'state.json',dict(phase='complete',pid=os.getpid()))
     except BaseException as error:
         save(args.output/'error.json',dict(type=type(error).__name__,message=str(error)));save(args.output/'state.json',dict(phase='failed',pid=os.getpid()));raise
     finally:
-        if child is not None and child.poll() is None:os.killpg(child.pid,signal.SIGTERM);child.wait()
-        if context is not None:context.__exit__(None,None,None)
+        for t in active.values():
+            if t['process'].poll() is None:os.killpg(t['process'].pid,signal.SIGTERM)
+        for t in active.values():t['process'].wait();t['context'].__exit__(None,None,None)
 
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',type=Path,required=True);p.add_argument('--worker',action='store_true')
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',type=Path,required=True);p.add_argument('--worker',action='store_true');p.add_argument('--shard',type=int,choices=range(4))
     p.add_argument('--video-root',type=Path,default=Path('/vepfs/vlms/data/EPIC_KITCHENS/videos'))
     p.add_argument('--recovery-root',type=Path,default=Path('/vepfs/vlms/data/EPIC_KITCHENS/rq2_frame_recovery_qwen_0924'))
     p.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'));args=p.parse_args()

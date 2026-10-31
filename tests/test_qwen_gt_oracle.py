@@ -1,5 +1,5 @@
 import pytest
-from tools.run_qwen_gt_oracle import balanced,cid,prompt,option_order,OPTIONS,safe_row,metrics
+from tools.run_qwen_gt_oracle import balanced,cid,prompt,option_order,OPTIONS,safe_row,metrics,shard_id
 
 
 def test_balanced_selection_deterministic_and_fills_budget():
@@ -24,3 +24,10 @@ def test_abstention_cannot_inflate_overall_accuracy():
     result=metrics(rows,{'a':dict(prediction='TAKE',confidence=.9),'b':dict(prediction='UNCERTAIN',confidence=.8)})
     assert result['accuracy']==.5 and result['known_prediction_coverage']==.5 and result['accepted_accuracy']==1.
     assert metrics(rows,{})['unavailable']==2
+
+
+def test_four_shards_are_disjoint_exhaustive_and_stable():
+    keys=[cid('video',float(i),float(i+1)) for i in range(200)]
+    sets=[{k for k in keys if shard_id(k)==s} for s in range(4)]
+    assert set.union(*sets)==set(keys) and sum(map(len,sets))==len(keys)
+    assert all(sets) and [shard_id(k) for k in keys]==[shard_id(k) for k in keys]
