@@ -33,6 +33,8 @@ def gpu(args):
     saved=torch.load(old/'best.pt',map_location='cpu');model.load_state_dict(saved['ema_state_dict'],strict=True);del saved
     model.eval().requires_grad_(False);initial=base.tensor_digest(model.state_dict())
     head=EndpointHead().cuda();generator=torch.Generator().manual_seed(123)
+    head.initialize(model.reg_head.offset_head.conv.weight,model.reg_head.offset_head.conv.bias,
+                    torch.cat([x.scale.reshape(-1) for x in model.reg_head.scale]))
     assert not {p.data_ptr() for p in head.parameters()} & {p.data_ptr() for p in model.reg_head.parameters()}
     def dataset(role):
         return base.dataset(cfg,e/(role+'_gt.json'),cfg['src_train_split'] if role=='source_train' else cfg['src_val_split'],False,False)
@@ -42,7 +44,7 @@ def gpu(args):
             for i in range(len(ds)):
                 v=move_to_device([ds[i]],'cuda:0')[0]
                 f,m=detector_features(model,v);points=model.point_generator(f);offsets,_=model.reg_head(f,m)
-                x,valid,levels=point_context(f,m);cls,gt=model.label_points(points,[v['segments']],[v['labels']])
+                x,valid,levels=point_context(f,m,model.reg_head);cls,gt=model.label_points(points,[v['segments']],[v['labels']])
                 ids=(valid & (cls[0].sum(1)>0)).nonzero(as_tuple=True)[0]
                 if len(ids)>2048:ids=ids[torch.randperm(len(ids),generator=generator)[:2048].cuda()]
                 a=torch.cat([z[0].T for z in offsets])
@@ -54,7 +56,8 @@ def gpu(args):
         torch.save(result,e/(role+'_points.pt'));return result
     train=collect('source_train');val=collect('source_val')
     assert set(train['video_ids']).isdisjoint(val['video_ids'])
-    ids=np.asarray(val['video_ids']);weights=torch.tensor([1/int((ids==v).sum()) for v in ids],device='cuda:0')
+    ids=np.asarray(val['video_ids']);counts={v:int((ids==v).sum()) for v in set(ids)}
+    weights=torch.tensor([1/counts[v] for v in ids],device='cuda:0')
     opt=torch.optim.AdamW(head.parameters(),lr=.001);best=float('inf');best_epoch=0;history=[];accepted=False
     def validate():
         head.eval();terms=[];bp=[];sp=[]
@@ -63,6 +66,14 @@ def gpu(args):
                 loss,b,s=objective(head,val['x'][start:start+512].cuda(),val['gt'][start:start+512].cuda())
                 terms.append(loss);bp.append(b);sp.append(s)
         return float((torch.cat(terms)*weights).sum()/weights.sum()),torch.cat(bp),torch.cat(sp)
+    initial_value,initial_prediction,_=validate()
+    difference=float((initial_prediction-val['a'].cuda()).abs().max())
+    if not torch.allclose(initial_prediction,val['a'].cuda(),rtol=1e-4,atol=1e-5):
+        raise ValueError('源预训练回归初始化不匹配')
+    best=initial_value;best_epoch=0;history.append(dict(epoch=0,source_validation=best,initialization=True))
+    torch.save(dict(state_dict=head.state_dict(),epoch=0,specification=SPEC),e/'best_auxiliary.pt')
+    save(e/'initialization_proof.json',dict(status='passed',maximum_absolute_error=difference,
+        original_regression_initialization=True,epoch_zero_source_loss=best,original_detector_not_modified=True))
     for epoch in range(1,51):
         head.train()
         for idx in torch.randperm(len(train['x']),generator=generator).split(512):
@@ -75,6 +86,7 @@ def gpu(args):
                 assert before!=base.tensor_digest(head.state_dict())
                 save(e/'acceptance.json',dict(status='passed',source_loss=float(loss),gradient_norm=grad,
                     branch_parameters_updated=True,independent_parameter_storage=True,target_gt_used=False,
+                    shared_frozen_regression_tower=True,independent_trainable_final_layer=True,
                     guard=guard,guard_sha256=sha(guard)));accepted=True
         value,_,_=validate();history.append(dict(epoch=epoch,source_validation=value))
         if value<best:
@@ -109,7 +121,7 @@ def gpu(args):
                 v=move_to_device([ds[index]],'cuda:0')[0]
                 assert v['segments'].numel()==0 and v['labels'].numel()==0
                 f,m=detector_features(model,v);points=model.point_generator(f);logits,_=model.cls_head(f,m);offsets,_=model.reg_head(f,m)
-                x,valid,levels=point_context(f,m);original=torch.cat([z[0].T for z in offsets]);prob=torch.cat([z[0].T.sigmoid().max(1).values for z in logits])*valid
+                x,valid,levels=point_context(f,m,model.reg_head);original=torch.cat([z[0].T for z in offsets]);prob=torch.cat([z[0].T.sigmoid().max(1).values for z in logits])*valid
                 fused=original.clone()
                 for start in range(0,len(x),512):
                     b,s=head(x[start:start+512]);fused[start:start+512],_=fuse(original[start:start+512],b,s,levels[start:start+512],calibration,prob[start:start+512])
@@ -156,7 +168,7 @@ def main(args):
     from tools.run_prototype_target_cache import prepare,INVENTORY,SHIFTS
     from tools.run_sada_baseline import acquire
     identity=code_identity();args.output.mkdir(parents=True,exist_ok=False)
-    save(args.output/'plan.json',dict(schema=SCHEMA,code=identity,specification=SPEC,route=2,revision=0,
+    save(args.output/'plan.json',dict(schema=SCHEMA,code=identity,specification=SPEC,route=2,revision=1,
         maximum_revisions=2,gpus=[0,1,2,3],reference=str(REFERENCE),target_parameter_search=False))
     prepare(args.output,REFERENCE,INVENTORY,identity)
     for shift in SHIFTS:
@@ -181,7 +193,8 @@ def main(args):
                 if t['stage']=='gpu':evals.append(t['shift'])
                 else:
                     e=args.output/'formal'/t['shift'];r=read(e/'complete.json')
-                    for p,digest in r['artifacts'].items():assert sha(p)==digest
+                    from tools.uncertainty_dual_head import audit_entry
+                    audit_entry(e)
                     complete.append(dict(shift=t['shift'],complete=str(e/'complete.json'),sha256=sha(e/'complete.json'),delta_pp=r['delta_pp'],results=r['results']))
             while evals and sum(t['stage']=='evaluate' for t in active.values())<2:
                 s=evals.pop(0);active[s+'/evaluate']=dict(p=spawn(s,'evaluate'),shift=s,stage='evaluate',gpu=None)
