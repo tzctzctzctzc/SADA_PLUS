@@ -7,16 +7,23 @@ from torch.nn import functional as F
 from tools.tta_core import (assert_unlabeled, unlabeled, dense, crop,
                             adaptable_parameters, parameter_digest, predict_full)
 
-SPEC = dict(schema='temporal-feature-recovery-ttt-v1', seed=123,
-    preparation_variants=['source_only','reconstruction','temporal_change'],
-    preparation_epochs=5, preparation_batch=1, preparation_lr=1e-4,
+SPEC = dict(schema='temporal-feature-recovery-frozen-preparation-revision1-v1', seed=123,
+    preparation_variants=['reconstruction'],
+    preparation_epochs=5, preparation_batch=1, preparation_lr=1e-4,source_encoder_preparation='frozen',
     decoder_lr=1e-3, reconstruction_weight=1., change_weight=.1,
     mask_fraction=.3, block_tokens=16, level=0, decoder_hidden=256,
     adaptive_modules='last-shared-SGP-stem-block-and-shared-FPN-norms',
-    reference='frozen-original-prototype-EMA', preparation_selection='full-source-val-mAP-best-of-epochs-1-to-5',
+    reference='frozen-original-prototype-EMA', preparation_selection='minimum-fixed-mask-source-val-reconstruction-epochs-1-to-5',
     test_optimizer='Adam-no-momentum-history-between-videos', learning_rates=[1e-4,1e-3], steps=[1,3],
     calibration_videos_per_shift=8, test_protocol='offline-whole-video-reset-each-video',
     target_GT_for_adaptation=False, preparation_target_data=False)
+
+
+def preparation_optimizer(model,head):
+    """修订一只准备decoder，保留原Prototype检测表示；TTT阶段再开放指定共享参数。"""
+    for p in model.parameters():p.requires_grad_(False)
+    for p in head.parameters():p.requires_grad_(True)
+    return torch.optim.AdamW(head.parameters(),lr=SPEC['decoder_lr'],weight_decay=.01)
 
 
 def seed_for(video_id, step):
