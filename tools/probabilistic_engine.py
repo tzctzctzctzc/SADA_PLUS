@@ -77,6 +77,7 @@ def one_epoch(ctx,epoch,limit=None):
         total=weight*source_loss+spec['target_semantic_weight']*semantic+spec['target_localization_weight']*localization
         if not torch.isfinite(total):raise ValueError('新结构损失非有限')
         src_norm=gradient_norm(source_loss,ctx.model.cls_head.parameters())
+        uncertainty_norm=gradient_norm(nll,ctx.model.pt_uncertainty.parameters())
         cls_norm=gradient_norm(semantic,ctx.model.cls_head.parameters()) if stats['accepted'] else 0.
         reg_norm=gradient_norm(localization,ctx.model.reg_head.parameters()) if stats['accepted'] else 0.
         total.backward()
@@ -88,7 +89,8 @@ def one_epoch(ctx,epoch,limit=None):
         ctx.model_ema.update(ctx.model)
         for scheduler in base.schedulers(ctx):scheduler.step()
         row=dict(train_loss=float(total.detach()),source_cls_loss=float(losses['cls_loss'].detach()),
-            source_reg_loss=float(losses['reg_loss'].detach()),source_nll=float(nll.detach()),source_positive_points=positives,source_gradient_norm=src_norm,
+            source_reg_loss=float(losses['reg_loss'].detach()),source_nll=float(nll.detach()),source_positive_points=positives,
+            source_gradient_norm=src_norm,source_uncertainty_gradient_norm=uncertainty_norm,
             target_semantic_loss=float(semantic.detach()),target_localization_loss=float(localization.detach()),
             target_classifier_gradient_norm=cls_norm,target_regressor_gradient_norm=reg_norm,
             target_gt_cls_loss=0.,target_gt_reg_loss=0.,target_gt_downstream_loss=0.,**stats)
@@ -145,6 +147,7 @@ def probe(cfg,entry,checkpoint=None):
         ctx.model.load_state_dict(saved['ema_state_dict'],strict=True)
         ctx.model_ema.module.load_state_dict(saved['ema_state_dict'],strict=True)
     initial=base.tensor_digest(ctx.model.state_dict())
+    uncertainty_before=base.tensor_digest(dict(ctx.model.pt_uncertainty.named_parameters()))
     reports={}
     # 目标缓存稀疏，必须遍历整个原始epoch，不能用前几个batch代表有无路由。
     epochs=(1,) if cfg['probabilistic_teacher']['variant']=='source' else (5,)
@@ -156,14 +159,18 @@ def probe(cfg,entry,checkpoint=None):
     digest=base.tensor_digest(state);base.restore(ctx,state)
     if base.tensor_digest(checkpoint_state(ctx,cfg,5,[[5,validation]]))!=digest:raise ValueError('完整GPU状态恢复失败')
     if base.tensor_digest(ctx.model.state_dict())==initial:raise ValueError('真实模型没有更新')
+    uncertainty_after=base.tensor_digest(dict(ctx.model.pt_uncertainty.named_parameters()))
+    if uncertainty_before==uncertainty_after:raise ValueError('概率头未被实际优化器更新')
     if any(p.grad is not None for p in ctx.model_ema.module.parameters()):raise ValueError('EMA教师有梯度')
     for row in reports.values():
-        if row['source_gradient_norm']<=0 or row['source_nll']<0:raise ValueError('源监督/概率头未生效')
+        if row['source_gradient_norm']<=0 or row['source_nll']<0 or row['source_uncertainty_gradient_norm']<=0:
+            raise ValueError('源监督/概率头未生效')
         if checkpoint and (row['accepted']<=0 or row['target_classifier_gradient_norm']<=0 or row['target_regressor_gradient_norm']<=0):
             raise ValueError('目标语义/定位学习未真实生效')
     save(entry/'result.json',dict(status='passed',variant=cfg['probabilistic_teacher']['variant'],reports=reports,
         source_validation_loss=validation,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,
         initial_state_sha256=initial,rng_roundtrip_sha256=digest,cuda_seed_proof=ctx.cuda_seed_proof,
+        uncertainty_parameters_updated=True,uncertainty_before_sha256=uncertainty_before,uncertainty_after_sha256=uncertainty_after,
         checkpoint_sha256=sha(checkpoint) if checkpoint else None))
 
 

@@ -86,6 +86,7 @@ def audit(entry):
         raise ValueError('教师未同权初始化或概率头规格改变')
     rows=[json.loads(x) for x in (entry/'metrics.jsonl').read_text().splitlines()]
     if not any(r['source_nll']>0 and r['source_positive_points']>0 for r in rows):raise ValueError('概率源监督未生效')
+    if not any(r['source_uncertainty_gradient_norm']>0 for r in rows):raise ValueError('概率头没有实际源梯度')
     variant=cfg['probabilistic_teacher']['variant']
     if variant=='source':
         if any(r['accepted'] or r['target_semantic_loss'] or r['target_localization_loss'] for r in rows):
@@ -160,6 +161,11 @@ def main(args):
         for cfg in configs.values():assert_config(cfg,old)
         target=read(old['baseline']['target_manifest'])['database']
         if not target or any('annotations' in row for row in target.values()):raise ValueError('目标训练manifest有GT')
+        cache=read(configs['vlm']['probabilistic_teacher']['prepared_cache'])
+        rows=[r for video in cache['by_video'].values() for r in video]
+        if (cache['candidate_count']!=200 or cache['selected_count']!=40 or len(rows)!=200 or
+                sum(r.get('participation_selected',True) for r in rows)!=40):
+            raise ValueError('不是原200候选池中的固定40名单')
         save(root/'inputs.json',dict(code=identity,migration_manifest_sha256=sha(MANIFEST),configurations=configs,
             prepared_cache_sha256=sha(configs['vlm']['probabilistic_teacher']['prepared_cache'])))
         source_probe=root/'probes/source';source_probe.mkdir(parents=True);save(source_probe/'config.json',configs['source'])
