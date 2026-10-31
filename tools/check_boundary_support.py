@@ -45,7 +45,9 @@ def head_probe(head,features,base,truth,positive):
     snapshot=io.BytesIO();torch.save(dict(head=head.state_dict(),optimizer=optimizer.state_dict(),cpu=torch.get_rng_state(),cuda=torch.cuda.get_rng_state(0)),snapshot)
     expected=tensor_digest(dict(head=head.state_dict(),optimizer=optimizer.state_dict(),cpu=torch.get_rng_state(),cuda=torch.cuda.get_rng_state(0)))
     with torch.no_grad():next(head.parameters()).add_(1)
-    torch.rand(3);torch.rand(3,device='cuda:0');snapshot.seek(0);saved=torch.load(snapshot,map_location='cuda:0')
+    # 老PyTorch在UUID可见卡下device_count可能为0；先反序列化CPU，
+    # 再由load_state_dict复制到已通过guard且实际可用的CUDA参数。
+    torch.rand(3);torch.rand(3,device='cuda:0');snapshot.seek(0);saved=torch.load(snapshot,map_location='cpu')
     head.load_state_dict(saved['head'],strict=True);optimizer.load_state_dict(saved['optimizer']);torch.set_rng_state(saved['cpu'].cpu());torch.cuda.set_rng_state(saved['cuda'].cpu(),0)
     restored=tensor_digest(dict(head=head.state_dict(),optimizer=optimizer.state_dict(),cpu=torch.get_rng_state(),cuda=torch.cuda.get_rng_state(0)))==expected
     head.load_state_dict(initial,strict=True);head.requires_grad_(False);torch.set_rng_state(cpu);torch.cuda.set_rng_state(cuda,0)
