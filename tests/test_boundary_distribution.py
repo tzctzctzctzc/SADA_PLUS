@@ -95,6 +95,7 @@ def test_real_sada_connects_source_loss_inference_optimizer_and_strict_restore(t
     assert torch.equal(rng,torch.get_rng_state())
     assert all(torch.equal(v,model.state_dict()[k]) for k,v in old.state_dict().items())
     source,target=proto['videos']();results=[];states=[]
+    for video in (source,target):video['metadata']['duration']=65.
     for m in (old,model):
         torch.manual_seed(456)
         results.append(m(video_list_src=[source],video_list_tgt=[target],mode='train',curr_epoch=5)[0])
@@ -113,3 +114,7 @@ def test_real_sada_connects_source_loss_inference_optimizer_and_strict_restore(t
     with torch.no_grad():
         output=model(video_list_src=[source],video_list_tgt=[target],mode='test')
     assert len(output[0])==len(output[1])==1
+    import pytest
+    bad=copy.deepcopy(target);bad['segments']=source['segments'];bad['labels']=source['labels']
+    with pytest.raises(ValueError,match='target GT'):
+        model(video_list_src=[source],video_list_tgt=[bad],mode='train',curr_epoch=5)

@@ -686,6 +686,9 @@ class SADA(nn.Module):
     
 
     def forward(self, video_list_src, video_list_tgt, mode=None, domain='src', curr_epoch=0, cls_static_anchors=None, mean_class_conf=None, risk_teacher=None, risk_generator=None, context_iteration=0):
+        if mode=='train' and self.boundary_equivariance is not None:
+            if any(v['segments'].numel() or v['labels'].numel() for v in video_list_tgt):
+                raise ValueError('边界等变训练要求target GT不可见')
         
         # Note: The domain is by default src, which indicates in the case of training that we care about applying supervision on the source domain (upper part of the architecture)
         # While during validation, we may want to evaluate the losses on the target domain only (lower part of the architecture)
