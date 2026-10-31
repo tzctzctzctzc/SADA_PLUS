@@ -27,3 +27,11 @@ def test_learns_known_signed_boundary_error_and_strict_restore():
     assert torch.isfinite(loss) and aligned_iou(pred,g).mean()>before+.15
     clone=Refiner(2);clone.load_state_dict(m.state_dict(),strict=True)
     assert torch.equal(m(x,b)[0],clone(x,b)[0])
+
+def test_gain_gate_reject_is_exact_identity():
+    from tools.uncertainty_refiner import gated_boxes,GainGate,gate_input
+    b=torch.tensor([[1.,3.],[2.,9.]]);p=b+1
+    actual=gated_boxes(b,p,torch.tensor([-1.,1.]))
+    assert torch.equal(actual[0],b[0]) and torch.equal(actual[1],p[1])
+    model=Refiner(2);z,p=gate_input(model,torch.randn(2,20),b)
+    assert z.shape==(2,260) and GainGate()(z).shape==(2,)

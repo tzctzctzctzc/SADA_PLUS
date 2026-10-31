@@ -118,6 +118,10 @@ def gpu(args):
         if epoch-best_epoch>=15:break
     head.load_state_dict(torch.load(e/'best_refiner.pt',map_location='cpu')['state_dict'],strict=True);head.eval()
     save(e/'source_mechanism.json',validation())
+    from tools.uncertainty_refiner import fit_gain_gate,gate_input,gated_boxes
+    if not skip_training:raise ValueError('修订1只复用已完整训练精修头，不重训旧方法')
+    frozen_head=base.tensor_digest(head.state_dict())
+    gate=fit_gain_gate(head,train,val,e)
     for domain in ['source','target']:
         ds=base.dataset(cfg,e/(domain+'_val_unlabeled.json'),cfg['src_val_split'] if domain=='source' else cfg['tgt_val_split'],False,True)
         columns={mode:{k:[] for k in ['video-id','t-start','t-end','label','score']} for mode in ['control','refined']}
@@ -133,7 +137,8 @@ def gpu(args):
             with torch.no_grad():
                 for start in range(0,len(boxes),128):
                     b=boxes[start:start+128];x,valid=context(features,masks,b,levels[start:start+128],model.fpn_strides)
-                    p,_=head(x,b);refined[start:start+128]=torch.where(valid[:,None],p,b)
+                    z,p=gate_input(head,x,b);p=gated_boxes(b,p,gate(z))
+                    refined[start:start+128]=torch.where(valid[:,None],p,b)
             meta=v['metadata'];raw['segments']=refined
             new=model.postprocessing([raw])[0]
             for mode,p in [('control',pred),('refined',new)]:
@@ -142,8 +147,9 @@ def gpu(args):
             print('EVALUATING',domain,index,len(ds),flush=True)
         for mode,c in columns.items():np.savez(e/(domain+'_'+mode+'.npz'),**{k:np.asarray(v) for k,v in c.items()})
     assert initial==base.tensor_digest(model.state_dict())
+    assert frozen_head==base.tensor_digest(head.state_dict())
     save(e/'gpu_complete.json',dict(status='passed',frozen_detector_unchanged=True,best_epoch=best_epoch,stop_epoch=epoch,
-        guard=guard,guard_sha256=sha(guard),code=code_identity(),target_gt_used=False))
+        guard=guard,guard_sha256=sha(guard),code=code_identity(),target_gt_used=False,frozen_refiner_unchanged=True))
 
 def evaluate(args):
     import numpy as np
@@ -171,7 +177,7 @@ def main(args):
     from tools.run_prototype_target_cache import prepare,INVENTORY,SHIFTS
     from tools.run_sada_baseline import acquire
     identity=code_identity();args.output.mkdir(parents=True,exist_ok=False)
-    save(args.output/'plan.json',dict(schema=SCHEMA,code=identity,specification=SPEC,route=1,revision=0,
+    save(args.output/'plan.json',dict(schema=SCHEMA,code=identity,specification=SPEC,route=1,revision=1,
         maximum_revisions=2,gpus=[0,1,2,3],reference=str(REFERENCE),target_parameter_search=False))
     prepare(args.output,REFERENCE,INVENTORY,identity)
     for shift in SHIFTS:
@@ -181,16 +187,22 @@ def main(args):
             wanted={s.lower() for s in splits};save(e/(role+'_gt.json'),dict(database={k:v for k,v in db.items() if v['subset'].lower() in wanted}),sort_keys=False)
     if args.previous:
         import shutil
+        prior=read(args.previous/'final_audit.json')
+        assert prior['status']=='passed' and prior['count']==6
         for old in args.previous.glob('formal/*'):
             if not (old/'best_refiner.pt').exists():continue
-            if (old/'complete.json').exists():raise ValueError('完整项需独立复用接口，拒绝重复评估')
+            complete=read(old/'complete.json')
+            assert complete['schema']=='prototype-uncertainty-local-refiner-v1'
+            for p,digest in complete['artifacts'].items():assert sha(p)==digest
+            assert read(old/'gpu_complete.json')['frozen_detector_unchanged']
             hist=read(old/'training_history.json');saved=__import__('torch').load(old/'best_refiner.pt',map_location='cpu')
             if hist[-1]['epoch']!=50 and hist[-1]['epoch']-saved['epoch']<15:
                 raise ValueError('部分头训练不允许从头重跑')
             new=args.output/'formal'/old.name;copied={}
             for name in ['best_refiner.pt','latest_refiner.pt','training_history.json','source_train_examples.pt','source_val_examples.pt','acceptance.json']:
-                p=old/name;assert p.exists();shutil.copyfile(p,new/name);copied[str(p)]=sha(p)
-            save(new/'recovery.json',dict(previous=str(old),previous_code=read(args.previous/'plan.json')['code'],artifacts=copied,training_reused=True,only_evaluation_restarted=True))
+                p=old/name;assert p.exists();(new/name).symlink_to(p);copied[str(p)]=sha(p)
+            save(new/'recovery.json',dict(previous=str(old),previous_code=read(args.previous/'plan.json')['code'],artifacts=copied,
+                training_reused=True,new_gain_gate_training=True,old_refiner_readonly=True))
     active={};pending=list(SHIFTS);evals=[];complete=[]
     def spawn(shift,stage,lease=None):
         e=args.output/'formal'/shift;env=dict(os.environ,PYTHONPATH=str(CODE),PYTHONDONTWRITEBYTECODE='1',CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='8',MKL_NUM_THREADS='8')
