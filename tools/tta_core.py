@@ -6,9 +6,9 @@ import torch
 from torch.nn import functional as F
 
 VARIANTS = ('multiview', 'self_train', 'prototype', 'uncertainty')
-SPEC = dict(schema='prototype-episodic-tta-v1', variants=VARIANTS,
+SPEC = dict(schema='prototype-episodic-tta-adam-revision1-v1', variants=VARIANTS,
     protocol='offline-whole-video-adapt-then-predict-reset-each-video',
-    learning_rates=[1e-5, 1e-4], steps=[1, 3], optimizer='SGD-no-momentum',
+    learning_rates=[1e-5, 1e-4], steps=[1, 3], optimizer='Adam-reset-each-video',
     teacher_momentum=.99, pseudo_threshold=.5, match_tiou=.5, max_pseudo=32,
     classification_weight=1., localization_weight=1., prototype_weight=.1,
     maximum_relative_boundary_std=.1, minimum_support=2, temporal_crop_fraction=.1,
@@ -235,7 +235,7 @@ def adapt_video(student, teacher, initial, video, variant, lr, steps, bank=None)
     trace=[]
     first_rows=consensus(teacher,video)
     if variant!='multiview':
-        optimizer=torch.optim.SGD(list(named.values()),lr=lr)
+        optimizer=torch.optim.Adam(list(named.values()),lr=lr)
         for step in range(steps):
             rows=first_rows if step==0 else consensus(teacher,video)
             if not rows:
