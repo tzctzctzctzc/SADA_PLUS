@@ -38,6 +38,9 @@ def state(root, phase, completed, pending):
 
 
 def main(args):
+    global SPEC,GATE,source_decision,audit_source
+    if args.diagnostic=='boundary':
+        from tools.check_boundary_support import SPEC,GATE,source_decision,audit_source
     identity=p.code_identity(); root=args.output_root; root.mkdir(exist_ok=False)
     inputs(args,identity)
     if args.preflight_only: state(root,'cpu_preflight_passed',[],[]); return
@@ -48,7 +51,8 @@ def main(args):
                 if task['process'].poll() is None: continue
                 if task['process'].returncode: raise RuntimeError(shift+'源诊断技术失败，保留现场')
                 path=root/'source'/shift/'result.json'; result=p.read(path)
-                if result['status']!='completed_source_complementarity' or result['target_data_read']: raise ValueError('结果身份错误')
+                expected='completed_source_boundary_support' if args.diagnostic=='boundary' else 'completed_source_complementarity'
+                if result['status']!=expected or result['target_data_read']: raise ValueError('结果身份错误')
                 for name,digest in result['artifacts'].items():
                     if p.sha(name)!=digest: raise ValueError('结果工件改变')
                 audit=audit_source(path.parent);p.save(path.parent/'source_audit.json',audit)
@@ -68,7 +72,7 @@ def main(args):
                         SADA_BASELINE_LEASE=lease['lease'],SADA_BASELINE_LEASE_SHA256=lease['lease_sha256'])
                     with (root/(shift+'.log')).open('x') as log:
                         process=subprocess.Popen([sys.executable,'-u','-B',str(Path(__file__).resolve()),
-                            '--child',shift,'--output-root',str(root),'--control',str(args.control),'--data-root',str(args.data_root)],
+                            '--child',shift,'--diagnostic',args.diagnostic,'--output-root',str(root),'--control',str(args.control),'--data-root',str(args.data_root)],
                             cwd=CODE,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
                     owned.ACTIVE[shift]=dict(process=process,context=context,lease=lease)
                     pending.remove(shift);used.add(gpu);launched=True
@@ -88,11 +92,15 @@ if __name__=='__main__':
     parser.add_argument('--control',type=Path,default=Path('/vepfs/vlms/prototype_capacity12_5f9a157_1029'))
     parser.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'))
     parser.add_argument('--gpus',default='0,1,2,3');parser.add_argument('--preflight-only',action='store_true')
+    parser.add_argument('--diagnostic',choices=['complementarity','boundary'],default='complementarity')
     parser.add_argument('--child',choices=['S'+str(i) for i in range(1,7)])
     args=parser.parse_args();args.gpus=[int(x) for x in args.gpus.split(',')]
     for key in ('output_root','control','data_root'): setattr(args,key,getattr(args,key).resolve())
     signal.signal(signal.SIGTERM,owned.stop);signal.signal(signal.SIGINT,owned.stop)
     if args.child:
-        from tools.branch_complementarity import worker
+        if args.diagnostic=='boundary':
+            from tools.check_boundary_support import worker
+        else:
+            from tools.branch_complementarity import worker
         worker(args)
     else: main(args)
