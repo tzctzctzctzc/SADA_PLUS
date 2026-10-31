@@ -38,12 +38,12 @@ class DistributionStage(nn.Module):
     def __init__(self,channels=512,radius=.5):
         super().__init__();self.encoder=nn.Sequential(nn.LayerNorm(channels*10),nn.Linear(channels*10,256),nn.GELU())
         self.out=nn.Linear(256,34);nn.init.zeros_(self.out.weight);nn.init.zeros_(self.out.bias)
-        self.register_buffer('grid',torch.linspace(-radius,radius,17))
+        self.register_buffer('grid',torch.arange(-8,9,dtype=torch.float32)*(radius/8))
         self.register_buffer('radius',torch.tensor(float(radius)))
     def forward(self,x,boxes):
         logits=self.out(self.encoder(x)).reshape(-1,2,17);p=logits.softmax(-1)
-        # 减同一uniform浮点值，使零初始化严格不移动原框。
-        shift=((p-torch.full_like(p,1/17))*self.grid).sum(-1)
+        # 成对相减：对称概率的残差严格为0，不依赖CPU/CUDA softmax的uniform舍入。
+        shift=((p[:,:,9:]-p[:,:,:8].flip(-1))*self.grid[9:]).sum(-1)
         d=(boxes[:,1]-boxes[:,0]).clamp_min(1e-6)
         raw=boxes+shift*d[:,None]
         width=(raw[:,1]-raw[:,0]).clamp_min(.05*d);center=raw.mean(1)
