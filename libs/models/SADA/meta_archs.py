@@ -574,6 +574,12 @@ class SADA(nn.Module):
         if cfg.get('phase_alignment'):
             from .phase_alignment import expand_discriminators
             expand_discriminators(self)
+        self.boundary_equivariance=None
+        if cfg.get('boundary_equivariance'):
+            if self.use_trident_head or self.endpoint_risk is not None or self.context_transfer is not None:
+                raise ValueError('独立边界配方不能混入其它定位探索')
+            from .boundary_equivariance import BoundaryEquivariance
+            self.boundary_equivariance=BoundaryEquivariance(fpn_dim,cfg['boundary_equivariance'])
         
     @property
     def device(self):
@@ -771,11 +777,18 @@ class SADA(nn.Module):
             out_offsets_src, out_actionness_src = self.reg_head(fpn_feats_src, fpn_masks_src)
             out_offsets_tgt, out_actionness_tgt= self.reg_head_target(fpn_feats_tgt, fpn_masks_tgt)
         
+        boundary_source_records=None
+        if self.boundary_equivariance is not None:
+            boundary_source_base=out_offsets_src;boundary_target_base=out_offsets_tgt
+            out_offsets_src,boundary_source_records=self.boundary_equivariance.refine(fpn_feats_src,out_offsets_src)
+            out_offsets_tgt,boundary_target_records=self.boundary_equivariance.refine(fpn_feats_tgt,out_offsets_tgt)
         out_offsets = [torch.cat((out_offsets_src[i], out_offsets_tgt[i]), dim=0) for i in range(len(out_offsets_src))]
         out_actionness = [torch.cat((out_actionness_src[i], out_actionness_tgt[i]), dim=0) for i in range(len(out_offsets_src))]
 
         # Generate the regression offsets of the frozen pseudo-label network (frozen in the case of static, or changing in the case of dynamic)
         out_offsets_tgt_pl, out_actionness_tgt_pl = self.reg_head_pl(fpn_feats_tgt, fpn_masks_tgt)
+        if self.boundary_equivariance is not None:
+            out_offsets_tgt_pl,_=self.boundary_equivariance.refine(fpn_feats_tgt,out_offsets_tgt_pl)
 
         # ------------------------------------------------------------
         # permute the outputs
@@ -862,6 +875,18 @@ class SADA(nn.Module):
                 curr_epoch=curr_epoch
             )
             
+            if mode=='train' and self.boundary_equivariance is not None:
+                from .boundary_equivariance import POLICY as boundary_policy
+                distribution=self.boundary_equivariance.source_loss(boundary_source_records,boundary_source_base,fpn_masks_src,gt_cls_labels_src,gt_offsets_src)
+                equivariance=self.boundary_equivariance.target_loss(self,video_list_tgt,boundary_target_records,boundary_target_base,out_cls_logits_tgt,fpn_masks_tgt,points,curr_epoch)
+                losses['boundary_source_distribution_loss']=distribution['loss']
+                losses['boundary_target_equivariance_loss']=equivariance['loss']
+                losses['downstream_loss']=losses['downstream_loss']+boundary_policy['source_distribution_weight']*distribution['loss']+boundary_policy['target_equivariance_weight']*equivariance['loss']
+                for key,value in distribution.items():
+                    if key!='loss':losses['boundary_source_'+key]=torch.as_tensor(value,device=self.device).detach()
+                for key,value in equivariance.items():
+                    if key!='loss':losses['boundary_target_'+key]=torch.as_tensor(value,device=self.device).detach()
+
             if mode=='train' and self.rq3_capacity is not None:
                 geometry=None
                 if hasattr(self.rq3_capacity,'geometry_selection'):

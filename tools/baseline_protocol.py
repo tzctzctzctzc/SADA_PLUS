@@ -62,6 +62,8 @@ def code_identity():
                                   'libs/models/SADA/background_oracle.py',
                                   'libs/models/SADA/phase_alignment.py',
                                   'libs/models/SADA/context_transfer.py',
+                                  'libs/models/SADA/boundary_distribution.py',
+                                  'libs/models/SADA/boundary_equivariance.py',
                                   'libs/models/SADA/prototype_methods.py'}
     if any(p not in allowed and not p.startswith(('tools/', 'tests/')) for p in changed):
         raise ValueError('存在白名单外的官方核心文件修改')

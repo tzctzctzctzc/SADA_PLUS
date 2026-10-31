@@ -71,3 +71,45 @@ def test_temporal_loss_detaches_weak_view_but_updates_strong_view_and_handles_em
     assert weak.grad is wp.grad is None and strong.grad.abs().sum()>0 and sp.grad is not None
     strong.grad=None;loss=temporal_distribution_loss(weak,wp,strong,sp,torch.tensor([False]),torch.tensor([4.]))
     assert loss==0;loss.backward();assert strong.grad.abs().sum()==0
+
+
+def test_real_sada_connects_source_loss_inference_optimizer_and_strict_restore(tmp_path,monkeypatch):
+    import copy
+    from pathlib import Path
+    from runpy import run_path
+    from libs.models.SADA.meta_archs import SADA
+    from libs.models.SADA.optimizer import make_optimizer
+    from libs.models.SADA.boundary_equivariance import SCHEMA,POLICY
+    code=Path(__file__).resolve().parents[1]
+    cfg=run_path(str(code/'tests/test_corrected_baseline.py'))['small_config']()
+    proto=run_path(str(code/'tests/test_prototype_capacity.py'))
+    cfg['prototype_capacity']=proto['configuration'](tmp_path,'control');cfg['model']['pl_threshold']=0
+    native=torch.tensor
+    def cpu_copy(*args,**kwargs):
+        value=native(*args,**kwargs)
+        return value.clone() if value.requires_grad and value.device.type=='cpu' else value
+    monkeypatch.setattr(torch,'tensor',cpu_copy)
+    torch.manual_seed(123);old=SADA(copy.deepcopy(cfg),'cpu');rng=torch.get_rng_state().clone()
+    new_cfg=copy.deepcopy(cfg);new_cfg['boundary_equivariance']=dict(schema=SCHEMA,policy=copy.deepcopy(POLICY))
+    torch.manual_seed(123);model=SADA(new_cfg,'cpu')
+    assert torch.equal(rng,torch.get_rng_state())
+    assert all(torch.equal(v,model.state_dict()[k]) for k,v in old.state_dict().items())
+    source,target=proto['videos']();results=[];states=[]
+    for m in (old,model):
+        torch.manual_seed(456)
+        results.append(m(video_list_src=[source],video_list_tgt=[target],mode='train',curr_epoch=5)[0])
+        states.append(torch.get_rng_state().clone())
+    assert torch.equal(states[0],states[1])
+    torch.testing.assert_close(results[0]['cls_loss'],results[1]['cls_loss'])
+    torch.testing.assert_close(results[0]['reg_loss'],results[1]['reg_loss'])
+    assert results[1]['boundary_source_distribution_loss']>0 and results[1]['boundary_target_rng_restored']==1
+    head=model.boundary_equivariance.head.logits.weight;before=head.detach().clone()
+    opt=make_optimizer(model,cfg['opt'],.0001,exclude_params=['disc_dom_adv','disc_dom_conditional_adv','learnable_embeddings'])
+    assert any(p is head for g in opt.param_groups for p in g['params'])
+    opt.zero_grad();results[1]['downstream_loss'].backward();assert head.grad.abs().sum()>0;opt.step()
+    assert not torch.equal(before,head)
+    restored=SADA(copy.deepcopy(new_cfg),'cpu');restored.load_state_dict(model.state_dict(),strict=True)
+    model.eval();old.eval()
+    with torch.no_grad():
+        output=model(video_list_src=[source],video_list_tgt=[target],mode='test')
+    assert len(output[0])==len(output[1])==1
