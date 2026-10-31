@@ -22,6 +22,15 @@ from tools.baseline_gpu import slot, snapshot
 ACTIVE = {}
 
 
+def prepare_file_limit():
+    # cycle会保留一轮CPU batch；大方向的共享张量句柄可能超过默认1024。
+    import resource
+    soft,hard=resource.getrlimit(resource.RLIMIT_NOFILE)
+    wanted=max(soft,65536 if hard==resource.RLIM_INFINITY else min(65536,hard))
+    resource.setrlimit(resource.RLIMIT_NOFILE,(wanted,hard))
+    return dict(previous_soft=soft,soft=wanted,hard=hard)
+
+
 def stop(signum, frame):
     # 只停止本监督直接管理的自有子进程组；不对NVML宿主PID发信号。
     for task in list(ACTIVE.values()):
@@ -211,9 +220,11 @@ def child(args):
 
 
 def main(args):
+    file_limit=prepare_file_limit()
     root=args.output_root.resolve();data=args.data_root.resolve()
     identity=code_identity()
     root.mkdir(parents=True,exist_ok=False)
+    save(root/'runtime_resources.json',dict(file_descriptors=file_limit))
     save(root/'state.json',dict(phase='cpu_input_audit',pid=os.getpid(),completed=[],active={}))
     args.tmpdir=args.tmpdir.resolve();args.tmpdir.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(dir=args.tmpdir,prefix='check_') as name:
