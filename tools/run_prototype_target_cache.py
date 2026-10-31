@@ -279,9 +279,10 @@ def evaluate_worker(args):
             pred['score'] = columns[score]
             evaluator = ANETdetection(str(annotation), splits, num_workers=2, action_subsampling='10_majority_classes')
             ap, mean, *_ = evaluator.evaluate(pred, verbose=True)
-            result = dict(map_by_tiou=[float(v) for v in ap], map_0.1_to_0.5=float(mean),
+            result = dict(map_by_tiou=[float(v) for v in ap],
                 mode=mode, domain=domain, checkpoint_sha256=bound['checkpoint_sha256'],
                 prediction_sha256=sha(path), split=splits, parameter_search=False)
+            result['map_0.1_to_0.5'] = float(mean)
             save(entry/'evaluation'/(domain+'_'+mode+'.json'), result)
             outputs[domain+'_'+mode] = result
         reference_map = read(original/'evaluation'/(domain+'_val.json'))['map_0.1_to_0.5']

@@ -2,6 +2,9 @@
 from copy import deepcopy
 from pathlib import Path
 from runpy import run_path
+import os
+import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -133,3 +136,14 @@ def test_specification_has_no_training_or_test_cache_writes():
     s=specification()
     assert s['trainable_parameters']==0 and s['validation_cache_writes'] is False
     assert s['selected_candidates']==40 and s['boundaries_and_labels']=='unchanged'
+
+
+def test_actual_runner_help_imports_and_parses_without_cuda():
+    root=Path(__file__).resolve().parents[1]
+    runner=root/'tools/run_prototype_target_cache.py'
+    compile(runner.read_text(encoding='utf-8'),str(runner),'exec')
+    result=subprocess.run([sys.executable,'-B',str(runner),'--help'],cwd=root,
+        env=dict(os.environ,CUDA_VISIBLE_DEVICES='',PYTHONDONTWRITEBYTECODE='1'),
+        stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
+    assert result.returncode==0,result.stdout
+    assert '--stage' in result.stdout and '--output' in result.stdout
