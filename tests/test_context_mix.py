@@ -11,7 +11,7 @@ import torch
 from tools.context_mix import (VARIANTS, FeatureBank, background_gaps, draw_pair, install,
                                mixed_loss, patch_record, prepare_table, specification)
 from tools.baseline_protocol import CODE, read, save, sha
-from tools.run_prototype_context_mix import assert_pair, changed_config
+from tools.run_prototype_context_mix import assert_pair, changed_config, audit_ledger
 
 
 def table_fixture(tmp_path):
@@ -186,3 +186,46 @@ def test_install_keeps_parameters_base_losses_and_rng_unchanged(tmp_path):
     assert b['downstream_loss']>a['downstream_loss'] and b['mix_fpn_gradient_norm']>0
     assert list(model.state_dict())==list(plain.state_dict())
     assert all(torch.equal(v,model.state_dict()[k]) for k,v in plain.state_dict().items())
+
+
+def test_completion_audit_reconstructs_continuous_gt_and_event_hash_chain(tmp_path):
+    import hashlib
+    _,_,table=table_fixture(tmp_path);bank=FeatureBank(table);rng=random.Random(42)
+    entry=tmp_path/'entry';entry.mkdir()
+    save(entry/'config.json',dict(baseline=dict(epoch_budget=dict(iterations_per_epoch=4)),
+                                 context_mix=dict(specification=specification('target_context'))))
+    save(entry/'termination.json',dict(decision=dict(epoch=3)))
+    events=[];digest='0'*64
+    for epoch in range(1,4):
+        _,event=draw_pair(bank,target_fixture(),rng,'target')
+        event.update(step=epoch*4,epoch=epoch)
+        digest=hashlib.sha256((digest+json.dumps(event,sort_keys=True,separators=(',',':'))).encode()).hexdigest()
+        events.append(dict(event,context='target',digest=digest))
+    ledger=entry/'mix_events.jsonl'
+    ledger.write_text(''.join(json.dumps(e)+'\n' for e in events))
+    saved=dict(step=12,events=3,event_digest=digest)
+    audit_ledger(entry,table,saved)
+    events[-1]['segments'][0][0]+=.125
+    ledger.write_text(''.join(json.dumps(e)+'\n' for e in events))
+    with pytest.raises(ValueError,match='GT'):
+        audit_ledger(entry,table,saved)
+
+
+def test_private_state_survives_checkpoint_roundtrip_without_new_model_weights(tmp_path):
+    import io
+    from tools.baseline_engine import controls,tensor_digest
+    from libs.models.SADA.meta_archs import SADA
+    base,path,_=table_fixture(tmp_path)
+    cfg=run_path(str(CODE/'tests/test_corrected_baseline.py'))['small_config']()
+    cfg.update(seed=123,baseline=base['baseline'])
+    cfg['model']['adv_method']=['None']
+    cfg['context_mix']=dict(variant='source_context',specification=specification('source_context'),
+                            table=str(path),table_sha256=sha(path))
+    model=SADA(cfg,'cpu');install(SimpleNamespace(model=model),cfg)
+    saved=controls(model);data=io.BytesIO();torch.save(saved,data);data.seek(0)
+    restored=torch.load(data,map_location='cpu')
+    assert tensor_digest(saved)==tensor_digest(restored)
+    model.context_mix_state=restored['context_mix_state']
+    a=random.Random();a.setstate(saved['context_mix_state']['rng'])
+    b=random.Random();b.setstate(model.context_mix_state['rng'])
+    assert [a.random() for _ in range(8)]==[b.random() for _ in range(8)]
