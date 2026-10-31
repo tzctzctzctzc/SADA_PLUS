@@ -9,6 +9,7 @@ from tools.baseline_protocol import CODE
 from libs.models.SADA.instance_detector import InstanceTemporalDetector,specification,sample_1d,TemporalCrossAttention
 from libs.models.SADA.instance_losses import source_losses,match,create_teacher,update_teacher,attach_vlm_labels,distill_instances
 from tools.instance_engine import query_budget,validation_windows
+from tools.run_instance_matrix import ordering,validate_results
 
 
 def small():
@@ -128,3 +129,12 @@ def test_long_video_windows_preserve_absolute_time_and_do_not_use_gt():
     torch.testing.assert_close(result['segments'],torch.tensor([[27.,59.],[59.,91.]]))
     windows=list(validation_windows(v,64));assert windows[1]['feats'].shape[-1]==32
     assert all((x['segments'][:,0]>=0).all() and (x['segments'][:,1]<=x['feats'].shape[-1]).all() for x in windows)
+
+
+def test_six_direction_schedule_is_finite_and_longest_first():
+    costs={'S1':1,'S2':2,'S3':3,'S4':4,'S5':5,'S6':6}
+    assert ordering(costs)==['S6','S5','S4','S3','S2','S1']
+    rows=[dict(status='passed',shift=s,map=.6) for s in costs]
+    assert validate_results(rows)==pytest.approx(.6)
+    with pytest.raises(ValueError):validate_results(rows[:-1])
+    with pytest.raises(ValueError):validate_results(rows[:-1]+[rows[0]])
