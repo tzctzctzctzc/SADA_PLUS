@@ -65,7 +65,7 @@ def test_true_sada_preserves_losses_and_initialization_but_has_no_discriminator_
     torch.manual_seed(123);original=SADA(cfg,'cpu')
     torch.manual_seed(123);model=SADA(plain,'cpu')
     assert all(torch.equal(v,model.state_dict()[k]) for k,v in original.state_dict().items())
-    source,target=helpers['videos']();target['feats'].requires_grad_()
+    source,target=helpers['videos']()
     torch.manual_seed(777);a=original(video_list_src=[source],video_list_tgt=[target],mode='train',curr_epoch=5)[0]
     torch.manual_seed(777);b=model(video_list_src=[source],video_list_tgt=[target],mode='train',curr_epoch=5)[0]
     for key in ('cls_loss','reg_loss','rq3_loss','rq3_source_loss','rq3_alignment_loss'):
@@ -78,7 +78,9 @@ def test_true_sada_preserves_losses_and_initialization_but_has_no_discriminator_
     # 保留原适配阶段对downstream_loss的总系数，不顺便改变源监督强度。
     loss=plain['model']['loss_weights']['weight_downstream']*b['downstream_loss'];loss.backward()
     assert model.rq3_capacity.branch.input_projection.weight.grad.abs().sum()>0
-    assert target['feats'].grad.abs().sum()>0
+    # 原预处理在no_grad下复制冻结SlowFast输入；应检查可训练FPN上的目标梯度。
+    assert b['rq3_target_gradient_norm']>0
+    assert any(p.grad is not None and p.grad.abs().sum()>0 for p in model.neck_source.parameters())
     assert all(p.grad is None for n,p in model.named_parameters() if any(k in n for k in disc_names))
     optimizer.step();disc_optimizer.step()
     assert not disc_optimizer.state_dict()['state']
