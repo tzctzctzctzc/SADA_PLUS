@@ -92,6 +92,7 @@ def test_real_sada_connects_source_loss_inference_optimizer_and_strict_restore(t
     torch.manual_seed(123);old=SADA(copy.deepcopy(cfg),'cpu');rng=torch.get_rng_state().clone()
     new_cfg=copy.deepcopy(cfg);new_cfg['boundary_equivariance']=dict(schema=SCHEMA,policy=copy.deepcopy(POLICY))
     torch.manual_seed(123);model=SADA(new_cfg,'cpu')
+    model.boundary_gradient_probe=True
     assert torch.equal(rng,torch.get_rng_state())
     assert all(torch.equal(v,model.state_dict()[k]) for k,v in old.state_dict().items())
     source,target=proto['videos']();results=[];states=[]
@@ -105,6 +106,8 @@ def test_real_sada_connects_source_loss_inference_optimizer_and_strict_restore(t
     torch.testing.assert_close(results[0]['cls_loss'],results[1]['cls_loss'])
     torch.testing.assert_close(results[0]['reg_loss'],results[1]['reg_loss'])
     assert results[1]['boundary_source_distribution_loss']>0 and results[1]['boundary_target_rng_restored']==1
+    assert results[1]['boundary_target_feature_gradient_norm']>0
+    assert results[1]['boundary_target_head_gradient_norm']>0
     head=model.boundary_equivariance.head.logits.weight;before=head.detach().clone()
     opt=make_optimizer(model,cfg['opt'],.0001,exclude_params=['disc_dom_adv','disc_dom_conditional_adv','learnable_embeddings'])
     assert any(p is head for g in opt.param_groups for p in g['params'])
