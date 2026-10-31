@@ -81,6 +81,7 @@ def encode_segments(branch, features, segments, levels, strides, chunk=256):
     if len(segments) != len(levels):
         raise ValueError('候选/层数不匹配')
     result = features[0].new_empty((len(segments), branch.classifier.in_features))
+    sampled = features[0].new_empty((len(segments), len(branch.sample_ratios), branch.input_projection.in_features))
     ratios = segments.new_tensor(branch.sample_ratios)
     for level, sequence in enumerate(features):
         indices = (levels == level).nonzero(as_tuple=True)[0]
@@ -96,11 +97,15 @@ def encode_segments(branch, features, segments, levels, strides, chunk=256):
             w = (pos-left).unsqueeze(-1)
             a = sequence[:, left.reshape(-1)].T.reshape(len(ids), len(ratios), -1)
             b = sequence[:, right.reshape(-1)].T.reshape_as(a)
-            tokens = branch.input_projection(a*(1-w)+b*w) + branch.position_embedding[None]
-            embedding = branch.output_norm(branch.encoder(tokens).mean(1))
-            result[ids] = F.normalize(embedding, dim=-1)
+            sampled[ids] = a*(1-w)+b*w
     if len(levels) and ((levels < 0).any() or (levels >= len(features)).any()):
         raise ValueError('FPN层非法')
+    # 恢复原候选顺序后统一经过编码器；不可按FPN层拆成不同的GEMM batch，
+    # 否则真实GPU上小batch的累计舍入可能越过已冻结的等价性阈值。
+    for start in range(0, len(segments), chunk):
+        tokens = branch.input_projection(sampled[start:start+chunk]) + branch.position_embedding[None]
+        embedding = branch.output_norm(branch.encoder(tokens).mean(1))
+        result[start:start+chunk] = F.normalize(embedding, dim=-1)
     return result
 
 

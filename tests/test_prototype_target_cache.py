@@ -132,6 +132,18 @@ def test_empty_queries_and_memory_have_no_effect():
     assert torch.equal(memory_support(torch.ones(2,2),torch.tensor([0,1]),b),torch.zeros(2))
 
 
+def test_mixed_fpn_levels_use_one_original_order_encoder_batch():
+    module=run_path(str(Path(__file__).resolve().parents[1]/'libs/models/SADA/prototype_capacity.py'))
+    branch=module['VLMProposalCoAdaptationBranch'](8,10).eval().requires_grad_(False)
+    calls=[]
+    hook=branch.encoder.register_forward_pre_hook(lambda m,args:calls.append(args[0].shape[0]))
+    try:
+        encode_segments(branch,[torch.randn(1,8,32),torch.randn(1,8,16)],
+                        torch.tensor([[2.,12.],[3.,15.]]),torch.tensor([1,0]),[1,2])
+    finally:hook.remove()
+    assert calls==[2]  # 不能按层变成[1,1]，否则真实GPU的GEMM舍入路径不同。
+
+
 def test_specification_has_no_training_or_test_cache_writes():
     s=specification()
     assert s['trainable_parameters']==0 and s['validation_cache_writes'] is False

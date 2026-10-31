@@ -185,7 +185,7 @@ def inference_worker(args):
             levels = torch.tensor(levels, device='cuda:0', dtype=torch.long)
             vector = encode_segments(branch, features, boxes, levels, model.fpn_strides)
             if not sampling_checked:
-                sample = min(4, len(boxes))
+                sample = len(boxes)  # 单视频原40名单不超过40项，比较同一完整batch。
                 original = branch.encode(features, [dict(segments=boxes[:sample], levels=levels[:sample])], model.fpn_strides)['embedding']
                 difference = float((original-vector[:sample]).abs().max())
                 if not torch.allclose(original, vector[:sample], rtol=1e-5, atol=2e-6):
