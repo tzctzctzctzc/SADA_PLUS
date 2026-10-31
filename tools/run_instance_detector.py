@@ -53,7 +53,7 @@ def main(args):
         protocol.save(root/'state.json',dict(phase='train' if args.train else 'probe',pid=os.getpid(),child=child.pid,gpu=lease['index']))
         if child.wait():raise RuntimeError('新实例结构真实阶段失败')
         if args.train:
-            names=('config.json','architecture.json','plan.json','initialization.json','metrics.jsonl','termination.json',
+            names=('config.json','architecture.json','plan.json','acceptance.json','initialization.json','metrics.jsonl','termination.json',
                 'best.pt','latest.pt','gpu.json','evaluation/source_val.json','evaluation/target_val.json','evaluation/manifest.json')
             protocol.save(root/'complete.json',dict(schema=engine.SCHEMA,shift=args.shift,code=identity,
                 artifacts={n:protocol.sha(root/n) for n in names}))

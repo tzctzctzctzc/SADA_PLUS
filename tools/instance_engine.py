@@ -176,6 +176,8 @@ def audit(root):
     if record['schema']!=SCHEMA or cfg['baseline']['code']!=plan['code'] or spec!=specification(plan['query_budget']['num_queries']):raise ValueError('新结构身份或规格不一致')
     for n,h in record['artifacts'].items():
         if sha(root/n)!=h:raise ValueError('完成工件改变: '+n)
+    for p,h in read(root/'acceptance.json').items():
+        if sha(p)!=h:raise ValueError('真实GPU验收改变')
     if sha(cfg['dataset']['json_file'])!=cfg['baseline']['source_manifest_sha256']:raise ValueError('源输入改变')
     terminal=read(root/'termination.json');expected=termination(terminal['history'])
     if terminal['decision']!=expected:raise ValueError('未在首次合法源早停边界停止')
