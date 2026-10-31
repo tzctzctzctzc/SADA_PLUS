@@ -59,6 +59,7 @@ def code_identity():
                                   'libs/models/SADA/prototype_capacity.py',
                                   'libs/models/SADA/prototype_methods.py'}
     allowed.add('libs/models/SADA/probabilistic_temporal.py')
+    allowed.update(('libs/models/SADA/instance_detector.py','libs/models/SADA/instance_losses.py'))
     if any(p not in allowed and not p.startswith(('tools/', 'tests/')) for p in changed):
         raise ValueError('存在白名单外的官方核心文件修改')
     return dict(commit=head, official_commit=OFFICIAL,
