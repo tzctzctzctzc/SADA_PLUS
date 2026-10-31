@@ -187,6 +187,7 @@ def capture(ctx, cfg, epoch, history):
         schedulers=[x.state_dict() for x in schedulers(ctx)],
         rng=dict(python=random.getstate(), numpy=np.random.get_state(), cpu=torch.get_rng_state(),
                  cuda=[torch.cuda.get_rng_state(0)], loaders={k:g.get_state() for k,g in ctx.generators.items()}))
+    if cfg.get('context_transfer'):result['schema']=cfg['context_transfer']['schema']
     if cfg.get('endpoint_risk'):
         from tools.endpoint_risk_engine import capture_extra
         result['endpoint_risk']=capture_extra(ctx)
@@ -241,11 +242,12 @@ def phase_weight_separation(model):
 
 def probe(cfg, output, warmup_steps=2, timed_steps=6):
     ctx = build(cfg)
+    if cfg.get('context_transfer'):ctx.model.context_gradient_probe=True
     # 固定40/200名单不能用前6批覆盖来代表；诊断遍历完整原始epoch，不补抽候选。
     if cfg.get('prototype_capacity'):
         timed_steps=max(len(ctx.train_loader_src),len(ctx.train_loader_tgt))
-    diagnostic_epochs=list(range(1,6)) if cfg.get('phase_alignment') else [1,5]
-    if cfg.get('phase_alignment'):warmup_steps=0
+    diagnostic_epochs=list(range(1,6)) if cfg.get('phase_alignment') or cfg.get('context_transfer') else [1,5]
+    if cfg.get('phase_alignment') or cfg.get('context_transfer'):warmup_steps=0
     reports = {}
     for epoch in diagnostic_epochs:
         epoch_setup(ctx, epoch)
@@ -276,6 +278,8 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
             model_updated=changed, source_gradient_norm=ctx.first_gradient_norm,target_gt_losses=[0.,0.,0.])
         if cfg.get('prototype_capacity'):
             values=ctx.train_metrics.result()
+            if cfg.get('context_transfer'):
+                reports[str(epoch)]['context_transfer']={k[len('t_context_'):]:float(v) for k,v in values.items() if k.startswith('t_context_')}
             if cfg.get('phase_alignment'):
                 reports[str(epoch)]['phase_alignment']={k[2:]:float(v) for k,v in values.items() if k.startswith('t_phase_')}
                 reports[str(epoch)]['phase_weight_separation']=phase_weight_separation(ctx.model)
@@ -361,6 +365,8 @@ def train(cfg, entry, resume=None, pause_after=None):
                    target_gt_cls_loss=0., target_gt_reg_loss=0., target_gt_downstream_loss=0.)
         if cfg.get('prototype_capacity'):
             row['auxiliary']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_rq3_')}
+        if cfg.get('context_transfer'):
+            row['context_transfer']={k[len('t_context_'):]:float(v) for k,v in metrics.items() if k.startswith('t_context_')}
         if cfg.get('endpoint_risk'):
             row['endpoint_risk']={k[len('t_endpoint_'):]:float(v) for k,v in metrics.items() if k.startswith('t_endpoint_')}
         if cfg.get('background_oracle'):

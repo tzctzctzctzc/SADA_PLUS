@@ -557,6 +557,10 @@ class SADA(nn.Module):
             self.rq3_capacity=build_capacity(cfg['prototype_capacity'],fpn_dim,self.num_classes,
                 self.fpn_strides,self.reg_range,self.device)
         self.endpoint_risk = None
+        self.context_transfer = None
+        if cfg.get('context_transfer'):
+            from .context_transfer import SourceContextTransfer
+            self.context_transfer=SourceContextTransfer(cfg,self.num_class_orig)
         self.background_oracle = None
         self.oracle_target_positive = None
         if cfg.get('background_oracle'):
@@ -871,6 +875,14 @@ class SADA(nn.Module):
                 for key,value in auxiliary.items():
                     losses['rq3_'+key]=torch.as_tensor(value,device=self.device).detach()
                 losses['downstream_loss']=losses['downstream_loss']+auxiliary['loss']
+
+            if mode=='train' and self.context_transfer is not None and curr_epoch>=self.cfg['train_cfg']['warmup_adv']:
+                mixed=self.context_transfer(self,video_list_src,video_list_tgt,curr_epoch)
+                losses['context_task_loss']=mixed['loss']
+                if mixed['loss'].requires_grad:
+                    losses['downstream_loss']=losses['downstream_loss']+self.cfg['context_transfer']['policy']['weight']*mixed['loss']
+                for key,value in mixed.items():
+                    if key!='loss':losses['context_'+key]=torch.as_tensor(value,device=self.device).detach()
 
             if mode=='train' and self.endpoint_risk is not None:
                 source_variance=self.endpoint_risk(risk_features_src)

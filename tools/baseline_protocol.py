@@ -61,6 +61,7 @@ def code_identity():
                                   'libs/models/SADA/endpoint_risk.py',
                                   'libs/models/SADA/background_oracle.py',
                                   'libs/models/SADA/phase_alignment.py',
+                                  'libs/models/SADA/context_transfer.py',
                                   'libs/models/SADA/prototype_methods.py'}
     if any(p not in allowed and not p.startswith(('tools/', 'tests/')) for p in changed):
         raise ValueError('存在白名单外的官方核心文件修改')
@@ -134,6 +135,8 @@ def audit_entry(entry, expected_schema=SCHEMA, acceptance_path=None):
         if sha(path) != digest:
             raise ValueError('完成工件SHA改变: '+path)
     cfg = read(entry/'config.json')
+    if cfg.get('context_transfer') and expected_schema!='prototype-source-context-transfer-v1':
+        raise ValueError('源上下文迁移必须使用专项审计身份')
     phase_schema='prototype-phase-mechanism-control-v1' if cfg.get('phase_control') else 'prototype-relative-phase-alignment-v1'
     if cfg.get('phase_alignment') and expected_schema!=phase_schema:
         raise ValueError('角色对齐不是旧基线/Prototype身份，必须使用专项审计')
