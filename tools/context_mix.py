@@ -27,6 +27,7 @@ def specification(variant):
                 pair_margin=1., context_fraction=[.25, .5],
                 gt_coordinates='continuous_feature_grid_translation_only',
                 supervision='source_train_task_gt_inside_inserted_patch_only',
+                loss_location='inside_original_downstream_before_original_stage_weight',
                 inference='unchanged', independent_rng=True, cache_bytes=536870912)
 
 
@@ -203,7 +204,7 @@ def draw_pair(bank, target, rng, context_kind):
     metadata.update(video_id='synthetic_source_gt', crop_start=0, crop_feat_len=n, video_length=n)
     views = [dict(feats=positive, segments=segments, labels=labels, metadata=metadata),
              dict(feats=negative, segments=segments.new_empty(0, 2), labels=labels.new_empty(0), metadata=metadata)]
-    main = [x+u for x in patch['main']]
+    main = (torch.tensor(patch['main'],dtype=torch.float32)+u).tolist()
     event = dict(source_video=table['videos'][patch['video']]['video_id'], source_patch=[patch['start'],patch['end']],
                  source_background_video=table['videos'][bg['video']]['video_id'], source_background=[bg_start,bg_start+width],
                  source_context_video=table['videos'][context_id]['video_id'], source_context_start=context_start,
@@ -277,7 +278,8 @@ def install(ctx, cfg):
     if options['specification'] != spec or sha(options['table']) != options['table_sha256']:
         raise ValueError('上下文实验spec或源表SHA改变')
     table = read(options['table'])
-    if table['source_manifest_sha256'] != cfg['baseline']['source_manifest_sha256']:
+    if (table['source_manifest_sha256'] != cfg['baseline']['source_manifest_sha256'] or
+            table['target_manifest_sha256'] != cfg['baseline']['target_manifest_sha256']):
         raise ValueError('源供体表不匹配')
     bank = FeatureBank(table, spec['cache_bytes'])
     model = ctx.model
