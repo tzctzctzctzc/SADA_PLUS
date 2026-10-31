@@ -107,4 +107,4 @@ def test_source_map_selection_unchanged_by_branch():
     train=next(n for n in ast.parse(text).body if isinstance(n,ast.FunctionDef) and n.name=='train')
     value=ast.unparse(train)
     assert 'source_validation_map(ctx, epoch' in value and 'score > best' in value
-    assert 'source_validation_loss' in value and 'row['auxiliary']' in value
+    assert 'source_validation_loss' in value and "row['auxiliary']" in value
