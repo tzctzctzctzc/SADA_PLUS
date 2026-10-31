@@ -17,6 +17,7 @@ SPEC = dict(population='original_levels012_threshold_deduplicated_raw_fully_visi
     seed=123, bootstrap_replicates=2000, source_val_previously_used_for_checkpoint_selection=True)
 SPEC['readouts'] = ['nearest_ready_source_prototype', 'source_CE_classifier']
 SPEC['readout_preference'] = 'nearest_prototype_if_passed_else_CE_if_passed_no_target_selection'
+SPEC['prototype_similarity'] = 'cosine_renormalize_frozen_EMA_prototype_vectors_without_mutation'
 GATE = dict(minimum_mean_net_correction_pp=1., minimum_mean_eligible_coverage=.05,
     minimum_mean_selected_precision=.70, minimum_clustered_bootstrap_lower_net_pp=0., target_effect_proof=False)
 
@@ -125,6 +126,11 @@ def bank_prediction(cosines, ready):
     return int(values.argmax()),float((ordered[-1]-ordered[-2])/2)
 
 
+def prototype_cosines(embedding, prototypes):
+    # EMA平均后的原型未必单位长度；只读计算余弦，不改冻结buffer。
+    return torch.nn.functional.normalize(embedding,dim=-1) @ torch.nn.functional.normalize(prototypes,dim=-1).T
+
+
 def bank_rows(rows):
     return [dict(r,prototype_class=r['bank_class'],prototype_margin=r['bank_margin']) for r in rows]
 
@@ -156,7 +162,7 @@ def observe(model, video):
             levels=torch.tensor([r['level'] for r in group], device=fpn[0].device))
         encoded = branch.encode(fpn, [proposal], model.rq3_capacity.strides)
         probabilities = encoded['logits'].softmax(-1).cpu().numpy()
-        cosines = (encoded['embedding'] @ branch.source_prototypes.T).cpu().numpy()
+        cosines = prototype_cosines(encoded['embedding'],branch.source_prototypes).cpu().numpy()
         ready = branch.source_prototype_ready.cpu().tolist()
         classes, margins = prediction_margin(probabilities)
         for j, row in enumerate(group):

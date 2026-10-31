@@ -1,8 +1,9 @@
 import copy
 import numpy as np
 import pytest
+import torch
 from tools.branch_complementarity import (foreground_distribution, prediction_margin, matching_labels,
-    bin_index, calibrate, selected, summarize, source_decision, bank_prediction, SPEC)
+    bin_index, calibrate, selected, summarize, source_decision, bank_prediction, prototype_cosines, SPEC)
 
 
 def row(d=0,b=1,gt=(1,),dm=.1,bm=.9):
@@ -34,6 +35,13 @@ def test_bins_include_boundaries_without_out_of_range():
 def test_nearest_prototype_ignores_unready_and_requires_two_real_classes():
     assert bank_prediction([.1,.9,.5],[True,False,True])==(2,.2)
     assert bank_prediction([.1,.9],[True,False])==(-1,0.)
+
+
+def test_ema_prototype_norm_does_not_change_nearest_cosine_and_buffers_unchanged():
+    x=torch.tensor([[1.,1.]]);bank=torch.tensor([[10.,0.],[0.,.1]])
+    before=bank.clone();values=prototype_cosines(x,bank)
+    torch.testing.assert_close(values,torch.tensor([[2**-.5,2**-.5]]))
+    assert torch.equal(before,bank)
 
 
 def test_source_calibration_counts_unmatched_as_wrong():
