@@ -164,8 +164,9 @@ def evaluate(cfg,spec,root):
                     for k,v in [('t-start',result['segments'][:,0]),('t-end',result['segments'][:,1]),('label',result['labels']),('score',result['scores'])]:columns[k]+=v.tolist()
         evaluator=ANETdetection(annotation,splits,num_workers=4,action_subsampling='10_majority_classes')
         ap,mean,*_=evaluator.evaluate({k:np.asarray(v) for k,v in columns.items()},verbose=True)
-        result=dict(map_0.1_to_0.5=float(mean),map_by_tiou=[float(x) for x in ap],videos=len(dataset),
+        result=dict(map_by_tiou=[float(x) for x in ap],videos=len(dataset),
             prediction_count=len(columns['score']),selected_epoch=saved['epoch'],state='teacher',checkpoint_sha256=sha(root/'best.pt'))
+        result['map_0.1_to_0.5']=float(mean)
         save(root/'evaluation'/(domain+'_val.json'),result);results[domain]=result
     save(root/'evaluation/manifest.json',dict(results=results,annotation_sha256=sha(annotation),checkpoint_sha256=sha(root/'best.pt')))
 
