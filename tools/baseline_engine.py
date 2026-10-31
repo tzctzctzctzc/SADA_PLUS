@@ -273,7 +273,7 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
     if not math.isfinite(validation) or validation <= 0:
         raise ValueError('真实源验证失败')
     # 内存序列化真实模型/EMA/优化器，不写诊断checkpoint；检查GPU随机流可真正接续。
-    saved=capture(ctx,cfg,5,[[5,validation]])
+    saved=capture(ctx,cfg,5,[[5,source_map]])
     buffer=io.BytesIO();torch.save(saved,buffer);buffer.seek(0)
     saved=torch.load(buffer,map_location='cpu');buffer.close()
     validate_cuda_rng(saved['rng']['cuda'])
@@ -282,7 +282,7 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
             cuda=torch.rand(4,device='cuda:0'),loaders={k:torch.randperm(8,generator=g) for k,g in ctx.generators.items()})
     restore(ctx,saved);expected_draw=tensor_digest(draws())
     restore(ctx,saved)
-    actual=capture(ctx,cfg,5,[[5,validation]])
+    actual=capture(ctx,cfg,5,[[5,source_map]])
     if tensor_digest(actual)!=tensor_digest(saved) or tensor_digest(draws())!=expected_draw:
         raise ValueError('真实GPU完整状态恢复或随机流重放失败')
     restore(ctx,saved)
