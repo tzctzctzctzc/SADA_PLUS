@@ -1,6 +1,7 @@
 """六方向正规源侧验证：源train固定拟合一次，只在末轮核验源val真实AP。"""
 import argparse
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
@@ -25,16 +26,25 @@ def source_inputs(args, identity):
             raise ValueError('不是冻结原Prototype参考')
         source = Path(cfg['dataset']['json_file'])
         if p.sha(source) != cfg['baseline']['source_manifest_sha256']: raise ValueError('源manifest漂移')
-        members = {}
+        members = {};physical = {};objects = {}
         for label, splits in [('train',cfg['src_train_split']), ('validation',cfg['src_val_split'])]:
             ds = dataset(cfg, source, splits, False)
             members[label] = [row['id'] for row in ds.data_list]
             if not members[label]: raise ValueError('源视频为空')
+            physical[label] = {};objects[label] = []
+            for video_id in members[label]:
+                if re.fullmatch(r'P[0-9]{2}_[0-9]{2,3}',video_id) is None:raise ValueError('不是EPIC原物理视频ID')
+                feature=(Path(cfg['dataset']['feat_folder'])/((cfg['dataset']['file_prefix'] or '')+video_id+cfg['dataset']['file_ext'])).resolve()
+                stat=feature.stat();physical[label][video_id]=str(feature);objects[label].append((stat.st_dev,stat.st_ino))
         if set(members['train']) & set(members['validation']): raise ValueError('源train/val交叉')
+        if set(physical['train'].values()) & set(physical['validation'].values()) or set(objects['train']) & set(objects['validation']):
+            raise ValueError('源train/val指向相同物理文件')
         allowed = set(members['train']) | set(members['validation'])
         if not set(p.read(source)['database']) <= allowed: raise ValueError('源manifest还含其它域视频，拒绝读取')
         proofs[shift] = dict(reference=str(ref), config_sha256=p.sha(ref/'config.json'),
-            source_manifest=str(source), source_manifest_sha256=p.sha(source), membership=members)
+            source_manifest=str(source), source_manifest_sha256=p.sha(source), membership=members,
+            physical_video_identity='EPIC_original_Pxx_clip_id_and_resolved_feature_object',physical_features=physical,
+            physical_train_validation_disjoint=True)
     os.chdir(CODE)
     p.save(args.output_root/'inputs.json', dict(status='passed', code=identity, specification=SPEC,
         target_data_read=False, sources=proofs))

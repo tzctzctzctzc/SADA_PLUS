@@ -37,10 +37,12 @@ def region_features(fpn, valid, points, boxes, scores, labels, seconds, classes)
     coordinates = (boxes-origin)/stride
     prefix = torch.cat([feature.new_zeros(feature.shape[0], 1), feature.cumsum(-1)], -1)
     def mean(lo, hi):
-        lo = lo.ceil().long().clamp(0, count)
-        hi = (hi.floor().long()+1).clamp(0, count)
-        length = (hi-lo).clamp_min(0)
-        return ((prefix[:, hi]-prefix[:, lo])/length.clamp_min(1)[None] * (length>0)[None]).T
+        left = lo.ceil().long().clamp(0, count)
+        right = (hi.floor().long()+1).clamp(0, count)
+        length = (right-left).clamp_min(0)
+        result = ((prefix[:, right]-prefix[:, left])/length.clamp_min(1)[None] * (length>0)[None]).T
+        short = (length==0) & (hi>=lo) & (hi>=0) & (lo<=count-1)
+        return torch.where(short[:,None], nearest((lo+hi)/2), result)
     def nearest(at):
         return feature[:, at.round().long().clamp(0, count-1)].T
     start, end = coordinates.unbind(-1)
@@ -59,22 +61,30 @@ class Readout(nn.Module):
         return self.net(x).squeeze(-1)
 
 
+def rescore_scores(original, quality):
+    return original*quality
+
+
 def fit_readout(paths, device):
     # 全部源train预测参加；统计量及优化只用train，不用val选择epoch/权重。
     rows = [np.load(path, allow_pickle=False) for path in paths]
+    classes = int(rows[0]['classes'])
+    if any(int(r['classes']) != classes for r in rows):raise ValueError('源缓存类别维度不同')
     x = np.concatenate([r['features'] for r in rows]); y = np.concatenate([r['quality'] for r in rows])
     for row in rows: row.close()
     if len(x) < SPEC['batch'] or not np.isfinite(x).all() or not np.isfinite(y).all():
         raise ValueError('源train读出样本不足或非有限')
     mean = x.mean(0, dtype=np.float64).astype(np.float32)
     std = x.std(0, dtype=np.float64).clip(.001).astype(np.float32)
+    mean[-classes:] = 0; std[-classes:] = 1  # 类别one-hot保持0/1，不施加连续变量标准化。
     generator = torch.Generator().manual_seed(SPEC['seed'])
-    torch.manual_seed(SPEC['seed']); torch.cuda.manual_seed(SPEC['seed'])
+    torch.manual_seed(SPEC['seed'])
+    if str(device).startswith('cuda'): torch.cuda.manual_seed(SPEC['seed'])
     model = Readout(x.shape[1]).to(device)
     initial = {k:v.detach().cpu().clone() for k,v in model.state_dict().items()}
     optimizer = torch.optim.AdamW(model.parameters(), lr=SPEC['lr'], weight_decay=SPEC['weight_decay'])
     norm_mean, norm_std = torch.from_numpy(mean).to(device), torch.from_numpy(std).to(device)
-    history = []; first_gradient_norm = None
+    history = []; first_gradient_norm = None; updates = 0
     for epoch in range(1, SPEC['epochs']+1):
         order = torch.randperm(len(x), generator=generator).numpy(); total = 0.
         for start in range(0, len(x), SPEC['batch']):
@@ -88,15 +98,17 @@ def fit_readout(paths, device):
                 first_gradient_norm = float(sum(v.grad.square().sum() for v in model.parameters()).sqrt())
                 if not math.isfinite(first_gradient_norm) or first_gradient_norm<=0:raise ValueError('源读出梯度无效')
             optimizer.step()
+            updates += 1
             total += float(loss.detach())*len(ids)
-        history.append(dict(epoch=epoch, loss=total/len(x)))
+        history.append(dict(epoch=epoch, loss=total/len(x),samples=len(x),optimizer_updates=updates))
         print('READOUT_EPOCH', epoch, history[-1]['loss'], flush=True)
     del x, y; gc.collect()
     model.eval()
     updated = any(not torch.equal(initial[k],v.detach().cpu()) for k,v in model.state_dict().items())
     if not updated or not all(bool(torch.isfinite(v).all()) for v in model.parameters()):raise ValueError('源读出参数未正确更新')
     return model, mean, std, history, dict(first_gradient_norm=first_gradient_norm,parameters_updated=updated,
-        validation_used_for_fit=False,completed_epochs=SPEC['epochs'])
+        validation_used_for_fit=False,completed_epochs=SPEC['epochs'],optimizer_updates=updates,
+        expected_optimizer_updates=math.ceil(history[-1]['samples']/SPEC['batch'])*SPEC['epochs'])
 
 
 def score_predictions(model, mean, std, path, device):
@@ -106,7 +118,7 @@ def score_predictions(model, mean, std, path, device):
             for start in range(0, len(original), SPEC['batch']):
                 x = torch.from_numpy((rows['features'][start:start+SPEC['batch']]-mean)/std).to(device)
                 prediction[start:start+SPEC['batch']] = model(x).sigmoid().cpu().numpy()
-        return rows['segments'].copy(), rows['labels'].copy(), original, original*prediction
+        return rows['segments'].copy(), rows['labels'].copy(), original, rescore_scores(original,prediction)
 
 
 def worker(args):
@@ -120,6 +132,9 @@ def worker(args):
     entry = args.output_root/'source'/args.child
     entry.mkdir(parents=True, exist_ok=False)
     identity = p.code_identity(); reference = args.control/'formal/control'/args.child
+    input_proof=p.read(args.output_root/'inputs.json')
+    if input_proof['code']!=identity or input_proof['target_data_read']:raise ValueError('源预检代码身份不一致')
+    source_proof=input_proof['sources'][args.child]
     cfg = p.read(reference/'config.json'); done = p.read(reference/'complete.json')
     for name in ['config.json', 'best.pt', 'termination.json', 'evaluation/source_val.json']:
         if p.sha(reference/name) != done['artifacts'][str(reference/name)]: raise ValueError('源参考工件改变: '+name)
@@ -138,6 +153,7 @@ def worker(args):
     before = tensor_digest(model.state_dict()); cache = {}; memberships = {}; feature_sha = {}; null_checked = False
     for split, subsets in [('train', cfg['src_train_split']), ('validation', cfg['src_val_split'])]:
         ds = dataset(cfg, manifest, subsets, False); memberships[split] = []; cache[split] = []
+        if [row['id'] for row in ds.data_list]!=source_proof['membership'][split]:raise ValueError('实际源成员与物理隔离预检不符')
         for i in range(len(ds)):
             raw = ds[i]; video_id = raw['metadata']['video_id']; memberships[split].append(video_id)
             video, _ = prepare_source_video(raw, device); p.assert_no_target_gt([video])
@@ -158,7 +174,7 @@ def worker(args):
                     scores, labels, seconds[:,1]-seconds[:,0], model.num_classes)
             path = entry/'features'/split/(video_id+'.npz'); path.parent.mkdir(parents=True, exist_ok=True)
             np.savez(path, features=features.cpu().numpy(), quality=quality.cpu().numpy(),
-                segments=seconds.cpu().numpy(), labels=labels.cpu().numpy(), scores=scores.cpu().numpy())
+                segments=seconds.cpu().numpy(), labels=labels.cpu().numpy(), scores=scores.cpu().numpy(),classes=np.asarray(model.num_classes))
             cache[split].append(dict(video_id=video_id, path=str(path), sha256=p.sha(path), predictions=len(scores)))
             feature = Path(cfg['dataset']['feat_folder'])/((cfg['dataset']['file_prefix'] or '')+video_id+cfg['dataset']['file_ext'])
             feature_sha[str(feature)] = p.sha(feature)
@@ -173,14 +189,18 @@ def worker(args):
     readout.to(device); columns = {name:{k:[] for k in ['video-id','t-start','t-end','label','score']} for name in ['original','readout']}
     for record in cache['validation']:
         segments, labels, scores, rescored = score_predictions(readout, mean, std, record['path'], device)
-        for name, confidence in [('original', scores), ('readout', rescored)]:
+        null_scores=rescore_scores(scores,np.ones_like(scores));np.testing.assert_array_equal(null_scores,scores)
+        for name, confidence in [('original', null_scores), ('readout', rescored)]:
             target = columns[name]; target['video-id'].extend([record['video_id']]*len(scores))
             for key, value in [('t-start',segments[:,0]),('t-end',segments[:,1]),('label',labels),('score',confidence)]:target[key].extend(value.tolist())
     results = {}
     for name, values in columns.items():
         evaluator = ANETdetection(str(manifest), cfg['src_val_split'], num_workers=2, action_subsampling='10_majority_classes')
         ap, average, *_ = evaluator.evaluate({k:np.asarray(v) for k,v in values.items()}, verbose=False)
-        results[name] = {'map_0.1_to_0.5':float(average), 'map_by_tiou':[float(v) for v in ap], 'predictions':len(values['score'])}
+        results[name] = {'map_0.1_to_0.5':float(average), 'map_by_tiou':[float(v) for v in ap], 'predictions':len(values['score']),
+            'ap_by_tiou_and_class':evaluator.ap.tolist(),
+            'original_class_ids':[int(evaluator.idx_to_activity_index[i]) for i in range(len(evaluator.activity_index))],
+            'tiou_thresholds':evaluator.tiou_thresholds.tolist()}
     old = p.read(reference/'evaluation/source_val.json')
     if abs(results['original']['map_0.1_to_0.5']-old['map_0.1_to_0.5']) > 1e-5:
         raise ValueError('源完整预测未复现原正式source mAP')
@@ -189,6 +209,8 @@ def worker(args):
         target_videos_read=0, target_gt_used=False, frozen_reference=str(reference),
         reference_complete_sha256=p.sha(reference/'complete.json'), checkpoint_sha256=p.sha(reference/'best.pt'),
         source_manifest_sha256=p.sha(manifest), original_model_unchanged=True, full_backend_null_check=null_checked,
+        source_physical_membership_preflight_sha256=p.sha(args.output_root/'inputs.json'),
+        constant_one_quality_restores_original_scores_and_official_ap=True,
         fit_proof=fit_proof,
         unchanged_segments_labels_nms_and_prediction_count=True, results=results,
         delta_map_pp=100*(results['readout']['map_0.1_to_0.5']-results['original']['map_0.1_to_0.5']),
