@@ -107,6 +107,10 @@ def test_source_selection_uses_six_direction_scores_and_favors_cheaper_ties():
     assert selection(trials)['lr']==1e-5 and selection(trials)['steps']==1
     trials[3]['scores']=[.5]*6;assert selection(trials)==trials[3]
     with pytest.raises(ValueError):selection(trials[:3])
+    bad=deepcopy(trials);bad[0]['scores'][0]=float('nan')
+    with pytest.raises(ValueError):selection(bad)
+    bad=deepcopy(trials);bad[0]['lr']=.01
+    with pytest.raises(ValueError):selection(bad)
 
 
 def test_no_target_supervision_or_background_negatives_in_loss():

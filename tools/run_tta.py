@@ -23,6 +23,10 @@ ACTIVE={}
 def selection(candidates):
     if len(candidates)!=4 or any(len(x['scores'])!=6 for x in candidates):
         raise ValueError('源校准必须覆盖四种设置和全部六方向')
+    expected={(lr,steps) for lr in SPEC['learning_rates'] for steps in SPEC['steps']}
+    if ({(x['lr'],x['steps']) for x in candidates}!=expected or
+            any(not 0<=v<=1 for x in candidates for v in x['scores'])):
+        raise ValueError('源校准配置不唯一或mAP非法')
     # 先固定此规则，目标结果从不进入选择函数。
     return max(candidates,key=lambda x:(sum(x['scores'])/6,-x['steps'],-x['lr']))
 
@@ -132,7 +136,9 @@ def worker(args):
     if sha(job['metadata_manifest'])!=job['metadata_sha256']:raise ValueError('无标签视频成员改变')
     if job['kind']=='target':
         frozen=Path(job['selection_file'])
-        if sha(frozen)!=job['selection_sha256'] or read(frozen)['target_results_seen']:
+        selected=read(frozen)
+        if (sha(frozen)!=job['selection_sha256'] or selected['target_results_seen'] or
+                job['lr']!=selected['chosen']['lr'] or job['steps']!=selected['chosen']['steps']):
             raise ValueError('必须先冻结纯源域选择，才能读取测试视频')
     # 父持物理锁，首次seed/model CUDA前再次核UUID/显存。
     guard=first_cuda_guard();os.chdir(args.data_root)
@@ -199,7 +205,7 @@ def audit_job(path):
         if any(x['target_gt_seen'] for x in proofs):raise ValueError('TTA使用目标GT')
         initials={x['initial_parameter_sha256'] for x in proofs}
         if len(initials)>1:raise ValueError('视频之间没有恢复同一个初始化')
-    return dict(job=str(path),complete_sha256=sha(out/'complete.json'),**result)
+    return dict(job=str(path),shift=job['shift'],variant=job.get('variant'),complete_sha256=sha(out/'complete.json'),**result)
 
 
 def run_jobs(root,jobs,data,identity,phase):
@@ -281,10 +287,12 @@ def main(args):
             manifests[s]=dict(source_meta=source_meta,source_gt=source_gt,target_meta=target_meta,
                 target_gt=cfg['baseline']['annotation_for_offline_evaluation'])
         banks=[write_job(root,'banks/'+s,'bank',s,prototype,identity,manifests[s]['source_meta'],manifests[s]['source_gt']) for s in SHIFTS]
-        run_jobs(root,banks,data,identity,'source_reference_banks')
+        # 先用S1参考验收真实更新，避免未验收就铺开其余方向的GPU准备。
+        run_jobs(root,banks[:1],data,identity,'source_reference_bank_S1')
         diag=write_job(root,'diagnostic/S1','diagnostic','S1',prototype,identity,manifests['S1']['source_meta'],manifests['S1']['source_gt'],
             bank=str(root/'banks/S1/bank.pt'),bank_sha256=sha(root/'banks/S1/bank.pt'))
         run_jobs(root,[diag],data,identity,'real_gpu_diagnostic')
+        run_jobs(root,banks[1:],data,identity,'source_reference_banks_remaining')
         candidates=[]
         for lr in SPEC['learning_rates']:
             for steps in SPEC['steps']:
@@ -307,7 +315,8 @@ def main(args):
                 jobs.append(write_job(root,'formal/'+variant+'/'+s,'target',s,prototype,identity,
                     manifests[s]['target_meta'],manifests[s]['target_gt'],**options))
             results=run_jobs(root,jobs,data,identity,'target_'+variant)
-            if len(results)!=6:raise ValueError('TTA方法未完成六方向')
+            if len(results)!=6 or {r['shift'] for r in results}!=set(SHIFTS):
+                raise ValueError('TTA方法未完成精确六方向')
             all_results[variant]=results
             save(root/'formal'/variant/'final_audit.json',dict(status='passed',count=6,results=results,
                 mean_map=sum(x['map'] for x in results)/6,source_selection_sha256=sha(frozen)))
