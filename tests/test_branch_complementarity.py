@@ -2,7 +2,7 @@ import copy
 import numpy as np
 import pytest
 from tools.branch_complementarity import (foreground_distribution, prediction_margin, matching_labels,
-    bin_index, calibrate, selected, summarize, source_decision, SPEC)
+    bin_index, calibrate, selected, summarize, source_decision, bank_prediction, SPEC)
 
 
 def row(d=0,b=1,gt=(1,),dm=.1,bm=.9):
@@ -29,6 +29,11 @@ def test_multilabel_gt_matching_is_class_blind_and_not_any_overlap():
 
 def test_bins_include_boundaries_without_out_of_range():
     assert [bin_index(v) for v in (0,.2,.999,1)]==[0,1,4,4]
+
+
+def test_nearest_prototype_ignores_unready_and_requires_two_real_classes():
+    assert bank_prediction([.1,.9,.5],[True,False,True])==(2,.2)
+    assert bank_prediction([.1,.9],[True,False])==(-1,0.)
 
 
 def test_source_calibration_counts_unmatched_as_wrong():

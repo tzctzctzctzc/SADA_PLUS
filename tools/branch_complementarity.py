@@ -15,6 +15,8 @@ SPEC = dict(population='original_levels012_threshold_deduplicated_raw_fully_visi
     gate='different_top1_and_calibrated_prototype_correctness_minus_detector_at_least_0.10',
     uncertainty_claim='empirical_branch_correctness_not_calibrated_target_uncertainty',
     seed=123, bootstrap_replicates=2000, source_val_previously_used_for_checkpoint_selection=True)
+SPEC['readouts'] = ['nearest_ready_source_prototype', 'source_CE_classifier']
+SPEC['readout_preference'] = 'nearest_prototype_if_passed_else_CE_if_passed_no_target_selection'
 GATE = dict(minimum_mean_net_correction_pp=1., minimum_mean_eligible_coverage=.05,
     minimum_mean_selected_precision=.70, minimum_clustered_bootstrap_lower_net_pp=0., target_effect_proof=False)
 
@@ -63,6 +65,7 @@ def calibrate(rows):
 
 
 def selected(row, calibration):
+    if row['prototype_class'] < 0: return False
     if row['detector_class'] == row['prototype_class']: return False
     # 无源样本的bin拒绝提供纠错监督，而非用先验0.5假装可信。
     a = calibration['detector'][bin_index(row['detector_margin'])]
@@ -91,7 +94,7 @@ def summarize(rows, calibration):
     return out
 
 
-def source_decision(results):
+def single_decision(results):
     if sorted(r['shift'] for r in results) != ['S'+str(i) for i in range(1, 7)]:
         raise ValueError('必须精确六方向')
     mean = math.fsum(r['metrics']['net_correction_pp'] for r in results)/6
@@ -115,6 +118,27 @@ def source_decision(results):
         frozen_gate=GATE, target_data_read=False, not_target_mAP=True)
 
 
+def bank_prediction(cosines, ready):
+    ready=np.asarray(ready,dtype=bool);cosines=np.asarray(cosines,dtype=np.float64)
+    if int(ready.sum())<2:return -1,0.
+    values=np.where(ready,cosines,-2.);ordered=np.sort(values)
+    return int(values.argmax()),float((ordered[-1]-ordered[-2])/2)
+
+
+def bank_rows(rows):
+    return [dict(r,prototype_class=r['bank_class'],prototype_margin=r['bank_margin']) for r in rows]
+
+
+def source_decision(results):
+    if not all('bank_metrics' in r for r in results):return single_decision(results)
+    ce=single_decision(results)
+    bank=single_decision([dict(r,metrics=r['bank_metrics'],per_video=r['bank_per_video']) for r in results])
+    chosen='nearest_ready_source_prototype' if bank['status']=='passed' else ('source_CE_classifier' if ce['status']=='passed' else None)
+    return dict(status='passed' if chosen else 'rejected',count=6,chosen_readout=chosen,
+        readouts=dict(nearest_ready_source_prototype=bank,source_CE_classifier=ce),
+        selection=SPEC['readout_preference'],target_data_read=False,not_target_mAP=True)
+
+
 @torch.no_grad()
 def observe(model, video):
     from tools.instance_task_source import rows_from_dense, fully_visible
@@ -132,6 +156,8 @@ def observe(model, video):
             levels=torch.tensor([r['level'] for r in group], device=fpn[0].device))
         encoded = branch.encode(fpn, [proposal], model.rq3_capacity.strides)
         probabilities = encoded['logits'].softmax(-1).cpu().numpy()
+        cosines = (encoded['embedding'] @ branch.source_prototypes.T).cpu().numpy()
+        ready = branch.source_prototype_ready.cpu().tolist()
         classes, margins = prediction_margin(probabilities)
         for j, row in enumerate(group):
             level = row['level']; idx = point_indices[level].get(float(row['absolute_feature_index']))
@@ -141,6 +167,8 @@ def observe(model, video):
             if int(dc[0]) != row['class_id']: raise ValueError('原候选类别与检测头不一致')
             row.update(detector_class=int(dc[0]), detector_margin=float(dm[0]), prototype_class=int(classes[j]),
                 prototype_margin=float(margins[j]), detector_scores=scores.tolist(), prototype_probabilities=probabilities[j].tolist())
+            bc,bm=bank_prediction(cosines[j],ready)
+            row.update(bank_class=bc,bank_margin=bm,bank_cosines=cosines[j].tolist(),bank_ready=ready)
     return rows, (points, masks, logits, offsets)
 
 
@@ -187,22 +215,26 @@ def worker(args):
             feature = Path(source_proof['physical_features'][split][vid]); features[str(feature)] = p.sha(feature)
             print('SOURCE_COMPLEMENTARITY', args.child, split, i+1, len(ds), len(rows), flush=True)
     calibration = calibrate(all_rows['train']); validation = all_rows['validation']
+    bank_calibration=calibrate(bank_rows(all_rows['train']));bank_validation=bank_rows(validation)
     per_video = [dict(video_id=vid, **summarize([r for r in validation if r['video_id'] == vid], calibration)) for vid in members['validation']]
+    bank_per_video=[dict(video_id=vid,**summarize([r for r in bank_validation if r['video_id']==vid],bank_calibration)) for vid in members['validation']]
     if before != tensor_digest(model.state_dict()): raise ValueError('诊断修改冻结模型')
     if not torch.equal(rng_cpu, torch.get_rng_state()) or not torch.equal(rng_cuda, torch.cuda.get_rng_state(0)):
         raise ValueError('只读诊断消耗了模型随机流')
     for split, rows in all_rows.items(): p.save(entry/(split+'_rows.json'), rows)
     p.save(entry/'calibration.json', calibration); p.save(entry/'membership.json', members)
+    p.save(entry/'bank_calibration.json',bank_calibration)
     p.save(entry/'source_truth.json', truths)
     p.save(entry/'result.json', dict(status='completed_source_complementarity', schema=SCHEMA, shift=args.child,
         code=identity, specification=SPEC, metrics=summarize(validation, calibration), per_video=per_video,
+        bank_metrics=summarize(bank_validation,bank_calibration),bank_per_video=bank_per_video,
         train_eligible=sum(bool(r['acceptable_classes']) for r in all_rows['train']),
         model_sha256_before=before, model_sha256_after=before, model_rng_unchanged=True, full_backend_null_check=null_checked,
         target_data_read=False, source_gt_input_to_model=False, formal_checkpoint_written=False,
         input_proof_sha256=p.sha(args.output_root/'inputs.json'), reference_artifacts=source_proof['reference_artifacts'],
         source_manifest_sha256=p.sha(cfg['dataset']['json_file']), feature_inputs=features,
         gpu_guard=guard, gpu_guard_sha256=p.sha(guard), peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,
-        artifacts={str(entry/name):p.sha(entry/name) for name in ('train_rows.json','validation_rows.json','calibration.json','membership.json','source_truth.json')}))
+        artifacts={str(entry/name):p.sha(entry/name) for name in ('train_rows.json','validation_rows.json','calibration.json','bank_calibration.json','membership.json','source_truth.json')}))
 
 
 def audit_source(entry):
@@ -228,6 +260,7 @@ def audit_source(entry):
             if row['video_id'] not in members[split]:raise ValueError('跨split候选')
             truth=truths[row['video_id']];labels,quality=matching_labels(truth['segments'],truth['labels'],row['feature_interval'])
             if labels!=row['acceptable_classes'] or abs(quality-row['maximum_tIoU'])>1e-9:raise ValueError('离线GT匹配未复现')
+            if bank_prediction(row['bank_cosines'],row['bank_ready'])!=(row['bank_class'],row['bank_margin']):raise ValueError('原型读出摘要改变')
             for name,vector in [('detector',foreground_distribution([row['detector_scores']])),('prototype',np.asarray([row['prototype_probabilities']]))]:
                 cls,margin=prediction_margin(vector)
                 if row[name+'_class']!=int(cls[0]) or abs(row[name+'_margin']-float(margin[0]))>1e-6:raise ValueError('分支预测摘要与原始分数不符')
@@ -236,11 +269,17 @@ def audit_source(entry):
     if summarize(rows['validation'],calibration)!=result['metrics']:raise ValueError('源纠错未复现')
     per_video=[dict(video_id=vid,**summarize([r for r in rows['validation'] if r['video_id']==vid],calibration)) for vid in members['validation']]
     if per_video!=result['per_video']:raise ValueError('视频聚类统计未复现')
+    bank_calibration=calibrate(bank_rows(rows['train']));bank_validation=bank_rows(rows['validation'])
+    if bank_calibration!=p.read(entry/'bank_calibration.json') or summarize(bank_validation,bank_calibration)!=result['bank_metrics']:
+        raise ValueError('最近原型纠错未复现')
+    bank_per_video=[dict(video_id=vid,**summarize([r for r in bank_validation if r['video_id']==vid],bank_calibration)) for vid in members['validation']]
+    if bank_per_video!=result['bank_per_video']:raise ValueError('原型视频聚类未复现')
     if (result['target_data_read'] or result['source_gt_input_to_model'] or result['formal_checkpoint_written'] or
         not result['model_rng_unchanged'] or not result['full_backend_null_check'] or result['model_sha256_before']!=result['model_sha256_after']):
         raise ValueError('只读源数据或模型隔离失败')
     guard=p.read(result['gpu_guard']);lease=p.read(guard['lease'])
     if (p.sha(result['gpu_guard'])!=result['gpu_guard_sha256'] or p.sha(guard['lease'])!=guard['lease_sha256'] or
         lease['commit']!=proof['code']['commit'] or guard['observed']['uuid']!=lease['observed']['uuid'] or
+        guard['owner_pid']!=lease['owner_pid'] or
         guard['observed']['free_mib']<lease['minimum_free_mib'] or lease['minimum_free_mib']<12288):raise ValueError('GPU准入证明不符')
     return dict(status='passed',shift=result['shift'],result=str(entry/'result.json'),result_sha256=p.sha(entry/'result.json'),metrics=result['metrics'])
