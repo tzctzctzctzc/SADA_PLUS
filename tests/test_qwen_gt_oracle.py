@@ -1,5 +1,5 @@
 import pytest
-from tools.run_qwen_gt_oracle import balanced,cid,prompt,option_order,OPTIONS,safe_row,metrics,shard_id
+from tools.run_qwen_gt_oracle import balanced,cid,prompt,option_order,OPTIONS,safe_row,metrics,shard_id,inside_indices
 
 
 def test_balanced_selection_deterministic_and_fills_budget():
@@ -31,3 +31,11 @@ def test_four_shards_are_disjoint_exhaustive_and_stable():
     sets=[{k for k in keys if shard_id(k)==s} for s in range(4)]
     assert set.union(*sets)==set(keys) and sum(map(len,sets))==len(keys)
     assert all(sets) and [shard_id(k) for k in keys]==[shard_id(k) for k in keys]
+
+
+def test_gt_sampling_never_reaches_outside_interval_even_for_short_actions():
+    times=[0.,.04,.08,.12,.16,.20,.24]
+    selected=inside_indices(times,.05,.19)
+    assert len(selected)==8 and all(.05<=times[i]<.19 for i in selected)
+    assert len(set(inside_indices(times,.075,.085)))==1
+    assert inside_indices(times,.081,.119) is None

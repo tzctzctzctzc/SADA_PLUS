@@ -69,6 +69,17 @@ def safe_row(row):
     return row
 
 
+def inside_indices(times,start,end):
+    lo=bisect_left(times,start);hi=bisect_left(times,end)
+    if lo>=hi:return None
+    chosen=[]
+    for k in range(8):
+        t=start+(end-start)*(k+.5)/8;i=bisect_left(times,t)
+        candidates={min(max(i,lo),hi-1),min(max(i-1,lo),hi-1)}
+        chosen.append(min(candidates,key=lambda j:(abs(times[j]-t),j)))
+    return chosen
+
+
 def prepare_video(video,items,args):
     import av
     from PIL import Image
@@ -80,13 +91,8 @@ def prepare_video(video,items,args):
         times=[float((x-origin)*stream.time_base) for x in timestamps]
     indices={};unavailable=[]
     for row in items:
-        start,end=row['start'],row['end'];lo=bisect_left(times,start);hi=bisect_left(times,end)
-        if lo>=hi:unavailable.append(row['candidate_id']);continue
-        chosen=[]
-        for k in range(8):
-            t=start+(end-start)*(k+.5)/8;i=bisect_left(times,t)
-            candidates={min(max(i,lo),hi-1),min(max(i-1,lo),hi-1)}
-            chosen.append(min(candidates,key=lambda j:(abs(times[j]-t),j)))
+        start,end=row['start'],row['end'];chosen=inside_indices(times,start,end)
+        if chosen is None:unavailable.append(row['candidate_id']);continue
         indices[row['candidate_id']]=chosen
     wanted=sorted({i for rr in indices.values() for i in rr})
     frames=exact_rgb_frames(path,wanted,args.recovery_root) if wanted else {}
@@ -218,7 +224,8 @@ def main(args):
     args.output=args.output.resolve();args.output.mkdir(parents=True,exist_ok=False)
     identity=code_identity();save(args.output/'plan.json',dict(code=identity,model='Qwen3-VL-8B-Instruct',model_revision=MODEL.name,
         scope='S1-S6-target-training-GT-intervals-only',maximum_per_shift=200,student_training=False,options=OPTIONS,
-        prompt_example=prompt('0'*64),physical_gpus=[0,1,2,3]))
+        prompt_example=prompt('0'*64),physical_gpus=[0,1,2,3],minimum_free_mib=22528,
+        memory_basis='previous single-card 8B max_memory 17408MiB plus 5120MiB inference headroom'))
     active={}
     def stop(signum,frame):
         signal.signal(signal.SIGTERM,signal.SIG_IGN);signal.signal(signal.SIGINT,signal.SIG_IGN)
@@ -239,7 +246,7 @@ def main(args):
             for shard in list(pending):
                 found=None
                 for index in (0,1,2,3):
-                    candidate=slot(index,args.data_root,args.output,24576,identity['commit'])
+                    candidate=slot(index,args.data_root,args.output,22528,identity['commit'])
                     try:lease=candidate.__enter__()
                     except BlockingIOError:continue
                     found=candidate,lease;break
