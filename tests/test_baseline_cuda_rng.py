@@ -42,7 +42,13 @@ def test_epoch_loop_and_original_model_math_are_unchanged():
     def loop(tree):
         train=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='train')
         return next(n for n in train.body if isinstance(n,ast.For))
-    assert ast.dump(loop(before))==ast.dump(loop(after))
+    # 本轮有意更换验证选模；逐个比较验证块之外的原训练操作。
+    def without_validation(node):
+        result=deepcopy(node)
+        result.body=[x for x in result.body if not (
+            isinstance(x,ast.If) and 'epoch % 5' in ast.unparse(x.test))]
+        return result
+    assert ast.dump(without_validation(loop(before)))==ast.dump(without_validation(loop(after)))
     for path in ('libs/models/SADA/meta_archs.py','libs/trainer/da_trainer.py','libs/models/SADA/optimizer.py'):
         assert subprocess.check_output(['git','show','90bdce09660b820df7d527aabf1d43df1350bc4b:'+path],cwd=CODE)==(CODE/path).read_bytes().replace(b'\r\n',b'\n')
 
