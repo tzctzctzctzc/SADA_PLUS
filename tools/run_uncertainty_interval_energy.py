@@ -86,7 +86,8 @@ def gpu(args):
                 losses.append(loss);selected.append(q.gather(1,choice[:,None]).squeeze(1));before.append(q[:,4]);oracle.append(q.masked_fill(~valid,-1).max(1).values);moved.append((choice!=4).float())
                 p=(-energy).masked_fill(~valid,-1e9).softmax(1);entropies.append(-(p*p.clamp_min(1e-9).log()).sum(1))
         avg=lambda xs:float((torch.cat(xs)*weights).sum()/weights.sum())
-        return dict(loss=avg(losses),mean_iou_before=avg(before),mean_iou_selected=avg(selected),mean_iou_grid_oracle=avg(oracle),moved_fraction=avg(moved),entropy=avg(entropies),source_validation_equal_video=True,not_independent_generalization_evidence=True)
+        selected_iou=avg(selected)
+        return dict(loss=1-selected_iou,pairwise_training_objective=avg(losses),mean_iou_before=avg(before),mean_iou_selected=selected_iou,mean_iou_grid_oracle=avg(oracle),moved_fraction=avg(moved),entropy=avg(entropies),source_validation_equal_video=True,not_independent_generalization_evidence=True)
     with torch.no_grad():
         a,x,d,labels,q,valid=batch(val,torch.arange(min(64,len(val['labels']))));assert select_interval(head(a,x,d,labels),valid).eq(4).all()
     report=validate();best=report['loss'];best_epoch=0;history=[dict(epoch=0,source_validation=best)]
@@ -167,7 +168,7 @@ def main(args):
     from tools.run_prototype_target_cache import prepare,INVENTORY,SHIFTS
     from tools.run_sada_baseline import acquire
     identity=code_identity();args.output.mkdir(parents=True,exist_ok=False)
-    save(args.output/'plan.json',dict(schema=SCHEMA,code=identity,specification=SPEC,route=4,revision=0,
+    save(args.output/'plan.json',dict(schema=SCHEMA,code=identity,specification=SPEC,route=4,revision=1,
         maximum_revisions=2,gpus=[0,1,2,3],reference=str(REFERENCE),target_parameter_search=False))
     prepare(args.output,REFERENCE,INVENTORY,identity)
     for shift in SHIFTS:

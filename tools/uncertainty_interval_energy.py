@@ -3,13 +3,14 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-SCHEMA='prototype-joint-interval-energy-v1'
-SPEC=dict(route=4,revision=0,seed=123,frozen_detector=True,source_only=True,
+SCHEMA='prototype-joint-interval-quality-ranking-v1'
+SPEC=dict(route=4,revision=1,seed=123,frozen_detector=True,source_only=True,
           grid=[-.25,0.,.25],joint_candidates=9,identity_index=4,
           source_groups_per_video=32,inference_proposals_per_video=200,
           representation='real-five-region-mean-max-anchor-and-candidate-plus-offset-and-class',
           hidden=128,batch=64,lr=.001,max_epochs=50,patience=15,
-          quality_temperature=.1,selection='equal-video-source-soft-quality-cross-entropy',
+          pair_temperature=.1,objective='quality-difference-weighted-all-pairs-logistic',
+          selection='equal-video-source-realized-MAP-one-minus-IoU',
           decoding='joint-MAP-exact-tie-keeps-original',target_gt=False,target_training=False,
           uncertainty='finite-candidate-set-entropy-not-global-calibrated-density')
 
@@ -44,9 +45,13 @@ class IntervalEnergy(nn.Module):
 
 def objective(head,anchor,variants,delta,labels,quality,valid):
     energy=head(anchor,variants,delta,labels)
-    logits=(-energy).masked_fill(~valid,-1e9)
-    target=(quality/SPEC['quality_temperature']).masked_fill(~valid,-1e9).softmax(1)
-    return -(target*logits.log_softmax(1)).sum(1),energy
+    score=-energy
+    quality_gap=quality[:,:,None]-quality[:,None,:]
+    score_gap=score[:,:,None]-score[:,None,:]
+    weight=quality_gap.abs()*(valid[:,:,None]&valid[:,None,:])
+    # 质量相同的候选不强行排序；与原框和其他候选都比较，较大IoU代价权重更大。
+    pair=F.softplus(-quality_gap.sign()*score_gap/SPEC['pair_temperature'])
+    return (pair*weight).sum((1,2))/weight.sum((1,2)).clamp_min(1e-6),energy
 
 
 def audit_entry(entry):

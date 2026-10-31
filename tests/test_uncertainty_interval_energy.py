@@ -35,3 +35,13 @@ def test_source_quality_ranking_can_learn_joint_peak():
     for _ in range(25):
         loss,_=objective(h,a,x,d,labels,q,valid);opt.zero_grad();loss.mean().backward();opt.step()
     assert select_interval(h(a,x,d,labels),valid).eq(8).all()
+
+
+def test_pairwise_quality_ordering_sign_matches_map():
+    class Fixed(torch.nn.Module):
+        def __init__(self,energy):super().__init__();self.energy=energy
+        def forward(self,*args):return self.energy
+    q=torch.linspace(0,1,9)[None];valid=torch.ones(1,9,dtype=torch.bool)
+    args=(torch.zeros(1,20),torch.zeros(1,9,20),torch.zeros(1,9,2),torch.zeros(1,dtype=torch.long),q,valid)
+    good,_=objective(Fixed(-q),*args);bad,_=objective(Fixed(q),*args)
+    assert good.item()<bad.item() and select_interval(-q,valid).item()==8
