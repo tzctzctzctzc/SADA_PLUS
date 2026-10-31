@@ -132,6 +132,9 @@ def build(cfg):
                     raise ValueError('非有限loss: '+name)
         return result
     ctx.model.forward = checked_forward
+    if cfg.get('context_mix'):
+        from tools.context_mix import install
+        install(ctx, cfg)
     return ctx
 
 
@@ -158,7 +161,10 @@ def tensor_digest(value):
 def controls(model):
     fields = ('loss_normalizer', 'loss_normalizer_pseudo_labels', 'train_label_smoothing',
               'cls_thres_prob', 'cls_thres_ti', 'ema_src_centroids', 'ema_tgt_centroids')
-    return {k: deepcopy(getattr(model, k)) for k in fields}
+    result = {k: deepcopy(getattr(model, k)) for k in fields}
+    if hasattr(model, 'context_mix_state'):
+        result['context_mix_state'] = deepcopy(model.context_mix_state)
+    return result
 
 
 def optimizers(ctx):
@@ -214,6 +220,8 @@ def epoch_setup(ctx, epoch):
 
 def probe(cfg, output, warmup_steps=2, timed_steps=6):
     ctx = build(cfg)
+    if cfg.get('context_mix'):
+        ctx.context_mix_ledger = str(Path(output).parent/'mix_events.jsonl')
     # 固定40/200名单不能用前6批覆盖来代表；诊断遍历完整原始epoch，不补抽候选。
     if cfg.get('prototype_capacity'):
         timed_steps=max(len(ctx.train_loader_src),len(ctx.train_loader_tgt))
@@ -231,6 +239,8 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
         ctx.train_loader_src, ctx.train_loader_tgt = [StepLoader(x, warmup_steps) for x in originals]
         ctx._train_epoch(epoch)
         ctx.train_metrics.reset()
+        if cfg.get('context_mix'):
+            ctx.context_mix_epoch = None
         ctx.train_loader_src, ctx.train_loader_tgt = [StepLoader(x, timed_steps) for x in originals]
         torch.cuda.synchronize(); torch.cuda.reset_peak_memory_stats()
         started = time.monotonic(); ctx._train_epoch(epoch); torch.cuda.synchronize()
@@ -251,6 +261,9 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
                 {k:v for k,v in ctx.model.rq3_capacity.named_parameters() if any(n in k for n in ('attention','pool_fusion'))})
             reports[str(epoch)]['pool_submodules_updated']={name:before!=tensor_digest(
                 dict(getattr(ctx.model.rq3_capacity.branch,name).named_parameters())) for name,before in pool_before.items()}
+        if cfg.get('context_mix'):
+            reports[str(epoch)]['context_mix']={k[2:]:float(v) for k,v in ctx.train_metrics.result().items()
+                                               if k.startswith('t_mix_')}
         ctx.train_loader_src, ctx.train_loader_tgt = originals
     ctx.valid_metrics_src.reset()
     validation = float(ctx._valid_epoch(5, ctx.val_loader_src, domain='src'))
@@ -284,6 +297,8 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
 def train(cfg, entry, resume=None):
     entry = Path(entry)
     ctx = build(cfg)
+    if cfg.get('context_mix'):
+        ctx.context_mix_ledger = str(entry/'mix_events.jsonl')
     save(entry/'runtime_config.json',ctx.cfg)
     save(entry/'seed_proof.json',ctx.cuda_seed_proof)
     if cfg.get('prototype_capacity'):
@@ -319,6 +334,8 @@ def train(cfg, entry, resume=None):
                    target_gt_cls_loss=0., target_gt_reg_loss=0., target_gt_downstream_loss=0.)
         if cfg.get('prototype_capacity'):
             row['auxiliary']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_rq3_')}
+        if cfg.get('context_mix'):
+            row['context_mix']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_mix_')}
         if epoch%5 == 0:
             ctx.valid_metrics_src.reset()
             value = float(ctx._valid_epoch(epoch, ctx.val_loader_src, domain='src'))
