@@ -2,6 +2,7 @@
 import argparse
 from copy import deepcopy
 import json
+import math
 import os
 from pathlib import Path
 import signal
@@ -194,6 +195,7 @@ def audit(path):
     if record['status']!='passed' or record['job_sha256']!=sha(path) or record['code']!=job['code']:
         raise ValueError('TTT完整身份改变')
     for p,field in [('config','config_sha256'),('checkpoint','checkpoint_sha256'),('metadata_manifest','metadata_sha256'),
+                     ('evaluation_annotation','evaluation_annotation_sha256'),
                      ('prepared','prepared_sha256'),('selection_file','selection_sha256')]:
         if p in job and sha(job[p])!=job[field]:raise ValueError('TTT输入改变: '+p)
     if sha(record['guard'])!=record['guard_sha256']:raise ValueError('首CUDA凭证改变')
@@ -254,13 +256,16 @@ def job_file(root,relative,kind,s,variant,prototype,identity,manifest,annotation
     save(out/'job.json',dict(kind=kind,shift=s,variant=variant,config=str(entry/'config.json'),
         config_sha256=sha(entry/'config.json'),checkpoint=str(entry/'best.pt'),checkpoint_sha256=sha(entry/'best.pt'),
         prototype_complete_sha256=sha(entry/'complete.json'),metadata_manifest=str(manifest),metadata_sha256=sha(manifest),
-        evaluation_annotation=str(annotation),output=str(out),code=identity,specification=SPEC,**extra))
+        evaluation_annotation=str(annotation),evaluation_annotation_sha256=sha(annotation),
+        output=str(out),code=identity,specification=SPEC,**extra))
     return out/'job.json'
 
 
 def source_selection(candidates):
     expected={(lr,n) for lr in SPEC['learning_rates'] for n in SPEC['steps']}
-    if {(x['lr'],x['steps']) for x in candidates}!=expected or any(len(x['results'])!=6 for x in candidates):
+    if (len(candidates)!=4 or {(x['lr'],x['steps']) for x in candidates}!=expected or
+            any(len(x['results'])!=6 or {r['shift'] for r in x['results']}!=set(SHIFTS) or
+                any(not math.isfinite(r['map']) or not 0<=r['map']<=1 for r in x['results']) for x in candidates)):
         raise ValueError('源校准必须四设置乘六方向')
     return max(candidates,key=lambda x:(sum(r['map'] for r in x['results'])/6,-x['steps'],-x['lr']))
 
@@ -274,8 +279,18 @@ def main(args):
         development='exploratory-all-positive-negative-results-retained',
         references=['https://arxiv.org/abs/2411.17869','https://jmlr.org/papers/v26/24-0439.html']))
     try:
-        if read(prototype/'final_audit.json')['count']!=6 or read(prior/'final_audit.json')['count']!=24:
+        proto_final=read(prototype/'final_audit.json');tta_final=read(prior/'final_audit.json')
+        if (proto_final['count']!=6 or tta_final['count']!=24 or
+                proto_final['status']!='passed' or tta_final['status']!='passed'):
             raise ValueError('前序精确六方向/24项未完成')
+        # 已终审前序只复核完整凭证的小文件SHA；不再次循环读取24份相同大权重。
+        for row in proto_final['results']:
+            if sha(prototype/'formal'/row['shift']/'prototype/complete.json')!=row['complete_sha256']:
+                raise ValueError('前序Prototype完整凭证改变')
+        for rows in tta_final['results'].values():
+            for row in rows:
+                if sha(Path(row['job']).parent/'complete.json')!=row['complete_sha256']:
+                    raise ValueError('前序TTA完整凭证改变')
         save(root/'predecessor.json',dict(prototype_final_sha256=sha(prototype/'final_audit.json'),
             tta_final_sha256=sha(prior/'final_audit.json')))
         manifests={}
