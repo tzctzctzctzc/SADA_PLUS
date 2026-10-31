@@ -57,6 +57,8 @@ def convert(archive,output,interval_policy='strict'):
     files={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in output.glob('*.json')}
     proof=dict(status='passed',schema='charades-ego-third-to-first-inputs-v1',label_names=LABEL_NAMES,
         interval_policy=interval_policy,corrections=corrections,
+        evaluation_protocol='clean_only' if interval_policy=='clean' else interval_policy,
+        raw_annotations_role='provenance_only_not_additional_evaluation',
         official_verb_ids=VERB_IDS,annotation_archive_sha256=hashlib.sha256(Path(archive).read_bytes()).hexdigest(),
         counts={s:sum(x['subset']==s for x in database.values()) for s in
             ('third_training','third_validation','ego_training','ego_validation')},
