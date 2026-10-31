@@ -36,6 +36,11 @@ def build_capacity(cfg,fpn_dim,num_classes,strides,regression_ranges,device):
     with torch.random.fork_rng(devices=devices):
         torch.manual_seed(0)
         result=RQ3ProposalPrototype(fpn_dim,num_classes,payload['by_video'],strides,regression_ranges,0.)
+        if 'label_names' in payload:
+            names=tuple(payload['label_names'])
+            if len(names)!=num_classes or len(set(names))!=num_classes:
+                raise ValueError('教师缓存类别词表必须逐索引匹配检测类别')
+            result.semantic_label_names=names
         if cfg['variant'] in ('temporal_pool','multi_prototype'):
             from .prototype_methods import make_method_branch
             torch.manual_seed(0)
@@ -72,17 +77,17 @@ KNOWN_LABELS = (
     "POUR",
 )
 
-def evidence_vector(label, num_classes, device, dtype, probabilities=None):
+def evidence_vector(label, num_classes, device, dtype, probabilities=None, label_names=KNOWN_LABELS):
     vector = torch.zeros(num_classes + 4, device=device, dtype=dtype)
-    known_label_count = min(int(num_classes), len(KNOWN_LABELS))
-    if label in KNOWN_LABELS[:known_label_count]:
+    known_label_count = min(int(num_classes), len(label_names))
+    if label in label_names[:known_label_count]:
         if probabilities is None:
-            vector[KNOWN_LABELS.index(label)] = 1.0
+            vector[label_names.index(label)] = 1.0
         else:
             probabilities = tuple(float(value) for value in probabilities)
             if len(probabilities) == known_label_count:
                 probabilities = probabilities
-            elif len(probabilities) == len(KNOWN_LABELS):
+            elif len(probabilities) == len(label_names):
                 probabilities = probabilities[:known_label_count]
             else:
                 raise ValueError("VLM class probabilities have an invalid size")
@@ -99,7 +104,7 @@ def evidence_vector(label, num_classes, device, dtype, probabilities=None):
         raise ValueError("unknown proposal semantic label")
     return vector
 
-def cached_proposals_for_videos(cache, videos, num_classes, n_levels, device, dtype):
+def cached_proposals_for_videos(cache, videos, num_classes, n_levels, device, dtype, label_names=KNOWN_LABELS):
     proposals = []
     for video in videos:
         metadata = video["metadata"]
@@ -136,7 +141,7 @@ def cached_proposals_for_videos(cache, videos, num_classes, n_levels, device, dt
             )
             evidence = torch.stack([
                 evidence_vector(
-                    row[3], num_classes, device, dtype, row[5]
+                    row[3], num_classes, device, dtype, row[5], label_names
                 ) for row in rows
             ])
             eligible = evidence[:, :num_classes].sum(dim=-1) > 0
@@ -449,6 +454,7 @@ class RQ3ProposalPrototype(nn.Module):
         self.num_classes = num_classes
         self.confidence_threshold = confidence_threshold
 
+
     def forward(self, source_videos, target_videos, source_features, target_features, epoch,
                 source_masks=None,target_masks=None):
         source = source_gt_proposals(source_videos, self.num_classes, len(self.strides), self.regression_ranges)
@@ -463,7 +469,8 @@ class RQ3ProposalPrototype(nn.Module):
         for index, video in enumerate(target_videos):
             target += cached_proposals_for_videos(
                 {str(video['metadata']['video_id']): kept[index]}, [video], self.num_classes,
-                len(self.strides), target_features[0].device, target_features[0].dtype)
+                len(self.strides), target_features[0].device, target_features[0].dtype,
+                getattr(self,'semantic_label_names',KNOWN_LABELS))
         for proposal in target:
             for key in proposal:
                 proposal[key] = proposal[key][:256]
