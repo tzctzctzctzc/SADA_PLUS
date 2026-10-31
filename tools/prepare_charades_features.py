@@ -9,6 +9,16 @@ import zipfile
 import numpy as np
 
 
+def temporal_features(array,video_id):
+    # 官方包有极短视频保留I3D的1×1空间轴，只移除这两轴，不squeeze时间轴。
+    if array.ndim==4 and array.shape[1:]==(1,1,1024):
+        array=array[:,0,0,:]
+    if array.ndim!=2 or array.shape[1]!=1024 or array.dtype!=np.float32 or not len(array):
+        raise ValueError('不是官方T×1024 float32 I3D特征: '+video_id)
+    if not np.isfinite(array).all():raise ValueError('特征包含非有限值: '+video_id)
+    return array
+
+
 def prepare(archive,annotations,output):
     identity=json.loads((annotations/'identity.json').read_text())
     if identity['interval_policy']!='clean' or identity['evaluation_protocol']!='clean_only':
@@ -22,22 +32,26 @@ def prepare(archive,annotations,output):
             raise ValueError('清洗后评估标注改变')
     output.mkdir(parents=True,exist_ok=False);rows=[]
     with zipfile.ZipFile(archive) as z:
-        names={Path(n).stem:n for n in z.namelist() if '/features/' in n and n.endswith('.npy')}
+        members=[n for n in z.namelist() if '/features/' in n and n.endswith('.npy')]
+        names={Path(n).stem:n for n in members}
+        if len(names)!=len(members):raise ValueError('官方包存在重复视频特征名')
         missing=set(database)-set(names)
         if missing:raise ValueError('官方特征缺少视频: '+str(sorted(missing)[:10]))
         for index,(vid,meta) in enumerate(database.items()):
             with z.open(names[vid]) as stream:raw=stream.read()
-            array=np.load(io.BytesIO(raw),allow_pickle=False)
-            if array.ndim!=2 or array.shape[1]!=1024 or array.dtype!=np.float32 or not len(array):
-                raise ValueError('不是官方T×1024 float32 I3D特征: '+vid)
-            if not np.isfinite(array).all():raise ValueError('特征包含非有限值: '+vid)
+            native=np.load(io.BytesIO(raw),allow_pickle=False)
+            array=temporal_features(native,vid)
             path=output/(vid+'.npz');np.savez(path,feats=array)
             rows.append(dict(video_id=vid,path=str(path.resolve()),shape=list(array.shape),dtype=str(array.dtype),
+                native_shape=list(native.shape),spatial_singletons_removed=native.ndim==4,
                 sha256=hashlib.sha256(path.read_bytes()).hexdigest(),native_npy_sha256=hashlib.sha256(raw).hexdigest(),
                 source_member=names[vid],subset=meta['subset']))
             if (index+1)%500==0:print('FEATURES',index+1,'/',len(database),flush=True)
     result=dict(status='passed',count=len(rows),feature_dim=1024,feature_dtype='float32',
-        numerical_conversion=False,container_only='NPY to ZIP_STORED NPZ',annotation_identity_sha256=hashlib.sha256((annotations/'identity.json').read_bytes()).hexdigest(),files=rows)
+        numerical_conversion=False,container_only='NPY to ZIP_STORED NPZ',
+        shape_policy='T,1,1,1024 to T,1024; retain temporal axis; no resampling',
+        archive_feature_count=len(names),unused_archive_video_ids=sorted(set(names)-set(database)),
+        annotation_identity_sha256=hashlib.sha256((annotations/'identity.json').read_bytes()).hexdigest(),files=rows)
     (output/'inventory.json').write_text(json.dumps(result,sort_keys=True));return result
 
 

@@ -25,3 +25,22 @@ def test_container_conversion_exact_and_metadata_relocation(tmp_path):
     assert p['count']==1 and not p['numerical_conversion']
     identity['evaluation_protocol']='raw';(inputs/'identity.json').write_text(json.dumps(identity))
     with pytest.raises(ValueError):M['prepare'](archive,inputs,tmp_path/'bad')
+
+
+@pytest.mark.parametrize('length',[1,3])
+def test_spatial_singletons_preserve_temporal_axis_and_exact_bytes(length):
+    native=np.arange(length*1024,dtype=np.float32).reshape(length,1,1,1024)
+    array=M['temporal_features'](native,'short_video')
+    assert array.shape==(length,1024)
+    assert array.tobytes()==native.tobytes()
+    assert np.shares_memory(array,native)
+
+
+@pytest.mark.parametrize('array',[
+    np.zeros((2,2,1,1024),dtype=np.float32),
+    np.zeros((1024,),dtype=np.float32),
+    np.zeros((2,1024),dtype=np.float64),
+    np.full((1,1,1,1024),np.nan,dtype=np.float32),
+])
+def test_invalid_features_are_rejected_without_pooling_or_casting(array):
+    with pytest.raises(ValueError):M['temporal_features'](array,'bad')
