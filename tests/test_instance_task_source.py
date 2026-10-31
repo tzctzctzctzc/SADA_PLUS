@@ -57,9 +57,20 @@ def test_fully_visible_uses_global_seconds_and_crop_origin_without_clipping():
 
 
 def test_source_gate_requires_exact_six_and_equal_direction_weights():
-    results=[dict(shift='S'+str(i),metrics=dict(precision05=.8,precision07=.5,coverage05=.1)) for i in range(1,7)]
+    results=[dict(shift='S'+str(i),metrics=dict(precision05=.8,precision07=.5,coverage05=.1,
+        predictions=10,ground_truth=20)) for i in range(1,7)]
     assert source_decision(results)['status']=='passed'
     results[0]['metrics']['coverage05']=0
     assert source_decision(results)['status']=='rejected'
     with pytest.raises(ValueError): source_decision(results[:-1])
     with pytest.raises(ValueError): source_decision(results[:-1]+[results[0]])
+
+
+@pytest.mark.parametrize('denominator',['predictions','ground_truth'])
+def test_empty_direction_cannot_be_hidden_by_five_high_quality_directions(denominator):
+    results=[dict(shift='S'+str(i),metrics=dict(precision05=1.,precision07=1.,coverage05=1.,
+        predictions=10,ground_truth=20)) for i in range(1,7)]
+    results[0]['metrics'].update(precision05=0.,precision07=0.,coverage05=0.)
+    results[0]['metrics'][denominator]=0
+    decision=source_decision(results)
+    assert decision['status']=='rejected' and not decision['all_direction_denominators_positive']

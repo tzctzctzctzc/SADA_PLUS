@@ -63,6 +63,7 @@ def instances(rows, cfg):
     options = cfg['test_cfg']
     if not options['multiclass_nms'] or options['nms_method'] != 'soft':
         raise ValueError('预注册配方仅接受原multiclass soft-NMS')
+    rows = sorted(rows,key=lambda r:(-r['score'],r['class_id'],*r['interval'],r.get('candidate_id','')))
     segments, scores, labels = batched_nms(torch.tensor([r['interval'] for r in rows]),
         torch.tensor([r['score'] for r in rows]), torch.tensor([r['class_id'] for r in rows]),
         options['iou_threshold'], options['min_score'], options['max_seg_num'],
@@ -96,15 +97,16 @@ def source_metrics(predictions, truth):
     result = dict(predictions=len(predictions), ground_truth=sum(len(v) for v in truth.values()))
     for threshold in (.5, .7):
         used = set(); true_positive = 0
-        for row in sorted(predictions, key=lambda x:-x['score']):
+        for row in sorted(predictions, key=lambda x:(-x['score'],x['video_id'],x['class_id'],*x['interval'])):
             candidates = [(overlap(row['interval'], gt['interval']), index)
                 for index, gt in enumerate(truth[row['video_id']])
                 if row['class_id'] == gt['class_id'] and (row['video_id'], index) not in used]
             if candidates:
-                quality, index = max(candidates)
+                quality, index = max(candidates,key=lambda x:x[0])
                 if quality >= threshold:
                     used.add((row['video_id'], index)); true_positive += 1
         result['precision'+str(int(threshold*10)).zfill(2)] = true_positive/max(1, len(predictions))
+        result['matched'+str(int(threshold*10)).zfill(2)] = true_positive
         if threshold == .5: result['coverage05'] = true_positive/max(1,result['ground_truth'])
     return result
 
@@ -113,7 +115,9 @@ def source_decision(results):
     if sorted(r['shift'] for r in results) != ['S'+str(i) for i in range(1, 7)]:
         raise ValueError('必须全六方向，不按局部源结果放行')
     mean = {key:math.fsum(row['metrics'][key] for row in results)/6 for key in ('precision05','precision07','coverage05')}
-    return dict(status='passed' if all(mean[key]>=SOURCE_GATE[key] for key in mean) else 'rejected',
+    valid = all(r['metrics']['predictions']>0 and r['metrics']['ground_truth']>0 for r in results)
+    return dict(status='passed' if valid and all(mean[key]>=SOURCE_GATE[key] for key in mean) else 'rejected',
+        all_direction_denominators_positive=valid,
         mean=mean, frozen_gate=SOURCE_GATE, count=6, target_data_read=False)
 
 
@@ -139,14 +143,17 @@ def worker(args):
     model.load_state_dict(saved['ema_state_dict'], strict=True); del saved
     model.eval().requires_grad_(False); before = tensor_digest(model.state_dict())
     source = dataset(cfg, cfg['dataset']['json_file'], cfg['src_val_split'], False)
-    predictions = []; truths = {}; members = []; raw_count = 0
+    expected = proof['references'][args.child]['source_validation_members']
+    if sorted(row['id'] for row in source.data_list) != expected: raise ValueError('实际源验证成员漂移')
+    predictions = []; truths = {}; members = []; raw_count = 0; nms_count = 0
     source_manifest = Path(cfg['dataset']['json_file'])
     if p.sha(source_manifest) != cfg['baseline']['source_manifest_sha256']: raise ValueError('源manifest漂移')
     for i, raw in enumerate(source):
         video, _ = prepare_source_video(raw, 'cuda:0'); p.assert_no_target_gt([video])
         vid = video['metadata']['video_id']; meta = video['metadata']; members.append(vid)
         raw_rows = raw_video(model, video); raw_count += len(raw_rows)
-        predictions.extend(fully_visible(instances(raw_rows,cfg),meta,video['feats'].shape[-1]))
+        kept = instances(raw_rows,cfg); nms_count += len(kept)
+        predictions.extend(fully_visible(kept,meta,video['feats'].shape[-1]))
         seconds = (raw['segments']*float(meta['feat_stride'])+.5*float(meta['feat_num_frames']))/float(meta['fps'])
         truths[vid] = [dict(interval=segment, class_id=int(label))
             for segment, label in zip(seconds.tolist(), raw['labels'].tolist())]
@@ -155,6 +162,9 @@ def worker(args):
     p.save(entry/'predictions.json', predictions); p.save(entry/'membership.json', members)
     p.save(entry/'result.json', dict(status='completed_source_instance_quality_check', shift=args.child,
         source_policy=SOURCE_POLICY, metrics=source_metrics(predictions, truths), raw_candidates=raw_count,
+        nms_threshold_candidates=nms_count, fully_visible_candidates=len(predictions),
+        represented_videos=len({r['video_id'] for r in predictions}),
+        represented_classes=sorted({r['class_id'] for r in predictions}),
         members=members, ground_truth_input_to_teacher=False, target_data_read=False,
         source_manifest_sha256=p.sha(source_manifest), reference=str(ref), reference_artifacts=proof['references'][args.child]['reference_artifacts'],
         model_sha256_before=before, model_sha256_after=before, code=identity, gpu_guard=guard, gpu_guard_sha256=p.sha(guard),
