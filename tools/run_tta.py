@@ -256,21 +256,28 @@ def main(args):
     identity=code_identity();root.mkdir(parents=True,exist_ok=False);(root/'tmp').mkdir()
     save(root/'runtime_resources.json',prepare_file_limit())
     save(root/'plan.json',dict(code=identity,specification=SPEC,prototype_root=str(prototype),
-        target_evaluation_jobs=18,reused_multiview_jobs=6,original_predictions='reuse-six-existing-complete-entries',
+        target_evaluation_jobs=24,reused_multiview_jobs=0,original_predictions='reuse-six-existing-complete-entries',
         previous_tta=str(args.previous_tta),wait_for=str(args.wait_for),
-        revision=1,hypothesis='Adam creates measurable prediction changes where SGD produced negligible changes; all filters, losses, update modules and source calibration grid unchanged',
+        revision=2,previous_revision=str(args.previous_revision),
+        hypothesis='Source calibration still updated only 11/47 videos under every Adam setting; lower only absolute confidence .5 to .1 while retaining two-view class/IoU agreement, and rerun matched no-update fusion controls',
         calibration='four-settings-fixed-eight-source-validation-videos-per-shift-global-source-mean',
         target_gt_for_selection=False))
     try:
-        if args.previous_tta is None:raise ValueError('修订一必须绑定已完整原版TTA，避免重复多视图和源原型')
+        if args.previous_tta is None or args.previous_revision is None:
+            raise ValueError('修订二必须绑定原版源原型及已完成Adam修订')
+        revision=read(args.previous_revision/'final_audit.json')
+        if revision['status']!='passed' or revision['count']!=24 or revision.get('new_target_evaluations')!=18:
+            raise ValueError('前序Adam修订未精确完成')
+        save(root/'previous_revision.json',dict(root=str(args.previous_revision),
+            final_sha256=sha(args.previous_revision/'final_audit.json')))
         if args.wait_for:
             while not (args.wait_for/'final_audit.json').exists():
                 previous=read(args.wait_for/'state.json')
-                if previous['phase'] in ('failed','stopped'):raise RuntimeError('前序路线二未完整结束，不抢占或接续')
-                save(root/'state.json',dict(phase='waiting_route2_complete',pid=os.getpid(),active={},waiting_root=str(args.wait_for)))
+                if previous['phase'] in ('failed','stopped'):raise RuntimeError('前序路线二修订未完整结束，不抢占或接续')
+                save(root/'state.json',dict(phase='waiting_route2_revision1_complete',pid=os.getpid(),active={},waiting_root=str(args.wait_for)))
                 time.sleep(15)
             previous=read(args.wait_for/'final_audit.json')
-            if previous['status']!='passed' or previous['count']!=30:raise ValueError('路线二不是精确30项终审')
+            if previous['status']!='passed' or previous['count']!=12:raise ValueError('路线二冻结准备修订不是精确12项终审')
         while not (prototype/'final_audit.json').exists():
             old=read(prototype/'state.json')
             if old['phase'] in ('failed','stopped'):raise RuntimeError('Prototype未完成且已停止；TTA不接续')
@@ -284,15 +291,14 @@ def main(args):
         save(root/'predecessor.json',dict(prototype_final_sha256=sha(prototype/'final_audit.json'),entries=references))
         prior=args.previous_tta.resolve();prior_final=read(prior/'final_audit.json')
         if prior_final['status']!='passed' or prior_final['count']!=24:raise ValueError('原版TTA未精确终审24项')
-        # 原源GT原型/无更新多视图不受优化器影响，独立审计后按原路径、原代码身份引用，不改写。
+        # 源GT原型不受阈值影响，按原路径/SHA复用；多视图门控已改变，必须新跑配对对照。
         reused_banks={s:audit_job(prior/'banks'/s/'job.json') for s in SHIFTS}
-        reused_multiview=[audit_job(prior/'formal/multiview'/s/'job.json') for s in SHIFTS]
         for s in SHIFTS:
             prior_job=read(prior/'banks'/s/'job.json');entry=prototype/'formal'/s/'prototype'
             if prior_job['checkpoint_sha256']!=sha(entry/'best.pt') or prior_job['config_sha256']!=sha(entry/'config.json'):
                 raise ValueError('原源参考与当前checkpoint不相同')
         save(root/'reused_artifacts.json',dict(original_root=str(prior),original_final_sha256=sha(prior/'final_audit.json'),
-            banks=reused_banks,multiview=reused_multiview,reason='only optimizer changes; no optimizer in bank or multiview path'))
+            banks=reused_banks,reason='fixed source bank is unchanged; all multiview controls rerun under new confidence gate'))
         manifests={}
         for s in SHIFTS:
             cfg=read(prototype/'formal'/s/'prototype/config.json')
@@ -325,12 +331,6 @@ def main(args):
             chosen=chosen,candidates=candidates,target_results_seen=False,specification=SPEC,code=identity))
         all_results={}
         for variant in VARIANTS:
-            if variant=='multiview':
-                all_results[variant]=reused_multiview
-                save(root/'formal'/variant/'final_audit.json',dict(status='passed',count=6,results=reused_multiview,
-                    mean_map=sum(x['map'] for x in reused_multiview)/6,reused=True,
-                    original_final_sha256=sha(prior/'formal/multiview/final_audit.json')))
-                continue
             jobs=[]
             for s in SHIFTS:
                 options=dict(variant=variant,lr=chosen['lr'],steps=chosen['steps'],selection_file=str(frozen),selection_sha256=sha(frozen))
@@ -344,8 +344,8 @@ def main(args):
             all_results[variant]=results
             save(root/'formal'/variant/'final_audit.json',dict(status='passed',count=6,results=results,
                 mean_map=sum(x['map'] for x in results)/6,source_selection_sha256=sha(frozen)))
-        save(root/'final_audit.json',dict(status='passed',count=24,new_target_evaluations=18,reused_multiview=6,
-            revision=1,results=all_results,original_prototype=references))
+        save(root/'final_audit.json',dict(status='passed',count=24,new_target_evaluations=24,reused_multiview=0,
+            revision=2,results=all_results,original_prototype=references))
         save(root/'state.json',dict(phase='complete',pid=os.getpid(),active={},count=24))
     except BaseException as error:
         save(root/'error.json',dict(type=type(error).__name__,message=str(error)))
@@ -366,6 +366,7 @@ if __name__=='__main__':
     p.add_argument('--prototype',type=Path);p.add_argument('--output',type=Path);p.add_argument('--job',type=Path)
     p.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'))
     p.add_argument('--previous-tta',type=Path)
+    p.add_argument('--previous-revision',type=Path)
     p.add_argument('--wait-for',type=Path)
     args=p.parse_args()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
