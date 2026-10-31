@@ -147,3 +147,18 @@ def test_actual_runner_help_imports_and_parses_without_cuda():
         stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
     assert result.returncode==0,result.stdout
     assert '--stage' in result.stdout and '--output' in result.stdout
+
+
+def test_repository_device_transfer_receives_video_batch():
+    # 加载真实仓库函数，不用另写一个近似实现掩盖接口差异。
+    # 函数本身没有外部依赖，独立编译它以避免Windows没有Linux NMS扩展。
+    import ast
+    path=Path(__file__).resolve().parents[1]/'libs/trainer/da_trainer.py'
+    node=next(n for n in ast.parse(path.read_text(encoding='utf-8')).body
+              if isinstance(n,ast.FunctionDef) and n.name=='move_to_device')
+    namespace=dict(torch=torch)
+    exec(compile(ast.Module(body=[node],type_ignores=[]),str(path),'exec'),namespace)
+    video=dict(feats=torch.ones(8,16),segments=torch.empty(0,2),labels=torch.empty(0,dtype=torch.long),metadata={'video_id':'t'})
+    result=namespace['move_to_device']([video],'cpu')[0]
+    assert result.keys()==video.keys() and torch.equal(result['feats'],video['feats'])
+    assert result is not video and result['metadata']['video_id']=='t'

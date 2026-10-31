@@ -61,6 +61,15 @@ def prepare(root, reference, inventory, identity):
             if not body['database']:
                 raise ValueError('空成员集合')
             save(entry/(name+'_unlabeled.json'), body, sort_keys=False)
+        # 实际数据接口在CPU先走一遍，包含仓库按batch接收的设备转换函数。
+        from tools.baseline_engine import dataset
+        from libs.trainer.da_trainer import move_to_device
+        for name in manifests:
+            splits = cfg['tgt_train_split'] if name=='target_train' else cfg['src_val_split'] if name=='source_val' else cfg['tgt_val_split']
+            ds = dataset(cfg, entry/(name+'_unlabeled.json'), splits, False, True)
+            sample = move_to_device([ds[0]], 'cpu')[0]
+            if sample['segments'].numel() or sample['labels'].numel() or sample['feats'].shape[0] != 2304:
+                raise ValueError('真实CPU入口的目标GT隔离或SlowFast维度错误')
         record = dict(reference=str(old), reference_complete_sha256=sha(old/'complete.json'),
                       checkpoint_sha256=complete['artifacts'][str(old/'best.pt')],
                       config_sha256=sha(entry/'config.json'), cache_sha256=cap['prepared_cache_sha256'],
@@ -154,7 +163,7 @@ def inference_worker(args):
             vid = info['id']
             if vid not in records:
                 continue
-            video = move_to_device(target_ds[index], 'cuda:0')
+            video = move_to_device([target_ds[index]], 'cuda:0')[0]
             if video['segments'].numel() or video['labels'].numel():
                 raise ValueError('缓存构建读取了目标GT')
             features, _ = detector_features(model, video)
