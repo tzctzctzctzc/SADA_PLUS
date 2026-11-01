@@ -78,7 +78,8 @@ def run(args):
             time.sleep(3)
         assert set(done)==set(shifts)
         results=[done[s] for s in shifts];mean=sum(x['map'] for x in results)/6
-        save(root/'final_audit.json',dict(status='passed',count=6,results=results,mean_map=mean,spec=SPEC))
+        save(root/'final_audit.json',dict(status='passed',count=6,results=results,mean_map=mean,
+            reference_so_mean=sum(x['reference_so_map'] for x in results)/6,mean_delta_pp=sum(x['delta_pp'] for x in results)/6,spec=SPEC))
         save(root/'state.json',dict(phase='complete',active={},completed=results))
     except BaseException as err:
         save(root/'error.json',dict(error=repr(err),pid=os.getpid()));raise

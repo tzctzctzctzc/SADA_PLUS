@@ -72,3 +72,10 @@ def test_evaluator_matches_known_perfect_ap(tmp_path):
     ev=m.ANETdetection(str(p),['target'],num_workers=1,action_subsampling='10_majority_classes')
     pred={'video-id':np.array(['b']),'t-start':np.array([3.]),'t-end':np.array([4.]),'label':np.array([2]),'score':np.array([.9])}
     assert ev.evaluate(pred,verbose=False)[1]==1.
+
+def test_empty_source_video_remains_negative(tmp_path):
+    torch.set_num_threads(2);cfg=config(tmp_path);p=Path(cfg['benchmark']['source_train']);db=read(p)
+    for v in db['database'].values():v['annotations']=[]
+    p.write_text(json.dumps(db));ctx=build(cfg,device='cpu',workers=0);batch=next(iter(ctx['train']))
+    assert len(ctx['train'].dataset)==4 and all(v['segments'].shape==(0,2) for v in batch)
+    losses,_=step(ctx,batch);assert np.isfinite(losses['final_loss']) and losses['reg_loss']==0.

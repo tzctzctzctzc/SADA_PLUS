@@ -62,7 +62,7 @@ def prepare(root, code):
         meta={}
         for role,field in [('source_train','src_train_split'),('source_val','src_val_split')]:
             db={k:dict(v,annotations=[a for a in v.get('annotations',[]) if int(a['label_id']) in SPEC['classes']]) for k,v in source.items() if v['subset'].lower() in old[field]}
-            assert db and all(v['annotations'] for v in db.values()), 'source empty-GT video must be handled explicitly'
+            assert db
             save(entry/(role+'.json'),dict(database=db)); meta[role]=list(db)
         # This coordinator runs with CUDA hidden; only metadata leave the target annotation file.
         annotation=old['baseline']['annotation_for_offline_evaluation']
@@ -105,11 +105,19 @@ def audit(entry):
     for p,h in read(entry/'inputs.json')['manifests'].items(): assert sha(p)==h,p
     b=cfg['benchmark']; ref=Path(b['reference'])
     assert sha(ref/'config.json')==b['reference_config_sha256'] and sha(ref/'complete.json')==b['reference_complete_sha256']
+    acceptance=read(entry.parents[1]/'acceptance.json');assert acceptance['status']=='passed' and acceptance['code']==b['code']
+    for proof in acceptance['reports'].values():
+        assert sha(proof['path'])==proof['sha256']
+        report=read(proof['path']);guard_audit(report['guard'],report['guard_sha256'],b['code']['commit'])
+        assert all(report['parameters_updated'].values()) and report['full_state_restore'] and report['next_step_exact']
+    init=read(entry/'initialization.json');p=read(acceptance['reports'][b['shift']]['path'])
+    assert init['model_sha256']==p['initial_model_sha256'] and not init['pretrained_checkpoint_loaded']
     t=read(entry/'termination.json'); assert terminal(t['history'])==t['decision']
     rows=read(entry/'metrics.json');assert [r['epoch'] for r in rows]==list(range(1,t['decision']['epoch']+1))
     assert [[r['epoch'],r['source_validation_loss']] for r in rows if 'source_validation_loss' in r]==t['history']
     assert all(r['steps']==b['steps_per_epoch'] and r['target_training_batches']==0 for r in rows)
     g=read(entry/'gpu_complete.json');guard_audit(g['guard'],g['guard_sha256'],b['code']['commit'])
+    tr=read(entry/'train_gpu.json');guard_audit(tr['guard'],tr['guard_sha256'],b['code']['commit'])
     import torch
     for name in ('best','latest'):
         x=torch.load(entry/(name+'.pt'),map_location='cpu')
@@ -122,4 +130,6 @@ def audit(entry):
         e=read(entry/'evaluation'/(role+'.json')); assert e['prediction_sha256']==sha(entry/(role+'.npz'))
         assert e['selected_epoch']==t['decision']['best_epoch'] and 0<=e['map_0.1_to_0.5']<=1
     result=read(entry/'evaluation/target_val.json')
-    return dict(shift=b['shift'],map=result['map_0.1_to_0.5'],complete=str(entry/'complete.json'),complete_sha256=sha(entry/'complete.json'))
+    reference=read(ref/'evaluation/target_val.json')['map_0.1_to_0.5']
+    return dict(shift=b['shift'],map=result['map_0.1_to_0.5'],reference_so_map=reference,
+                delta_pp=100*(result['map_0.1_to_0.5']-reference),complete=str(entry/'complete.json'),complete_sha256=sha(entry/'complete.json'))
