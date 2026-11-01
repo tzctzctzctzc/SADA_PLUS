@@ -6,3 +6,7 @@ vendor/cltdr/** -text
 tools/cltdr*.py text eol=lf
 tools/run_cltdr_so.py text eol=lf
 tests/test_cltdr_so.py text eol=lf
+vendor/digit/** -text
+tools/digit*.py text eol=lf
+tools/run_digit_so.py text eol=lf
+tests/test_digit_so.py text eol=lf
