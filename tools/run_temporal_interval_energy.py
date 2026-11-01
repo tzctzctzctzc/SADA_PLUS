@@ -47,6 +47,12 @@ def gpu(args):
         return f,m,raw,torch.cat(levels)
 
     def cache(role,limit=None):
+        if (e/'resume.json').exists():
+            proof=read(e/'resume.json');index=e/(role+'_cache_index.json')
+            assert sha(index)==proof['cache_indexes'][role]
+            saved_index=read(index);assert saved_index['all_source_GT_covered']
+            assert set(x['video_id'] for x in saved_index['videos'])==set(read(e/(role+'_gt.json'))['database'])
+            return saved_index['videos']
         path=e/(role+'_gt.json');splits=cfg['src_train_split'] if role=='source_train' else cfg['src_val_split'];ds=base.dataset(cfg,path,splits,False,False)
         output=e/'source_cache'/role;output.mkdir(parents=True);index=[];counts=dict(gt_instances=0,real_proposals=0,matched_real=0,unmatched_real=0,ambiguous_real=0)
         with torch.no_grad():
@@ -105,12 +111,28 @@ def gpu(args):
                 del data
         return dict(loss=float(np.mean(losses)),selected_iou=float(np.mean(ious)),candidate_oracle_iou=float(np.mean(oracles)),population='source-val curriculum; includes GT proposals, not actual inference AP')
 
-    report=validate();history=[dict(epoch=0,source_validation=report['loss'],**{k:v for k,v in report.items() if k!='loss'})];best=report['loss'];best_epoch=0
+    from tools.temporal_energy_transfer import restore_source_checkpoint
+    resumed=(e/'resume.json').exists()
+    if resumed:
+        proof=read(e/'resume.json');assert sha(proof['source_checkpoint'])==proof['source_checkpoint_sha256']
+        resumed_state=torch.load(proof['source_checkpoint'],map_location='cpu')
+        choice=restore_source_checkpoint(head,opt,generator,resumed_state,SPEC)
+        history=choice['history'];best=choice['best_loss'];best_epoch=choice['best_epoch'];start_epoch=choice['next_epoch']
+        assert sha(e/'best_energy.pt')==proof['source_best_checkpoint_sha256']
+    else:
+        report=validate();history=[dict(epoch=0,source_validation=report['loss'],**{k:v for k,v in report.items() if k!='loss'})];best=report['loss'];best_epoch=0;start_epoch=1
     def source_checkpoint(epoch):
         return dict(state_dict=head.state_dict(),optimizer=opt.state_dict(),epoch=epoch,history=deepcopy(history),specification=SPEC,generator=generator.get_state(),cpu_rng=torch.get_rng_state(),cuda_rng=torch.cuda.get_rng_state(0),code=identity)
-    torch.save(source_checkpoint(0),e/'best_energy.pt');accepted=False
+    if not resumed:torch.save(source_checkpoint(0),e/'best_energy.pt')
+    accepted=resumed
+    if args.stage=='gpu':
+        from tools.temporal_energy_resume import gpu_transfer_gate
+        frozen_state=deepcopy(source_checkpoint(start_epoch-1))
+        bench=gpu_transfer_gate(head,opt,generator,frozen_state,torch.load(train[0]['path'],map_location='cpu'),parts,SPEC,base.tensor_digest)
+        save(e/'transfer_gpu_acceptance.json',dict(**bench,guard=guard,guard_sha256=sha(guard),resume_prefix_epoch=start_epoch-1,code=identity))
+        print('TRANSFER_GPU_GATE',json.dumps(bench),flush=True)
     epochs=2 if args.stage=='probe' else SPEC['source_epochs']
-    for epoch in range(1,epochs+1):
+    for epoch in range(start_epoch,epochs+1):
         head.train();running=[];kind_counts={}
         for i in torch.randperm(len(train),generator=generator).tolist():
             data=source_record_to_device(torch.load(train[i]['path'],map_location='cpu'),'cuda:0');order=torch.randperm(len(data['anchors']),generator=generator)
@@ -225,12 +247,17 @@ def evaluate(args):
 def main(args):
     from tools.run_prototype_target_cache import prepare,INVENTORY
     from tools.run_sada_baseline import acquire
-    identity=code_identity();args.output.mkdir(parents=True,exist_ok=False);save(args.output/'plan.json',dict(schema=SCHEMA,specification=SPEC,code=identity,method='full-source-curriculum-temporal-energy-with-joint-adaptation',extra_training_budget=True))
-    prepare(args.output,REFERENCE,INVENTORY,identity)
+    identity=code_identity();args.output.mkdir(parents=True,exist_ok=False)
+    if args.resume_from:
+        from tools.temporal_energy_resume import prepare_resume
+        resumed_minimum=prepare_resume(args.output,args.resume_from.resolve(),identity,SPEC)
+    else:
+        save(args.output/'plan.json',dict(schema=SCHEMA,specification=SPEC,code=identity,method='full-source-curriculum-temporal-energy-with-joint-adaptation',extra_training_budget=True))
+        prepare(args.output,REFERENCE,INVENTORY,identity)
     for s in SHIFTS:
         e=args.output/'formal'/s;cfg=read(e/'config.json');assert cfg['test_cfg']['duration_thresh']==SPEC['minimum_duration'];db=read(cfg['dataset']['json_file'])['database']
         for role,split in [('source_train',cfg['src_train_split']),('source_val',cfg['src_val_split'])]:save(e/(role+'_gt.json'),dict(database={k:v for k,v in db.items() if v['subset'] in split}),sort_keys=False)
-    pending=list(SHIFTS);active={};evals=[];complete=[];probe_pending=list(SHIFTS);probe_reports={};accepted=False;minimum=12288
+    pending=list(SHIFTS);active={};evals=[];complete=[];probe_pending=[] if args.resume_from else list(SHIFTS);probe_reports={};accepted=bool(args.resume_from);minimum=resumed_minimum if args.resume_from else 12288
     def spawn(s,stage,card=None):
         e=args.output/('probes' if stage=='probe' else 'formal')/s
         if stage=='probe':
@@ -280,7 +307,7 @@ def main(args):
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,required=True);parser.add_argument('--entry',type=Path);parser.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'));parser.add_argument('--stage',choices=['probe','gpu','evaluate']);args=parser.parse_args();args.output=args.output.resolve()
+    parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,required=True);parser.add_argument('--entry',type=Path);parser.add_argument('--resume-from',type=Path);parser.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'));parser.add_argument('--stage',choices=['probe','gpu','evaluate']);args=parser.parse_args();args.output=args.output.resolve()
     def stop(sig,frame):raise SystemExit(128+sig)
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
     if args.stage in ['probe','gpu']:gpu(args)

@@ -27,6 +27,16 @@ def audit_entry(entry):
         if z is not hist[-1]:assert z['epoch']-which<15
     assert source['best_epoch']==which and (source['stop_epoch']==50 or source['stop_epoch']-which>=15)
     frozen=torch.load(e/'best_energy.pt',map_location='cpu');latest=torch.load(e/'latest_energy.pt',map_location='cpu');assert frozen['epoch']==which and latest['history']==hist and latest['cuda_rng'].numel()>0
+    if (e/'resume.json').exists():
+        recovery=read(e/'resume.json');assert sha(recovery['source_checkpoint'])==recovery['source_checkpoint_sha256']
+        old=torch.load(recovery['source_checkpoint'],map_location='cpu')
+        assert hist[:recovery['prefix_epoch']+1]==old['history']
+        assert sha(recovery['source_best_checkpoint'])==recovery['source_best_checkpoint_sha256']
+        assert sha(recovery['old_acceptance'])==recovery['old_acceptance_sha256']
+        gate=read(e/'transfer_gpu_acceptance.json')
+        assert gate['status']=='passed' and gate['exact_loss_optimizer_parameter_and_rng'] and gate['formal_state_restored']
+        assert gate['resume_prefix_epoch']==recovery['prefix_epoch']
+        assert sha(gate['guard'])==gate['guard_sha256']
     joint=e/'joint';t=joint_decision(read(joint/'source_history.json'));assert t['reason']!='running' and t==read(joint/'termination.json');saved=torch.load(joint/'best.pt',map_location='cpu');last=torch.load(joint/'latest.pt',map_location='cpu');assert saved['epoch']==t['best_epoch'] and saved['config']==cfg and last['epoch']==t['epoch'] and last['rng']['cuda'][0].numel()>0
     assert any(k.startswith('temporal_energy.') for k in saved['ema_state_dict'])
     assert last['model_controls']['temporal_energy_state']['step']>0
