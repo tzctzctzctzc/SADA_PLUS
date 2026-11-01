@@ -153,12 +153,16 @@ def main(args):
     root=args.root;root.mkdir(exist_ok=False);prepare_file_limit()
     if os.environ.get('CUDA_VISIBLE_DEVICES')!='':raise ValueError('父CUDA必须为空')
     identity=code_identity()
-    reused=None
+    reused=None;reused_teacher=False
     if args.previous_root:
         old=args.previous_root.resolve();previous=read(old/'plan.json')
         if previous['policy']!=json.loads(json.dumps(POLICY)):raise ValueError('恢复不能改变已冻结方法')
-        if (old/'formal').exists() or list((old/'teacher').glob('**/scores.jsonl')):
-            raise ValueError('此恢复入口仅处理尚未查教师/开正式训练的准备中断')
+        if (old/'formal').exists():raise ValueError('此恢复入口不处理任何正式/部分训练')
+        has_teacher=list((old/'teacher').glob('**/scores.jsonl'))
+        if has_teacher:
+            if len(has_teacher)!=2 or not all((old/'teacher'/str(i)/'complete.json').exists() for i in [0,1]):
+                raise ValueError('部分教师评分必须另做精确行恢复，禁止重送完整200')
+            if not (old/'frames_manifest.json').is_file():raise ValueError('缺少原评分输入帧清单')
         original=subprocess.check_output(['git','show',previous['code']['commit']+':tools/charades_prototype.py'],cwd=CODE)
         import hashlib
         if hashlib.sha256(original).hexdigest()!=sha(CODE/'tools/charades_prototype.py'):raise ValueError('准备数学改变不能按技术恢复复用')
@@ -172,10 +176,24 @@ def main(args):
         if pool['target_manifest_sha256']!=sha(pool['target_manifest']):raise ValueError('目标训练成员改变')
         if previous['teacher_model_identity_sha256']!=sha(old/'teacher_model_identity.json'):raise ValueError('教师模型凭证改变')
         for name in names:os.link(old/name,root/name)
+        if has_teacher:
+            os.link(old/'frames_manifest.json',root/'frames_manifest.json')
+            for shard in [0,1]:
+                source=old/'teacher'/str(shard);proof=read(source/'complete.json')
+                if proof['count']!=100 or proof['scores_sha256']!=sha(source/'scores.jsonl'):
+                    raise ValueError('已完成教师结果不完整')
+                if proof['manifest_sha256']!=sha(old/'frames_manifest.json'):raise ValueError('评分输入身份不符')
+                destination=root/'teacher'/str(shard);destination.mkdir(parents=True)
+                for name in ['scores.jsonl','complete.json','device_map.json']:os.link(source/name,destination/name)
+            reused_teacher=True
         reused=dict(previous_root=str(old),original_code=previous['code'],artifacts={str(old/n):sha(old/n) for n in names},
             stage_receipts={str(p):sha(p) for p in (old/'stage_receipts').glob('*.json')},
             teacher_queries_repeated=0,formal_training_repeated=0,reason='PyAV CPU frame runtime handoff; no mathematics change')
         save(root/'reused_preparation.json',reused)
+        if reused_teacher:save(root/'reused_teacher.json',dict(previous_root=str(old),original_code=previous['code'],
+            artifacts={str(p):sha(p) for p in (old/'teacher').glob('*/*') if p.is_file()},
+            original_frame_manifest=str(old/'frames_manifest.json'),frame_manifest_sha256=sha(old/'frames_manifest.json'),
+            repeated_VLM_queries=0,reason='same Python3.12 teacher probability replay; no probability conversion'))
     # VLM依赖只在已安装Qwen的环境核验；源检测环境不擅自安装/升级transformers。
     command=[TEACHER_PYTHON,'-B','-c',
         'from tools.score_prototype_refresh import checkpoint_identity; from tools.baseline_protocol import save; '
@@ -194,13 +212,19 @@ def main(args):
         tasks(root,[{}],'candidate_calibration',[2,3])
         tasks(root,[{}],'candidates',[2,3])
     from tools.charades_prototype import freeze
-    save(root/'state.json',dict(phase='exact-raw-frame-preparation',active={},parent_pid=os.getpid()))
+    save(root/'state.json',dict(phase='reusing-complete-teacher' if reused_teacher else 'exact-raw-frame-preparation',active={},parent_pid=os.getpid()))
     # 已有Qwen环境安装PyAV18；仅把CPU精确解码交给它，不改正在运行的SADA环境。
     frame_command=[TEACHER_PYTHON,'-B','-c','from pathlib import Path; from tools.charades_prototype import frames; '
         +'frames(Path('+repr(str(root))+'),Path('+repr(str(RAW))+'))']
-    subprocess.run(frame_command,cwd=CODE,env=dict(os.environ,CUDA_VISIBLE_DEVICES='',PYTHONDONTWRITEBYTECODE='1'),check=True)
-    tasks(root,[dict(shard=i) for i in [0,1]],'teacher',[2,3],TEACHER_PYTHON)
-    freeze(root);save(root/'cache_independent_audit.json',verify_cache(root))
+    if not reused_teacher:
+        subprocess.run(frame_command,cwd=CODE,env=dict(os.environ,CUDA_VISIBLE_DEVICES='',PYTHONDONTWRITEBYTECODE='1'),check=True)
+        tasks(root,[dict(shard=i) for i in [0,1]],'teacher',[2,3],TEACHER_PYTHON)
+    # Python3.12改进float sum，跨3.9逐值比较会差1ULP；保留原始概率并在原环境精确重放。
+    freeze_command=[TEACHER_PYTHON,'-B','-c','import sys; from pathlib import Path; from tools.charades_prototype import freeze; '
+        +'from tools.baseline_protocol import save; freeze(Path('+repr(str(root))+')); '
+        +'save('+repr(str(root/'teacher_probability_reproduction.json'))+',dict(status="passed",count=200,exact_equality=True,python=sys.version,executable=sys.executable,probability_conversion=False))']
+    subprocess.run(freeze_command,cwd=CODE,env=dict(os.environ,CUDA_VISIBLE_DEVICES='',PYTHONDONTWRITEBYTECODE='1'),check=True)
+    save(root/'cache_independent_audit.json',verify_cache(root))
     for arm in POLICY['variants']:
         cfg=configuration(root,arm)
         for folder in ['probes','formal']:
@@ -217,7 +241,7 @@ def main(args):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',type=Path,required=True)
-    p.add_argument('--previous-root',type=Path,help='只引用未查询教师/未正式训练根的完整准备工件')
+    p.add_argument('--previous-root',type=Path,help='仅引用完整准备/完整教师评分；不覆盖部分阶段或任何正式训练')
     p.add_argument('--worker',action='store_true');p.add_argument('--stage',choices=['candidate_calibration','candidates','teacher','probe','train','evaluate'])
     p.add_argument('--variant',choices=POLICY['variants']);p.add_argument('--shard',type=int,choices=[0,1]);a=p.parse_args()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
