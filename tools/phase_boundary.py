@@ -291,7 +291,8 @@ def pretrain_source_head(ctx,cfg,output):
  from tools.baseline_protocol import save,sha
  model=ctx.model;model.eval();head=model.phase_boundary
  caches={}
- for role,loader in [('train',ctx.train_loader_src),('val',ctx.val_loader_src)]:
+ source_loader=base.loader(ctx.train_loader_src.dataset,True,torch.Generator().manual_seed(123),1,cfg['loader']['num_workers'])
+ for role,loader in [('train',source_loader),('val',ctx.val_loader_src)]:
   cache=[]
   for videos in loader:
    videos=base.move_to_device(videos,model.device)
@@ -314,7 +315,7 @@ def pretrain_source_head(ctx,cfg,output):
   print('SOURCE_PHASE_HEAD',json.dumps(row),flush=True)
  base.checkpoint(output,dict(spec=SPEC,state_dict=beststate,best_epoch=bestepoch,history=history,
   optimizer=optimizer.state_dict(),rng_cpu=torch.get_rng_state(),rng_cuda=torch.cuda.get_rng_state(0),
-  source_only=True,scope='one_original_training_crop_per_drop_last_loader_member_cached_for_five_head_epochs',
+  source_only=True,scope='all_source_training_videos_one_original_GT_crop_cached_for_five_head_epochs',
   source_videos=[[v['metadata']['video_id'] for v in vs] for _,_,_,vs in caches['train']],
   validation_videos=[[v['metadata']['video_id'] for v in vs] for _,_,_,vs in caches['val']]))
  save(Path(output).with_suffix('.json'),dict(spec=SPEC,best_epoch=bestepoch,history=history,head_sha256=sha(output),target_gt_used=False))
@@ -326,6 +327,9 @@ def audit(entry):
  from tools import baseline_protocol as protocol
  e=Path(entry);read,sha=protocol.read,protocol.sha;r=read(e/'complete.json');cfg=read(e/'config.json')
  ref=Path(r['reference']);assert sha(ref/'complete.json')==r['reference_complete_sha256'];assert_pair(cfg,read(ref/'config.json'))
+ assert cfg['phase_boundary_runtime']['reference']==str(ref)
+ headfile=Path(cfg['phase_boundary_runtime']['source_head']);headreceipt=read(headfile.with_suffix('.json'))
+ assert sha(headfile)==headreceipt['head_sha256']
  result=protocol.audit_entry(e,expected_schema=SCHEMA)
  assert sha(SPEC['text_cache'])==SPEC['text_sha256'] and sha(SPEC['text_provenance'])==SPEC['text_provenance_sha256']
  rows=[json.loads(z) for z in (e/'metrics.jsonl').read_text().splitlines()]
