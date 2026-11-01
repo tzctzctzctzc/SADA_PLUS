@@ -11,11 +11,13 @@ def main(args):
     from tools.baseline_protocol import read,save,sha,code_identity
     from tools.baseline_gpu import first_cuda_guard
     from tools.baseline_engine import tensor_digest
-    from tools.run_meta_ttt import load,data
+    from tools.run_meta_ttt import load,data,binding
     from tools.meta_ttt import SPEC,episode
     from tools.meta_ttt_speed import BACKEND,install,restore_training,check_resume
     guard=first_cuda_guard();torch.set_num_threads(8)
-    job=read(args.job);os.chdir(job['data_root']);output=args.output;output.mkdir(exist_ok=False,parents=True)
+    job=read(args.job)
+    assert binding(job)==job['input_sha256']
+    os.chdir(job['data_root']);output=args.output;output.mkdir(exist_ok=False,parents=True)
     reports={}
     for arm in ['meta','joint']:
         packets={};timings={};peaks={}
