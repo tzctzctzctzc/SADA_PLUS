@@ -37,6 +37,8 @@ def gpu_stage(args):
         assert set(saved['ema_state_dict'])=={k for k in ctx.model.state_dict() if not k.startswith('phase_boundary.')}
         ctx.model.load_state_dict(dict(ctx.model.state_dict(),**saved['ema_state_dict']),strict=True)
         ctx.model_ema.module.load_state_dict(dict(ctx.model_ema.module.state_dict(),**saved['ema_state_dict']),strict=True);del saved
+        from tools.phase_boundary import pretrain_source_head
+        pretrain_source_head(ctx,cfg,Path(cfg['phase_boundary_runtime']['source_head']))
         ctx.phase_ledger=str(e/'probe_events.jsonl');phases={}
         for epoch,steps in [(1,2),(5,8)]:
             base.epoch_setup(ctx,epoch);loaders=ctx.train_loader_src,ctx.train_loader_tgt
@@ -62,7 +64,7 @@ def gpu_stage(args):
         actual=base.capture(ctx,cfg,5,[[5,validation]]);assert base.tensor_digest(actual)==base.tensor_digest(captured)
         save(e/'result.json',dict(status='passed',code=identity,phases=phases,initial_state_sha=ctx.initial_state_sha,
             initial_detector_sha=ctx.initial_detector_sha,source_validation_loss=validation,source_validation_scope='two videos only; formal uses complete split',
-            full_state_roundtrip='passed',diagnostic_initialization='cold identity checked, then mature reference EMA loaded for mechanism only',
+            full_state_roundtrip='passed',diagnostic_initialization='cold identity checked; mature EMA and five-epoch source-selected phase head; formal uses same mature weights/head with fresh joint optimizers',
             checkpoint_written=False,formal_training=False,guard=guard,guard_sha256=sha(guard)))
     elif args.stage=='train':
         base.train(cfg,e)
@@ -133,13 +135,13 @@ def main(args):
     if shutil.disk_usage(root).free<15*2**30:raise ValueError('实验盘不足15GiB，不能启动六项checkpoint写入')
     tmp=Path('/vepfs/vlms/tmp')/('phase_'+identity['commit'][:7]);tmp.mkdir(parents=True,exist_ok=False)
     save(root/'plan.json',dict(schema=SCHEMA,code=identity,specification=SPEC,shifts=SHIFTS,gpus=[0,1,2,3],
-        seed=123,batch=2,policy=POLICY,reference_retrained=False,new_formal_count=6,initialization='fresh same cold initialization'))
+        seed=123,batch=2,policy=POLICY,reference_retrained=False,new_formal_count=6,initialization='mature reference EMA plus source-selected head; extra adaptation budget'))
     save(root/'state.json',dict(phase='input_audit',pid=os.getpid(),active={},completed=[]))
     prepare(root/'reference_snapshot',REFERENCE.parents[1],INVENTORY,identity)
     configs={};references={}
     for s in SHIFTS:
         ref=REFERENCE/s;references[s]=audit_reference(ref);old=read(ref/'config.json')
-        cfg=paired_config(old,identity,tmp);configs[s]=cfg
+        cfg=paired_config(old,identity,tmp);cfg['phase_boundary_runtime']=dict(reference=str(ref),source_head=str(root/'formal'/s/'phase'/'source_head.pt'));configs[s]=cfg
         entry=root/'formal'/s/'phase';entry.mkdir(parents=True);save(entry/'config.json',cfg)
         for domain in ['source','target']:save(entry/(domain+'_val_unlabeled.json'),read(root/'reference_snapshot/formal'/s/(domain+'_val_unlabeled.json')),sort_keys=False)
         probe=root/'probes'/s;probe.mkdir(parents=True);save(probe/'config.json',cfg)

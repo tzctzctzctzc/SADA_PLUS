@@ -27,7 +27,8 @@ SPEC=dict(schema=SCHEMA,hidden=128,tokens=24,phases=3,text_phases=4,
  target_classification='teacher_class_and_phase_class_agree_positive_points_only',
  target_regression='phase_edge_refined_teacher_endpoints_separate_masks',
  target_phase='ordered_posterior_KL_on_physical_correspondences',
- precision='float32',initialization='original_Prototype_cold_seed123_b2_extra_auxiliary_parameters',
+ precision='float32',initialization='mature_Prototype_EMA_extra_source_head_pretrain_and_joint_adaptation',
+ source_head_epochs=5,source_head_lr=.0003,source_head_selection='complete_source_val_auxiliary_loss',
  source_selection='original_complete_source_cls_plus_reg_EMA_every5_patience15_max50',
  adversarial='original_conditional_rev_unchanged',prototype='original128_frozen_VLM40of200_membership',
  inference='original_heads_NMS_voting_no_auxiliary_score_product',target_GT=False)
@@ -38,6 +39,7 @@ def paired_config(old,identity,tmp):
 
 def assert_pair(c,old):
  p=deepcopy(c);assert p.pop('phase_boundary')==SPEC
+ p.pop('phase_boundary_runtime',None)
  for k in ['code','tmpdir']:p['baseline'][k]=old['baseline'][k]
  assert p==old and c['seed']==123 and c['loader']['batch_size']==2
 
@@ -115,9 +117,9 @@ def sequence_loss(head,tokens,labels):
  reverse=path_partition(chosen.flip(-1).log_softmax(-1))
  return F.cross_entropy(scores,labels)+(-normal/tokens.shape[1]).mean()+F.softplus((reverse-normal)/tokens.shape[1]).mean(),chosen,scores
 
-def direct(model,videos):
+def direct(model,videos,training=True):
  # 不调用带no_grad的缓存helper；学生SGP/FPN/回归塔保留完整梯度。
- x,m=model.preprocessing(videos,mode='train');x=model.dropout(x)
+ x,m=model.preprocessing(videos,mode='train' if training else 'validation');x=model.dropout(x)
  f,m,_=model.backbone_source(x,m);f,m=model.neck_source(f,m)
  cls=model.cls_head(f,m)[0];reg=model.reg_head(f,m)[0]
  return f,m,cls,reg
@@ -217,7 +219,22 @@ def install(ctx,cfg):
  from tools.baseline_protocol import sha
  assert cfg['phase_boundary']==SPEC and sha(SPEC['text_cache'])==SPEC['text_sha256']
  text=torch.load(SPEC['text_cache'],map_location='cpu')['embeddings'];assert text.shape==(10,4,512)
- model=ctx.model;model.phase_boundary=PhaseBoundary(text).to(model.device)
+ model=ctx.model
+ # 原成熟检测器作固定共同起点；新增源预训与联合预算单独披露。
+ runtime=cfg['phase_boundary_runtime'];ref=Path(runtime['reference'])
+ saved=torch.load(ref/'best.pt',map_location='cpu')
+ model.load_state_dict(saved['ema_state_dict'],strict=True);ctx.model_ema.module.load_state_dict(saved['ema_state_dict'],strict=True)
+ for mm in [model,ctx.model_ema.module]:
+  for k,v in saved['ema_controls'].items():
+   if torch.is_tensor(v):getattr(mm,k).data.copy_(v)
+   elif isinstance(v,list):
+    for a,b in zip(getattr(mm,k),v):a.data.copy_(b)
+   else:setattr(mm,k,deepcopy(v))
+ del saved
+ model.phase_boundary=PhaseBoundary(text).to(model.device)
+ if Path(runtime['source_head']).exists():
+  head=torch.load(runtime['source_head'],map_location='cpu');assert head['spec']==SPEC
+  model.phase_boundary.load_state_dict(head['state_dict'],strict=True)
  ctx.model_ema.module.phase_boundary=deepcopy(model.phase_boundary)
  for p in ctx.model_ema.module.phase_boundary.parameters():p.requires_grad_(False)
  for opt in [ctx.optimizer_gen_source,ctx.optimizer_gen_source_alignment]:
@@ -267,6 +284,43 @@ def install(ctx,cfg):
    with Path(ctx.phase_ledger).open('a') as log:log.write(json.dumps(dict(event,digest=state['digest']))+'\n')
   return output
  model.forward=forward
+
+def pretrain_source_head(ctx,cfg,output):
+ """成熟冻结SGP上缓存原训练crop，完整源split训练新头；不访问target/目标GT。"""
+ from tools import baseline_engine as base
+ from tools.baseline_protocol import save,sha
+ model=ctx.model;model.eval();head=model.phase_boundary
+ caches={}
+ for role,loader in [('train',ctx.train_loader_src),('val',ctx.val_loader_src)]:
+  cache=[]
+  for videos in loader:
+   videos=base.move_to_device(videos,model.device)
+   with torch.no_grad():f,m,c,r=direct(model,videos,training=role=='train')
+   cache.append((tuple(x.detach() for x in f),m,tuple(x.detach() for x in r),videos))
+  caches[role]=cache
+ optimizer=torch.optim.AdamW(head.parameters(),lr=SPEC['source_head_lr'],weight_decay=.05)
+ best=float('inf');history=[];beststate=None
+ for epoch in range(1,SPEC['source_head_epochs']+1):
+  head.train();train=[]
+  for f,m,r,videos in caches['train']:
+   optimizer.zero_grad();loss,_=source_loss(model,head,f,m,r,videos);assert torch.isfinite(loss)
+   loss.backward();torch.nn.utils.clip_grad_norm_(head.parameters(),1.);optimizer.step();train.append(float(loss.detach()))
+  head.eval();val=[]
+  with torch.no_grad():
+   for f,m,r,videos in caches['val']:val.append(float(source_loss(model,head,f,m,r,videos)[0]))
+  row=dict(epoch=epoch,train_loss=sum(train)/len(train),validation_loss=sum(val)/len(val));history.append(row)
+  if row['validation_loss']<best:
+   best=row['validation_loss'];beststate=deepcopy(head.state_dict());bestepoch=epoch
+  print('SOURCE_PHASE_HEAD',json.dumps(row),flush=True)
+ base.checkpoint(output,dict(spec=SPEC,state_dict=beststate,best_epoch=bestepoch,history=history,
+  optimizer=optimizer.state_dict(),rng_cpu=torch.get_rng_state(),rng_cuda=torch.cuda.get_rng_state(0),
+  source_only=True,scope='one_original_training_crop_per_drop_last_loader_member_cached_for_five_head_epochs',
+  source_videos=[[v['metadata']['video_id'] for v in vs] for _,_,_,vs in caches['train']],
+  validation_videos=[[v['metadata']['video_id'] for v in vs] for _,_,_,vs in caches['val']]))
+ save(Path(output).with_suffix('.json'),dict(spec=SPEC,best_epoch=bestepoch,history=history,head_sha256=sha(output),target_gt_used=False))
+ head.load_state_dict(beststate,strict=True);ctx.model_ema.module.phase_boundary.load_state_dict(beststate,strict=True)
+ del caches
+ torch.cuda.empty_cache()
 
 def audit(entry):
  from tools import baseline_protocol as protocol
