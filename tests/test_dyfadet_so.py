@@ -50,7 +50,7 @@ def test_real_model_resume_and_gt_independence(tmp_path):
     batch=next(iter(ctx['train']));before=digest(ctx['model'].state_dict())
     for _ in range(3):loss,norms=step(ctx,batch,True)
     assert before!=digest(ctx['model'].state_dict()) and all(v>0 for v in norms.values())
-    b=io.BytesIO();torch.save(capture(ctx,cfg,1,[],[]),b);b.seek(0);saved=torch.load(b)
+    b=io.BytesIO();torch.save(capture(ctx,cfg,1,[],[]),b);b.seek(0);saved=torch.load(b,map_location='cpu')
     restore(ctx,deepcopy(saved));assert digest(capture(ctx,cfg,1,[],[]))==digest(saved)
     l1,_=step(ctx,batch);d1=digest(capture(ctx,cfg,1,[],[]))
     restore(ctx,deepcopy(saved));l2,_=step(ctx,batch);d2=digest(capture(ctx,cfg,1,[],[]))

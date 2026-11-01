@@ -137,7 +137,8 @@ def probe(cfg,entry,guard):
     for batch in batches:loss,norms=step(ctx,batch,True)
     updated={k:before[k]!=digest(getattr(m,k).state_dict()) for k in before}
     assert all(updated.values()) and all(v>0 and math.isfinite(v) for v in norms.values()),(updated,norms)
-    buf=io.BytesIO();torch.save(capture(ctx,cfg,0,[],[]),buf);buf.seek(0);state=torch.load(buf)
+    # PyTorch 1.13在UUID隔离下可能把device_count报告成0，先落CPU再严格恢复到当前逻辑卡。
+    buf=io.BytesIO();torch.save(capture(ctx,cfg,0,[],[]),buf);buf.seek(0);state=torch.load(buf,map_location='cpu')
     saved_digest=digest(state);restore(ctx,deepcopy(state));assert digest(capture(ctx,cfg,0,[],[]))==saved_digest
     loss1,_=step(ctx,batches[-1]);after1=digest(capture(ctx,cfg,0,[],[]))
     restore(ctx,deepcopy(state));loss2,_=step(ctx,batches[-1]);after2=digest(capture(ctx,cfg,0,[],[]))
