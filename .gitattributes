@@ -1,0 +1,4 @@
+vendor/dyfadet/** -text
+tools/dyfadet*.py text eol=lf
+tools/run_dyfadet_so.py text eol=lf
+tests/test_dyfadet_so.py text eol=lf
