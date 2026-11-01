@@ -135,7 +135,7 @@ def select_proposals(f,m,cls,reg,model,video_index,length):
   for j in ok.nonzero().flatten().tolist():
    boxes.append(b[j]);scores.append(prob[ids[j]]);labels.append(label[ids[j]]);levels.append(l);indices.append(int(ids[j]))
  if not boxes:return []
- b=torch.stack(boxes);s=torch.stack(scores);labels=torch.stack(labels);keep=[]
+ b=torch.stack(boxes).detach();s=torch.stack(scores);labels=torch.stack(labels);keep=[]
  for j in s.argsort(descending=True).tolist():
   if keep:
    k=torch.tensor(keep,device=b.device);inter=(torch.minimum(b[j,1],b[k,1])-torch.maximum(b[j,0],b[k,0])).clamp_min(0)
