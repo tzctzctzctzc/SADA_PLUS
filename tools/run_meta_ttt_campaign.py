@@ -7,6 +7,7 @@ from tools.meta_ttt import SPEC
 from tools.run_meta_ttt import binding,audit,selection
 from tools.run_sada_baseline import acquire,prepare_file_limit
 ACTIVE={}
+EXTRA_RELEASE=None
 
 def stop(signum,frame):
     for task in ACTIVE.values():
@@ -24,7 +25,9 @@ def run_stage(root,rows,stage,indices,identity):
                 complete.append(audit(task['job']))
                 task['lease_context'].__exit__(None,None,None);del ACTIVE[key]
             while pending:
-                found=acquire(indices,Path('/vepfs/vlms/SADA_PLUS'),root,24576,identity['commit'])
+                from tools.finished_gpu_handoff import available_indices
+                eligible=available_indices(indices,EXTRA_RELEASE)
+                found=acquire(eligible,Path('/vepfs/vlms/SADA_PLUS'),root,24576,identity['commit'])
                 if not found:break
                 context,lease=found;row=pending.pop(0);key=row['key'];job_path=root/'jobs'/(stage+'_'+key+'.json')
                 job=dict(row['paths'],stage=stage,shift=row['shift'],arm=row['arm'],
@@ -53,6 +56,8 @@ def run_stage(root,rows,stage,indices,identity):
     return complete
 
 def main(args):
+    global EXTRA_RELEASE
+    EXTRA_RELEASE=args.extra_gpu_release
     if os.environ.get('CUDA_VISIBLE_DEVICES')!='':raise ValueError('监督进程必须CUDA空')
     prepare_file_limit();root=args.root.resolve();root.mkdir(exist_ok=False)
     identity=code_identity();review=read(args.review)
@@ -69,8 +74,12 @@ def main(args):
         if list((previous/'formal').glob('*/*/complete.json')):
             raise ValueError('此迁移仅处理当前两条epoch保存点；已完成项须独立引用，不能重训')
         speed_review=read(args.speed_review)
-        if speed_review['status']!='passed' or speed_review['code']!=identity or not speed_review['resume']:
+        if speed_review['status']!='passed' or not speed_review['resume']:
             raise ValueError('必须当前代码真实GPU等价/测速和已训练RNG恢复门禁')
+        if speed_review['code']!=identity:
+            for name in ['tools/meta_ttt.py','tools/meta_ttt_speed.py','tools/run_meta_ttt.py']:
+                original=subprocess.check_output(['git','show',speed_review['code']['commit']+':'+name],cwd=CODE)
+                if hashlib.sha256(original).hexdigest()!=sha(CODE/name):raise ValueError('只能调度变更复用原提速证明')
         for p in (previous/'formal').glob('*/*/latest.pt'):
             arm,s=p.parent.parent.name,p.parent.name
             resumed[(arm,s)]=dict(resume_checkpoint=str(p),resume_checkpoint_sha256=sha(p),
@@ -101,15 +110,30 @@ def main(args):
         acceptance_review=str(args.review),acceptance_review_sha256=sha(args.review),
         original_6_GPU_receipts='historical identity preserved; same meta_ttt.py hash and probe AST',
         specification=SPEC,source_only_preparation=True,target_GT_used=False,execution_backend=BACKEND,
-        execution_backend_scope='meta-source-preparation-only;native-joint-control-and-test')
+        execution_backend_scope='meta-source-preparation-only;native-joint-control-and-test',
+        extra_gpu_release=str(EXTRA_RELEASE) if EXTRA_RELEASE else None)
     save(root/'plan.json',plan)
     indices=[int(x) for x in args.gpus.split(',')]
     def row(s,arm,stage,extra=None):
         extra=dict(extra or {},execution_backend=BACKEND)
         if stage=='formal' and (arm,s) in resumed:extra.update(resumed[(arm,s)])
         return dict(key=arm+'_'+s,shift=s,arm=arm,paths=paths[s],output=root/stage/arm/s,extra=extra or {})
-    reports=run_stage(root,[row('S1',a,'acceptance') for a in ['meta','joint']],'training_probe',indices,identity)
-    maps=[read(Path(r['job']).parent.parent/'acceptance'/read(r['job'])['arm']/'S1/complete.json')['result']['source_map0'] for r in reports]
+    if args.reuse_acceptance:
+        if not previous:raise ValueError('复用验收需要原监督根')
+        old_acceptance=read(previous/'acceptance.json');reports=old_acceptance['reports'];maps=[]
+        originals={}
+        for report in reports:
+            old_job=read(report['job']);p=Path(old_job['output'])/'complete.json';proof=read(p)
+            if sha(p)!=report['complete_sha256']:raise ValueError('原验收凭证SHA变化')
+            for name in ['tools/meta_ttt.py','tools/meta_ttt_speed.py','tools/run_meta_ttt.py']:
+                original=subprocess.check_output(['git','show',proof['code']['commit']+':'+name],cwd=CODE)
+                if hashlib.sha256(original).hexdigest()!=sha(CODE/name):raise ValueError('训练实现变化不能复用原验收')
+            if proof['result']['status']!='passed' or proof['result']['steps']!=53:raise ValueError('原完整验收不合格')
+            originals[str(p)]=dict(sha256=sha(p),code=proof['code']);maps.append(proof['result']['source_map0'])
+        save(root/'reused_acceptance.json',dict(originals=originals,reason='scheduler-only-change;training-and-kernel-files-byte-identical',current_code=identity))
+    else:
+        reports=run_stage(root,[row('S1',a,'acceptance') for a in ['meta','joint']],'training_probe',indices,identity)
+        maps=[read(Path(r['job']).parent.parent/'acceptance'/read(r['job'])['arm']/'S1/complete.json')['result']['source_map0'] for r in reports]
     if abs(maps[0]-maps[1])>1e-6:raise ValueError('两臂初始源mAP不一致')
     save(root/'acceptance.json',dict(status='passed',reports=reports,source_map0=maps[0]))
     order=['S5','S6','S2','S4','S1','S3']
@@ -146,6 +170,8 @@ if __name__=='__main__':
     p.add_argument('--gpus',default='0,1')
     p.add_argument('--previous-root',type=Path,help='本次技术提速精确承接原meta S5/S6 epoch保存点')
     p.add_argument('--speed-review',type=Path,help='当前代码GPU数值等价/测速/恢复证明')
+    p.add_argument('--extra-gpu-release',type=Path,help='第三人称完成独立终审后移交GPU2/3的原子凭证')
+    p.add_argument('--reuse-acceptance',action='store_true',help='只调度变更时保留原代码身份引用既有完整验收')
     a=p.parse_args()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
     try:main(a)
