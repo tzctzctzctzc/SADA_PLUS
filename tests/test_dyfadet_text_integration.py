@@ -24,6 +24,7 @@ def test_full_model_optimizer_ema_resume_routing_and_text(variant,tmp_path,monke
  assert e.base.digest(m.state_dict())==e.base.digest(ctx['ema'].module.state_dict())
  src=next(iter(ctx['train']));target=next(iter(ctx['target']));monkeypatch.setattr(e,'pseudo',fixed_pseudo)
  for _ in range(4):loss,norms=e.update(ctx,src,target,True)
+ assert torch.equal(m.semantic.text_embeddings,ctx['ema'].module.semantic.text_embeddings)
  assert all(v>0 for v in norms.values()) and set(norms)==set(e.MODULES)
  assert all(p.grad is None for p in ctx['ema'].module.parameters())
  assert sum(float(p.grad.abs().sum()) for p in m.semantic.text_projection.parameters() if p.grad is not None)>0

@@ -19,6 +19,12 @@ def dense_dispatch(model,videos):
     return model.dense(videos) if isinstance(model,TextDetector) else _ORIGINAL_DENSE(model,videos)
 base.dense=dense_dispatch
 
+class TextModelEma(base.ModelEma):
+    def update(self,model):
+        super().update(model)
+        # 文本缓存是固定输入，不能因EMA浮点舍入而随训练漂移。
+        self.module.semantic.text_embeddings.copy_(model.semantic.text_embeddings)
+
 def wrap(detector,cfg,device):
     info=cfg['benchmark']['text'];data=torch.load(info['cache'],map_location='cpu')
     assert sha(info['cache'])==info['sha256']
@@ -127,7 +133,7 @@ def build(cfg,mode,device='cuda:0',workers=None):
     ctx['model'].loss_normalizer=ctx['ema'].module.loss_normalizer=ref['normalizers'][1]
     ctx['initial_sha']=base.digest(ref['ema']);del ref
     ctx['model']=wrap(ctx['model'],cfg,device)
-    ctx['ema']=base.ModelEma(ctx['model'],decay=.999)
+    ctx['ema']=TextModelEma(ctx['model'],decay=.999)
     for name,p in ctx['model'].semantic.named_parameters():
         group=0 if p.ndim>=2 and name!='phase_positions' else 1
         ctx['opt'].param_groups[group]['params'].append(p)
