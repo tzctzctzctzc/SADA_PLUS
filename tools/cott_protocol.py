@@ -29,6 +29,7 @@ SPEC = dict(schema=SCHEMA, paper='https://aclanthology.org/2026.emnlp-main.1163/
     max_new_tokens=dict(transition=2048, grouping=8192, refine=1536, direct=4096),
     max_input_tokens=65536, schema_retries=1, score_threshold=.5, dedup_tiou=.5,
     transition_contract_version=2,
+    grouping_contract_version=2,
     retry_contract='same visual evidence plus exact schema error; do not include invalid assistant answer as a completion template',
     metrics_tiou=[.1,.2,.3,.4,.5], bootstrap_video_replicates=1000,
     adaptations=['10-class vocabulary plus OTHER', 'typed JSON output with explicit validation',
@@ -115,6 +116,12 @@ def grouping_prompt(transitions,duration):
         'verb per interval. Gaps are permitted. Multiple descriptions at one pair are overlapping '
         'window observations, not repeated actions. Assign exactly one vocabulary label or OTHER '
         'to each interval. Times must lie within [0,'+str(duration)+']. '
+        'For EVERY adjacent pair of output rows i and i+1 enforce end[i] <= start[i+1]. '
+        'An action may touch the next action at a shared boundary, but no instant can belong '
+        'to two primitive rows. Where two descriptions span a shared transition, use the '
+        'evidence to locate their handoff boundary. Before returning, check every adjacent numeric '
+        'end/start pair. Keep all supported distinct interactions; do not discard an action '
+        'just to satisfy the constraint. '
         'Schema: {"intervals":[{"start":0.0,"end":1.0,"label":"TAKE",'
         '"description":"take the cup"}]}; use an empty list if no action is evidenced.\n'+
         json.dumps(transitions,ensure_ascii=False))
@@ -178,8 +185,14 @@ def validate(x,stage,lo,hi,pair_count=0):
         for r in rows: interval(r,lo,hi,stage=='direct')
         if stage=='grouping':
             if rows!=sorted(rows,key=lambda r:r['start']): raise ValueError('grouping not chronological')
-            if any(a['end']>b['start']+1e-5 for a,b in zip(rows,rows[1:])):
-                raise ValueError('paper primitive grouping must be non-overlapping')
+            conflicts=[dict(previous_index=i,previous_label=a['label'],previous_end=a['end'],
+                next_index=i+1,next_label=b['label'],next_start=b['start'],overlap_seconds=a['end']-b['start'])
+                for i,(a,b) in enumerate(zip(rows,rows[1:])) if a['end']>b['start']+1e-5]
+            if conflicts:
+                raise ValueError('paper primitive grouping must be non-overlapping: '+json.dumps(conflicts)+
+                    '. Regenerate the complete chronological interval list from the SAME evidence. '
+                    'Choose the physical handoff boundary so every end[i] <= start[i+1]; '
+                    'do not repeat the overlapping numbers, drop an interaction, or invent evidence.')
     return x
 
 def iou(a,b):

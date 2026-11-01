@@ -64,7 +64,15 @@ class Generator:
             model_sha256=self.model_sha,spec_sha256=digest(SPEC))
         h=digest(req)
         if (entry/'result.json').exists():
-            old=read(entry/'result.json');assert old['request_sha256']==h
+            old=read(entry/'result.json')
+            if old['request_sha256']!=h:
+                # 仅明确绑定的、未改变提示/帧/模型的成功transition/direct前缀可复用。
+                binding=read(self.root/'accepted_prefix_reuse.json')['calls'][video_id+'/'+call_id]
+                assert stage in ['transition','direct']
+                assert sha(entry/'result.json')==binding['result_sha256']
+                prior=read(entry/'request.json')
+                assert digest(prior)==old['request_sha256']==binding['request_sha256']
+                assert dict(prior,spec_sha256=req['spec_sha256'])==req,'reused call changed beyond grouping-only SPEC'
             assert sha(entry/'request.json')==old['request_file_sha256']
             for name,v in old['attempt_sha256'].items(): assert sha(entry/name)==v
             return validate(old['parsed'],stage,lo,hi,pair_count)

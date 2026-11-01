@@ -89,6 +89,12 @@ def evaluate(root,partial=False):
         cost=cost,model_identity_sha256=sha(root/'model_identity.json'),
         first_cuda_sha256=sha(root/'first_cuda.json'),
         conclusion_scope='source-only pilot; no target mAP, no student training, no proof of UDA gain')
+    if (root/'accepted_prefix_reuse.json').exists():
+        binding=read(root/'accepted_prefix_reuse.json')
+        assert sha(root/'accepted_prefix_reuse.json')==plan['successful_prefix_reuse_sha256']
+        for p,h in binding['failed_requests_sha256'].items():assert sha(p)==h
+        out['technical_prefix_reuse']=dict(receipt_sha256=sha(root/'accepted_prefix_reuse.json'),
+            accepted_calls=len(binding['calls']),prior_failed_contract_cost=binding['prior_failed_contract_cost'])
     stamp=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     save(root/'evaluation'/('partial_'+stamp+'.json' if partial else 'final.json'),out)
     if not partial:

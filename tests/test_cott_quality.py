@@ -107,6 +107,24 @@ def test_temporal_iou_values():
     assert iou(event(),event(start=1,end=2))==0
     assert iou(event(),event(start=0,end=2))==.5
 
+def test_grouping_overlap_error_identifies_conflicting_numbers_without_repairing_rows():
+    rows=[event(start=2.002,end=6.006),event(start=5.5055,end=8.008,label='INSERT')]
+    with pytest.raises(ValueError,match='previous_end.*6.006.*next_start.*5.5055'):
+        validate(dict(intervals=rows),'grouping',0,25)
+    assert rows[0]['end']==6.006 and rows[1]['start']==5.5055
+    prompt=grouping_prompt([],25)
+    assert 'end[i] <= start[i+1]' in prompt
+
+def test_successful_prefix_only_reuses_identical_non_grouping_request(tmp_path):
+    from tools.run_cott_quality import Generator
+    gen=Generator.__new__(Generator);gen.root=tmp_path;gen.model_sha='model'
+    req=dict(stage='direct',system=SYSTEM,prompt='same',frames=[],lo=0.,hi=5.,pair_count=0,model_sha256='model',spec_sha256='previous')
+    d=tmp_path/'calls/v/direct_0000';save(d/'request.json',req);parsed=dict(intervals=[])
+    result=dict(request_sha256=digest(req),request_file_sha256=sha(d/'request.json'),attempt_sha256={},parsed=parsed);save(d/'result.json',result)
+    save(tmp_path/'accepted_prefix_reuse.json',dict(calls={'v/direct_0000':dict(result_sha256=sha(d/'result.json'),request_sha256=digest(req))}))
+    assert gen.call('v','direct_0000','direct','same',[],0.,5.)==parsed
+    with pytest.raises(AssertionError):gen.call('v','direct_0000','direct','changed',[],0.,5.)
+
 def test_recorded_call_resume_preserves_exact_request_and_rejects_changed_prompt(tmp_path):
     from tools.run_cott_quality import Generator
     gen=Generator.__new__(Generator);gen.root=tmp_path;gen.model_sha='model'
