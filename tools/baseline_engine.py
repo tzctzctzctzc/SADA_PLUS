@@ -130,14 +130,16 @@ def build(cfg):
             ctx.checked_steps += 1
         result = original(*args, **kwargs)
         if kwargs.get('mode') != 'test':
-            for name, value in result[0].items():
-                if not torch.isfinite(value).all():
-                    raise ValueError('非有限loss: '+name)
+            if not torch.isfinite(torch.stack([v.detach().reshape(()) for v in result[0].values()])).all():
+                raise ValueError('非有限loss')
         return result
     ctx.model.forward = checked_forward
     if cfg.get('context_mix'):
         from tools.context_mix import install
         install(ctx, cfg)
+    if cfg.get('benchmark')=='charades-ego-third-to-first' and cfg.get('prototype_capacity'):
+        from tools.charades_speed import install
+        install(ctx)
     return ctx
 
 
