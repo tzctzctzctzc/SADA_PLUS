@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from libs.modeling.losses import sigmoid_focal_loss,ctr_diou_loss_1d
 from libs.utils.nms import batched_nms
+from tools.dyfadet_split_policy import temporal_view,inverse_segments,stability_filter,assignment_metadata
 
 MODULES=('backbone','neck','cls_head','reg_head')
 
@@ -45,7 +46,7 @@ def strong(videos,generator):
     return result
 
 @torch.no_grad()
-def pseudo(teacher,videos):
+def raw_pseudo(teacher,videos):
     teacher.eval();result=[]
     # The official evaluation preprocessor accepts one video; preserve it exactly.
     for v in videos:
@@ -58,18 +59,48 @@ def pseudo(teacher,videos):
         keep=score>=SPEC['target_threshold'];result.append(dict(segments=seg[keep],scores=score[keep],labels=label[keep]))
     return result
 
+@torch.no_grad()
+def pseudo(teacher,videos):
+    original=raw_pseudo(teacher,videos)
+    for v,p in zip(videos,original):
+        views=[]
+        for scale in SPEC['regression_temporal_scales']:
+            changed,ratio=temporal_view(v,scale)
+            prediction=raw_pseudo(teacher,[changed])[0]
+            prediction['segments']=inverse_segments(prediction['segments'],ratio,v['feats'].shape[-1])
+            views.append(prediction)
+        p['regression_keep'],p['stability_iou'],p['stability_endpoint']=stability_filter(
+            p,views,SPEC['regression_min_iou'],SPEC['regression_max_endpoint_fraction'])
+    return original
+
+
 def positive_loss(model,outputs,predictions):
     points,masks,cls,reg=outputs
-    gt_cls,gt_reg=model.label_points(points,[p['segments'].to(model.device) for p in predictions],[p['labels'].to(model.device) for p in predictions])
-    gt=torch.stack(gt_cls);valid=torch.cat(masks,1);pos=(gt.sum(-1)>0)&valid;n=int(pos.sum())
     logits=torch.cat(cls,1);offsets=torch.cat(reg,1)
-    if not n:return logits.sum()*0,offsets.sum()*0,n
-    labels=gt[pos]*(1-model.train_label_smoothing)+model.train_label_smoothing/(model.num_classes+1)
-    classification=sigmoid_focal_loss(logits[pos],labels,reduction='sum')/n
-    # Preserve the official equal-shortest-instance multi-label offset convention.
-    vid=torch.where(gt[pos])[0]
-    regression=ctr_diou_loss_1d(offsets[pos][vid],torch.stack(gt_reg)[pos][vid],reduction='sum')/n
-    return classification,regression,n
+    valid=torch.cat(masks,1);targets=[];weights=[];reg_segments=[];reg_labels=[]
+    for p in predictions:
+        seg=p['segments'].to(model.device);lab=p['labels'].to(model.device)
+        score=p['scores'].to(model.device)
+        target,_,weight=assignment_metadata(model,points,seg,lab,score)
+        targets.append(target);weights.append(weight)
+        keep=p['regression_keep'].to(model.device)
+        reg_segments.append(seg[keep]);reg_labels.append(lab[keep])
+    gt=torch.stack(targets);weight=torch.stack(weights)
+    pos=(gt.sum(-1)>0)&valid;n=int(pos.sum())
+    classification=logits.sum()*0
+    if n:
+        labels=gt[pos]*(1-model.train_label_smoothing)+model.train_label_smoothing/(model.num_classes+1)
+        per_point=sigmoid_focal_loss(logits[pos],labels,reduction='none').sum(-1)
+        # Unweighted denominator preserves absolute confidence attenuation.
+        classification=(per_point*weight[pos]).sum()/n
+    rcls,rgt=model.label_points(points,reg_segments,reg_labels)
+    rg=torch.stack(rcls);rpos=(rg.sum(-1)>0)&valid;nr=int(rpos.sum())
+    regression=offsets.sum()*0
+    if nr:
+        vid=torch.where(rg[rpos])[0]
+        regression=ctr_diou_loss_1d(offsets[rpos][vid],torch.stack(rgt)[rpos][vid],reduction='sum')/nr
+    return classification,regression,n,nr,float(weight[pos].mean()) if n else 0.
+
 
 def predict_unlabeled(model,videos):
     # Official forward filters `segments` before its eval branch. Reuse the
@@ -109,21 +140,21 @@ def update(ctx,source,target=None,measure=False):
     if target is None:
         # Control and disabled UDA execute the official function, not a reimplementation.
         result,_=base.step(ctx,source);ctx['step']+=1
-        result.update(target_cls=0.,target_reg=0.,target_positive_points=0,target_proposals=0,target_classes=[0]*10,ramp=0.)
+        result.update(target_cls=0.,target_reg=0.,target_positive_points=0,target_proposals=0,target_classes=[0]*10,ramp=0.,target_regression_points=0,target_regression_proposals=0,target_cls_weight=0.)
         return result,{}
     m=ctx['model'];m.train();ctx['opt'].zero_grad(set_to_none=True)
     source_loss=m(source);assert all(torch.isfinite(x).all() for x in source_loss.values())
     source_loss['final_loss'].backward()
     result={k:float(v.detach()) for k,v in source_loss.items()};norms={}
-    result.update(target_cls=0.,target_reg=0.,target_positive_points=0,target_proposals=0,target_classes=[0]*10,ramp=0.)
+    result.update(target_cls=0.,target_reg=0.,target_positive_points=0,target_proposals=0,target_classes=[0]*10,ramp=0.,target_regression_points=0,target_regression_proposals=0,target_cls_weight=0.)
     if target is not None:
         assert ctx['mode']=='uda' and all('segments' not in v and 'labels' not in v for v in target)
         with target_stream(ctx):
             labels=pseudo(ctx['ema'].module,target);normalizer=m.loss_normalizer
-            c,r,n=positive_loss(m,base.dense(m,strong(target,ctx['augmentation'])),labels)
+            c,r,n,nr,confidence=positive_loss(m,base.dense(m,strong(target,ctx['augmentation'])),labels)
             assert m.loss_normalizer==normalizer
             loss=c+SPEC['target_regression_weight']*r;assert torch.isfinite(loss)
-            if measure and n:
+            if measure and nr:
                 for name in MODULES:
                     params=[p for p in getattr(m,name).parameters() if p.requires_grad]
                     gs=torch.autograd.grad(loss,params,retain_graph=True,allow_unused=True)
@@ -142,7 +173,8 @@ def record(ctx,path,source,target,result):
     x=dict(step=ctx['step'],previous=ctx['ledger_digest'],source_videos=[v['video_id'] for v in source],
         target_videos=[v['video_id'] for v in target] if target is not None else [],
         target_crops=[dict(video_id=v['video_id'],start=v['crop_start_grid'],length=v['crop_length']) for v in target] if target is not None else [],
-        target_positive_points=result['target_positive_points'],target_proposals=result['target_proposals'],target_classes=result['target_classes'])
+        target_positive_points=result['target_positive_points'],target_proposals=result['target_proposals'],target_classes=result['target_classes'],
+        target_regression_points=result['target_regression_points'],target_regression_proposals=result['target_regression_proposals'],target_cls_weight=result['target_cls_weight'])
     h=hashlib.sha256(json.dumps(x,sort_keys=True,separators=(',',':')).encode()).hexdigest();x['sha256']=h;ctx['ledger_digest']=h
     with Path(path).open('a') as f:f.write(json.dumps(x)+'\n')
 
@@ -196,6 +228,23 @@ def probe(cfg,entry,guard):
         loss,norms=update(ctx,source,batch,True)
         if norms:all_norms=norms;chosen=batch;break
     assert chosen is not None and all(v>0 and math.isfinite(v) for v in all_norms.values()),('no target support',loss,all_norms)
+    # Actual Teacher predictions verify that filtering gates regression separately.
+    labels=pseudo(ctx['ema'].module,chosen)
+    out=base.dense(ctx['model'],chosen)
+    c,r,n,nr,confidence=positive_loss(ctx['model'],out,labels)
+    assert n>0 and nr>0
+    cls_params=list(ctx['model'].cls_head.parameters());reg_params=list(ctx['model'].reg_head.parameters())
+    def norm(loss,params):
+        gradients=torch.autograd.grad(loss,params,retain_graph=True,allow_unused=True)
+        return math.sqrt(sum(float(g.detach().square().sum()) for g in gradients if g is not None))
+    routing=dict(classification_to_cls=norm(c,cls_params),classification_to_reg=norm(c,reg_params),
+        regression_to_cls=norm(r,cls_params),regression_to_reg=norm(r,reg_params))
+    assert routing['classification_to_cls']>0 and routing['regression_to_reg']>0
+    assert routing['classification_to_reg']==routing['regression_to_cls']==0
+    split_support=dict(classification_proposals=sum(len(p['labels']) for p in labels),
+        regression_proposals=sum(int(p['regression_keep'].sum()) for p in labels),
+        classification_points=n,regression_points=nr,classification_weight=confidence)
+    del out,c,r,labels
     changed={k:before[k]!=base.digest(getattr(ctx['model'],k).state_dict()) for k in MODULES};assert all(changed.values())
     state=frozen_state(ctx);state['probe']=True
     restore(ctx,deepcopy(state));again=capture(ctx,0,[],[]);again['probe']=True
@@ -215,7 +264,7 @@ def probe(cfg,entry,guard):
     save(entry/'probe.json',dict(status='passed',initial_ema_sha256=initial,parameters_updated=changed,
         target_gradient_norms=all_norms,target_gradient_positive=True,source_disabled_path_equal=True,source_disabled_calls_official=True,
         disabled_GPU_repeat=disabled,full_state_restore=True,next_step_exact=resumed['exact'],next_step_numerical=True,next_step_GPU_repeat=resumed,
-        teacher_no_grad=True,target_GT_used=False,
+        teacher_no_grad=True,target_GT_used=False,split_loss_routing=routing,split_support=split_support,
         original_inference_equal=True,loss=loss,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,
         guard=guard,guard_sha256=sha(guard)))
 
@@ -273,6 +322,7 @@ def train_mode(cfg,entry,mode,guard,matched_stop=None):
         torch.cuda.synchronize();row['seconds']=time.monotonic()-started;rows.append(row)
         state=capture(ctx,epoch,history,rows);base.checkpoint(d/'latest.pt',state)
         if improved:base.checkpoint(d/'best.pt',state)
+        if epoch%5==0:base.checkpoint(d/('epoch_%03d.pt'%epoch),state)
         del state;save(d/'metrics.json',rows);print('EPOCH',mode,json.dumps(row),flush=True)
     selected=terminal(history) if mode=='uda' else dict(decision(history),reason='matched_UDA_source_update_budget')
     if matched_stop is not None:assert selected['epoch']==matched_stop

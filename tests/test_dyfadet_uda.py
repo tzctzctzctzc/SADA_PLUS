@@ -21,26 +21,26 @@ def config(tmp_path):
     cfg['benchmark'].update(target_train=str(path),reference=str(ref));return cfg
 
 def fixed_pseudo(teacher,videos):
-    return [dict(segments=torch.tensor([[4.,12.]]),labels=torch.tensor([2]),scores=torch.tensor([.9])) for _ in videos]
+    return [dict(segments=torch.tensor([[4.,12.]]),labels=torch.tensor([2]),scores=torch.tensor([.9]),regression_keep=torch.tensor([True])) for _ in videos]
 
 def test_target_ignore_and_no_normalizer_update(tmp_path):
     cfg=config(tmp_path);ctx=e.build(cfg,'uda','cpu',0);m=ctx['model'];m.eval()
     videos=next(iter(ctx['target']))[:1];out=e.base.dense(m,videos);points,masks,cls,reg=out
     cls=[x.detach().requires_grad_() for x in cls];reg=[x.detach().requires_grad_() for x in reg]
-    normal=m.loss_normalizer;pred=fixed_pseudo(m,videos);c,r,n=e.positive_loss(m,(points,masks,cls,reg),pred)
+    normal=m.loss_normalizer;pred=fixed_pseudo(m,videos);c,r,n,nr,w=e.positive_loss(m,(points,masks,cls,reg),pred)
     assert n>0; (c+r).backward();assert m.loss_normalizer==normal
     gt,_=m.label_points(points,[p['segments'] for p in pred],[p['labels'] for p in pred]);pos=torch.stack(gt).sum(-1)>0
     grad=torch.cat([x.grad for x in cls],1);assert torch.count_nonzero(grad[~pos])==0 and torch.count_nonzero(grad[pos])>0
     altered=[];start=0
     for x in cls:
         y=x.detach().clone();mask=pos[:,start:start+x.shape[1]];y[~mask]+=100;altered.append(y);start+=x.shape[1]
-    c2,r2,n2=e.positive_loss(m,(points,masks,altered,reg),pred)
+    c2,r2,n2,nr2,w2=e.positive_loss(m,(points,masks,altered,reg),pred)
     assert c.item()==c2.item() and r.item()==r2.item() and n==n2
 
 def test_empty_pseudo_has_zero_target_gradient(tmp_path):
     cfg=config(tmp_path);ctx=e.build(cfg,'uda','cpu',0);m=ctx['model'];m.train();v=next(iter(ctx['target']))
-    p=[dict(segments=torch.zeros(0,2),labels=torch.zeros(0,dtype=torch.long)) for _ in v]
-    c,r,n=e.positive_loss(m,e.base.dense(m,v),p);(c+r).backward()
+    p=[dict(segments=torch.zeros(0,2),labels=torch.zeros(0,dtype=torch.long),scores=torch.zeros(0),regression_keep=torch.zeros(0,dtype=torch.bool)) for _ in v]
+    c,r,n,nr,w=e.positive_loss(m,e.base.dense(m,v),p);(c+r).backward()
     assert c.item()==r.item()==n==0
     assert all(p.grad is None or torch.count_nonzero(p.grad)==0 for p in m.parameters())
 
@@ -103,9 +103,9 @@ def test_legal_epoch0_and_matched_budget():
 
 def test_ledger_chains_exact_members(tmp_path):
     ctx=dict(step=1,ledger_digest='');v=[dict(video_id='src')];t=[dict(video_id='tgt',crop_start_grid=3,crop_length=8)]
-    p=tmp_path/'events.jsonl';e.record(ctx,p,v,t,dict(target_positive_points=3,target_proposals=2,target_classes=[0]*10))
+    p=tmp_path/'events.jsonl';e.record(ctx,p,v,t,dict(target_positive_points=3,target_proposals=2,target_classes=[0]*10,target_regression_points=0,target_regression_proposals=0,target_cls_weight=0.))
     first=json.loads(p.read_text());assert first['source_videos']==['src'] and first['target_videos']==['tgt']
-    ctx['step']=2;e.record(ctx,p,v,None,dict(target_positive_points=0,target_proposals=0,target_classes=[0]*10))
+    ctx['step']=2;e.record(ctx,p,v,None,dict(target_positive_points=0,target_proposals=0,target_classes=[0]*10,target_regression_points=0,target_regression_proposals=0,target_cls_weight=0.))
     second=json.loads(p.read_text().splitlines()[1]);assert second['previous']==first['sha256'] and second['target_videos']==[]
 
 def test_numerical_check_rejects_wrong_gradient_optimizer_or_rng():

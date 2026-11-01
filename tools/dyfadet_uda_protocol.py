@@ -5,13 +5,19 @@ import math,subprocess
 from tools.dyfadet_protocol import read,save,sha,CODE,VENDOR
 
 REFERENCE=Path('/vepfs/vlms/dyfadet_so6_694c64a_1101')
-SCHEMA='dyfadet-positive-pseudo-ema-uda-v1'
+SCHEMA='dyfadet-decoupled-confidence-temporal-stability-uda-v1'
 SPEC=dict(seed=123,source_batch=2,target_batch=2,max_epochs=30,validation_every=5,patience=15,
     initialization='per_shift_audited_SO_best_EMA',epoch0_candidate=True,ema_decay=.999,
     learning_rate=1e-5,eta_min=1e-6,warmup_epochs=0,weight_decay=.05,
-    target_threshold=.5,target_regression_weight=.5,target_ramp_epochs=5,channel_dropout=.1,
+    target_threshold=.5,classification_weight='minimum_teacher_confidence_of_tied_shortest_instances',
+    regression_temporal_scales=[.9,1.1],regression_min_iou=.7,regression_max_endpoint_fraction=.15,
+    regression_matching='same_class_mutual_best_IoU_in_both_views',
+    regression_targets='original_teacher_intervals_separate_official_point_assignment',
+    temporal_mapping='align_corners_false_pixel_centers_inverse_actual_length_ratio',
+    validation_checkpoint_every=5,regression_stability_is_accuracy=False,
+    target_regression_weight=.5,target_ramp_epochs=5,channel_dropout=.1,
     target_supervision='original_point_assignment_positive_locations_only_other_locations_ignored',
-    target_normalization='separate_current_positive_count',source_loss='unchanged_official_DyFADet',
+    target_normalization='classification_unweighted_positive_count_regression_separate_stable_positive_count',source_loss='unchanged_official_DyFADet',
     target_crop='uniform_without_GT_shared_teacher_student_local_grid',
     augmentation='channel_dropout_only_preserves_time_coordinates',
     source_control='same_SO_initialization_and_actual_UDA_source_update_count',
@@ -97,7 +103,7 @@ def audit(entry):
         assert all(r['target_training_batches']==(b['steps_per_epoch'] if mode=='uda' else 0) for r in rows)
         for r in rows:
             assert all(math.isfinite(r[k]) for k in ('final_loss','cls_loss','reg_loss','target_cls','target_reg','ramp'))
-            if mode=='uda' and r['target_positive_points']>0:
+            if mode=='uda' and r['target_regression_points']>0:
                 assert set(r['target_gradient_norms'])=={'backbone','neck','cls_head','reg_head'}
                 assert all(v>0 and math.isfinite(v) for v in r['target_gradient_norms'].values())
         init=read(d/'initialization.json');assert init['reference_best_sha256']==b['reference_best_sha256']
@@ -123,6 +129,13 @@ def audit(entry):
             if mode=='source_control':assert x['target_videos']==[]
         assert digest==t['ledger_digest']
         if mode=='uda':assert sum(x['target_positive_points'] for x in events)>0
+            assert sum(x['target_regression_points'] for x in events)>0
+            assert all(0<=x['target_regression_proposals']<=x['target_proposals'] for x in events)
+            assert all(0<=x['target_cls_weight']<=1 for x in events)
+            for epoch in range(5,stop+1,5):
+                snap=torch.load(d/('epoch_%03d.pt'%epoch),map_location='cpu')
+                assert snap['epoch']==epoch and snap['config']==c and snap['mode']==mode
+                del snap
         guard_audit(t['guard'],t['guard_sha256'],b['code']['commit'])
         for role in ('source_val','target_val'):
             manifest=c['benchmark']['inference'][role];db=read(manifest)['database']
