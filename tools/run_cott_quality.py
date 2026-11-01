@@ -57,11 +57,12 @@ class Generator:
             model_sha256=self.model_sha,trainable_parameters=sum(p.numel() for p in self.model.parameters() if p.requires_grad)))
         print('MODEL_READY',flush=True)
 
-    def call(self,video_id,call_id,stage,prompt,frames,lo,hi,pair_count=0):
+    def call(self,video_id,call_id,stage,prompt,frames,lo,hi,pair_count=0,grouping_grid=None):
         entry=self.root/'calls'/video_id/call_id; entry.mkdir(parents=True,exist_ok=True)
         for f in frames: assert sha(f['path'])==f['sha256']
         req=dict(stage=stage,system=SYSTEM,prompt=prompt,frames=frames,lo=lo,hi=hi,pair_count=pair_count,
             model_sha256=self.model_sha,spec_sha256=digest(SPEC))
+        if grouping_grid is not None:req['grouping_grid']=grouping_grid
         h=digest(req)
         if (entry/'result.json').exists():
             old=read(entry/'result.json')
@@ -115,10 +116,19 @@ class Generator:
             cards=gpu_snapshot()
             assert all(x['free_mib']>=3072 for x in cards), 'insufficient generation headroom, no precision/batch fallback'
             batch=batch.to(self.model.device); started=time.monotonic()
+            decoder=None;extra={};decoder_proof=None
+            if stage=='grouping':
+                from tools.cott_grouping_decoder import GroupingDecoder,safe_description_tokens
+                assert grouping_grid is not None
+                if not hasattr(self,'grouping_safe_tokens'):
+                    self.grouping_safe_tokens=safe_description_tokens(self.processor.tokenizer)
+                decoder=GroupingDecoder(self.processor.tokenizer,n,grouping_grid,CLASSES+['OTHER'],
+                    self.model.generation_config.eos_token_id,self.grouping_safe_tokens)
+                extra=dict(prefix_allowed_tokens_fn=decoder,num_beams=1)
             with torch.inference_mode():
                 output=self.model.generate(**batch,do_sample=False,max_new_tokens=SPEC['max_new_tokens'][stage],
-                    use_cache=True,pad_token_id=self.processor.tokenizer.pad_token_id)
-            ids=output[0,n:]; raw=self.processor.tokenizer.decode(ids,skip_special_tokens=True)
+                    use_cache=True,pad_token_id=self.processor.tokenizer.pad_token_id,**extra)
+            ids=output[0,n:]; raw=self.processor.tokenizer.decode(ids,skip_special_tokens=True,clean_up_tokenization_spaces=False)
             elapsed=time.monotonic()-started
             eos=self.model.generation_config.eos_token_id
             eos=[eos] if isinstance(eos,int) else eos
@@ -126,11 +136,14 @@ class Generator:
             parsed=None
             try:
                 if truncated: raise ValueError('response truncated at token budget')
-                parsed=validate(parse_object(raw),stage,lo,hi,pair_count);status='valid';error=None
+                obj=parse_object(raw)
+                if decoder is not None:obj,decoder_proof=decoder.finish(ids.tolist())
+                parsed=validate(obj,stage,lo,hi,pair_count);status='valid';error=None
             except (ValueError,TypeError,KeyError,AttributeError) as exc:
                 status='invalid';error=str(exc)
             save(ap,dict(status=status,request_sha256=h,raw=raw,parsed=parsed,error=error,
                 truncated=truncated,input_tokens=n,output_tokens=len(ids),elapsed_sec=elapsed,
+                constrained_decoder=decoder_proof,
                 peak_reserved_mib=[torch.cuda.max_memory_reserved(i)/2**20 for i in range(4)]))
             attempts[ap.name]=sha(ap)
             print('CALL',video_id,call_id,attempt,status,round(elapsed,2),flush=True)
@@ -162,7 +175,9 @@ def run_video(gen,row):
     assert set(transition_rows)==set(range(len(frames)-1))
     transitions=[dict(pair=i,**r) for i,r in sorted(transition_rows.items())]
     save(entry/'transitions.json',transitions)
-    grouped=gen.call(v,'grouping','grouping',grouping_prompt(transitions,row['duration']),[],0.,row['duration'])
+    grid=[transitions[0]['start']]+[x['end'] for x in transitions]
+    assert all(a['end']==b['start'] for a,b in zip(transitions,transitions[1:]))
+    grouped=gen.call(v,'grouping','grouping',grouping_prompt(transitions,row['duration']),[],0.,row['duration'],grouping_grid=grid)
     requests.append('grouping');save(entry/'primitive_intervals.json',grouped)
     refined=[]; rejected=[]
     for i,r in enumerate(grouped['intervals']):

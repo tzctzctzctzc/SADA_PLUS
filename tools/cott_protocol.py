@@ -29,7 +29,8 @@ SPEC = dict(schema=SCHEMA, paper='https://aclanthology.org/2026.emnlp-main.1163/
     max_new_tokens=dict(transition=2048, grouping=8192, refine=1536, direct=4096),
     max_input_tokens=65536, schema_retries=1, score_threshold=.5, dedup_tiou=.5,
     transition_contract_version=2,
-    grouping_contract_version=2,
+    grouping_contract_version=3,
+    grouping_serialization='ordered_transition_index_spans_constrained_greedy_v1',
     retry_contract='same visual evidence plus exact schema error; do not include invalid assistant answer as a completion template',
     metrics_tiou=[.1,.2,.3,.4,.5], bootstrap_video_replicates=1000,
     adaptations=['10-class vocabulary plus OTHER', 'typed JSON output with explicit validation',
@@ -115,14 +116,21 @@ def grouping_prompt(transitions,duration):
         'do not merge distinct repeated actions. Output non-overlapping intervals, one concrete '
         'verb per interval. Gaps are permitted. Multiple descriptions at one pair are overlapping '
         'window observations, not repeated actions. Assign exactly one vocabulary label or OTHER '
-        'to each interval. Times must lie within [0,'+str(duration)+']. '
-        'For EVERY adjacent pair of output rows i and i+1 enforce end[i] <= start[i+1]. '
+        'to each interval. The video duration is '+str(duration)+' seconds. '
+        'Serialize each group using the given global transition pair IDs: start_pair is the '
+        'first included pair, end_pair is the EXCLUSIVE end (last included pair plus one). '
+        'The real start time is the start of start_pair; the real end time is the end of '
+        'pair end_pair-1. Group consecutive evidence; do not generate float timestamps here. '
+        'For EVERY adjacent pair of output rows i and i+1 enforce end_pair[i] <= start_pair[i+1]. '
         'An action may touch the next action at a shared boundary, but no instant can belong '
         'to two primitive rows. Where two descriptions span a shared transition, use the '
         'evidence to locate their handoff boundary. Before returning, check every adjacent numeric '
         'end/start pair. Keep all supported distinct interactions; do not discard an action '
         'just to satisfy the constraint. '
-        'Schema: {"intervals":[{"start":0.0,"end":1.0,"label":"TAKE",'
+        'Use concise English descriptions. The decoder enforces only this JSON format and '
+        'legal ordered indices; YOU must choose all actions, boundaries, labels and descriptions '
+        'from the complete evidence. Stage 3 will revisit each group visually for finer timing. '
+        'Schema: {"intervals":[{"start_pair":0,"end_pair":1,"label":"TAKE",'
         '"description":"take the cup"}]}; use an empty list if no action is evidenced.\n'+
         json.dumps(transitions,ensure_ascii=False))
 

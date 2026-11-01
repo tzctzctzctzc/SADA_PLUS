@@ -113,7 +113,7 @@ def test_grouping_overlap_error_identifies_conflicting_numbers_without_repairing
         validate(dict(intervals=rows),'grouping',0,25)
     assert rows[0]['end']==6.006 and rows[1]['start']==5.5055
     prompt=grouping_prompt([],25)
-    assert 'end[i] <= start[i+1]' in prompt
+    assert 'end_pair[i] <= start_pair[i+1]' in prompt
 
 def test_successful_prefix_only_reuses_identical_non_grouping_request(tmp_path):
     from tools.run_cott_quality import Generator
@@ -162,7 +162,7 @@ def test_all_three_stages_run_across_complete_video(tmp_path,monkeypatch):
     class MockGenerator:
         root=tmp_path
         calls=[]
-        def call(self,v,rid,stage,prompt,frames,lo,hi,pair_count=0):
+        def call(self,v,rid,stage,prompt,frames,lo,hi,pair_count=0,grouping_grid=None):
             self.calls.append(stage)
             if stage=='transition':
                 parsed=dict(transitions=[dict(pair=i,event='continuing',description='cut vegetable') for i in range(pair_count)])

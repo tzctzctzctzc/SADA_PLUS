@@ -7,6 +7,26 @@ from pathlib import Path
 CODE=Path(__file__).resolve().parents[1];sys.path.insert(0,str(CODE))
 from tools.cott_protocol import *
 
+
+def audit_grouping_trace(root,req,attempt):
+    """CPU重放每个受约束token，不仅相信生成端的passed字段。"""
+    from tools.cott_grouping_decoder import GroupingDecoder,safe_description_tokens
+    if not hasattr(audit_grouping_trace,'cache'):audit_grouping_trace.cache={}
+    identity=read(root/'model_identity.json')['identity'];path=identity['path']
+    if path not in audit_grouping_trace.cache:
+        from transformers import AutoTokenizer
+        tok=AutoTokenizer.from_pretrained(path,local_files_only=True)
+        audit_grouping_trace.cache[path]=(tok,safe_description_tokens(tok))
+    tok,safe=audit_grouping_trace.cache[path];proof=attempt['constrained_decoder']
+    assert proof['grid']==req['grouping_grid'] and proof['manual_interval_edits']==proof['deleted_intervals']==0
+    decoder=GroupingDecoder(tok,0,req['grouping_grid'],CLASSES+['OTHER'],tok.eos_token_id,safe)
+    # generation_config may include an additional EOS id. It must be a tokenizer special id.
+    ids=proof['token_ids'];last=ids[-1]
+    if last in tok.all_special_ids:decoder.eos=list(set(decoder.eos+[last]))
+    parsed,replayed=decoder.finish(ids)
+    assert parsed==attempt['parsed'] and replayed==proof
+    assert tok.decode(ids,skip_special_tokens=True,clean_up_tokenization_spaces=False)==attempt['raw']
+
 def audit_video(root,v):
     entry=root/'videos'/v;done=read(entry/'complete.json')
     for name,h in done['artifacts'].items(): assert sha(entry/name)==h
@@ -16,7 +36,11 @@ def audit_video(root,v):
         r=read(p/'result.json');req=read(p/'request.json')
         assert sha(p/'request.json')==r['request_file_sha256']
         assert digest(req)==r['request_sha256']
-        for f,a in r['attempt_sha256'].items(): assert sha(p/f)==a
+        for f,a in r['attempt_sha256'].items():
+            assert sha(p/f)==a
+            attempt=read(p/f)
+            if req['stage']=='grouping' and 'grouping_grid' in req and attempt['status']=='valid':
+                audit_grouping_trace(root,req,attempt)
         validate(r['parsed'],req['stage'],req['lo'],req['hi'],req['pair_count'])
     return read(entry/'predictions.json'),done
 
@@ -93,6 +117,7 @@ def evaluate(root,partial=False):
         binding=read(root/'accepted_prefix_reuse.json')
         assert sha(root/'accepted_prefix_reuse.json')==plan['successful_prefix_reuse_sha256']
         for p,h in binding['failed_requests_sha256'].items():assert sha(p)==h
+        for r in binding.get('ancestor_receipts',[]):assert sha(r['path'])==r['sha256']
         out['technical_prefix_reuse']=dict(receipt_sha256=sha(root/'accepted_prefix_reuse.json'),
             accepted_calls=len(binding['calls']),prior_failed_contract_cost=binding['prior_failed_contract_cost'])
     stamp=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
