@@ -65,7 +65,7 @@ def test_confidence_weights_cls_only_and_unstable_offsets_get_zero_gradient(tmp_
     for p in pred:p['regression_keep'].zero_()
     c,r,n,nr,w=e.positive_loss(m,out,pred)
     assert n>0 and nr==0 and r.item()==0
-    grads=torch.autograd.grad(c+r,list(m.reg_head.parameters()),allow_unused=True)
+    grads=torch.autograd.grad(c+r,[p for p in m.reg_head.parameters() if p.requires_grad],allow_unused=True)
     assert all(x is None or not x.any() for x in grads)
     assert c.item()>0
 

@@ -233,7 +233,7 @@ def probe(cfg,entry,guard):
     out=base.dense(ctx['model'],chosen)
     c,r,n,nr,confidence=positive_loss(ctx['model'],out,labels)
     assert n>0 and nr>0
-    cls_params=list(ctx['model'].cls_head.parameters());reg_params=list(ctx['model'].reg_head.parameters())
+    cls_params=[p for p in ctx['model'].cls_head.parameters() if p.requires_grad];reg_params=[p for p in ctx['model'].reg_head.parameters() if p.requires_grad]
     def norm(loss,params):
         gradients=torch.autograd.grad(loss,params,retain_graph=True,allow_unused=True)
         return math.sqrt(sum(float(g.detach().square().sum()) for g in gradients if g is not None))
