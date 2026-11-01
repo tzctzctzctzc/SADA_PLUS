@@ -100,6 +100,11 @@ def restore(ctx,state):
     ctx['step']=state['step'];ctx['ledger_digest']=state['ledger_digest']
 
 def update(ctx,source,target=None,measure=False):
+    if target is None:
+        # Control and disabled UDA execute the official function, not a reimplementation.
+        result,_=base.step(ctx,source);ctx['step']+=1
+        result.update(target_cls=0.,target_reg=0.,target_positive_points=0,target_proposals=0,target_classes=[0]*10,ramp=0.)
+        return result,{}
     m=ctx['model'];m.train();ctx['opt'].zero_grad(set_to_none=True)
     source_loss=m(source);assert all(torch.isfinite(x).all() for x in source_loss.values())
     source_loss['final_loss'].backward()
@@ -135,30 +140,59 @@ def record(ctx,path,source,target,result):
     h=hashlib.sha256(json.dumps(x,sort_keys=True,separators=(',',':')).encode()).hexdigest();x['sha256']=h;ctx['ledger_digest']=h
     with Path(path).open('a') as f:f.write(json.dumps(x)+'\n')
 
+def frozen_state(ctx,epoch=0,history=None,metrics=None):
+    buf=io.BytesIO();torch.save(capture(ctx,epoch,history or [],metrics or []),buf);buf.seek(0)
+    return torch.load(buf,map_location='cpu')
+
+def gradients(ctx):
+    return {k:p.grad.detach().cpu().clone() for k,p in ctx['model'].named_parameters() if p.grad is not None}
+
+def numerical_step_check(a,b,ga,gb,learning_rate):
+    # Official GPU repeatability was measured before defining this gate. Gradients
+    # are checked tightly; tiny sign changes in Adam's first moment can cause up
+    # to two learning-rate units of parameter difference near a zero gradient.
+    assert set(ga)==set(gb)
+    for k in ga:assert torch.allclose(ga[k],gb[k],atol=1e-6,rtol=1e-5),('gradient',k,float((ga[k]-gb[k]).abs().max()))
+    bound=2*learning_rate+1e-7
+    for name,atol in [('model',bound),('ema',.001*bound+1e-7)]:
+        assert set(a[name])==set(b[name])
+        for k in a[name]:assert torch.allclose(a[name][k],b[name][k],atol=atol,rtol=1e-6),(name,k)
+    assert a['optimizer']['param_groups']==b['optimizer']['param_groups']
+    assert set(a['optimizer']['state'])==set(b['optimizer']['state'])
+    for index,values in a['optimizer']['state'].items():
+        other=b['optimizer']['state'][index];assert values.keys()==other.keys()
+        for k,v in values.items():
+            if k=='step':assert torch.equal(v,other[k])
+            else:assert torch.allclose(v,other[k],atol=1e-6 if k=='exp_avg' else 1e-7,rtol=1e-5),('optimizer',index,k)
+    for k in set(a)-{'model','ema','optimizer'}:assert base.digest(a[k])==base.digest(b[k]),k
+    return dict(exact=base.digest(a)==base.digest(b),max_parameter_delta=max(float((a['model'][k]-b['model'][k]).abs().max()) for k in a['model']),
+        max_gradient_delta=max(float((ga[k]-gb[k]).abs().max()) for k in ga),gradient_atol=1e-6,gradient_rtol=1e-5,parameter_atol=bound)
+
 def probe(cfg,entry,guard):
     ctx=build(cfg,'uda');initial=ctx['initial_sha'];source=next(iter(ctx['train']))
     target_batches=list(itertools.islice(ctx['target'],8));assert target_batches
     before={k:base.digest(getattr(ctx['model'],k).state_dict()) for k in MODULES}
     # At identical state the disabled adaptation path must equal official source training.
-    state=deepcopy(capture(ctx,0,[],[]));state['probe']=True
-    a,_=base.step(ctx,source);official=base.digest(base.capture(ctx,cfg,0,[],[]))
+    state=frozen_state(ctx);state['probe']=True;lr=ctx['opt'].param_groups[0]['lr']
+    a,_=base.step(ctx,source);ctx['step']+=1;official=frozen_state(ctx);ga=gradients(ctx)
     restore(ctx,deepcopy(state));b,_=update(ctx,source)
-    assert all(a[k]==b[k] for k in a) and official==base.digest(base.capture(ctx,cfg,0,[],[]))
-    restore(ctx,deepcopy(state));del state
+    assert all(a[k]==b[k] for k in a)
+    disabled=numerical_step_check(official,frozen_state(ctx),ga,gradients(ctx),lr)
+    restore(ctx,deepcopy(state));del state,official,ga
     all_norms={};loss=None;chosen=None
     for batch in target_batches:
         loss,norms=update(ctx,source,batch,True)
         if norms:all_norms=norms;chosen=batch;break
     assert chosen is not None and all(v>0 and math.isfinite(v) for v in all_norms.values()),('no target support',loss,all_norms)
     changed={k:before[k]!=base.digest(getattr(ctx['model'],k).state_dict()) for k in MODULES};assert all(changed.values())
-    saved=capture(ctx,0,[],[]);saved['probe']=True
-    buf=io.BytesIO();torch.save(saved,buf);del saved;buf.seek(0);state=torch.load(buf,map_location='cpu');del buf
+    state=frozen_state(ctx);state['probe']=True
     restore(ctx,deepcopy(state));again=capture(ctx,0,[],[]);again['probe']=True
     assert base.digest(again)==base.digest(state);del again
-    l1,_=update(ctx,source,chosen);after1=base.digest(capture(ctx,0,[],[]))
-    restore(ctx,deepcopy(state));l2,_=update(ctx,source,chosen);after2=base.digest(capture(ctx,0,[],[]))
-    assert l1==l2 and after1==after2,'next step exact restore failed'
-    del state
+    lr=ctx['opt'].param_groups[0]['lr'];l1,_=update(ctx,source,chosen);after1=frozen_state(ctx);g1=gradients(ctx)
+    restore(ctx,deepcopy(state));l2,_=update(ctx,source,chosen);after2=frozen_state(ctx)
+    assert all(np.allclose(l1[k],l2[k],atol=1e-6,rtol=1e-5) for k in l1)
+    resumed=numerical_step_check(after1,after2,g1,gradients(ctx),lr)
+    del state,after1,after2,g1
     m=ctx['ema'].module;v=next(iter(ctx['val']));m.eval()
     with torch.no_grad():
         p1=m(v);p2=m.inference(v,*base.dense(m,v))
@@ -167,8 +201,9 @@ def probe(cfg,entry,guard):
     assert base.digest(p1)==base.digest(p2)==base.digest(p3)
     torch.cuda.synchronize()
     save(entry/'probe.json',dict(status='passed',initial_ema_sha256=initial,parameters_updated=changed,
-        target_gradient_norms=all_norms,target_gradient_positive=True,source_disabled_path_equal=True,
-        full_state_restore=True,next_step_exact=True,teacher_no_grad=True,target_GT_used=False,
+        target_gradient_norms=all_norms,target_gradient_positive=True,source_disabled_path_equal=True,source_disabled_calls_official=True,
+        disabled_GPU_repeat=disabled,full_state_restore=True,next_step_exact=resumed['exact'],next_step_numerical=True,next_step_GPU_repeat=resumed,
+        teacher_no_grad=True,target_GT_used=False,
         original_inference_equal=True,loss=loss,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,
         guard=guard,guard_sha256=sha(guard)))
 

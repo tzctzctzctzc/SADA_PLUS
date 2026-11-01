@@ -101,3 +101,12 @@ def test_ledger_chains_exact_members(tmp_path):
     first=json.loads(p.read_text());assert first['source_videos']==['src'] and first['target_videos']==['tgt']
     ctx['step']=2;e.record(ctx,p,v,None,dict(target_positive_points=0,target_proposals=0,target_classes=[0]*10))
     second=json.loads(p.read_text().splitlines()[1]);assert second['previous']==first['sha256'] and second['target_videos']==[]
+
+def test_numerical_check_rejects_wrong_gradient_optimizer_or_rng():
+    a=dict(model={'x':torch.tensor([1.])},ema={'x':torch.tensor([1.])},optimizer=dict(param_groups=[],state={0:dict(step=torch.tensor(1.),exp_avg=torch.tensor([.1]),exp_avg_sq=torch.tensor([.01]))}),rng=torch.tensor([1]))
+    g={'x':torch.tensor([.2])};assert e.numerical_step_check(a,deepcopy(a),g,g,1e-5)['exact']
+    bad=deepcopy(a);bad['rng'][0]=2
+    with pytest.raises(AssertionError):e.numerical_step_check(a,bad,g,g,1e-5)
+    bad=deepcopy(a);bad['optimizer']['state'][0]['exp_avg']+=.01
+    with pytest.raises(AssertionError):e.numerical_step_check(a,bad,g,g,1e-5)
+    with pytest.raises(AssertionError):e.numerical_step_check(a,deepcopy(a),g,{'x':g['x']+.01},1e-5)
