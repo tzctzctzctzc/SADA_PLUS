@@ -13,7 +13,7 @@ def evaluate(annotation,prediction,manifest,output):
     assert set(columns['video-id'])<=set(source)
     path=CODE/'libs/evaluation/evaluator_anet.py';s=importlib.util.spec_from_file_location('source_ap',path);m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
     result=m.ANETdetection(annotation,None,num_workers=2,action_subsampling='10_majority_classes').evaluate(columns,verbose=False)
-    save(output,dict(map_0.1_to_0.5=float(result[1]),map_by_tiou=[float(x) for x in result[0]],
+    save(output,dict({'map_0.1_to_0.5':float(result[1])},map_by_tiou=[float(x) for x in result[0]],
         videos=list(inputs),annotation=str(annotation),annotation_sha256=sha(annotation),
         prediction=str(prediction),prediction_sha256=sha(prediction),manifest_sha256=sha(manifest),
         evaluator_sha256=sha(path),target_GT_used=False,cuda_visible_devices=''))

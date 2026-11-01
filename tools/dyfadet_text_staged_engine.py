@@ -150,7 +150,7 @@ def evaluate(entry):
             with np.load(d/(role+'.npz')) as f:columns={k:f[k] for k in f.files}
             result=m.ANETdetection(offline['annotation'],splits,num_workers=2,action_subsampling='10_majority_classes').evaluate(columns,verbose=True)
             proof=read(d/(role+'_inference.json'))
-            save(d/'evaluation'/(role+'.json'),dict(map_0.1_to_0.5=float(result[1]),map_by_tiou=[float(x) for x in result[0]],
+            save(d/'evaluation'/(role+'.json'),dict({'map_0.1_to_0.5':float(result[1])},map_by_tiou=[float(x) for x in result[0]],
                 selected_epoch=proof['selected_epoch'],videos=proof['count'],prediction_sha256=sha(d/(role+'.npz')),evaluator_sha256=sha(path),annotation_sha256=offline['annotation_sha256']))
     artifacts={str(p):sha(p) for p in entry.rglob('*') if p.is_file() and p.suffix in ['.json','.jsonl','.pt','.npz'] and p.name!='complete.json'}
     save(entry/'complete.json',dict(schema=SCHEMA,shift=cfg['benchmark']['shift'],code=cfg['benchmark']['code'],artifacts=artifacts))
