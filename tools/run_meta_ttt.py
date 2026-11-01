@@ -73,7 +73,7 @@ def source_map(job,model,reference,encoder,decoder,cfg,steps):
     return evaluate_predictions(predictions,job['source_manifest'],cfg['src_val_split'])['map']
 
 
-def train(job):
+def train(job, acceptance=False):
     import numpy as np
     import torch
     from tools.baseline_engine import checkpoint,loader,tensor_digest
@@ -90,6 +90,10 @@ def train(job):
     budget=cfg['baseline']['epoch_budget']['iterations_per_epoch']
     if not len(dl):raise ValueError('源训练集为空')
     out=Path(job['output']);history=[dict(epoch=0,map=source_map(job,model,ref,enc,dec,cfg,0))];epochs=[]
+    if acceptance:
+        frozen_initial=tensor_digest({n:p for n,p in model.named_parameters() if not p.requires_grad})
+        reference_initial=tensor_digest(ref.state_dict())
+    task_head_gradient=dict(classification=False,regression=False)
     def payload(epoch,latest=False):
         result=dict(config=cfg,specification=SPEC,arm=job['arm'],epoch=epoch,
             state_dict=model.state_dict(),decoder=dec.state_dict(),
@@ -101,7 +105,7 @@ def train(job):
             torch_cuda=torch.cuda.get_rng_state(0),source_loader=generator.get_state()))
         return result
     checkpoint(out/'best.pt',payload(0))
-    for epoch in range(1,SPEC['max_epochs']+1):
+    for epoch in range(1,(1 if acceptance else SPEC['max_epochs'])+1):
         it=iter(dl);losses=[];gradients=[];hypergradients=[]
         for step in range(budget):
             try: batch=next(it)
@@ -112,6 +116,8 @@ def train(job):
                 if not torch.isfinite(loss):raise ValueError('元目标非有限')
                 loss.backward();losses.append(float(loss.detach()))
             hg=sum(float(p.grad.square().sum()) for p in dec.parameters() if p.grad is not None)**.5
+            for key,module in [('classification',model.cls_head_target),('regression',model.reg_head_target)]:
+                task_head_gradient[key] |= any(p.grad is not None and bool(p.grad.abs().sum()>0) for p in module.parameters())
             norm=torch.nn.utils.clip_grad_norm_(base_params+list(dec.parameters()),SPEC['clip'])
             if not torch.isfinite(norm) or norm<=0 or not math_finite(hg) or hg<=0:raise ValueError('模型/恢复头梯度无效')
             optimizer.step();gradients.append(float(norm));hypergradients.append(hg)
@@ -127,6 +133,27 @@ def train(job):
             if score>previous:checkpoint(out/'best.pt',payload(epoch))
             print('SOURCE_POST_ADAPT_MAP',epoch,score,flush=True)
         checkpoint(out/'latest.pt',payload(epoch,True))
+        if acceptance:
+            from tools.meta_ttt import predict,clean_video
+            sample=clean_video(ds[0]);before=predict(model,ref,enc,dec,sample,SPEC['inner_steps'])
+            saved=torch.load(out/'latest.pt',map_location='cpu')
+            model.load_state_dict(saved['state_dict'],strict=True);dec.load_state_dict(saved['decoder'],strict=True)
+            optimizer.load_state_dict(saved['optimizer'])
+            random.setstate(saved['rng']['python']);np.random.set_state(saved['rng']['numpy'])
+            torch.set_rng_state(saved['rng']['torch_cpu']);torch.cuda.set_rng_state(saved['rng']['torch_cuda'],0)
+            generator.set_state(saved['rng']['source_loader'])
+            after=predict(model,ref,enc,dec,sample,SPEC['inner_steps'])
+            assert all(torch.equal(before[k],after[k]) for k in ('segments','scores','labels'))
+            assert all(task_head_gradient.values())
+            assert frozen_initial==tensor_digest({n:p for n,p in model.named_parameters() if not p.requires_grad})
+            assert reference_initial==tensor_digest(ref.state_dict())
+            post=source_map(job,model,ref,enc,dec,cfg,SPEC['inner_steps'])
+            return dict(status='passed',arm=job['arm'],epochs=1,steps=budget,
+                source_map0=history[0]['map'],diagnostic_source_post_adapt_map=post,
+                source_task_heads_gradient=task_head_gradient,decoder_gradient_seen=min(hypergradients)>0,
+                exact_checkpoint_prediction_roundtrip=True,optimizer_and_all_rng_restored=True,
+                frozen_parameters_and_reference_unchanged=True,target_GT_used=False,target_videos_seen=0,
+                peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20)
         if epoch%SPEC['validate_every']==0 and choose_checkpoint(history)[1]:break
     best,stop=choose_checkpoint(history)
     if not stop:raise ValueError('未达到合法停止')
@@ -264,7 +291,7 @@ def worker(job_path,stage,device):
     np.random.seed(123)
     started=time.time()
     if stage=='probe':result=probe(job,device)
-    elif stage=='train':result=train(job)
+    elif stage in ('train','training_probe'):result=train(job,acceptance=stage=='training_probe')
     elif stage=='calibrate':result=calibrate(job)
     elif stage=='evaluate':result=evaluate(job)
     else:raise ValueError(stage)
@@ -318,7 +345,7 @@ def dispatch(job_path,stage,gpu):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command',choices=['worker','dispatch','audit','select','make-job'])
-    parser.add_argument('--job',type=Path);parser.add_argument('--stage',choices=['probe','train','calibrate','evaluate'],default='probe')
+    parser.add_argument('--job',type=Path);parser.add_argument('--stage',choices=['probe','train','training_probe','calibrate','evaluate'],default='probe')
     parser.add_argument('--device',default='cuda:0');parser.add_argument('--gpu',type=int,choices=range(4))
     parser.add_argument('--calibrations',nargs='+',type=Path);parser.add_argument('--arm',choices=SPEC['arms']);parser.add_argument('--output',type=Path)
     parser.add_argument('--inputs',type=Path,help='显式机器路径JSON，不自动猜测/换数据')
