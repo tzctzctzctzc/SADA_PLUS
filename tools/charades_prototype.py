@@ -11,6 +11,7 @@ MODEL=Path('/vepfs/vlms/cache/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct
 POLICY=dict(schema=SCHEMA,teacher='qwen3_vl_8b',labels=LABEL_NAMES,candidate_count=200,selected_count=40,
     proposal_model='Charades-UDA-source-loss-selected-EMA',candidate_seed=6,levels=[0,1,2],
     candidate_threshold='frozen-Charades-baseline-pl_threshold',per_video_cap=30,
+    candidate_eligibility='eight-distinct-frames-and-fully-supported-original-feature-grid',
     participation='top20-percent-max-class-probability-no-top1-ties',
     frames=8,input_mode='native_video',readout='ten-digit-single-token-log-likelihood',
     min_pixels=224*224,max_pixels=448*448,temperature=1.,label_order='frozen-official-verb-ids',
@@ -101,6 +102,11 @@ def candidates(root,baseline):
                     start=max(0.,min(meta['duration'],((coordinate-float(o[0])*float(p[3]))*meta['feat_stride']+.5*meta['feat_num_frames'])/meta['fps']))
                     end=max(0.,min(meta['duration'],((coordinate+float(o[1])*float(p[3]))*meta['feat_stride']+.5*meta['feat_num_frames'])/meta['fps']))
                     if end-start<8/meta['fps']:continue
+                    # 先满足原Prototype fully_visible_cache的几何定义再冻结200条，
+                    # 不能让200条评分完成后才发现视频边界proposal永远无法参与训练。
+                    a=(start*meta['fps']-.5*meta['feat_num_frames'])/meta['feat_stride']
+                    b=(end*meta['fps']-.5*meta['feat_num_frames'])/meta['feat_stride']
+                    if a<0 or b>v['feats'].shape[-1]:continue
                     row=dict(candidate_id='%s-p%07d'%(meta['video_id'],absolute),video_id=meta['video_id'],
                         absolute_feature_index=absolute,source_fpn_levels=[level],proposal_start_sec=start,proposal_end_sec=end)
                     grouped[absolute].append((float(score),row))

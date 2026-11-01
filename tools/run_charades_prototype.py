@@ -36,7 +36,17 @@ def verify_cache(root):
     members=read(read(BASE/'uda/config.json')['baseline']['target_manifest'])['database']
     assert set(x['by_video'])<=set(members) and all('annotations' not in v for v in members.values())
     for p,digest in x['source_artifacts'].items():assert sha(p)==digest
-    return dict(status='passed',count=200,selected=40,labels=list(LABEL_NAMES),cache_sha256=sha(root/'prepared.json'))
+    from libs.models.SADA.prototype_capacity import fully_visible_cache
+    from tools.baseline_engine import dataset
+    from tools.charades_prototype import without_gt
+    cfg=read(BASE/'uda/config.json');ds=dataset(cfg,cfg['baseline']['target_manifest'],cfg['tgt_train_split'],False,True)
+    indices={row['id']:i for i,row in enumerate(ds.data_list)};visible=0
+    for vid,values in x['by_video'].items():
+        kept,_,_=fully_visible_cache({vid:values},[without_gt(ds[indices[vid]])],0.)
+        visible+=sum(len(group) for group in kept)
+    assert visible==40,('selected candidates cannot reach real target loss',visible)
+    return dict(status='passed',count=200,selected=40,fully_visible_on_original_full_videos=visible,
+        labels=list(LABEL_NAMES),cache_sha256=sha(root/'prepared.json'))
 
 def evaluate_safe(root,variant):
     import numpy as np
