@@ -100,9 +100,10 @@ def evaluate_cpu(args):
         splits=cfg['src_val_split'] if domain=='source' else cfg['tgt_val_split']
         evaluator=ANETdetection(annotation,splits,num_workers=2,action_subsampling='10_majority_classes')
         ap,mean,*_=evaluator.evaluate(prediction,verbose=True)
-        result=dict(map_0.1_to_0.5=float(mean),map_by_tiou=[float(x) for x in ap],
+        result=dict(map_by_tiou=[float(x) for x in ap],
             videos=len(read(e/(domain+'_val_unlabeled.json'))['database']),prediction_count=len(prediction['score']),
             selected_epoch=terminal['best_epoch'],checkpoint_sha256=checkpoint,state='ema_state_dict',split=splits,prediction_sha256=sha(path))
+        result['map_0.1_to_0.5']=float(mean)
         save(e/'evaluation'/(domain+'_val.json'),result);results[domain]=result
     save(e/'evaluation/manifest.json',dict(config_sha256=sha(e/'config.json'),checkpoint_sha256=checkpoint,
         annotation_sha256=sha(annotation),results=results,target_gt_scope='CPU offline task metric only'))
