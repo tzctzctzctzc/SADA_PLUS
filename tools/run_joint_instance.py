@@ -59,7 +59,7 @@ def train(job,probe=False):
         return dict(config=cfg,ema_state_dict=teacher.state_dict(),head_state_dict=ema_head.state_dict(),epoch=epoch,
             specification=SPEC,variant=variant,parent_checkpoint_sha256=job['checkpoint_sha256'],initial_state_sha256=initial,initial_head_sha256=head_initial)
     if not probe:checkpoint(out/'best.pt',best_payload(0))
-    max_epoch=1 if probe else 30
+    max_epoch=3 if probe else 30
     for epoch in range(1,max_epoch+1):
         if shutil.disk_usage(out).free<2*2**30:raise RuntimeError('剩余磁盘低于2GiB，保留工件停止，不删除旧结果')
         # 真实重新遍历loader；不使用cycle缓存整轮crop。
@@ -79,7 +79,7 @@ def train(job,probe=False):
             losses=ret[0];native=losses['downstream_loss']*cfg['model']['loss_weights']['weight_downstream']
             if not torch.isfinite(native):raise ValueError('原检测/Prototype损失非有限')
             native.backward();native_value=float(native.detach());del native,ret
-            row=dict(native=native_value,source_region=0.,source_regions=0,source_region_positive=0,pseudo_instances=0,pseudo_native_points=0,target=0.,target_annotations=0,target_GT_used=False)
+            row=dict(native=native_value,source_region=0.,source_regions=0,source_region_positive=0,source_region_background=0,pseudo_instances=0,pseudo_native_points=0,target=0.,target_annotations=0,target_GT_used=False)
             # 单视频反传释放图；仍只在整个batch所有损失之后做一次optimizer step。
             model.eval()
             with torch.random.fork_rng(devices=[0]):
@@ -95,7 +95,7 @@ def train(job,probe=False):
                     (loss/len(sv)).backward();row['source_region']+=float(loss.detach())/len(sv)
                     for k,vv in metrics.items():row[k]+=vv
                     del loss,outputs,packet
-                active=variant=='ema_joint' and (probe or epoch>=3)
+                active=variant=='ema_joint' and epoch>=3
                 if active:
                     for v in tv:
                         clean=unlabeled(v);pseudo=pseudo_instances(teacher,ema_head,clean,epoch)
@@ -105,7 +105,7 @@ def train(job,probe=False):
                         if not torch.isfinite(loss):raise ValueError('完整目标实例损失非有限')
                         if probe and len(pseudo['boxes']) and step in (1,10,budget-1):
                             for key,params in [('target_backbone',model.backbone_target.stem[-1].parameters()),('target_classifier',model.cls_head.parameters()),('target_regressor',model.reg_head.parameters()),('target_region_encoder',head.stages[0].encoder.parameters())]:signals[key] |= norm(loss,params)>1e-8
-                        weight=1. if probe else min((epoch-2)/5.,1.)
+                        weight=min((epoch-2)/5.,1.)
                         (weight*loss/len(tv)).backward();row['target']+=float(loss.detach())/len(tv)
                         for k,vv in metrics.items():row[k]+=vv
                         del loss,pseudo
@@ -119,6 +119,7 @@ def train(job,probe=False):
             if step%20==0:print('TRAIN',variant,epoch,step+1,budget,json.dumps(row),flush=True)
         aggregate={k:sum(r[k] for r in reports)/budget for k in reports[0] if isinstance(reports[0][k],(int,float))}
         aggregate.update(epoch=epoch,steps=budget,target_annotations=0,target_GT_used=False);epochs.append(aggregate);save(out/'epochs.json',epochs)
+        if probe and epoch<3:continue
         if probe:
             assert signals['source_backbone'] and signals['source_region_encoder'],signals
             if variant=='ema_joint':assert all(signals.values()),signals

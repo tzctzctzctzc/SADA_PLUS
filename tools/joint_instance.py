@@ -14,7 +14,7 @@ SPEC=dict(schema='prototype-joint-instance-v1',variants=['source_joint','ema_joi
     max_epochs=30,validate_every=2,patience_epochs=10,include_epoch_zero=True,
     learning_rate=1e-5,head_learning_rate=1e-4,weight_decay=.01,clip_grad=1.,ema_momentum=.99,
     target_start_epoch=3,ramp_epochs=5,target_weight=1.,train_dense_proposals=128,
-    source_jitters=4,source_jitter_fraction=.3,source_positive_iou=.5,source_ignore_iou=.1,
+    source_jitters=4,source_jitter_fraction=.3,source_background_proposals=128,source_positive_iou=.5,source_ignore_iou=.1,
     dimension=128,attention_heads=4,encoder_layers=2,stages=2,proposal_chunk=32,
     ordered_tokens=[8,16,8],sample_ranges=[[-.25,.25],[0.,1.],[.75,1.25]],
     feature_scales='all-original-FPN-levels-learned-valid-scale-fusion',
@@ -101,6 +101,15 @@ def source_proposals(packet,video,step):
         noise=(torch.rand(copies.shape,generator=g,device=boxes.device)-.5)*.6*w[:,None]
         jitter=(copies+noise).clamp(0,video['feats'].shape[-1]);jitter=jitter[jitter[:,1]>jitter[:,0]]
         extra=torch.cat((gt,jitter));boxes=torch.cat((boxes,extra));base=torch.cat((base,base_at_boxes(packet,extra)))
+    # 完整源GT只在源侧构造可靠背景，不能把目标未检出位置当背景。
+    g=torch.Generator(device=boxes.device).manual_seed(1000123+step);length=video['feats'].shape[-1]
+    center=torch.rand(512,generator=g,device=boxes.device)*length
+    duration=(gt[:,1]-gt[:,0]).median().clamp_min(2) if len(gt) else boxes.new_tensor(length/8)
+    width=duration*(.5+1.5*torch.rand(512,generator=g,device=boxes.device))
+    background=torch.stack((center-width/2,center+width/2),1).clamp(0,length)
+    keep=(background[:,1]>background[:,0])
+    if len(gt):keep &= pair_iou(background,gt).amax(1)<.1
+    boxes=torch.cat((boxes,background[keep][:128]))
     return boxes,base_at_boxes(packet,boxes)
 
 def base_at_boxes(packet,boxes):
@@ -113,12 +122,13 @@ def base_at_boxes(packet,boxes):
     return (torch.stack(values,1)*w[...,None]).sum(1)/w.sum(1).clamp_min(1)[:,None]
 
 def source_objective(outputs,gt,labels):
-    total=outputs[0]['logits'].sum()*0;positive=0
+    total=outputs[0]['logits'].sum()*0;positive=0;background=0
     for out in outputs:
         b=out['boxes'];n=len(b);targets=b.new_zeros(n,10);quality=b.new_zeros(n,10)
         if len(gt):
             overlaps=pair_iou(b.detach(),gt);best,index=overlaps.max(1)
             positive=positive+int((best>=.5).sum())
+            background=background+int((best<.1).sum())
             for c in range(10):
                 same=labels==c
                 if same.any():quality[:,c]=overlaps[:,same].max(1).values
@@ -129,7 +139,7 @@ def source_objective(outputs,gt,labels):
         focal=(ce*(targets*(1-prob)+(1-targets)*prob).square())[valid].sum()/max(int((targets[valid]>0).sum()),1)
         q=F.binary_cross_entropy_with_logits(out['quality'][out['supported']],quality[out['supported']]) if out['supported'].any() else b.sum()*0
         total=total+.5*(focal+regression+q)
-    return total,dict(source_region_positive=positive,source_regions=len(outputs[0]['boxes']))
+    return total,dict(source_region_positive=positive,source_region_background=background,source_regions=len(outputs[0]['boxes']))
 
 @torch.no_grad()
 def pseudo_instances(model,head,video,epoch):
