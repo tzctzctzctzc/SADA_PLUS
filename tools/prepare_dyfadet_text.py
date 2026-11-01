@@ -1,5 +1,5 @@
 """仅根据固定类别生成CLIP文本缓存；CPU运行，不读任何视频或目标标注。"""
-import argparse,hashlib,json,sys,urllib.request
+import argparse,hashlib,json,sys,urllib.request,shutil
 from pathlib import Path
 import torch
 
@@ -35,7 +35,9 @@ def main(args):
  assert sha(args.checkpoint)==expected,'checkpoint differs from official OpenAI CLIP B16 release'
  out=Path(args.output);out.mkdir(parents=True,exist_ok=False)
  bpe=out/'bpe_simple_vocab_16e6.txt.gz'
- urllib.request.urlretrieve('https://raw.githubusercontent.com/openai/CLIP/main/clip/bpe_simple_vocab_16e6.txt.gz',bpe)
+ if args.bpe:shutil.copyfile(args.bpe,bpe)
+ else:urllib.request.urlretrieve('https://raw.githubusercontent.com/openai/CLIP/main/clip/bpe_simple_vocab_16e6.txt.gz',bpe)
+ assert sha(bpe)=='924691ac288e54409236115652ad4aa250f48203de50a9e4722a6ecd48d6804a'
  tok=SimpleTokenizer(str(bpe));texts=[s for row in DESCRIPTIONS for s in row]
  tokens=torch.zeros((len(texts),77),dtype=torch.long)
  for i,t in enumerate(texts):
@@ -55,4 +57,4 @@ def main(args):
  (out/'provenance.json').write_text(json.dumps(provenance,ensure_ascii=False,indent=2));print(json.dumps(provenance),flush=True)
 
 if __name__=='__main__':
- p=argparse.ArgumentParser();p.add_argument('--checkpoint',required=True);p.add_argument('--output',required=True);main(p.parse_args())
+ p=argparse.ArgumentParser();p.add_argument('--checkpoint',required=True);p.add_argument('--output',required=True);p.add_argument('--bpe');main(p.parse_args())
