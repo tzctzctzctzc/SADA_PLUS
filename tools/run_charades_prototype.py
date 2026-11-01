@@ -117,7 +117,7 @@ def worker(args):
             for key in ['rq3_source_loss','rq3_alignment_loss','rq3_target_gradient_norm','rq3_selected']:
                 if not math.isfinite(aux[key]) or aux[key]<=0:raise ValueError('Prototype关键真实信号未通过: '+key)
             if result['initial_detector_sha']!=read(BASE/'uda/termination.json')['initial_state_sha']:raise ValueError('共享检测器初始化改变')
-        elif args.stage=='train':engine.train(cfg,entry)
+        elif args.stage=='train':engine.train(cfg,entry,resume=plan.get('resume_from',{}).get(args.variant))
         elif args.stage=='evaluate':evaluate_safe(root,args.variant)
     save(root/'stage_receipts'/(args.stage+'_'+str(args.variant or args.shard)+'.json'),dict(status='passed',
         stage=args.stage,variant=args.variant,shard=args.shard,code=plan['code'],gpu_guard=proof,
@@ -150,6 +150,9 @@ def tasks(root,rows,stage,gpus,python=PYTHON):
         if pending or ACTIVE:time.sleep(4)
 
 def main(args):
+    if args.resume_root:
+        from tools.charades_speed_campaign import main as resume_campaign
+        return resume_campaign(args,sys.modules[__name__])
     root=args.root;root.mkdir(exist_ok=False);prepare_file_limit()
     if os.environ.get('CUDA_VISIBLE_DEVICES')!='':raise ValueError('父CUDA必须为空')
     identity=code_identity()
@@ -242,6 +245,8 @@ def main(args):
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',type=Path,required=True)
     p.add_argument('--previous-root',type=Path,help='仅引用完整准备/完整教师评分；不覆盖部分阶段或任何正式训练')
+    p.add_argument('--resume-root',type=Path,help='当前两组从原完整保存点精确接续，不重查教师')
+    p.add_argument('--speed-review',type=Path,help='当前代码GPU完整状态逐值等价/测速证明')
     p.add_argument('--worker',action='store_true');p.add_argument('--stage',choices=['candidate_calibration','candidates','teacher','probe','train','evaluate'])
     p.add_argument('--variant',choices=POLICY['variants']);p.add_argument('--shard',type=int,choices=[0,1]);a=p.parse_args()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
