@@ -67,8 +67,10 @@ class Generator:
             old=read(entry/'result.json')
             if old['request_sha256']!=h:
                 # 仅明确绑定的、未改变提示/帧/模型的成功transition/direct前缀可复用。
-                binding=read(self.root/'accepted_prefix_reuse.json')['calls'][video_id+'/'+call_id]
                 assert stage in ['transition','direct']
+                receipt=self.root/'accepted_prefix_reuse.json'
+                assert receipt.exists(), 'changed request requires explicit immutable-prefix binding'
+                binding=read(receipt)['calls'][video_id+'/'+call_id]
                 assert sha(entry/'result.json')==binding['result_sha256']
                 prior=read(entry/'request.json')
                 assert digest(prior)==old['request_sha256']==binding['request_sha256']
