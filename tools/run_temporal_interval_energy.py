@@ -30,6 +30,7 @@ def gpu(args):
     from tools import baseline_engine as base
     from tools.prototype_target_cache import detector_features,duration_levels,assert_same_prediction
     from tools.temporal_interval_energy import TemporalIntervalEnergy,interval_iou,video_groups,score_intervals,energy_loss,search,install_joint,interval_limits,clamp_intervals
+    from tools.temporal_energy_transfer import source_record_to_device
     e=args.entry;cfg=read(e/'config.json');bound=read(e/'inputs.json');identity=code_identity();assert identity==read(args.output/'plan.json')['code']
     os.chdir(args.data_root);fix_random_seed(123,include_cuda=True);torch.cuda.manual_seed(123)
     ref=Path(bound['reference']);assert sha(ref/'best.pt')==bound['checkpoint_sha256']
@@ -83,9 +84,9 @@ def gpu(args):
     head=TemporalIntervalEnergy().cuda();opt=torch.optim.AdamW(head.parameters(),lr=SPEC['source_lr'])
 
     def parts(record,ids):
-        f=[x.cuda() for x in record['features']];m=[x.cuda() for x in record['masks']]
-        a,t,lv,cl,inst=[record[k][ids].cuda() for k in ['anchors','truths','levels','classes','instances']]
-        gt=record['segments'].cuda();labels=record['gt_labels'].cuda()
+        f=record['features'];m=record['masks']
+        a,t,lv,cl,inst=[record[k][ids] for k in ['anchors','truths','levels','classes','instances']]
+        gt=record['segments'];labels=record['gt_labels']
         boxes,q,padding,kinds=video_groups(f,m,a,t,lv,cl,inst,gt,labels,model.fpn_strides,record['length'])
         score,accept,valid=score_intervals(head,f,m,a,boxes,lv,cl,model.fpn_strides)
         valid &= padding;loss=energy_loss(score,accept,q,valid,inst>=0)
@@ -96,11 +97,12 @@ def gpu(args):
         head.eval();losses=[];ious=[];oracles=[]
         with torch.no_grad():
             for row in val:
-                data=torch.load(row['path'],map_location='cpu');vl=[];vi=[];vo=[]
+                data=source_record_to_device(torch.load(row['path'],map_location='cpu'),'cuda:0');vl=[];vi=[];vo=[]
                 for ids in torch.arange(len(data['anchors'])).split(SPEC['source_group_batch']):
                     loss,selected,matched,oracle,_=parts(data,ids);vl.extend(loss.tolist());vi.extend(selected[matched].tolist());vo.extend(oracle[matched].tolist())
                 losses.append(float(np.mean(vl)))
                 if vi:ious.append(float(np.mean(vi)));oracles.append(float(np.mean(vo)))
+                del data
         return dict(loss=float(np.mean(losses)),selected_iou=float(np.mean(ious)),candidate_oracle_iou=float(np.mean(oracles)),population='source-val curriculum; includes GT proposals, not actual inference AP')
 
     report=validate();history=[dict(epoch=0,source_validation=report['loss'],**{k:v for k,v in report.items() if k!='loss'})];best=report['loss'];best_epoch=0
@@ -111,7 +113,7 @@ def gpu(args):
     for epoch in range(1,epochs+1):
         head.train();running=[];kind_counts={}
         for i in torch.randperm(len(train),generator=generator).tolist():
-            data=torch.load(train[i]['path'],map_location='cpu');order=torch.randperm(len(data['anchors']),generator=generator)
+            data=source_record_to_device(torch.load(train[i]['path'],map_location='cpu'),'cuda:0');order=torch.randperm(len(data['anchors']),generator=generator)
             if args.stage=='probe':order=order[:8]
             for ids in order.split(SPEC['source_group_batch']):
                 before=base.tensor_digest(head.state_dict()) if not accepted else None
@@ -120,6 +122,7 @@ def gpu(args):
                 for k,count in zip(*kinds.unique(return_counts=True)):kind_counts[str(int(k))]=kind_counts.get(str(int(k)),0)+int(count)
                 if not accepted:
                     assert norm>0 and before!=base.tensor_digest(head.state_dict());save(e/'acceptance.json',dict(status='passed',loss=float(loss),head_gradient_norm=float(norm),parameters_updated=True,temporal_token_count=40,candidate_types_seen=kind_counts,target_gt_used=False,guard=guard,guard_sha256=sha(guard)));accepted=True
+            del data
         report=validate();history.append(dict(epoch=epoch,source_validation=report['loss'],train_loss=float(np.mean(running)),candidate_kind_counts=kind_counts,**{k:v for k,v in report.items() if k!='loss'}))
         if report['loss']<best:best=report['loss'];best_epoch=epoch;torch.save(source_checkpoint(epoch),e/'best_energy.pt')
         torch.save(source_checkpoint(epoch),e/'latest_energy.pt');save(e/'energy_history.json',history);print('TEMPORAL_ENERGY_EPOCH',epoch,json.dumps(history[-1]),flush=True)
