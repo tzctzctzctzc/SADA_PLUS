@@ -163,7 +163,9 @@ def update(ctx,source,target=None,measure=False):
             (ramp*loss).backward()
             classes=torch.bincount(torch.cat([x['labels'] for x in labels]),minlength=10).tolist()
             result.update(target_cls=float(c.detach()),target_reg=float(r.detach()),target_positive_points=n,
-                target_proposals=sum(len(x['labels']) for x in labels),target_classes=classes,ramp=ramp)
+                target_proposals=sum(len(x['labels']) for x in labels),target_classes=classes,ramp=ramp,
+                target_regression_points=nr,target_regression_proposals=sum(int(x['regression_keep'].sum()) for x in labels),
+                target_cls_weight=confidence)
     norm=torch.nn.utils.clip_grad_norm_(m.parameters(),1.);assert torch.isfinite(norm)
     ctx['opt'].step();ctx['sched'].step();ctx['ema'].update(m);ctx['step']+=1
     assert all(p.grad is None for p in ctx['ema'].module.parameters())

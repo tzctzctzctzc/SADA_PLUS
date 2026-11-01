@@ -79,7 +79,9 @@ def test_disabled_path_exact_and_all_modules_target_gradient(tmp_path,monkeypatc
     e.restore(ctx,deepcopy(state));other,_=e.update(ctx,src)
     assert all(loss[k]==other[k] for k in loss) and d==e.base.digest(e.base.capture(ctx,cfg,0,[],[]))
     e.restore(ctx,deepcopy(state));monkeypatch.setattr(e,'pseudo',fixed_pseudo)
-    _,norms=e.update(ctx,src,tgt,True)
+    metrics,norms=e.update(ctx,src,tgt,True)
+    assert metrics['target_regression_points']>0 and metrics['target_regression_proposals']==len(tgt)
+    assert abs(metrics['target_cls_weight']-.9)<1e-6
     assert set(norms)==set(e.MODULES) and all(v>0 and np.isfinite(v) for v in norms.values())
     assert all(p.grad is None for p in ctx['ema'].module.parameters())
 
