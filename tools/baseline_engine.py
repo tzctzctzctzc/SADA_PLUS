@@ -112,6 +112,8 @@ def build(cfg):
     original = ctx.model.forward
     ctx.checked_steps = 0
     ctx.first_gradient_norm = None
+    from tools.charades_speed import enabled
+    ctx.charades_speed_enabled=enabled(cfg)
     for opt in (ctx.optimizer_gen_source,ctx.optimizer_gen_source_alignment):
         step = opt.step
         def checked_step(*args, _opt=opt, _step=step, **kwargs):
@@ -130,14 +132,18 @@ def build(cfg):
             ctx.checked_steps += 1
         result = original(*args, **kwargs)
         if kwargs.get('mode') != 'test':
-            if not torch.isfinite(torch.stack([v.detach().reshape(()) for v in result[0].values()])).all():
-                raise ValueError('非有限loss')
+            if ctx.charades_speed_enabled:
+                if not torch.isfinite(torch.stack([v.detach().reshape(()) for v in result[0].values()])).all():
+                    raise ValueError('非有限loss')
+            else:
+                for name,value in result[0].items():
+                    if not torch.isfinite(value).all():raise ValueError('非有限loss: '+name)
         return result
     ctx.model.forward = checked_forward
     if cfg.get('context_mix'):
         from tools.context_mix import install
         install(ctx, cfg)
-    if cfg.get('benchmark')=='charades-ego-third-to-first' and cfg.get('prototype_capacity'):
+    if ctx.charades_speed_enabled:
         from tools.charades_speed import install
         install(ctx)
     return ctx

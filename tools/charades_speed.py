@@ -7,6 +7,11 @@ from types import MethodType
 import torch
 
 
+def enabled(cfg):
+    return (cfg.get('benchmark')=='charades-ego-third-to-first' and bool(cfg.get('prototype_capacity'))
+            and cfg['model']['adv_method']==['None'])
+
+
 def batched_metrics(tracker, losses):
     names=list(losses)
     # float64保证不同dtype的标量提升后仍等于各自原.item()。

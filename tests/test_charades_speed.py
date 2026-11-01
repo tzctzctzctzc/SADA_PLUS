@@ -2,11 +2,14 @@ import unittest
 from copy import deepcopy
 import torch
 from torch import nn
-from tools.charades_speed import fast_ema,batched_metrics,epoch_function
+from tools.charades_speed import fast_ema,batched_metrics,epoch_function,enabled
 from libs.utils import ModelEma2
 from libs.evaluation.metrics import MetricTracker
 
 class SpeedTests(unittest.TestCase):
+    def test_only_measured_faster_path_enabled(self):
+        cfg=dict(benchmark='charades-ego-third-to-first',prototype_capacity={'variant':'control'},model={'adv_method':['None']})
+        self.assertTrue(enabled(cfg));cfg['model']['adv_method']=['reverse'];self.assertFalse(enabled(cfg))
     def test_ema_preserves_repeated_alias_updates(self):
         class Model(nn.Module):
             def __init__(self):

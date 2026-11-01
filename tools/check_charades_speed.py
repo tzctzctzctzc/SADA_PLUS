@@ -49,7 +49,7 @@ def main(args):
             limited_epoch(ctx,2);engine.epoch_setup(ctx,epoch);ctx._train_epoch(epoch)
             engine.restore(ctx,saved);engine.epoch_setup(ctx,epoch)
             # 重绑定原函数，避免限2步的包装嵌套；数值计算没有变化。
-            if name=='native':ctx._train_epoch=MethodType(original.Trainer._train_epoch,ctx)
+            if name=='native' or not ctx.charades_speed_enabled:ctx._train_epoch=MethodType(original.Trainer._train_epoch,ctx)
             else:
                 from tools.charades_speed import epoch_function
                 ctx._train_epoch=MethodType(epoch_function(),ctx)
@@ -68,6 +68,7 @@ def main(args):
             full_model_EMA_optimizers_schedulers_controls_RNG_exact=True,metrics_exact=True,full_state_sha256=a,
             prototype_target_gradient=aux['t_rq3_target_gradient_norm'],target_GT_used=False,
             resume_checkpoint_sha256=sha(entry/'latest.pt'))
+        reports[arm]['effective_path']='batched-metrics-alias-aware-EMA' if arm=='no_adversarial' else 'original-adversarial-preserved'
         save(args.output/(arm+'.json'),reports[arm]);print('BENCHMARK',arm,json.dumps(reports[arm]),flush=True)
         del saved,packets,fixed
     save(args.output/'complete.json',dict(status='passed',code=code_identity(),reports=reports,guard=str(proof),
