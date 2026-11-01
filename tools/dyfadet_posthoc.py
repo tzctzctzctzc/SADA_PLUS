@@ -35,7 +35,7 @@ def evaluate(args):
     with np.load(entry/'target_val.npz') as f:pred={k:f[k] for k in f.files}
     g=read(entry/'gpu_complete.json');assert g['prediction_sha256']==sha(entry/'target_val.npz')
     assert g['videos']==list(read(cfg['benchmark']['inference']['target_val'])['database'])
-    ev=m.ANETdetection(offline['annotation'],offline['splits']['target_val'],num_workers=4,action_subsampling='10_majority_classes');ap,mean=ev.evaluate(pred,verbose=True)
+    ev=m.ANETdetection(offline['annotation'],offline['splits']['target_val'],num_workers=4,action_subsampling='10_majority_classes');metrics=ev.evaluate(pred,verbose=True);ap,mean=metrics[0],metrics[1]
     so=read(Path(cfg['benchmark']['reference'])/'evaluation/target_val.json')['map_0.1_to_0.5']
     save(entry/'result.json',dict(shift=args.shift,epoch=15,weights='EMA',map=float(mean),map_by_tiou=[float(x) for x in ap],reference_so_map=so,
         delta_pp=100*(float(mean)-so),scope='user_requested_posthoc_target_diagnostic_not_source_selected_result',checkpoint=p['checkpoint'],
