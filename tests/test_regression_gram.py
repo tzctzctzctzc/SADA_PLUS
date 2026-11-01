@@ -42,3 +42,21 @@ def test_exact_original_three_tap_convolution_layout():
 def test_too_few_points_rejected():
     import pytest
     with pytest.raises(ValueError):gram_alignment(torch.ones(3,6),torch.ones(4,6))
+
+
+def test_feature_path_keeps_backbone_gradient_without_detaching_cache_helper():
+    from torch import nn
+    from tools.regression_gram import differentiable_detector_features
+    class Backbone(nn.Module):
+        def __init__(self):
+            super().__init__();self.weight=nn.Parameter(torch.tensor(2.))
+        def forward(self,x,m):return [x*self.weight],m,None
+    class Neck(nn.Module):
+        def forward(self,f,m):return f,m
+    class Model:
+        backbone_source=Backbone();neck_source=Neck();dropout=nn.Identity()
+        backbone_target=backbone_source;neck_target=neck_source
+        def preprocessing(self,video,mode):return video[0],None
+    model=Model();f,m=differentiable_detector_features(model,torch.ones(1,2,3))
+    assert f[0].requires_grad and torch.equal(f[0],torch.ones_like(f[0])*2)
+    f[0].sum().backward();assert model.backbone_source.weight.grad>0

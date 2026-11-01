@@ -16,6 +16,15 @@ SPEC=dict(schema='regression-gram-transfer-readiness-v1',explained_variance=.9,
           target_gt=False,formal_training=False)
 
 
+def differentiable_detector_features(model,video):
+    # 旧缓存helper有@no_grad；这里明确使用相同前向运算的可微路径。
+    if model.backbone_source is not model.backbone_target or model.neck_source is not model.neck_target:
+        raise ValueError('核验仅支持当前共享定位基座')
+    inputs,masks=model.preprocessing([video],mode='test')
+    features,masks,_=model.backbone_source(model.dropout(inputs),masks)
+    return model.neck_source(features,masks)
+
+
 def augmented_svd(features):
     a=torch.cat([torch.ones_like(features[:,:1]),features],1).double()
     _,s,vh=torch.linalg.svd(a,full_matrices=False)

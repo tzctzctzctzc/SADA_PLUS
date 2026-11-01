@@ -23,7 +23,7 @@ def probe(args):
     from libs.utils import fix_random_seed
     from tools import baseline_engine as base
     from tools.prototype_target_cache import detector_features
-    from tools.regression_gram import regression_inputs,gram_alignment
+    from tools.regression_gram import regression_inputs,gram_alignment,differentiable_detector_features
     e=args.entry;cfg=read(e/'config.json');inputs=read(e/'inputs.json');identity=code_identity()
     assert identity==read(args.output/'plan.json')['code']
     os.chdir(args.data_root);fix_random_seed(123,include_cuda=True);torch.cuda.manual_seed(123)
@@ -41,7 +41,14 @@ def probe(args):
         for i in range(min(SPEC['videos_per_domain'],len(ds))):
             v=move_to_device([ds[i]],'cuda:0')[0]
             if not source:assert not v['segments'].numel() and not v['labels'].numel()
-            f,m=detector_features(model,v);points=model.point_generator(f);x=regression_inputs(model.reg_head,f,m)[0]
+            f,m=differentiable_detector_features(model,v)
+            assert all(z.requires_grad for z in f)
+            if i==0:
+                original_f,original_m=detector_features(model,v)
+                assert all(torch.equal(a,b) for a,b in zip(f,original_f))
+                assert all(torch.equal(a,b) for a,b in zip(m,original_m))
+                del original_f,original_m
+            points=model.point_generator(f);x=regression_inputs(model.reg_head,f,m)[0]
             valid=torch.cat([z[0].reshape(-1) for z in m]).bool()
             logits,_=model.cls_head(f,m);scores=torch.cat([z[0].T for z in logits]).sigmoid().amax(1).detach()
             if source:
