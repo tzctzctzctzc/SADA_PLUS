@@ -17,7 +17,7 @@ SPEC=dict(schema='prototype-joint-instance-v1',variants=['source_joint','ema_joi
     source_jitters=4,source_jitter_fraction=.3,source_background_proposals=128,source_positive_iou=.5,source_ignore_iou=.1,
     dimension=128,attention_heads=4,encoder_layers=2,stages=2,proposal_chunk=32,
     ordered_tokens=[8,16,8],sample_ranges=[[-.25,.25],[0.,1.],[.75,1.25]],
-    feature_scales='all-original-FPN-levels-learned-valid-scale-fusion',
+    feature_scales='all-original-FPN-levels-learned-valid-scale-fusion',classification_anchor='original-proposal-level-and-physical-point',
     target_threshold=.5,target_nms=.5,target_max_instances=128,target_mask_fraction=.2,
     pseudo='EMA-refined-instances-with-soft-class-and-class-specific-quality',
     target_negative_classes=False,missing_predictions_are_background=False,
@@ -84,13 +84,14 @@ class JointHead(nn.Module):
                 item=stage(packet,b,l);rows[index].append(item);b=item['boxes'];l=item['logits']
         return [{k:torch.cat([x[k] for x in row]) for k in row[0]} for row in rows] if len(boxes) else []
 
-def proposals(packet,length,limit=128):
-    boxes=[];logits=[]
-    for l,o,p,m in zip(packet['logits'],packet['offsets'],packet['points'],packet['masks']):
+def proposals(packet,length,limit=128,identity=False):
+    boxes=[];logits=[];levels=[];indices=[]
+    for level,(l,o,p,m) in enumerate(zip(packet['logits'],packet['offsets'],packet['points'],packet['masks'])):
         keep=m[0].nonzero().flatten();order=l[0,keep,:10].detach().sigmoid().amax(1).argsort(descending=True)[:limit];keep=keep[order]
         q=p[keep];off=o[0,keep];b=torch.stack((q[:,0]-off[:,0]*q[:,3],q[:,0]+off[:,1]*q[:,3]),1).detach().clamp(0,length)
-        ok=b[:,1]>b[:,0];boxes.append(b[ok]);logits.append(l[0,keep,:10][ok])
+        ok=b[:,1]>b[:,0];boxes.append(b[ok]);logits.append(l[0,keep,:10][ok]);indices.append(keep[ok]);levels.append(torch.full_like(keep[ok],level))
     b=torch.cat(boxes);l=torch.cat(logits);order=l.detach().sigmoid().amax(1).argsort(descending=True)[:limit]
+    if identity:return b[order],l[order],torch.cat(levels)[order],torch.cat(indices)[order]
     return b[order],l[order]
 
 def source_proposals(packet,video,step):
@@ -109,17 +110,30 @@ def source_proposals(packet,video,step):
     background=torch.stack((center-width/2,center+width/2),1).clamp(0,length)
     keep=(background[:,1]>background[:,0])
     if len(gt):keep &= pair_iou(background,gt).amax(1)<.1
-    boxes=torch.cat((boxes,background[keep][:128]))
-    return boxes,base_at_boxes(packet,boxes)
+    extra=background[keep][:128];boxes=torch.cat((boxes,extra));base=torch.cat((base,base_at_boxes(packet,extra)))
+    return boxes,base
 
 def base_at_boxes(packet,boxes):
-    # 所有层的实际中心点类别证据；源GT扰动/目标实例/推理使用同一规则。
-    values=[];support=[]
+    # 仅GT扰动/背景没有原候选身份：按原回归范围选择真实层，再取该层中心点。
+    values=[];support=[];eligible=[];half=(boxes[:,1]-boxes[:,0])/2
     for l,p,m in zip(packet['logits'],packet['points'],packet['masks']):
         index=(boxes.mean(1)/p[0,3]).round().long().clamp(0,len(p)-1)
-        values.append(l[0,index,:10]);support.append(m[0,index])
-    w=torch.stack(support,1).to(boxes.dtype)
-    return (torch.stack(values,1)*w[...,None]).sum(1)/w.sum(1).clamp_min(1)[:,None]
+        values.append(l[0,index,:10]);support.append(m[0,index]);eligible.append((half>=p[0,1])&(half<=p[0,2])&m[0,index])
+    candidates=torch.stack(eligible,1);chosen=candidates.to(torch.int64).argmax(1)
+    fallback=torch.stack(support,1).to(torch.int64).argmax(1);chosen=torch.where(candidates.any(1),chosen,fallback)
+    return torch.stack(values,1)[torch.arange(len(boxes),device=boxes.device),chosen]
+
+def native_candidates(model,packet):
+    """逐值复用原推理筛选/排序/解码，并保留每项的完整类别logit和FPN身份。"""
+    segments=[];scores=[];labels=[];base=[]
+    for l,o,p,m in zip(packet['logits'],packet['offsets'],packet['points'],packet['masks']):
+        probability=(l[0].sigmoid()*m[0,:,None]).flatten();keep=(probability>model.test_pre_nms_thresh).nonzero().flatten()
+        values,order=probability[keep].sort(descending=True);n=min(model.test_pre_nms_topk,len(keep));keep=keep[order[:n]]
+        point=torch.div(keep,model.num_class_orig,rounding_mode='floor');label=keep%model.num_class_orig
+        off=model.decode_offset(o[0],None,None,mode='test')[point];q=p[point]
+        b=torch.stack((q[:,0]-off[:,0]*q[:,3],q[:,0]+off[:,1]*q[:,3]),1);valid=(b[:,1]-b[:,0])>model.test_duration_thresh
+        segments.append(b[valid]);scores.append(values[:n][valid]);labels.append(label[valid]);base.append(l[0,point,:10][valid])
+    return dict(segments=torch.cat(segments),scores=torch.cat(scores),labels=torch.cat(labels)),torch.cat(base)
 
 def source_objective(outputs,gt,labels):
     total=outputs[0]['logits'].sum()*0;positive=0;background=0
@@ -143,8 +157,8 @@ def source_objective(outputs,gt,labels):
 
 @torch.no_grad()
 def pseudo_instances(model,head,video,epoch):
-    assert_unlabeled(video);packet=dense(model,video);b,l=proposals(packet,video['feats'].shape[-1],128)
-    out=head(packet,b,base_at_boxes(packet,b))[-1];p=out['logits'].sigmoid();quality=out['quality'].sigmoid();score=(p*quality).sqrt()
+    assert_unlabeled(video);packet=dense(model,video);b,l,levels,points=proposals(packet,video['feats'].shape[-1],128,True)
+    out=head(packet,b,l)[-1];p=out['logits'].sigmoid();quality=out['quality'].sigmoid();score=(p*quality).sqrt()
     confidence,labels=score.max(1);order=confidence.argsort(descending=True);selected=[]
     for i in order.tolist():
         if float(confidence[i])<.5 or not out['supported'][i]:continue
@@ -152,7 +166,7 @@ def pseudo_instances(model,head,video,epoch):
         if any(int(labels[i])==int(labels[j]) and float(pair_iou(out['boxes'][i:i+1],out['boxes'][j:j+1])[0,0])>.5 for j in selected):continue
         selected.append(i)
     ix=torch.tensor(selected,device=b.device,dtype=torch.long)
-    return dict(boxes=out['boxes'][ix].detach(),labels=labels[ix],probability=p[ix],quality=quality[ix],weight=confidence[ix].square())
+    return dict(boxes=out['boxes'][ix].detach(),labels=labels[ix],probability=p[ix],quality=quality[ix],weight=confidence[ix].square(),levels=levels[ix],points=points[ix])
 
 def target_objective(model,head,video,pseudo):
     assert_unlabeled(video);packet=dense(model,video);b=pseudo['boxes'];zero=packet['logits'][0].sum()*0
@@ -170,7 +184,8 @@ def target_objective(model,head,video,pseudo):
         cls=F.binary_cross_entropy_with_logits(logits[pos][torch.arange(len(which),device=b.device),labels],pseudo['probability'][which,labels],reduction='none')
         reg=ctr_diou_loss_1d(pred[pos],offset[pos],reduction='none')
         native=((cls+reg)*w).sum()/w.sum().clamp_min(1e-6)
-    outputs=head(packet,b,base_at_boxes(packet,b));weights=pseudo['weight'];denom=weights.sum().clamp_min(1e-6)
+    anchor=torch.stack([packet['logits'][int(level)][0,int(point),:10] for level,point in zip(pseudo['levels'],pseudo['points'])]) if 'levels' in pseudo else base_at_boxes(packet,b)
+    outputs=head(packet,b,anchor);weights=pseudo['weight'];denom=weights.sum().clamp_min(1e-6)
     for out in outputs:
         ix=torch.arange(len(b),device=b.device);labels=pseudo['labels']
         cls=F.binary_cross_entropy_with_logits(out['logits'][ix,labels],pseudo['probability'][ix,labels],reduction='none')
@@ -180,10 +195,10 @@ def target_objective(model,head,video,pseudo):
 
 @torch.no_grad()
 def predict(model,head,video,epoch):
-    packet=dense(model,video);raw=raw_prediction(model,packet)
+    packet=dense(model,video);raw,base=native_candidates(model,packet)
     if epoch==0 or not len(raw['segments']):return postprocess(model,video,raw)
     # 不截断原完整推理候选；只分chunk控制显存，每一个原候选均过两级模块。
-    b=raw['segments'];base=base_at_boxes(packet,b)
+    b=raw['segments']
     out=head(packet,b,base)[-1];i=torch.arange(len(b),device=b.device);lab=out['logits'].argmax(1)
     ramp=min(epoch/5.,1.);scores=(out['logits'][i,lab].sigmoid()*out['quality'][i,lab].sigmoid()).sqrt()
     valid=out['supported'];raw['segments']=torch.where(valid[:,None],b+ramp*(out['boxes']-b),b)

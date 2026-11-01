@@ -67,3 +67,9 @@ def test_target_gt_rejected_before_any_model_or_selector_call():
     v=dict(feats=torch.zeros(8,64),metadata={},segments=torch.tensor([[1.,5.]]),labels=torch.tensor([2]))
     for fn,args in [(target_objective,(None,None,v,None)),(pseudo_instances,(None,None,v,3))]:
         with pytest.raises(ValueError,match='GT'):fn(*args)
+
+def test_original_candidate_keeps_its_level_and_point_logits():
+    from tools.joint_instance import proposals
+    p=packet();p['logits'][0].data.fill_(-8);p['logits'][1].data.fill_(-8);p['logits'][1].data[0,7,3]=8
+    b,l,levels,indices=proposals(p,64,1,True)
+    assert levels.item()==1 and indices.item()==7 and l[0,3].item()==8
