@@ -6,11 +6,12 @@ from pathlib import Path
 from tools.baseline_protocol import read,save,sha
 from tools.prepare_charades_inputs import LABEL_NAMES
 
-SCHEMA='charades-prototype-fixed40of200-v1'
+SCHEMA='charades-prototype-source-calibrated40of200-v1'
 MODEL=Path('/vepfs/vlms/cache/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b')
 POLICY=dict(schema=SCHEMA,teacher='qwen3_vl_8b',labels=LABEL_NAMES,candidate_count=200,selected_count=40,
     proposal_model='Charades-UDA-source-loss-selected-EMA',candidate_seed=6,levels=[0,1,2],
-    candidate_threshold='frozen-Charades-baseline-pl_threshold',per_video_cap=30,
+    candidate_threshold='source-val-class-agnostic-proposal-IoU0.3-F1',per_video_cap=30,
+    source_threshold_grid=[.6,.3,.1,.05,.01,.001],
     candidate_eligibility='eight-distinct-frames-and-fully-supported-original-feature-grid',
     participation='top20-percent-max-class-probability-no-top1-ties',
     frames=8,input_mode='native_video',readout='ten-digit-single-token-log-likelihood',
@@ -77,7 +78,7 @@ def prediction(model,video):
         video_length=meta['video_length'],feat_stride=meta['feat_stride'],feat_num_frames=meta['feat_num_frames'],
         use_temporal_grid_feats=meta['use_temporal_grid_feats'])])[0]
 
-def candidates(root,baseline):
+def candidates(root,baseline,source_calibration=False):
     import torch
     from libs.models.SADA import make_meta_arch
     from tools.baseline_engine import dataset
@@ -86,16 +87,19 @@ def candidates(root,baseline):
     torch.manual_seed(123);torch.cuda.manual_seed(123)
     model=make_meta_arch('sada',deepcopy(cfg),device='cuda:0').cuda().eval()
     model.load_state_dict(saved['ema_state_dict'],strict=True)
-    ds=dataset(cfg,cfg['baseline']['target_manifest'],cfg['tgt_train_split'],False,True)
-    members=read(cfg['baseline']['target_manifest'])['database']
-    if any('annotations' in row for row in members.values()):raise ValueError('目标manifest中出现标注')
+    manifest=cfg['dataset']['json_file'] if source_calibration else cfg['baseline']['target_manifest']
+    splits=cfg['src_val_split'] if source_calibration else cfg['tgt_train_split']
+    ds=dataset(cfg,manifest,splits,False,True)
+    members={k:v for k,v in read(manifest)['database'].items() if v['subset'].lower() in splits}
+    if not source_calibration and any('annotations' in row for row in members.values()):raise ValueError('目标manifest中出现标注')
+    threshold=0. if source_calibration else read(root/'source_threshold.json')['threshold']
     all_rows=[]
     with torch.no_grad():
         for index in range(len(ds)):
             v=without_gt(ds[index]);packet=dense(model,v);meta=v['metadata'];grouped=defaultdict(list)
             for level in POLICY['levels']:
                 scores=packet['logits'][level][0].sigmoid().amax(0)
-                keep=(packet['masks'][level][0,0] & (scores>=cfg['model']['pl_threshold'])).nonzero().flatten()
+                keep=(packet['masks'][level][0,0] & (scores>=threshold)).nonzero().flatten()
                 pts=packet['points'][level][keep].cpu();offsets=packet['offsets'][level][0,:,keep].transpose(0,1).cpu();scores=scores[keep].cpu()
                 for p,o,score in zip(pts,offsets,scores):
                     coordinate=float(p[0]);absolute=int(round(coordinate))
@@ -108,10 +112,35 @@ def candidates(root,baseline):
                     b=(end*meta['fps']-.5*meta['feat_num_frames'])/meta['feat_stride']
                     if a<0 or b>v['feats'].shape[-1]:continue
                     row=dict(candidate_id='%s-p%07d'%(meta['video_id'],absolute),video_id=meta['video_id'],
-                        absolute_feature_index=absolute,source_fpn_levels=[level],proposal_start_sec=start,proposal_end_sec=end)
+                        absolute_feature_index=absolute,source_fpn_levels=[level],proposal_start_sec=start,proposal_end_sec=end,model_score=float(score))
                     grouped[absolute].append((float(score),row))
             all_rows.extend(max(values,key=lambda z:z[0])[1] for values in grouped.values())
             if index%200==0:print('UNLABELED_CANDIDATES',index+1,len(ds),len(all_rows),flush=True)
+    if source_calibration:
+        import os
+        path=root/'source_val_proposals.json'
+        with path.open('x') as f:json.dump(all_rows,f,allow_nan=False);f.flush();os.fsync(f.fileno())
+        def iou(a,b):
+            intersection=max(0.,min(a[1],b[1])-max(a[0],b[0]))
+            return intersection/max(1e-8,a[1]-a[0]+b[1]-b[0]-intersection)
+        reports=[];gt_count=sum(len(v['annotations']) for v in members.values())
+        for threshold in POLICY['source_threshold_grid']:
+            pool=choose([r for r in all_rows if r['model_score']>=threshold]);hits=0;by_video=defaultdict(list)
+            for row in pool:
+                box=[row['proposal_start_sec'],row['proposal_end_sec']];by_video[row['video_id']].append(box)
+                hits+=max((iou(box,a['segment']) for a in members[row['video_id']]['annotations']),default=0.)>=.3
+            recovered=sum(max((iou(a['segment'],b) for b in by_video.get(vid,[])),default=0.)>=.3
+                for vid,item in members.items() for a in item['annotations'])
+            precision=hits/max(len(pool),1);recall=recovered/max(gt_count,1)
+            reports.append(dict(threshold=threshold,candidates=len(pool),precision=precision,recall=recall,
+                f1=2*precision*recall/max(precision+recall,1e-12)))
+        legal=[r for r in reports if r['candidates']==200]
+        if not legal:raise ValueError('源验证所有预定阈值均无200条几何合法proposal，保留诊断停止')
+        selected=max(legal,key=lambda r:(r['f1'],r['threshold']))
+        save(root/'source_threshold.json',dict(threshold=selected['threshold'],reports=reports,
+            source_only=True,target_GT_used=False,target_results_used=False,
+            source_predictions_sha256=sha(path),source_manifest_sha256=sha(manifest),policy=POLICY))
+        return
     pool=choose(all_rows)
     if len(pool)!=200:raise ValueError('冻结阈值下有效候选不足200，禁止按目标结果降阈值')
     save(root/'candidate_pool.json',dict(policy=POLICY,candidates=pool,target_members=sorted(members),
@@ -201,5 +230,6 @@ def freeze(root):
     save(root/'prepared.json',dict(schema=SCHEMA,teacher='qwen3_vl_8b',label_names=LABEL_NAMES,by_video=dict(by_video),
         selected_count=40,candidate_count=200,policy=POLICY,target_GT_used=False,
         source_artifacts={str(root/'candidate_pool.json'):sha(root/'candidate_pool.json'),str(root/'frames_manifest.json'):sha(root/'frames_manifest.json'),
+            str(root/'source_threshold.json'):sha(root/'source_threshold.json'),
             **{str(root/'teacher'/str(i)/'complete.json'):sha(root/'teacher'/str(i)/'complete.json') for i in [0,1]}}))
     return root/'prepared.json'

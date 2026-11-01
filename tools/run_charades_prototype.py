@@ -96,9 +96,9 @@ def worker(args):
     proof=first_cuda_guard();os.chdir('/vepfs/vlms/SADA_PLUS')
     import torch
     torch.set_num_threads(8)
-    if args.stage=='candidates':
+    if args.stage in ('candidates','candidate_calibration'):
         from tools.charades_prototype import candidates
-        candidates(root,BASE/'uda')
+        candidates(root,BASE/'uda',source_calibration=args.stage=='candidate_calibration')
     elif args.stage=='teacher':
         from tools.charades_prototype import score
         score(root,args.shard)
@@ -165,6 +165,7 @@ def main(args):
     annotation=read(base_cfg['baseline']['annotation_for_offline_evaluation'])['database']
     save(root/'evaluation_unlabeled.json',dict(database={vid:{k:v for k,v in row.items() if k!='annotations'}
         for vid,row in annotation.items() if row['subset'].lower() in base_cfg['tgt_val_split']}))
+    tasks(root,[{}],'candidate_calibration',[2,3])
     tasks(root,[{}],'candidates',[2,3])
     from tools.charades_prototype import frames,freeze
     save(root/'state.json',dict(phase='exact-raw-frame-preparation',active={},parent_pid=os.getpid()))
@@ -187,7 +188,7 @@ def main(args):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',type=Path,required=True)
-    p.add_argument('--worker',action='store_true');p.add_argument('--stage',choices=['candidates','teacher','probe','train','evaluate'])
+    p.add_argument('--worker',action='store_true');p.add_argument('--stage',choices=['candidate_calibration','candidates','teacher','probe','train','evaluate'])
     p.add_argument('--variant',choices=POLICY['variants']);p.add_argument('--shard',type=int,choices=[0,1]);a=p.parse_args()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
     try:worker(a) if a.worker else main(a)
