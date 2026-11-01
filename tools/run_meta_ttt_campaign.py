@@ -56,6 +56,30 @@ def main(args):
     if os.environ.get('CUDA_VISIBLE_DEVICES')!='':raise ValueError('监督进程必须CUDA空')
     prepare_file_limit();root=args.root.resolve();root.mkdir(exist_ok=False)
     identity=code_identity();review=read(args.review)
+    from tools.meta_ttt_speed import BACKEND
+    previous=args.previous_root.resolve() if args.previous_root else None
+    resumed={}
+    if previous:
+        old_plan=read(previous/'plan.json')
+        if old_plan['specification']!=SPEC:raise ValueError('技术提速不能改变原方法')
+        state=read(previous/'state.json')
+        for pid in [state['parent_pid']]+[r['pid'] for r in state.get('active',{}).values()]:
+            proc=Path('/proc')/str(pid)/'cmdline'
+            if proc.exists() and str(previous).encode() in proc.read_bytes():raise ValueError('旧自有进程尚未退出')
+        if list((previous/'formal').glob('*/*/complete.json')):
+            raise ValueError('此迁移仅处理当前两条epoch保存点；已完成项须独立引用，不能重训')
+        speed_review=read(args.speed_review)
+        if speed_review['status']!='passed' or speed_review['code']!=identity or not speed_review['resume']:
+            raise ValueError('必须当前代码真实GPU等价/测速和已训练RNG恢复门禁')
+        for p in (previous/'formal').glob('*/*/latest.pt'):
+            arm,s=p.parent.parent.name,p.parent.name
+            resumed[(arm,s)]=dict(resume_checkpoint=str(p),resume_checkpoint_sha256=sha(p),
+                resume_best=str(p.parent/'best.pt'),resume_best_sha256=sha(p.parent/'best.pt'))
+        if set(resumed)!={('meta','S5'),('meta','S6')}:raise ValueError('当前迁移要求精确两条原保存点')
+        save(root/'predecessor.json',dict(root=str(previous),code=old_plan['code'],
+            plan_sha256=sha(previous/'plan.json'),resume_artifacts={a+'_'+s:v for (a,s),v in resumed.items()},
+            speed_review=str(args.speed_review),speed_review_sha256=sha(args.speed_review),
+            mathematical_protocol_changed=False,source_samples_or_budget_changed=False,old_complete_training_repeated=0))
     if review['status']!='passed' or review['count']!=6:raise ValueError('六向实际GPU门禁不完整')
     paths={s:read(args.inputs/('%s_A100_paths.json'%s)) for s in ['S%d'%i for i in range(1,7)]}
     for s,p in paths.items():
@@ -76,10 +100,12 @@ def main(args):
         source_calibration_jobs=12,target_jobs=24,arms=['meta','joint'],shifts=list(paths),
         acceptance_review=str(args.review),acceptance_review_sha256=sha(args.review),
         original_6_GPU_receipts='historical identity preserved; same meta_ttt.py hash and probe AST',
-        specification=SPEC,source_only_preparation=True,target_GT_used=False)
+        specification=SPEC,source_only_preparation=True,target_GT_used=False,execution_backend=BACKEND)
     save(root/'plan.json',plan)
     indices=[int(x) for x in args.gpus.split(',')]
     def row(s,arm,stage,extra=None):
+        extra=dict(extra or {},execution_backend=BACKEND)
+        if stage=='formal' and (arm,s) in resumed:extra.update(resumed[(arm,s)])
         return dict(key=arm+'_'+s,shift=s,arm=arm,paths=paths[s],output=root/stage/arm/s,extra=extra or {})
     reports=run_stage(root,[row('S1',a,'acceptance') for a in ['meta','joint']],'training_probe',indices,identity)
     maps=[read(Path(r['job']).parent.parent/'acceptance'/read(r['job'])['arm']/'S1/complete.json')['result']['source_map0'] for r in reports]
@@ -116,7 +142,10 @@ def main(args):
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',type=Path,required=True)
     p.add_argument('--inputs',type=Path,required=True);p.add_argument('--review',type=Path,required=True)
-    p.add_argument('--gpus',default='0,1');a=p.parse_args()
+    p.add_argument('--gpus',default='0,1')
+    p.add_argument('--previous-root',type=Path,help='本次技术提速精确承接原meta S5/S6 epoch保存点')
+    p.add_argument('--speed-review',type=Path,help='当前代码GPU数值等价/测速/恢复证明')
+    a=p.parse_args()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
     try:main(a)
     except BaseException as error:

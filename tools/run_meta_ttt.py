@@ -19,6 +19,9 @@ def verify(job):
     if binding(job)!=job['input_sha256']: raise ValueError('冻结输入SHA改变')
     if job.get('prepared') and sha(job['prepared'])!=job['prepared_sha256']:
         raise ValueError('准备权重SHA改变')
+    for key in ['resume_checkpoint','resume_best']:
+        if job.get(key) and sha(job[key])!=job[key+'_sha256']:
+            raise ValueError('恢复工件SHA改变: '+key)
     cfg=read(job['config']);allowed=set(cfg['src_train_split']+cfg['src_val_split'])
     if any(v['subset'].lower() not in allowed for v in read(job['source_manifest'])['database'].values()):
         raise ValueError('源准备manifest混入目标视频')
@@ -40,6 +43,10 @@ def load(job,device):
     model.load_state_dict(base['ema_state_dict'],strict=True);model.eval()
     initial=tensor_digest(model.state_dict());reference=deepcopy(model).eval().requires_grad_(False)
     encoder=configure(model)
+    if job.get('execution_backend'):
+        from tools.meta_ttt_speed import BACKEND,install
+        if job['execution_backend']!=BACKEND:raise ValueError('未知执行后端')
+        install(encoder)
     with torch.random.fork_rng(devices=[0] if device.startswith('cuda') else []):
         torch.manual_seed(123)
         decoder=Recovery(cfg['model']['fpn_dim'],len(model.fpn_strides),SPEC['decoder_hidden']).to(device)
@@ -89,7 +96,24 @@ def train(job, acceptance=False):
     dl=loader(ds,True,generator,SPEC['source_batch'],0)
     budget=cfg['baseline']['epoch_budget']['iterations_per_epoch']
     if not len(dl):raise ValueError('源训练集为空')
-    out=Path(job['output']);history=[dict(epoch=0,map=source_map(job,model,ref,enc,dec,cfg,0))];epochs=[]
+    out=Path(job['output']);start_epoch=0
+    if job.get('resume_checkpoint'):
+        from tools.meta_ttt_speed import check_resume,restore_training
+        saved=torch.load(job['resume_checkpoint'],map_location='cpu')
+        start_epoch=check_resume(saved,job,cfg,initial,head_initial)
+        history=saved['history'];epochs=saved['epochs']
+        best_saved=torch.load(job['resume_best'],map_location='cpu')
+        if (best_saved['epoch']!=choose_checkpoint(history)[0]['epoch']
+                or best_saved['config']!=cfg or best_saved['parent_checkpoint_sha256']!=job['input_sha256']['checkpoint']):
+            raise ValueError('旧best不对应源选择')
+        checkpoint(out/'best.pt',best_saved)
+        save(out/'epochs.json',epochs)
+        if len(history)>1:save(out/'source_history.json',history)
+        restore_training(saved,model,dec,optimizer,generator)
+        print('RESUME_EPOCH_BOUNDARY',start_epoch,'NEXT',start_epoch+1,flush=True)
+        del saved,best_saved
+    else:
+        history=[dict(epoch=0,map=source_map(job,model,ref,enc,dec,cfg,0))];epochs=[]
     if acceptance:
         frozen_initial=tensor_digest({n:p for n,p in model.named_parameters() if not p.requires_grad})
         reference_initial=tensor_digest(ref.state_dict())
@@ -104,8 +128,8 @@ def train(job, acceptance=False):
             python=random.getstate(),numpy=np.random.get_state(),torch_cpu=torch.get_rng_state(),
             torch_cuda=torch.cuda.get_rng_state(0),source_loader=generator.get_state()))
         return result
-    checkpoint(out/'best.pt',payload(0))
-    for epoch in range(1,(1 if acceptance else SPEC['max_epochs'])+1):
+    if not start_epoch:checkpoint(out/'best.pt',payload(0))
+    for epoch in range(start_epoch+1,(1 if acceptance else SPEC['max_epochs'])+1):
         it=iter(dl);losses=[];gradients=[];hypergradients=[]
         for step in range(budget):
             try: batch=next(it)
@@ -115,7 +139,9 @@ def train(job, acceptance=False):
                 loss=episode(model,ref,enc,dec,source,job['arm'],((epoch-1)*budget+step)*SPEC['inner_steps'])/len(batch)
                 if not torch.isfinite(loss):raise ValueError('元目标非有限')
                 loss.backward();losses.append(float(loss.detach()))
-            hg=sum(float(p.grad.square().sum()) for p in dec.parameters() if p.grad is not None)**.5
+            # 保留每张量原float32平方求和与Python double累计的数值，合并为一次GPU同步。
+            squares=torch.stack([p.grad.square().sum() for p in dec.parameters() if p.grad is not None])
+            hg=sum(squares.detach().cpu().tolist())**.5
             for key,module in [('classification',model.cls_head_target),('regression',model.reg_head_target)]:
                 task_head_gradient[key] |= any(p.grad is not None and bool(p.grad.abs().sum()>0) for p in module.parameters())
             norm=torch.nn.utils.clip_grad_norm_(base_params+list(dec.parameters()),SPEC['clip'])
