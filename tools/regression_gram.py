@@ -26,8 +26,9 @@ def differentiable_detector_features(model,video):
     return model.neck_source(features,masks)
 
 
-def augmented_svd(features):
+def augmented_svd(features,normalize=False):
     a=torch.cat([torch.ones_like(features[:,:1]),features],1).double()
+    if normalize:a=a/(len(a)**.5)
     _,s,vh=torch.linalg.svd(a,full_matrices=False)
     return s.square(),vh
 
@@ -36,11 +37,11 @@ def inverse_from_spectrum(eigenvalues,vh,rank):
     return (vh[:rank].T/eigenvalues[:rank])@vh[:rank]
 
 
-def gram_alignment(source,target):
+def gram_alignment(source,target,normalize=False):
     if source.ndim!=2 or target.ndim!=2 or source.shape[1]!=target.shape[1]:
         raise ValueError('源目标必须是相同回归特征维数的二维矩阵')
     if min(len(source),len(target))<4:raise ValueError('回归点不足，不假造对齐信号')
-    es,vs=augmented_svd(source);et,vt=augmented_svd(target)
+    es,vs=augmented_svd(source,normalize);et,vt=augmented_svd(target,normalize)
     def count(e):
         if not torch.isfinite(e).all() or e[0]<=0:raise ValueError('非有限或零谱')
         return int(torch.searchsorted(e.detach().cumsum(0)/e.detach().sum(),SPEC['explained_variance']))+1

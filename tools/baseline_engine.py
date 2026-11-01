@@ -138,6 +138,9 @@ def build(cfg):
     if cfg.get('context_mix'):
         from tools.context_mix import install
         install(ctx, cfg)
+    if cfg.get('regression_gram'):
+        from tools.prototype_regression_gram import install
+        install(ctx,cfg)
     return ctx
 
 
@@ -167,6 +170,8 @@ def controls(model):
     result = {k: deepcopy(getattr(model, k)) for k in fields}
     if hasattr(model, 'context_mix_state'):
         result['context_mix_state'] = deepcopy(model.context_mix_state)
+    if hasattr(model,'regression_gram_state'):
+        result['regression_gram_state']=deepcopy(model.regression_gram_state)
     return result
 
 
@@ -302,6 +307,8 @@ def train(cfg, entry, resume=None):
     ctx = build(cfg)
     if cfg.get('context_mix'):
         ctx.context_mix_ledger = str(entry/'mix_events.jsonl')
+    if cfg.get('regression_gram'):
+        ctx.regression_gram_ledger=str(entry/'regression_gram_events.jsonl')
     save(entry/'runtime_config.json',ctx.cfg)
     save(entry/'seed_proof.json',ctx.cuda_seed_proof)
     if cfg.get('prototype_capacity'):
@@ -339,6 +346,8 @@ def train(cfg, entry, resume=None):
             row['auxiliary']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_rq3_')}
         if cfg.get('context_mix'):
             row['context_mix']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_mix_')}
+        if cfg.get('regression_gram'):
+            row['regression_gram']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_gram_')}
         if epoch%5 == 0:
             ctx.valid_metrics_src.reset()
             value = float(ctx._valid_epoch(epoch, ctx.val_loader_src, domain='src'))
