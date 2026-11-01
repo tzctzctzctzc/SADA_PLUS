@@ -100,5 +100,12 @@ class ProtocolTests(unittest.TestCase):
             evaluator=module.ANETdetection(str(p),['target'],num_workers=1,action_subsampling='10_majority_classes')
             pred={'video-id':np.array(['v']),'t-start':np.array([1.]),'t-end':np.array([2.]),'label':np.array([2]),'score':np.array([.9])}
             self.assertEqual(evaluator.evaluate(pred,verbose=False)[1],1.)
+    def test_replay_difference_rejects_real_change(self):
+        a=dict(weight=torch.tensor([1.,2.]),rng=torch.tensor([1,2],dtype=torch.uint8))
+        b=copy.deepcopy(a);b['weight'][0]+=1e-7
+        self.assertTrue(e.repeat_difference(a,b)['allclose'])
+        b['weight'][0]+=.01;self.assertFalse(e.repeat_difference(a,b)['allclose'])
+        b['rng'][0]=3
+        with self.assertRaises(AssertionError):e.repeat_difference(a,b)
 
 if __name__=='__main__':unittest.main(verbosity=2)

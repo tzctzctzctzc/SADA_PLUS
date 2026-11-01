@@ -22,6 +22,7 @@ SPEC = dict(seed=123,batch_size=2,max_epochs=50,valid_every=5,patience=15,
     epoch_steps='same_as_existing_SO_reference',source_cycle='itertools_cycle_cached_batches',
     source_crop='same_benchmark_grid_crop_then_exact_DiGIT_seconds_conversion',
     postprocessing='official_one_class_per_query_then_fixed_benchmark_softNMS',
+    restore='exact_saved_state_and_rng_GPU_next_step_allclose_atol1e-6_rtol1e-5_not_bitwise_guaranteed',
     scheduling='user_authorized_shared_GPU_no_public_exclusive_lock')
 
 
@@ -126,7 +127,8 @@ def audit(entry):
     for proof in acceptance['reports'].values():
         assert sha(proof['path'])==proof['sha256']
         report=read(proof['path']);guard_audit(report['guard'],report['guard_sha256'],b['code']['commit'])
-        assert all(report['parameters_updated'].values()) and report['full_state_restore'] and report['next_step_exact']
+        assert all(report['parameters_updated'].values()) and report['full_state_restore'] and report['next_step_numerically_equal']
+        assert report['replay']['rng_exact'] and report['replay']['difference']['allclose']
         assert report['official_model_and_postprocessor'] and len(report['cuda_operator_reference'])==2
     init=read(entry/'initialization.json');p=read(acceptance['reports'][b['shift']]['path'])
     assert init['model_sha256']==p['initial_model_sha256'] and not init['pretrained_checkpoint_loaded']

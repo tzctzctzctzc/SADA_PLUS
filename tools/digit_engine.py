@@ -190,6 +190,38 @@ def cuda_operator_check():
         reports.append(dict(dtype=str(dtype),tolerance=tol,max_absolute_errors=diffs))
     return reports
 
+def cpu_copy(x):
+    if torch.is_tensor(x):return x.detach().cpu().clone()
+    if isinstance(x,dict):return {k:cpu_copy(v) for k,v in x.items()}
+    if isinstance(x,list):return [cpu_copy(v) for v in x]
+    if isinstance(x,tuple):return tuple(cpu_copy(v) for v in x)
+    return deepcopy(x)
+
+def repeat_difference(a,b,atol=1e-6,rtol=1e-5):
+    report=dict(max_absolute_error=0.,max_tolerance_ratio=0.,float_tensors=0,nonfloating_exact=True,allclose=True)
+    def visit(x,y,path='state'):
+        assert type(x)==type(y),path
+        if torch.is_tensor(x):
+            assert x.dtype==y.dtype and x.shape==y.shape,path
+            if torch.is_floating_point(x):
+                err=(x-y).abs();limit=atol+rtol*x.abs()
+                report['float_tensors']+=1
+                if x.numel():
+                    maximum=float(err.max());ratio=float((err/limit).max())
+                    if maximum>report['max_absolute_error']:report.update(max_absolute_error=maximum,worst_path=path)
+                    report['max_tolerance_ratio']=max(report['max_tolerance_ratio'],ratio)
+                    report['allclose'] &= bool(torch.isfinite(err).all()) and ratio<=1
+            else:assert torch.equal(x,y),path
+        elif isinstance(x,np.ndarray):assert np.array_equal(x,y),path
+        elif isinstance(x,dict):
+            assert x.keys()==y.keys(),path
+            for k in x:visit(x[k],y[k],path+'/'+str(k))
+        elif isinstance(x,(list,tuple)):
+            assert len(x)==len(y),path
+            for i,(u,v) in enumerate(zip(x,y)):visit(u,v,path+'/'+str(i))
+        else:assert x==y,path
+    visit(a,b);return report
+
 def probe(cfg,entry,guard):
     operator=cuda_operator_check()
     ctx=build(cfg);m=ctx['model'];initial=digest(m.state_dict());before={k:digest(p) for k,p in group_parameters(m).items()}
@@ -199,9 +231,15 @@ def probe(cfg,entry,guard):
     assert all(updated.values()) and all(math.isfinite(v) and v>0 for v in norms.values()),(updated,norms)
     buf=io.BytesIO();torch.save(capture(ctx,cfg,0,[],[]),buf);buf.seek(0);state=torch.load(buf,map_location='cpu',weights_only=False)
     saved_digest=digest(state);restore(ctx,deepcopy(state));assert digest(capture(ctx,cfg,0,[],[]))==saved_digest
-    l1,_=step(ctx,batches[-1]);d1=digest(capture(ctx,cfg,0,[],[]))
-    restore(ctx,deepcopy(state));l2,_=step(ctx,batches[-1]);d2=digest(capture(ctx,cfg,0,[],[]))
-    assert l1==l2 and d1==d2,'resume next-step mismatch'
+    l1,_=step(ctx,batches[-1]);a=cpu_copy(capture(ctx,cfg,0,[],[]));d1=digest(a)
+    restore(ctx,deepcopy(state));l2,_=step(ctx,batches[-1]);b=cpu_copy(capture(ctx,cfg,0,[],[]));d2=digest(b)
+    difference=repeat_difference(a,b)
+    replay=dict(saved_state_exact=True,next_step_bitwise_exact=l1==l2 and d1==d2,
+                loss1=l1,loss2=l2,difference=difference,atol=1e-6,rtol=1e-5,
+                rng_exact=digest(a['rng'])==digest(b['rng']),reason='official_CUDA_atomic_add_and_linear_resize_backward')
+    save(entry/'replay_diagnostic.json',replay)
+    assert replay['rng_exact'] and difference['allclose'] and all(math.isclose(l1[k],l2[k],rel_tol=1e-5,abs_tol=1e-6) for k in l1),'resume numerical mismatch'
+    del a,b,state
     m.eval();source=next(iter(ctx['val']));x,info=device_batch(source,ctx['device'])
     clean=[{k:v for k,v in row.items() if k not in ('segments','labels')} for row in info]
     with torch.no_grad():
@@ -209,7 +247,8 @@ def probe(cfg,entry,guard):
         pred,_=predict(ctx,source,cfg);assert all(torch.isfinite(v).all() for v in pred.values())
     value=validation(ctx);torch.cuda.synchronize()
     save(entry/'probe.json',dict(status='passed',initial_model_sha256=initial,gradient_norms=norms,parameters_updated=updated,
-        source_loss=loss,source_validation_loss=value,full_state_restore=True,next_step_exact=True,official_model_and_postprocessor=True,
+        source_loss=loss,source_validation_loss=value,full_state_restore=True,next_step_exact=replay['next_step_bitwise_exact'],next_step_numerically_equal=True,
+        replay=replay,official_model_and_postprocessor=True,
         cuda_operator_reference=operator,
         unlabeled_inference_equal=True,target_training_batches=0,parameter_count=sum(p.numel() for p in m.parameters()),
         peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,guard=guard,guard_sha256=sha(guard),
