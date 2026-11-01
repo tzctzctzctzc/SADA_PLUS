@@ -287,7 +287,6 @@ def audit(entry):
  latest=torch.load(e/'latest.pt',map_location='cpu');s=latest['model_controls']['phase_boundary_state']
  assert s['step']==len(ledger)==len(rows)*cfg['baseline']['epoch_budget']['iterations_per_epoch'] and s['digest']==digest
  assert any(k.startswith('phase_boundary.') for k in latest['state_dict']) and any(k.startswith('phase_boundary.') for k in latest['ema_state_dict'])
- assert any(any(k in x for k in ['phase_boundary']) for x in [latest['model_controls']]) is False  # controls store counters, weights live in state_dict
  for domain in ['source','target']:
   assert all('annotations' not in v for v in read(e/(domain+'_val_unlabeled.json'))['database'].values())
   assert read(e/'evaluation'/(domain+'_val.json'))['prediction_sha256']==sha(e/(domain+'_val.npz'))

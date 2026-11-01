@@ -49,6 +49,7 @@ def gpu_stage(args):
                 regression_updated=reg_before!=base.tensor_digest(ctx.model.reg_head.state_dict()),
                 peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,
                 source_gradient_norm=ctx.first_gradient_norm,target_gt_losses=[0.,0.,0.])
+            print('PHASE_GPU_CHECK',json.dumps(phases[str(epoch)]),flush=True)
             ctx.train_loader_src,ctx.train_loader_tgt=loaders
         assert phases['1']['phase']['phase_source_instances']>0
         for k in ['phase_target_phase_used','phase_target_sgp_gradient','phase_target_regression_gradient']:
