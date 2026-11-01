@@ -1,4 +1,4 @@
-"""简单EMA自训练：源官方损失 + 目标正点监督，无域判别器或VLM。"""
+"""Ti-FAD/PDA文本机制联合学习，保留分离分类/回归筛选与源选模。"""
 from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path

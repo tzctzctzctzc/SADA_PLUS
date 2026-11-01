@@ -31,6 +31,8 @@ def sha(p):
 
 def main(args):
  assert not torch.cuda.is_initialized()
+ expected='5806e77cd80f8b59890b7e101eabd078d9fb84e6937f9e85e4ecb61988df416f'
+ assert sha(args.checkpoint)==expected,'checkpoint differs from official OpenAI CLIP B16 release'
  out=Path(args.output);out.mkdir(parents=True,exist_ok=False)
  bpe=out/'bpe_simple_vocab_16e6.txt.gz'
  urllib.request.urlretrieve('https://raw.githubusercontent.com/openai/CLIP/main/clip/bpe_simple_vocab_16e6.txt.gz',bpe)
@@ -44,7 +46,7 @@ def main(args):
  with torch.no_grad():emb=model.encode_text(tokens).float();emb=emb/emb.norm(dim=-1,keepdim=True)
  assert emb.shape==(40,512) and torch.isfinite(emb).all()
  torch.save(dict(embeddings=emb.reshape(10,4,512),tokens=tokens,labels=LABELS,descriptions=DESCRIPTIONS),out/'text.pt')
- provenance=dict(encoder='OpenAI CLIP ViT-B/16 frozen text encoder',checkpoint=args.checkpoint,checkpoint_sha256=sha(args.checkpoint),
+ provenance=dict(encoder='OpenAI CLIP ViT-B/16 frozen text encoder',checkpoint=args.checkpoint,checkpoint_sha256=expected,
   bpe_sha256=sha(bpe),text_sha256=sha(out/'text.pt'),labels=LABELS,descriptions=DESCRIPTIONS,
   phase_order=['start','middle','end','global'],description_author='implementation_assistant_from_class_names_only',
   target_video_access=False,target_GT_access=False,training=False,

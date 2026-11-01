@@ -32,7 +32,7 @@ SPEC.update(text_variant=VARIANT,vlm=True,text_encoder='frozen_OpenAI_CLIP_B16',
     text_source='fixed_class_names_and_assistant_authored_start_middle_end_global_descriptions',
     target_video_VLM_queries=False,text_phases=4,feature_dimension=512,feature_levels=6,
     semantic_initialization='zero_residual_readouts_SO_predictions_equal',semantic_learning_rate='same_1e-5_as_visual',
-    source_loss='official_DyFADet_plus_hard_foreground_and_TiFAD_Gaussian_soft_foreground',
+    source_loss=('official_DyFADet_plus_hard_and_Gaussian_soft_foreground' if VARIANT=='tifad' else 'official_DyFADet_plus_hard_foreground'),
     architecture=('six_level_bidirectional_text_visual_attention_with_salient_Gaussian_support' if VARIANT=='tifad' else
                   'four_phase_temporal_importance_filter_cross_attention_phase_token_MHSA_adaptive_fusion_classification_and_three_layer_regression_MLP'),
     adaptation_to_closed_set='retain_original_cls_reg_heads_add_trainable_semantic_residuals_and_foreground_readout',
