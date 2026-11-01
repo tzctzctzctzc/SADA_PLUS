@@ -28,6 +28,8 @@ SPEC = dict(schema=SCHEMA, paper='https://aclanthology.org/2026.emnlp-main.1163/
     decode='greedy', min_pixels=224**2, max_pixels=448**2,
     max_new_tokens=dict(transition=2048, grouping=8192, refine=1536, direct=4096),
     max_input_tokens=65536, schema_retries=1, score_threshold=.5, dedup_tiou=.5,
+    transition_contract_version=2,
+    retry_contract='same visual evidence plus exact schema error; do not include invalid assistant answer as a completion template',
     metrics_tiou=[.1,.2,.3,.4,.5], bootstrap_video_replicates=1000,
     adaptations=['10-class vocabulary plus OTHER', 'typed JSON output with explicit validation',
         'overlap stride and refinement padding fixed here because exact values are unspecified',
@@ -91,12 +93,20 @@ SYSTEM = ('You annotate visible physical hand-object interactions in egocentric 
 
 def transition_prompt(frames):
     pairs=[dict(pair=i,start=a['time_sec'],end=b['time_sec']) for i,(a,b) in enumerate(zip(frames,frames[1:]))]
-    return ('For EVERY adjacent frame pair describe the visible physical change, including object '
-        'state and hand contact when visible. Do not caption frames independently and do not '
-        'merge the pairs into intervals. Mark the observed action phase as start, continuing, '
-        'ending or none. Return exactly one row per listed pair, in order, even for no change. '
-        'Schema: {"transitions":[{"pair":0,"description":"...","event":"start"}]}. '
-        'Pairs: '+json.dumps(pairs))
+    count=len(frames)-1
+    slots=dict(transitions=[dict(pair=i,description=f'REPLACE with change from FRAME {i} to FRAME {i+1}',
+        event='REPLACE with start, continuing, ending or none') for i in range(count)])
+    return (f'There are {len(frames)} input frames and exactly {count} ADJACENT FRAME PAIRS. '
+        'FRAME 0 is context for the first comparison, NOT an extra observation to caption. '
+        'For pair i compare FRAME i with FRAME i+1: describe the physical CHANGE between '
+        'them, including object state and hand contact. Do not independently caption each '
+        'frame. Do not infer what happens after the final frame. Mark the action phase '
+        'as start, continuing, ending or none. Keep one row even for no physical change. '
+        f'Return exactly {count} rows with pair IDs 0 through {count-1}, in order; '
+        f'pair {count} does not exist and must not appear. Do not add or remove slots. '
+        'Fill the following complete output template, replacing every description and event '
+        'placeholder with an observation from the specified pair.\nOUTPUT TEMPLATE:\n'+
+        json.dumps(slots)+'\nEXACT PAIR TIMESTAMPS (seconds):\n'+json.dumps(pairs))
 
 def grouping_prompt(transitions,duration):
     return ('Group the COMPLETE chronological transition evidence below into atomic physical '
@@ -151,7 +161,10 @@ def validate(x,stage,lo,hi,pair_count=0):
     if stage=='transition':
         rows=x.get('transitions')
         if not isinstance(rows,list) or [v.get('pair') for v in rows]!=list(range(pair_count)):
-            raise ValueError('must describe every adjacent pair in exact order')
+            got=[v.get('pair') for v in rows] if isinstance(rows,list) else None
+            raise ValueError(f'Expected exactly {pair_count} transition rows with pair IDs '
+                f'{list(range(pair_count))}, got {got}. There are {pair_count+1} frames '
+                f'but only {pair_count} transitions: no initial-frame caption and no pair {pair_count}.')
         for r in rows:
             if r.get('event') not in ['start','continuing','ending','none']: raise ValueError('invalid phase')
             if not isinstance(r.get('description'),str) or not r['description'].strip(): raise ValueError('empty transition')

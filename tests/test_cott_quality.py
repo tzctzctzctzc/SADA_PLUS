@@ -88,6 +88,20 @@ def test_raw_images_are_not_40_fpn_tokens_or_feature_indices():
     p=transition_prompt(frames)
     assert '15.5' in p and '"pair": 10' in p
 
+def test_transition_contract_has_exactly_k_minus_one_explicit_slots():
+    frames=[dict(time_sec=i*.5) for i in range(12)]
+    p=transition_prompt(frames)
+    template=p.split('OUTPUT TEMPLATE:\n')[1].split('\nEXACT PAIR')[0]
+    assert [r['pair'] for r in json.loads(template)['transitions']]==list(range(11))
+    assert 'exactly 11 ADJACENT FRAME PAIRS' in p
+    assert 'pair 11 does not exist' in p
+
+def test_extra_frame_caption_error_is_specific_and_never_truncated():
+    rows=[dict(pair=i,description='visible change',event='continuing') for i in range(12)]
+    with pytest.raises(ValueError,match='Expected exactly 11'):
+        validate(dict(transitions=rows),'transition',0,5.5,11)
+    assert len(rows)==12
+
 def test_temporal_iou_values():
     assert iou(event(),event())==1
     assert iou(event(),event(start=1,end=2))==0

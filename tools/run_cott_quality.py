@@ -89,11 +89,11 @@ class Generator:
                     dict(type='image',image=Path(f['path']).resolve().as_uri(),
                         min_pixels=SPEC['min_pixels'],max_pixels=SPEC['max_pixels'])]
             content.append(dict(type='text',text=prompt))
-            messages=[dict(role='system',content=SYSTEM),dict(role='user',content=content)]
             if attempt:
-                messages += [dict(role='assistant',content=previous),dict(role='user',content=
-                    'The previous response failed the declared output contract: '+error+
-                    '. Recheck the same evidence and return a complete corrected JSON object. Do not add actions to satisfy formatting.')]
+                content.append(dict(type='text',text='A prior attempt failed the output contract: '+error+
+                    ' Recheck the same evidence and fill the declared output slots correctly. '
+                    'Do not invent actions or copy an invalid per-frame caption list.'))
+            messages=[dict(role='system',content=SYSTEM),dict(role='user',content=content)]
             formatted=self.processor.apply_chat_template(messages,tokenize=False,add_generation_prompt=True)
             if frames:
                 images,videos=process_vision_info(messages,image_patch_size=16)
