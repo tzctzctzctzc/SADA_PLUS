@@ -15,6 +15,7 @@ SPEC = dict(seed=123, batch_size=2, max_epochs=50, valid_every=5, patience=15,
     initialization='fresh_official_model_then_deepcopy_ema', optimizer='official_AdamW',
     learning_rate=.0001, warmup_epochs=16, weight_decay=.04, cosine_total_epochs=50, eta_min=.00005,
     architecture='official_GMG_CLTDR_Trident_and_refinement', loss_mix=[.7,.3],
+    postprocessing='existing_benchmark_fixed_before_training', official_voting_thresh=.7, benchmark_voting_thresh=.75,
     scheduling='user_authorized_shared_GPU_no_public_exclusive_lock',
     epoch_steps='same_as_existing_SO_reference', source_cycle='itertools_cycle_cached_batches',
     classes=list(range(10)), raw_features='unchanged_SlowFast', target_training=False,
@@ -52,6 +53,11 @@ def terminal(history):
     assert all(decision(history[:n])['reason']=='running' for n in range(1,len(history)))
     return d
 
+def benchmark_postprocessing(author,reference):
+    expected=dict(author,voting_thresh=.75)
+    assert author['voting_thresh']==.7 and expected==reference, 'unreviewed postprocessing difference'
+    return deepcopy(reference)
+
 def prepare(root, code):
     import sys
     sys.path.insert(0,str(VENDOR))
@@ -79,13 +85,14 @@ def prepare(root, code):
         cfg['model']['num_classes']=10
         cfg['init_rand_seed']=123; cfg['loader'].update(batch_size=2,num_workers=4)
         cfg['opt'].update(epochs=34,warmup_epochs=16)
-        # The benchmark postprocessing is numerically identical to official EPIC settings.
+        # 唯一已核差异：作者voting=.70，固定benchmark=.75；不按结果搜索。
         test=deepcopy(old['test_cfg']); test['ext_score_file']=None
-        assert test==cfg['test_cfg'], 'unexpected postprocessing difference'
-        cfg['model']['test_cfg']=test;cfg['model']['train_cfg']=cfg['train_cfg']
+        author_test=deepcopy(cfg['test_cfg']);test=benchmark_postprocessing(author_test,test)
+        cfg['test_cfg']=test;cfg['model']['test_cfg']=test;cfg['model']['train_cfg']=cfg['train_cfg']
         cfg['benchmark']=dict(schema=SCHEMA,spec=SPEC,code=code,shift=s,reference=str(ref),
             reference_config_sha256=sha(ref/'config.json'),reference_complete_sha256=sha(ref/'complete.json'),
             steps_per_epoch=old['baseline']['epoch_budget']['iterations_per_epoch'],
+            official_test_cfg=author_test,
             source_train=str(entry/'source_train.json'),source_val=str(entry/'source_val.json'),
             inference={role:str(entry/(role+'_unlabeled.json')) for role in ('source_val','target_val')})
         save(entry/'config.json',cfg)

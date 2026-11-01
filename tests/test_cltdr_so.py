@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import torch
 
-from tools.cltdr_protocol import CODE,VENDOR,SPEC,decision,terminal,read,sha
+from tools.cltdr_protocol import CODE,VENDOR,SPEC,decision,terminal,read,sha,benchmark_postprocessing
 sys.path.insert(0,str(VENDOR))
 from libs.core import load_config
 from tools.cltdr_engine import BenchmarkDataset,build,step,capture,restore,digest,dense,validation,source_loss,MODULES
@@ -34,6 +34,12 @@ def test_first_legal_stop():
     assert terminal(history)['best_epoch']==10
     with pytest.raises(AssertionError):terminal(history+[[30,1.]])
     with pytest.raises(AssertionError):decision([[5,1],[15,.9]])
+
+def test_fixed_benchmark_postprocessing():
+    author=deepcopy(load_config(str(VENDOR/'configs/epic_slowfast_verb_vflloss.yaml'))['test_cfg'])
+    reference=dict(author,voting_thresh=.75)
+    assert benchmark_postprocessing(author,reference)==reference and author['voting_thresh']==.7
+    with pytest.raises(AssertionError):benchmark_postprocessing(author,dict(reference,min_score=.1))
 
 def test_data_coordinates_and_unlabeled(tmp_path):
     cfg=config(tmp_path);ds=BenchmarkDataset(cfg,cfg['benchmark']['source_train'])
