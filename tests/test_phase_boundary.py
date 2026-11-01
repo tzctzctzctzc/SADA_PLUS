@@ -54,5 +54,25 @@ def test_target_empty_support_is_finite_zero_and_does_not_invent_labels():
  h=PhaseBoundary(torch.randn(10,4,512));f=[torch.randn(1,512,16,requires_grad=True)];m=[torch.ones(1,1,16,dtype=torch.bool)]
  c=[torch.full((1,97,16),-20.)];r=[torch.ones(1,2,16)]
  model=SimpleNamespace(fpn_strides=[1],phase_boundary=h)
- loss,stats=target_loss(model,model,h,(f,m,c,r),(f,m,c,r),[dict(original_length=16,lo=0,width=16,ratio=1)],1)
+ loss,stats=target_loss(model,model,h,(f,m,c,r),(f,m,c,r),[dict(original_length=16,lo=0,width=16,ratio=1,length=16)],1)
  assert loss==0 and stats['target_proposals']==0;loss.backward();assert f[0].grad.abs().sum()==0
+
+def test_target_endpoint_gate_separates_left_and_right_and_trains_real_regression():
+ class Head(torch.nn.Module):
+  def __init__(self,teacher):super().__init__();self.teacher=teacher
+  def sequence(self,x):
+   logits=x.mean(-1)[:,None,:,None].expand(-1,10,-1,3)
+   scores=x.mean((-1,-2))[:,None].expand(-1,10).clone();scores[:,0]=scores[:,0]+10
+   return logits,scores
+  def dense(self,x):
+   # 教师左端点更可靠，右端点更不可靠；必须只训练左边。
+   scales=x.new_tensor([.1,2.] if self.teacher else [1.,1.]).expand(len(x),-1)
+   return x.new_full((len(x),2),6.),scales,x.new_ones(len(x))
+ student=Head(False);teacher=SimpleNamespace(fpn_strides=[1],phase_boundary=Head(True))
+ f=[torch.randn(1,512,32,requires_grad=True)];m=[torch.ones(1,1,32,dtype=torch.bool)]
+ cls=torch.full((1,97,32),-20.);cls[0,0,16]=10
+ r=[torch.full((1,2,32),4.,requires_grad=True)]
+ tl,stats=target_loss(SimpleNamespace(fpn_strides=[1]),teacher,student,(f,m,[cls],r),(f,m,[cls.clone().requires_grad_()],r),[dict(original_length=32,lo=0,width=32,ratio=1,length=32)],1)
+ assert stats['target_left_used']==1 and stats['target_right_used']==0
+ tl.backward();assert r[0].grad[0,0,16]!=0 and r[0].grad[0,1,16]==0
+ assert f[0].grad.norm()>0

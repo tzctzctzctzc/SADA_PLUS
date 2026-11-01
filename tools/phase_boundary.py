@@ -204,7 +204,7 @@ def target_loss(model,teacher,head,weak,strong,views,step):
    label=torch.zeros_like(sc[l][vi,:,k]);label[c]=1
    losses.append(F.binary_cross_entropy_with_logits(sc[l][vi,:,k],label)*confidence);stats['target_class_used']+=1
    _,sunc,_=head.dense(sf[l][vi,:,k][None]);sunc=sunc[0]
-   mask=(tunc<sunc.detach())&(torch.stack(edgeconf)>=.5)
+   mask=(tunc<sunc.detach())&(torch.stack(edgeconf)>=.5)&(mapped_ref>=0)&(mapped_ref<view['length'])
    stats['target_teacher_scale']+=float(tunc.mean());stats['target_student_scale']+=float(sunc.detach().mean())
    pred=torch.stack([k*stride-sr[l][vi,0,k]*stride,k*stride+sr[l][vi,1,k]*stride])
    if mask.any():

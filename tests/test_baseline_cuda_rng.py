@@ -48,7 +48,11 @@ def test_epoch_loop_and_original_model_math_are_unchanged():
     assert len(gram_logs)==1 and len(gram_logs[0].body)==1 and not gram_logs[0].orelse
     expected=ast.parse("row['regression_gram']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_gram_')}").body[0]
     assert ast.dump(gram_logs[0].body[0])==ast.dump(expected)
-    optional_logs={"cfg.get('prototype_capacity')", "cfg.get('context_mix')", "cfg.get('regression_gram')"}
+    phase_logs=[n for n in after_loop.body if isinstance(n,ast.If) and ast.unparse(n.test)=="cfg.get('phase_boundary')"]
+    assert len(phase_logs)==1 and len(phase_logs[0].body)==1 and not phase_logs[0].orelse
+    expected=ast.parse("row['phase_boundary']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_phase_')}").body[0]
+    assert ast.dump(phase_logs[0].body[0])==ast.dump(expected)
+    optional_logs={"cfg.get('prototype_capacity')", "cfg.get('context_mix')", "cfg.get('regression_gram')", "cfg.get('phase_boundary')"}
     after_loop.body=[n for n in after_loop.body if not (isinstance(n,ast.If) and ast.unparse(n.test) in optional_logs)]
     assert ast.dump(loop(before))==ast.dump(after_loop)
     for path in ('libs/trainer/da_trainer.py','libs/models/SADA/optimizer.py'):
