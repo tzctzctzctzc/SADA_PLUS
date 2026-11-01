@@ -100,7 +100,8 @@ def main(args):
         source_calibration_jobs=12,target_jobs=24,arms=['meta','joint'],shifts=list(paths),
         acceptance_review=str(args.review),acceptance_review_sha256=sha(args.review),
         original_6_GPU_receipts='historical identity preserved; same meta_ttt.py hash and probe AST',
-        specification=SPEC,source_only_preparation=True,target_GT_used=False,execution_backend=BACKEND)
+        specification=SPEC,source_only_preparation=True,target_GT_used=False,execution_backend=BACKEND,
+        execution_backend_scope='meta-source-preparation-only;native-joint-control-and-test')
     save(root/'plan.json',plan)
     indices=[int(x) for x in args.gpus.split(',')]
     def row(s,arm,stage,extra=None):

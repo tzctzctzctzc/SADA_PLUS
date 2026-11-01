@@ -23,12 +23,17 @@ def main(args):
         packets={};timings={};peaks={}
         for backend in ['native',BACKEND]:
             j=dict(job,arm=arm);model,ref,enc,dec,cfg,initial,head_initial=load(j,'cuda:0')
-            names=install(enc) if backend==BACKEND else []
+            names=install(enc) if backend==BACKEND and arm=='meta' else []
             model.cls_head_target.requires_grad_(True);model.reg_head_target.requires_grad_(True)
             params=list(enc.parameters())+list(model.cls_head_target.parameters())+list(model.reg_head_target.parameters())+list(dec.parameters())
             ds=data(j,cfg,cfg['src_train_split'],True)
             random.seed(123);np.random.seed(123);torch.manual_seed(123);torch.cuda.manual_seed(123)
-            batch=[ds[0],ds[1]]
+            # 仅用源训练集的真实长crop压测，不裁短或用合成输入夸大吞吐。
+            samples=[]
+            for index in range(len(ds)):
+                samples.append(ds[index])
+                if sum(v['feats'].shape[-1]>=2304 for v in samples)>=2:break
+            batch=sorted(samples,key=lambda v:v['feats'].shape[-1],reverse=True)[:2]
             tokens=[v['feats'].shape[-1] for v in batch]
             torch.cuda.reset_peak_memory_stats();seconds=[];packet=None
             for repeat in range(3):
@@ -59,6 +64,7 @@ def main(args):
             original_loss=a['loss'],optimized_loss=b['loss'],gradient_relative_l2=relative,gradient_cosine=cosine,
             maximum_gradient_absolute_error=max_absolute,seconds=timings,speedup=old/new,peak_reserved_mib=peaks,
             patched_layers=names,all_parameters_and_reference_unchanged=True,target_GT_used=False)
+        reports[arm]['effective_backend']='depthwise-unfold' if arm=='meta' else 'native-control-preserved'
         save(output/('comparison_'+arm+'.json'),reports[arm]);print('BENCHMARK',arm,json.dumps(reports[arm]),flush=True)
         del packets,av,bv,a,b
     # 原已训练保存点的完整state/AdamW/RNG恢复与原生精度下下一批次一致。

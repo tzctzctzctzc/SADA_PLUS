@@ -46,7 +46,9 @@ def load(job,device):
     if job.get('execution_backend'):
         from tools.meta_ttt_speed import BACKEND,install
         if job['execution_backend']!=BACKEND:raise ValueError('未知执行后端')
-        install(encoder)
+        # 实测收益来自二阶源准备；普通对照与一阶测试适应继续使用更快的原生卷积。
+        if job['arm']=='meta' and job['stage'] in ('train','training_probe'):
+            install(encoder)
     with torch.random.fork_rng(devices=[0] if device.startswith('cuda') else []):
         torch.manual_seed(123)
         decoder=Recovery(cfg['model']['fpn_dim'],len(model.fpn_strides),SPEC['decoder_hidden']).to(device)
