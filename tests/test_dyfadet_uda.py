@@ -51,6 +51,12 @@ def test_real_teacher_batch_uses_unlabeled_local_grid(tmp_path):
         assert not p['segments'].requires_grad and bool((p['scores']>=.5).all())
         assert bool((p['segments']>=0).all()) and bool((p['segments']<=v['crop_length']).all())
 
+def test_unlabeled_evaluation_matches_official_forward(tmp_path):
+    cfg=config(tmp_path);ctx=e.build(cfg,'uda','cpu',0);m=ctx['ema'].module;m.eval();videos=next(iter(ctx['val']))
+    un=[{k:v for k,v in x.items() if k not in ('segments','labels')} for x in videos]
+    with torch.no_grad():a=m(videos);b=e.predict_unlabeled(m,un)
+    assert e.base.digest(a)==e.base.digest(b)
+
 def test_uniform_crop_and_channel_mask_preserve_coordinates(tmp_path):
     cfg=config(tmp_path);ds=e.TargetDataset(cfg,cfg['benchmark']['target_train']);random.seed(3);v=ds[0]
     assert 57<=v['feats'].shape[1]<=64 and 'segments' not in v

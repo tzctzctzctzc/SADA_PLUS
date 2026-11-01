@@ -71,6 +71,12 @@ def positive_loss(model,outputs,predictions):
     regression=ctr_diou_loss_1d(offsets[pos][vid],torch.stack(gt_reg)[pos][vid],reduction='sum')/n
     return classification,regression,n
 
+def predict_unlabeled(model,videos):
+    # Official forward filters `segments` before its eval branch. Reuse the
+    # identical dense network and official decoder without requiring fake GT.
+    assert all('segments' not in v and 'labels' not in v for v in videos)
+    return model.inference(videos,*base.dense(model,videos))
+
 def build(cfg,mode,device='cuda:0',workers=None):
     ctx=base.build(cfg,device,workers);ref=torch.load(Path(cfg['benchmark']['reference'])/'best.pt',map_location='cpu')
     ctx['model'].load_state_dict(ref['ema'],strict=True);ctx['ema'].module.load_state_dict(ref['ema'],strict=True)
@@ -203,7 +209,7 @@ def probe(cfg,entry,guard):
     with torch.no_grad():
         p1=m(v);p2=m.inference(v,*base.dense(m,v))
         un=[{k:x for k,x in y.items() if k not in ('segments','labels')} for y in v]
-        p3=m(un)
+        p3=predict_unlabeled(m,un)
     assert base.digest(p1)==base.digest(p2)==base.digest(p3)
     torch.cuda.synchronize()
     save(entry/'probe.json',dict(status='passed',initial_ema_sha256=initial,parameters_updated=changed,
@@ -283,7 +289,7 @@ def infer(cfg,entry,mode):
         ds=base.BenchmarkDataset(cfg,path,unlabeled=True);cols={k:[] for k in ('video-id','t-start','t-end','label','score')};seen=[]
         with torch.no_grad():
             for i,v in enumerate(ds):
-                seen.append(v['video_id']);pred=m([v])[0];num=len(pred['scores']);cols['video-id'].extend([v['video_id']]*num)
+                seen.append(v['video_id']);pred=predict_unlabeled(m,[v])[0];num=len(pred['scores']);cols['video-id'].extend([v['video_id']]*num)
                 for k,x in [('t-start',pred['segments'][:,0]),('t-end',pred['segments'][:,1]),('label',pred['labels']),('score',pred['scores'])]:cols[k].extend(x.cpu().tolist())
                 if i%10==0:print('INFERENCE',mode,role,i,len(ds),flush=True)
         np.savez_compressed(d/(role+'.npz'),**{k:np.asarray(v,dtype=str if k=='video-id' else np.int64 if k=='label' else np.float32) for k,v in cols.items()})
