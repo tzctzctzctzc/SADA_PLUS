@@ -218,12 +218,27 @@ def main(args):
     root.mkdir(parents=True,exist_ok=False);(root/'tmp').mkdir();save(root/'runtime_resources.json',prepare_file_limit())
     save(root/'plan.json',dict(specification=SPEC,code=identity,formal_count=12,prototype=str(base),prototype_final_sha256=sha(base/'final_audit.json'),exploratory=True,controls='identical architecture/base/head initialization/native losses/source-target flow/budget; target pseudo task only differs',checkpoint_storage='full fp32 best and latest only; preserve prior artifacts',resume='refuse existing root; no blind restart of partial matrix'))
     try:
-        probes=[make_job(root,'probe/'+v,'probe','S1',v,base,identity) for v in SPEC['variants']]
-        reports=run_jobs(root,probes,data,identity,'real_gpu_acceptance')
+        reused=[]
+        if args.reuse_control_probe:
+            # 仅复用源控制的完整GPU验收，原job/代码/lease身份保留，不冒充当前GPU执行。
+            import ast
+            old=args.reuse_control_code.resolve();oldjob=read(args.reuse_control_probe);assert oldjob['kind']=='probe' and oldjob['variant']=='source_joint'
+            def nodes(path):return {n.name:ast.dump(n,include_attributes=False) for n in ast.parse(path.read_text()).body if isinstance(n,(ast.FunctionDef,ast.ClassDef))}
+            a=nodes(old/'tools/joint_instance.py');b=nodes(CODE/'tools/joint_instance.py')
+            for name in ('sample','Stage','JointHead','proposals','source_proposals','base_at_boxes','native_candidates','source_objective'):assert a[name]==b[name]
+            command="import sys,os,json;sys.path.insert(0,sys.argv[1]);from tools.run_joint_instance import audit;from tools.baseline_protocol import code_identity;identity=code_identity();os.chdir(sys.argv[3]);print(json.dumps(dict(result=audit(sys.argv[2]),code=identity)))"
+            env=dict(os.environ,CUDA_VISIBLE_DEVICES='',PYTHONDONTWRITEBYTECODE='1')
+            checked=json.loads(subprocess.check_output([sys.executable,'-B','-c',command,str(old),str(args.reuse_control_probe),str(data)],env=env,cwd=old,text=True))
+            assert checked['code']==oldjob['code']
+            save(root/'reused_source_probe.json',dict(status='passed',original_job=str(args.reuse_control_probe),original_job_sha256=sha(args.reuse_control_probe),original_code=checked['code'],unchanged_source_math_AST=True,result=checked['result'],scope='source control proof only; current EMA target method revalidated anew'))
+            reused=[dict(checked['result'],original_code=checked['code'],reused=True)]
+        variants=['ema_joint'] if reused else SPEC['variants']
+        probes=[make_job(root,'probe/'+v,'probe','S1',v,base,identity) for v in variants]
+        reports=reused+run_jobs(root,probes,data,identity,'real_gpu_acceptance')
         assert len({x['initial_state_sha256'] for x in reports})==len({x['initial_head_sha256'] for x in reports})==1
         save(root/'acceptance.json',dict(status='passed',results=reports,code=identity))
         # 完整真实GPU验收后，父进程CPU独立再次审计才进入正式矩阵。
-        accepted=[audit(p) for p in probes];save(root/'monitor/acceptance_independent_audit.json',dict(status='passed',count=2,results=accepted))
+        accepted=reused+[audit(p) for p in probes];save(root/'monitor/acceptance_independent_audit.json',dict(status='passed',count=2,results=accepted))
         groups={}
         for v in SPEC['variants']:
             jobs=[make_job(root,'formal/'+v+'/'+s,'train',s,v,base,identity) for s in SHIFTS]
@@ -251,7 +266,7 @@ def main(args):
 def stop(signum,frame):
     signal.signal(signal.SIGTERM,signal.SIG_IGN);raise SystemExit(128+signum)
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--prototype',type=Path);p.add_argument('--output',type=Path);p.add_argument('--job',type=Path);p.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'));args=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--prototype',type=Path);p.add_argument('--output',type=Path);p.add_argument('--job',type=Path);p.add_argument('--reuse-control-probe',type=Path);p.add_argument('--reuse-control-code',type=Path);p.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'));args=p.parse_args()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
     if args.job:worker(args)
     else:main(args)
