@@ -25,6 +25,20 @@ def test_same_features_zero_angle_and_scale_with_well_supported_columns():
     assert loss<1e-10 and info['scale']==0
 
 
+def test_sparse_identical_features_do_not_create_false_domain_gap():
+    torch.manual_seed(11);a=torch.randn(30,6,dtype=torch.float64)
+    a=torch.cat([a,torch.zeros(30,8,dtype=a.dtype)],1)
+    loss,info=gram_alignment(a,a.clone())
+    assert loss<1e-10 and info['both_zero_inverse_columns']==8
+
+
+def test_common_feature_scaling_does_not_invent_angular_difference():
+    torch.manual_seed(11);a=torch.randn(30,6,dtype=torch.float64)
+    a=torch.cat([a,torch.zeros(30,8,dtype=a.dtype)],1)*1e6
+    loss,info=gram_alignment(a,a.clone())
+    assert loss<1e-10 and info['both_zero_inverse_columns']==8
+
+
 def test_exact_original_three_tap_convolution_layout():
     from torch import nn
     class Head:

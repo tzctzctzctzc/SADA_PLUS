@@ -8,10 +8,11 @@ import torch
 from torch.nn import functional as F
 
 
-SPEC=dict(schema='regression-gram-transfer-readiness-v1',explained_variance=.9,
+SPEC=dict(schema='regression-gram-transfer-readiness-v2',explained_variance=.9,
           angle_weight=.05,scale_weight=.001,feature='actual-three-tap-regression-input',
           target_confidence=.5,max_points_per_video=128,videos_per_domain=2,
           rank_rule='common maximum rank-count reaching .9 explained variance; detached',
+          zero_columns='both numerically absent: angle0; one absent: constant angle1; common: unit-column cosine',
           numerical_precision='float64 loss kernel only; detector precision unchanged',
           target_gt=False,formal_training=False)
 
@@ -48,11 +49,20 @@ def gram_alignment(source,target):
     if min(float(es[rank-1]/es[0]),float(et[rank-1]/et[0]))<1e-10:
         raise ValueError('共同子空间退化，不能安全迁移')
     gs=inverse_from_spectrum(es,vs,rank);gt=inverse_from_spectrum(et,vt,rank)
-    angle=(1-F.cosine_similarity(gs,gt,dim=0,eps=1e-6)).abs().mean()
+    # 稀疏ReLU回归特征可有全零列：两个相同零向量没有夹角差。
+    # 固定eps=1e-6会将小范数逆Gram列当不相似，甚至相同域也出现假差异。
+    ns=torch.linalg.vector_norm(gs,dim=0);nt=torch.linalg.vector_norm(gt,dim=0)
+    tolerance=torch.finfo(gs.dtype).eps*torch.maximum(ns.max(),nt.max()).detach()
+    present_s=ns.detach()>tolerance;present_t=nt.detach()>tolerance;common=present_s&present_t
+    distance=(present_s^present_t).to(gs.dtype)
+    distance[common]=(1-((gs[:,common]/ns[common])*(gt[:,common]/nt[common])).sum(0)).abs()
+    angle=distance.mean()
     scale=torch.linalg.vector_norm(es[:rank]-et[:rank])/rank
     loss=SPEC['angle_weight']*angle+SPEC['scale_weight']*scale
     return loss,dict(rank=rank,angle=float(angle.detach()),scale=float(scale.detach()),
-                     source_points=len(source),target_points=len(target),dimension=source.shape[1])
+                     source_points=len(source),target_points=len(target),dimension=source.shape[1],
+                     common_inverse_columns=int(common.sum()),one_sided_inverse_columns=int((present_s^present_t).sum()),
+                     both_zero_inverse_columns=int((~present_s&~present_t).sum()))
 
 
 def regression_inputs(head,features,masks):
