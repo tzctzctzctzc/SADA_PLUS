@@ -73,3 +73,12 @@ def test_original_candidate_keeps_its_level_and_point_logits():
     p=packet();p['logits'][0].data.fill_(-8);p['logits'][1].data.fill_(-8);p['logits'][1].data[0,7,3]=8
     b,l,levels,indices=proposals(p,64,1,True)
     assert levels.item()==1 and indices.item()==7 and l[0,3].item()==8
+
+def test_uncalibrated_quality_weights_instead_of_eliminating_confident_class(monkeypatch):
+    import tools.joint_instance as core
+    p=packet();p['logits'][0].data.fill_(-8);p['logits'][0].data[0,20,2]=8
+    monkeypatch.setattr(core,'dense',lambda model,video:p)
+    def head(packet,boxes,base):return [dict(boxes=boxes,logits=base,quality=torch.full_like(base,-3.),supported=torch.ones(len(boxes),dtype=torch.bool))]
+    v=dict(feats=torch.zeros(8,64),metadata={},segments=torch.empty(0,2),labels=torch.empty(0,dtype=torch.long))
+    result=core.pseudo_instances(None,head,v,6)
+    assert len(result['boxes'])>0 and result['weight'].gt(0).all() and result['weight'].max()<.01

@@ -19,7 +19,7 @@ SPEC=dict(schema='prototype-joint-instance-v1',variants=['source_joint','ema_joi
     ordered_tokens=[8,16,8],sample_ranges=[[-.25,.25],[0.,1.],[.75,1.25]],
     feature_scales='all-original-FPN-levels-learned-valid-scale-fusion',classification_anchor='original-proposal-level-and-physical-point',
     target_threshold=.5,target_nms=.5,target_max_instances=128,target_mask_fraction=.2,
-    pseudo='EMA-refined-instances-with-soft-class-and-class-specific-quality',
+    pseudo='EMA-refined-instances-with-soft-class-and-class-specific-quality',target_quality_use='continuous-reliability-weight-not-hard-selection',
     target_negative_classes=False,missing_predictions_are_background=False,
     source_native_and_original_Prototype=True,target_GT=False,
     inference='all-original-pre-NMS-proposals-refined-before-unchanged-original-NMS',
@@ -158,19 +158,21 @@ def source_objective(outputs,gt,labels):
 @torch.no_grad()
 def pseudo_instances(model,head,video,epoch):
     assert_unlabeled(video);packet=dense(model,video);b,l,levels,points=proposals(packet,video['feats'].shape[-1],128,True)
-    out=head(packet,b,l)[-1];p=out['logits'].sigmoid();quality=out['quality'].sigmoid();score=(p*quality).sqrt()
-    confidence,labels=score.max(1);order=confidence.argsort(descending=True);selected=[]
+    out=head(packet,b,l)[-1];p=out['logits'].sigmoid();quality=out['quality'].sigmoid()
+    confidence,labels=p.max(1);order=confidence.argsort(descending=True);selected=[]
+    ix_all=torch.arange(len(b),device=b.device);q=quality[ix_all,labels]
+    diagnostics=dict(teacher_candidates=len(b),teacher_class_pass=int((confidence>=.5).sum()),teacher_old_joint_pass=int(((confidence*q).sqrt()>=.5).sum()),teacher_quality_mean=float(q.mean()) if len(q) else 0.)
     for i in order.tolist():
         if float(confidence[i])<.5 or not out['supported'][i]:continue
         if not (0<=out['boxes'][i,0]<out['boxes'][i,1]<=video['feats'].shape[-1]):continue
         if any(int(labels[i])==int(labels[j]) and float(pair_iou(out['boxes'][i:i+1],out['boxes'][j:j+1])[0,0])>.5 for j in selected):continue
         selected.append(i)
     ix=torch.tensor(selected,device=b.device,dtype=torch.long)
-    return dict(boxes=out['boxes'][ix].detach(),labels=labels[ix],probability=p[ix],quality=quality[ix],weight=confidence[ix].square(),levels=levels[ix],points=points[ix])
+    return dict(boxes=out['boxes'][ix].detach(),labels=labels[ix],probability=p[ix],quality=quality[ix],weight=confidence[ix].square()*q[ix].square(),levels=levels[ix],points=points[ix],diagnostics=diagnostics)
 
 def target_objective(model,head,video,pseudo):
     assert_unlabeled(video);packet=dense(model,video);b=pseudo['boxes'];zero=packet['logits'][0].sum()*0
-    if not len(b):return zero,dict(pseudo_instances=0,pseudo_native_points=0)
+    if not len(b):return zero,dict(pseudo_instances=0,pseudo_native_points=0,**pseudo.get('diagnostics',{}))
     # GT字段始终空：原label_points只接单独的detached伪实例payload。
     t,offset=model.label_points(packet['points'],[b],[pseudo['labels']]);t=torch.stack(t);offset=torch.stack(offset)
     logits=torch.cat(packet['logits'],1);pred=torch.cat(packet['offsets'],1);valid=torch.cat(packet['masks'],1)
@@ -191,7 +193,7 @@ def target_objective(model,head,video,pseudo):
         cls=F.binary_cross_entropy_with_logits(out['logits'][ix,labels],pseudo['probability'][ix,labels],reduction='none')
         q=F.binary_cross_entropy_with_logits(out['quality'][ix,labels],pseudo['quality'][ix,labels],reduction='none')
         native=native+.5*((cls+q+diou(out['boxes'],b))*weights).sum()/denom
-    return native,dict(pseudo_instances=len(b),pseudo_native_points=int(pos.sum()))
+    return native,dict(pseudo_instances=len(b),pseudo_native_points=int(pos.sum()),**pseudo.get('diagnostics',{}))
 
 @torch.no_grad()
 def predict(model,head,video,epoch):

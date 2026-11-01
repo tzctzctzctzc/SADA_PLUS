@@ -58,6 +58,11 @@ def train(job,probe=False):
     def best_payload(epoch):
         return dict(config=cfg,ema_state_dict=teacher.state_dict(),head_state_dict=ema_head.state_dict(),epoch=epoch,
             specification=SPEC,variant=variant,parent_checkpoint_sha256=job['checkpoint_sha256'],initial_state_sha256=initial,initial_head_sha256=head_initial)
+    def latest_payload(epoch):
+        return dict(config=cfg,specification=SPEC,variant=variant,epoch=epoch,history=history,epochs=epochs,
+            state_dict=model.state_dict(),ema_state_dict=teacher.state_dict(),head_state_dict=head.state_dict(),ema_head_state_dict=ema_head.state_dict(),optimizer=optimizer.state_dict(),model_controls=controls(model),ema_controls=controls(teacher),
+            parent_checkpoint_sha256=job['checkpoint_sha256'],initial_state_sha256=initial,initial_head_sha256=head_initial,
+            rng=dict(python=random.getstate(),numpy=np.random.get_state(),cpu=torch.get_rng_state(),cuda=torch.cuda.get_rng_state(0),loaders={k:g.get_state() for k,g in generators.items()}))
     if not probe:checkpoint(out/'best.pt',best_payload(0))
     max_epoch=SPEC['target_start_epoch'] if probe else SPEC['max_epochs']
     for epoch in range(1,max_epoch+1):
@@ -79,7 +84,7 @@ def train(job,probe=False):
             losses=ret[0];native=losses['downstream_loss']*cfg['model']['loss_weights']['weight_downstream']
             if not torch.isfinite(native):raise ValueError('原检测/Prototype损失非有限')
             native.backward();native_value=float(native.detach());del native,ret
-            row=dict(native=native_value,source_region=0.,source_regions=0,source_region_positive=0,source_region_background=0,pseudo_instances=0,pseudo_native_points=0,target=0.,target_annotations=0,target_GT_used=False)
+            row=dict(native=native_value,source_region=0.,source_regions=0,source_region_positive=0,source_region_background=0,pseudo_instances=0,pseudo_native_points=0,target=0.,target_annotations=0,target_GT_used=False,teacher_candidates=0,teacher_class_pass=0,teacher_old_joint_pass=0,teacher_quality_mean=0.)
             # 单视频反传释放图；仍只在整个batch所有损失之后做一次optimizer step。
             model.eval()
             with torch.random.fork_rng(devices=[0]):
@@ -89,7 +94,7 @@ def train(job,probe=False):
                     outputs=head(packet,boxes,base)
                     loss,metrics=source_objective(outputs,v['segments'],v['labels'])
                     if not torch.isfinite(loss):raise ValueError('完整源实例损失非有限')
-                    if probe and step in (1,10,budget-1):
+                    if probe and not (signals['source_backbone'] and signals['source_region_encoder']):
                         signals['source_backbone'] |= norm(loss,model.backbone_source.stem[-1].parameters())>1e-8
                         signals['source_region_encoder'] |= norm(loss,head.stages[0].encoder.parameters())>1e-8
                     (loss/len(sv)).backward();row['source_region']+=float(loss.detach())/len(sv)
@@ -103,8 +108,9 @@ def train(job,probe=False):
                         strong['feats']=strong['feats'].masked_fill(mask[None],0.)
                         loss,metrics=target_objective(model,head,strong,pseudo)
                         if not torch.isfinite(loss):raise ValueError('完整目标实例损失非有限')
-                        if probe and len(pseudo['boxes']) and step in (1,10,budget-1):
-                            for key,params in [('target_backbone',model.backbone_target.stem[-1].parameters()),('target_classifier',model.cls_head.parameters()),('target_regressor',model.reg_head.parameters()),('target_region_encoder',head.stages[0].encoder.parameters())]:signals[key] |= norm(loss,params)>1e-8
+                        if probe and len(pseudo['boxes']) and not all(signals.values()):
+                            for key,params in [('target_backbone',model.backbone_target.stem[-1].parameters()),('target_classifier',model.cls_head.parameters()),('target_regressor',model.reg_head.parameters()),('target_region_encoder',head.stages[0].encoder.parameters())]:
+                                if not signals[key]:signals[key] |= norm(loss,params)>1e-8
                         weight=min((epoch-SPEC['target_start_epoch']+1)/SPEC['ramp_epochs'],1.)
                         (weight*loss/len(tv)).backward();row['target']+=float(loss.detach())/len(tv)
                         for k,vv in metrics.items():row[k]+=vv
@@ -119,6 +125,7 @@ def train(job,probe=False):
             if step%20==0:print('TRAIN',variant,epoch,step+1,budget,json.dumps(row),flush=True)
         aggregate={k:sum(r[k] for r in reports)/budget for k in reports[0] if isinstance(reports[0][k],(int,float))}
         aggregate.update(epoch=epoch,steps=budget,target_annotations=0,target_GT_used=False);epochs.append(aggregate);save(out/'epochs.json',epochs)
+        if probe and epoch>=SPEC['target_start_epoch']-1:checkpoint(out/'probe_latest.pt',latest_payload(epoch))
         if probe and epoch<SPEC['target_start_epoch']:continue
         if probe:
             assert signals['source_backbone'] and signals['source_region_encoder'],signals
@@ -134,10 +141,7 @@ def train(job,probe=False):
             score=validate(teacher,ema_head,cfg,epoch);previous=select(history)[0]['map'];history.append(dict(epoch=epoch,map=score));save(out/'source_history.json',history)
             if score>previous:checkpoint(out/'best.pt',best_payload(epoch))
             print('SOURCE_VALIDATION',epoch,score,flush=True)
-        checkpoint(out/'latest.pt',dict(config=cfg,specification=SPEC,variant=variant,epoch=epoch,history=history,epochs=epochs,
-            state_dict=model.state_dict(),ema_state_dict=teacher.state_dict(),head_state_dict=head.state_dict(),ema_head_state_dict=ema_head.state_dict(),optimizer=optimizer.state_dict(),model_controls=controls(model),ema_controls=controls(teacher),
-            parent_checkpoint_sha256=job['checkpoint_sha256'],initial_state_sha256=initial,initial_head_sha256=head_initial,
-            rng=dict(python=random.getstate(),numpy=np.random.get_state(),cpu=torch.get_rng_state(),cuda=torch.cuda.get_rng_state(0),loaders={k:g.get_state() for k,g in generators.items()})))
+        checkpoint(out/'latest.pt',latest_payload(epoch))
         if epoch%SPEC['validate_every']==0 and select(history)[1]:break
     chosen,stopped=select(history);assert stopped
     save(out/'termination.json',dict(status='passed',best_epoch=chosen['epoch'],stop_epoch=epoch,source_history=history,epochs=epochs,initial_state_sha256=initial,initial_head_sha256=head_initial,target_GT_used=False,specification=SPEC))
@@ -165,7 +169,7 @@ def worker(args):
         for i in range(len(ds)):
             items.append(prediction_item(predict(model,head,unlabeled(ds[i]),saved['epoch'])));print('EVAL',i+1,len(ds),flush=True)
         save(out/'predictions.json',items);result=evaluate_predictions(items,job['evaluation_annotation'],cfg['tgt_val_split']);result.update(status='passed',videos=len(ds),target_GT_used=False)
-    names=('epochs.json','source_history.json','best.pt','latest.pt','termination.json','predictions.json')
+    names=('epochs.json','source_history.json','best.pt','latest.pt','termination.json','predictions.json','probe_latest.pt')
     save(out/('train_complete.json' if job['kind']=='train' else 'complete.json'),dict(status='passed',result=result,job_sha256=sha(args.job),code=job['code'],guard=guard,guard_sha256=sha(guard),artifacts={n:sha(out/n) for n in names if (out/n).exists()}))
 
 def audit(path):
