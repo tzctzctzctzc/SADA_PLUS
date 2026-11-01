@@ -12,7 +12,7 @@ SPEC=dict(seed=123,source_batch=2,target_batch=2,max_epochs=30,validation_every=
     target_threshold=.5,classification_weight='minimum_teacher_confidence_of_tied_shortest_instances',
     regression_temporal_scales=[.9,1.1],regression_min_iou=.7,regression_max_endpoint_fraction=.15,
     regression_matching='same_class_mutual_best_IoU_in_both_views',
-    regression_targets='original_teacher_intervals_separate_official_point_assignment',
+    regression_targets='original_official_point_instance_assignment_mask_unstable_and_tied_instances_no_reassignment',
     temporal_mapping='align_corners_false_pixel_centers_inverse_actual_length_ratio',
     validation_checkpoint_every=5,regression_stability_is_accuracy=False,
     target_regression_weight=.5,target_ramp_epochs=5,channel_dropout=.1,

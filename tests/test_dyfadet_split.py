@@ -45,12 +45,12 @@ def test_confidence_assignment_matches_official_overlap_and_ties(tmp_path):
     for seg,lab in [(torch.tensor([[4.,12.],[4.,12.],[7.,10.],[1.,40.]]),torch.tensor([1,2,3,1])),
                     (torch.zeros(0,2),torch.zeros(0,dtype=torch.long))]:
         score=torch.linspace(.5,.9,len(seg))
-        target,offset,weight=assignment_metadata(m,points,seg,lab,score)
+        target,offset,weight,reliable=assignment_metadata(m,points,seg,lab,score)
         a,b=m.label_points(points,[seg],[lab])
         assert torch.equal(target,a[0]) and torch.equal(offset,b[0])
         assert bool(((weight>=0)&(weight<=1)).all())
     seg=torch.tensor([[4.,12.],[4.,12.]])
-    _,_,weight=assignment_metadata(m,points,seg,torch.tensor([1,2]),torch.tensor([.9,.6]))
+    _,_,weight,_=assignment_metadata(m,points,seg,torch.tensor([1,2]),torch.tensor([.9,.6]))
     assert torch.all(weight[weight>0]==.6)
 
 
@@ -70,12 +70,19 @@ def test_confidence_weights_cls_only_and_unstable_offsets_get_zero_gradient(tmp_
     assert c.item()>0
 
 
-def test_regression_separate_assignment_can_ignore_short_unstable_instance(tmp_path):
+def test_regression_mask_preserves_short_unstable_instance_identity(tmp_path):
     ctx=e.build(config(tmp_path),'uda','cpu',0);m=ctx['model'];m.eval()
     videos=next(iter(ctx['target']))[:1];out=e.base.dense(m,videos)
-    pred=[dict(segments=torch.tensor([[4.,12.],[7.,9.]]),labels=torch.tensor([2,2]),
+    pred=[dict(segments=torch.tensor([[4.,12.],[7.,9.]]),labels=torch.tensor([2,3]),
                scores=torch.tensor([.9,.8]),regression_keep=torch.tensor([True,False])) for _ in videos]
     c,r,n,nr,w=e.positive_loss(m,out,pred)
-    only=[{k:v[:1] for k,v in p.items()} for p in pred]
-    _,rr,_,nnr,_=e.positive_loss(m,out,only)
-    assert torch.equal(r,rr) and nr==nnr and nr>0
+    p=pred[0]
+    cls,offset,weight,keep=assignment_metadata(m,out[0],p['segments'],p['labels'],p['scores'],p['regression_keep'])
+    official_cls,official_reg=m.label_points(out[0],[p['segments']],[p['labels']])
+    assert torch.equal(cls,official_cls[0]) and torch.equal(offset,official_reg[0])
+    assert not keep[cls[:,3]>0].any() and keep.any()
+    assert 0<nr<n
+    # A tied unreliable instance must also prevent conflicting offset supervision.
+    seg=torch.tensor([[4.,12.],[4.,12.]])
+    _,_,_,keep=assignment_metadata(m,out[0],seg,torch.tensor([2,3]),torch.tensor([.9,.8]),torch.tensor([True,False]))
+    assert not keep.any()

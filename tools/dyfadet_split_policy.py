@@ -50,12 +50,12 @@ def stability_filter(anchor, views, min_iou=.7, max_endpoint=.15):
 
 
 @torch.no_grad()
-def assignment_metadata(model, points, segments, labels, scores):
+def assignment_metadata(model, points, segments, labels, scores, regression_keep=None):
     """原官方中心/range/最短实例分配；分类点权重取并列实例最低置信度。"""
     pts = torch.cat(points)
     n = len(pts)
     if not len(segments):
-        return pts.new_zeros(n, model.num_classes), pts.new_zeros(n, 2), pts.new_zeros(n)
+        return pts.new_zeros(n, model.num_classes), pts.new_zeros(n, 2), pts.new_zeros(n), torch.zeros(n,dtype=torch.bool,device=pts.device)
     length = segments[:, 1] - segments[:, 0]
     left = pts[:, 0, None] - segments[None, :, 0]
     right = segments[None, :, 1] - pts[:, 0, None]
@@ -76,4 +76,10 @@ def assignment_metadata(model, points, segments, labels, scores):
     offsets = distances[torch.arange(n, device=pts.device), index] / pts[:, 3, None]
     weights = scores[None].expand(n, -1).masked_fill(~tied, float('inf')).amin(1)
     weights = torch.where(torch.isfinite(weights), weights, torch.zeros_like(weights))
-    return cls, offsets, weights
+    # Keep the original shortest-instance identity. Never substitute a longer
+    # stable instance at a point assigned to a shorter unreliable instance.
+    if regression_keep is None:regression_keep=torch.ones(len(segments),dtype=torch.bool,device=pts.device)
+    reliable=torch.isfinite(minimum)&regression_keep[index]
+    # Official tied multi-label targets share one offset: require all ties stable.
+    reliable &= (~tied | regression_keep[None]).all(1)
+    return cls, offsets, weights, reliable

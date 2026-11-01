@@ -77,14 +77,12 @@ def pseudo(teacher,videos):
 def positive_loss(model,outputs,predictions):
     points,masks,cls,reg=outputs
     logits=torch.cat(cls,1);offsets=torch.cat(reg,1)
-    valid=torch.cat(masks,1);targets=[];weights=[];reg_segments=[];reg_labels=[]
+    valid=torch.cat(masks,1);targets=[];weights=[];reg_targets=[];reg_valid=[]
     for p in predictions:
         seg=p['segments'].to(model.device);lab=p['labels'].to(model.device)
         score=p['scores'].to(model.device)
-        target,_,weight=assignment_metadata(model,points,seg,lab,score)
-        targets.append(target);weights.append(weight)
-        keep=p['regression_keep'].to(model.device)
-        reg_segments.append(seg[keep]);reg_labels.append(lab[keep])
+        target,offset,weight,reliable=assignment_metadata(model,points,seg,lab,score,p['regression_keep'].to(model.device))
+        targets.append(target);weights.append(weight);reg_targets.append(offset);reg_valid.append(reliable)
     gt=torch.stack(targets);weight=torch.stack(weights)
     pos=(gt.sum(-1)>0)&valid;n=int(pos.sum())
     classification=logits.sum()*0
@@ -93,12 +91,11 @@ def positive_loss(model,outputs,predictions):
         per_point=sigmoid_focal_loss(logits[pos],labels,reduction='none').sum(-1)
         # Unweighted denominator preserves absolute confidence attenuation.
         classification=(per_point*weight[pos]).sum()/n
-    rcls,rgt=model.label_points(points,reg_segments,reg_labels)
-    rg=torch.stack(rcls);rpos=(rg.sum(-1)>0)&valid;nr=int(rpos.sum())
+    rpos=pos&torch.stack(reg_valid);nr=int(rpos.sum())
     regression=offsets.sum()*0
     if nr:
-        vid=torch.where(rg[rpos])[0]
-        regression=ctr_diou_loss_1d(offsets[rpos][vid],torch.stack(rgt)[rpos][vid],reduction='sum')/nr
+        vid=torch.where(gt[rpos])[0]
+        regression=ctr_diou_loss_1d(offsets[rpos][vid],torch.stack(reg_targets)[rpos][vid],reduction='sum')/nr
     return classification,regression,n,nr,float(weight[pos].mean()) if n else 0.
 
 
