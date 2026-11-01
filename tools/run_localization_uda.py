@@ -117,15 +117,17 @@ def training(job,probe=False):
             loss=supervised+SPEC['pseudo_regression_weight']*pseudo
             if not torch.isfinite(loss):raise ValueError('定位训练loss非有限')
             loss.backward();norm=torch.nn.utils.clip_grad_norm_(list(named.values()),SPEC['clip_grad'])
-            if not torch.isfinite(norm) or float(norm)<=0:raise ValueError('定位回归梯度无效')
-            opt.step();update_ema(ema,named)
+            if not torch.isfinite(norm):raise ValueError('定位回归梯度非有限')
+            # 无正回归点的批次可合法为零梯度；不以AdamW权重衰减冒充监督更新。
+            updated=float(norm)>0
+            if updated:opt.step();update_ema(ema,named)
             report=dict(source=float(supervised.detach()),pseudo=float(pseudo.detach()),gradient_norm=float(norm),
-                pseudo_points=points,target_gradient_norm=target_norm,target_GT_used=False,target_annotations=0)
+                pseudo_points=points,target_gradient_norm=target_norm,optimizer_updated=updated,target_GT_used=False,target_annotations=0)
             reports.append(report)
             if step%20==0:print('TRAIN',variant,epoch,step+1,budget,json.dumps(report),flush=True)
         last_epoch=epoch
         aggregate=dict(epoch=epoch,steps=len(reports),source=sum(x['source'] for x in reports)/len(reports),
-            pseudo=sum(x['pseudo'] for x in reports)/len(reports),pseudo_points=sum(x['pseudo_points'] for x in reports),
+            pseudo=sum(x['pseudo'] for x in reports)/len(reports),pseudo_points=sum(x['pseudo_points'] for x in reports),updated_steps=sum(x['optimizer_updated'] for x in reports),
             target_GT_used=False,target_annotations=0)
         epochs.append(aggregate);save(out/'epochs.json',epochs)
         if probe:break
