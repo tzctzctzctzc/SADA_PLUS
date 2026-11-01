@@ -172,6 +172,8 @@ def controls(model):
         result['context_mix_state'] = deepcopy(model.context_mix_state)
     if hasattr(model,'regression_gram_state'):
         result['regression_gram_state']=deepcopy(model.regression_gram_state)
+    if hasattr(model,'temporal_energy_state'):
+        result['temporal_energy_state']=deepcopy(model.temporal_energy_state)
     return result
 
 
