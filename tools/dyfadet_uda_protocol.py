@@ -91,6 +91,10 @@ def audit(entry):
     for proof in acceptance['reports'].values():
         assert sha(proof['path'])==proof['sha256'];p=read(proof['path']);guard_audit(p['guard'],p['guard_sha256'],b['code']['commit'])
         assert p['full_state_restore'] and p['next_step_numerical'] and p['target_gradient_positive'] and p['source_disabled_path_equal'] and p['source_disabled_calls_official']
+        routing=p['split_loss_routing'];support=p['split_support']
+        assert routing['classification_to_cls']>0 and routing['regression_to_reg']>0
+        assert routing['classification_to_reg']==routing['regression_to_cls']==0
+        assert 0<support['regression_proposals']<=support['classification_proposals'] and support['regression_points']>0
     stop=read(e/'uda/termination.json')['decision']['epoch']
     for mode in ('uda','source_control'):
         d=e/mode;t=read(d/'termination.json');h=t['history'];rows=read(d/'metrics.json')

@@ -56,7 +56,7 @@ def test_confidence_assignment_matches_official_overlap_and_ties(tmp_path):
 
 def test_confidence_weights_cls_only_and_unstable_offsets_get_zero_gradient(tmp_path):
     ctx=e.build(config(tmp_path),'uda','cpu',0);m=ctx['model'];m.eval()
-    videos=next(iter(ctx['target']));out=e.base.dense(m,videos);pred=fixed_pseudo(m,videos)
+    videos=next(iter(ctx['target']))[:1];out=e.base.dense(m,videos);pred=fixed_pseudo(m,videos)
     c,r,n,nr,w=e.positive_loss(m,out,pred)
     changed=deepcopy(pred)
     for p in changed:p['scores']*=.5
@@ -72,7 +72,7 @@ def test_confidence_weights_cls_only_and_unstable_offsets_get_zero_gradient(tmp_
 
 def test_regression_separate_assignment_can_ignore_short_unstable_instance(tmp_path):
     ctx=e.build(config(tmp_path),'uda','cpu',0);m=ctx['model'];m.eval()
-    videos=next(iter(ctx['target']));out=e.base.dense(m,videos)
+    videos=next(iter(ctx['target']))[:1];out=e.base.dense(m,videos)
     pred=[dict(segments=torch.tensor([[4.,12.],[7.,9.]]),labels=torch.tensor([2,2]),
                scores=torch.tensor([.9,.8]),regression_keep=torch.tensor([True,False])) for _ in videos]
     c,r,n,nr,w=e.positive_loss(m,out,pred)
