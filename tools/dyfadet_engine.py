@@ -227,7 +227,7 @@ def evaluate(entry):
         ev=mod.ANETdetection(offline['annotation'],splits,num_workers=4,action_subsampling='10_majority_classes')
         result=ev.evaluate(columns,verbose=True);proof=read(entry/(role+'_inference.json'))
         assert proof['videos']==list(read(cfg['benchmark']['inference'][role])['database'])
-        save(entry/'evaluation'/(role+'.json'),dict(map_by_tiou=[float(x) for x in result[0]],map_0.1_to_0.5=float(result[1]),
+        save(entry/'evaluation'/(role+'.json'),dict({'map_0.1_to_0.5':float(result[1])},map_by_tiou=[float(x) for x in result[0]],
             selected_epoch=proof['selected_epoch'],videos=proof['count'],prediction_sha256=sha(entry/(role+'.npz')),
             evaluator_sha256=sha(module_path),annotation_sha256=offline['annotation_sha256']))
     artifacts={str(p):sha(p) for p in entry.rglob('*') if p.is_file() and p.suffix in ('.json','.pt','.npz') and p.name!='complete.json'}
