@@ -145,10 +145,12 @@ def gpu(args):
     initial_loss=float(ctx._valid_epoch(0,validation_loader,domain='src'))
     best=initial_loss;joint_history=[[0,initial_loss]];joint_rows=[]
     torch.save(base.capture(ctx,cfg,0,joint_history),joint/'best.pt')
-    for epoch in range(1,(2 if args.stage=='probe' else SPEC['joint_epochs'])+1):
+    joint_epochs=[1,5] if args.stage=='probe' else range(1,SPEC['joint_epochs']+1)
+    for epoch in joint_epochs:
         base.epoch_setup(ctx,epoch);before=base.tensor_digest(ctx.model.backbone_source.state_dict())
         original_loaders=ctx.train_loader_src,ctx.train_loader_tgt
-        if args.stage=='probe':ctx.train_loader_src,ctx.train_loader_tgt=[base.StepLoader(x,1) for x in original_loaders]
+        # 原warmup首step的lr为0；至少两步才能验证优化器实际更新。
+        if args.stage=='probe':ctx.train_loader_src,ctx.train_loader_tgt=[base.StepLoader(x,2) for x in original_loaders]
         ctx._train_epoch(epoch);ctx.train_loader_src,ctx.train_loader_tgt=original_loaders;metrics=ctx.train_metrics.result()
         assert before!=base.tensor_digest(ctx.model.backbone_source.state_dict())
         joint_rows.append(dict(epoch=epoch,source_cls=float(metrics['t_cls_loss']),source_reg=float(metrics['t_reg_loss']),energy_loss=float(metrics['t_temporal_energy_loss']),groups=float(metrics['t_temporal_energy_groups']),target_gt_cls_loss=0.,target_gt_reg_loss=0.,target_gt_downstream_loss=0.))
