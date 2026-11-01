@@ -81,7 +81,8 @@ def evaluate_safe(root,variant):
             count=len(row['scores']);columns['video-id'] += [row['video_id']]*count
             columns['t-start'] += [v[0] for v in row['segments']];columns['t-end'] += [v[1] for v in row['segments']]
             columns['label'] += row['labels'];columns['score'] += row['scores']
-        evaluator=ANETdetection(cfg['baseline']['annotation_for_offline_evaluation'],split,num_workers=4,action_subsampling='all')
+        annotation=cfg['dataset']['json_file'] if domain=='source' else cfg['baseline']['annotation_for_offline_evaluation']
+        evaluator=ANETdetection(annotation,split,num_workers=4,action_subsampling='all')
         ap,score,*_=evaluator.evaluate({k:np.asarray(v) for k,v in columns.items()},verbose=False)
         results[domain]={'map_0.1_to_0.5':float(score),'map_by_tiou':[float(v) for v in ap],
             'videos':len(ds),'selected_epoch':saved['epoch'],'predictions_sha256':sha(dest),'GT_read_after_saved_predictions':True}
@@ -120,7 +121,8 @@ def worker(args):
         elif args.stage=='evaluate':evaluate_safe(root,args.variant)
     save(root/'stage_receipts'/(args.stage+'_'+str(args.variant or args.shard)+'.json'),dict(status='passed',
         stage=args.stage,variant=args.variant,shard=args.shard,code=plan['code'],gpu_guard=proof,
-        cache_sha256=sha(root/'prepared.json') if (root/'prepared.json').exists() else None,target_GT_used=False))
+        cache_sha256=sha(root/'prepared.json') if (root/'prepared.json').exists() else None,
+        target_GT_for_training=False,target_GT_for_offline_evaluation=args.stage=='evaluate'))
 
 def tasks(root,rows,stage,gpus,python=PYTHON):
     pending=list(rows)
