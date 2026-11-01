@@ -151,11 +151,34 @@ def main(args):
     root=args.root;root.mkdir(exist_ok=False);prepare_file_limit()
     if os.environ.get('CUDA_VISIBLE_DEVICES')!='':raise ValueError('父CUDA必须为空')
     identity=code_identity()
+    reused=None
+    if args.previous_root:
+        old=args.previous_root.resolve();previous=read(old/'plan.json')
+        if previous['policy']!=json.loads(json.dumps(POLICY)):raise ValueError('恢复不能改变已冻结方法')
+        if (old/'formal').exists() or list((old/'teacher').glob('**/scores.jsonl')):
+            raise ValueError('此恢复入口仅处理尚未查教师/开正式训练的准备中断')
+        original=subprocess.check_output(['git','show',previous['code']['commit']+':tools/charades_prototype.py'],cwd=CODE)
+        import hashlib
+        if hashlib.sha256(original).hexdigest()!=sha(CODE/'tools/charades_prototype.py'):raise ValueError('准备数学改变不能按技术恢复复用')
+        names=['teacher_model_identity.json','source_threshold.json','source_val_proposals.json','candidate_pool.json']
+        for name in names:
+            if not (old/name).is_file():raise ValueError('缺少已完整准备阶段 '+name)
+        chosen=read(old/'source_threshold.json')
+        if not chosen['source_only'] or chosen['target_GT_used'] or chosen['source_predictions_sha256']!=sha(old/'source_val_proposals.json'):raise ValueError('源校准凭证不符')
+        pool=read(old/'candidate_pool.json')
+        if len(pool['candidates'])!=200 or pool['checkpoint_sha256']!=sha(BASE/'uda/best.pt'):raise ValueError('冻结候选模型改变')
+        if pool['target_manifest_sha256']!=sha(pool['target_manifest']):raise ValueError('目标训练成员改变')
+        if previous['teacher_model_identity_sha256']!=sha(old/'teacher_model_identity.json'):raise ValueError('教师模型凭证改变')
+        for name in names:os.link(old/name,root/name)
+        reused=dict(previous_root=str(old),original_code=previous['code'],artifacts={str(old/n):sha(old/n) for n in names},
+            stage_receipts={str(p):sha(p) for p in (old/'stage_receipts').glob('*.json')},
+            teacher_queries_repeated=0,formal_training_repeated=0,reason='PyAV CPU frame runtime handoff; no mathematics change')
+        save(root/'reused_preparation.json',reused)
     # VLM依赖只在已安装Qwen的环境核验；源检测环境不擅自安装/升级transformers。
     command=[TEACHER_PYTHON,'-B','-c',
         'from tools.score_prototype_refresh import checkpoint_identity; from tools.baseline_protocol import save; '
         +'save('+repr(str(root/'teacher_model_identity.json'))+',checkpoint_identity())']
-    subprocess.run(command,cwd=CODE,env=dict(os.environ,CUDA_VISIBLE_DEVICES='',PYTHONDONTWRITEBYTECODE='1'),check=True)
+    if not reused:subprocess.run(command,cwd=CODE,env=dict(os.environ,CUDA_VISIBLE_DEVICES='',PYTHONDONTWRITEBYTECODE='1'),check=True)
     base_cfg=read(BASE/'uda/config.json')
     save(root/'plan.json',dict(schema=SCHEMA,code=identity,policy=POLICY,gpus=[2,3],baseline_root=str(BASE),
         baseline_complete_sha256={v:sha(BASE/v/'complete.json') for v in ['so','uda']},
@@ -165,11 +188,15 @@ def main(args):
     annotation=read(base_cfg['baseline']['annotation_for_offline_evaluation'])['database']
     save(root/'evaluation_unlabeled.json',dict(database={vid:{k:v for k,v in row.items() if k!='annotations'}
         for vid,row in annotation.items() if row['subset'].lower() in base_cfg['tgt_val_split']}))
-    tasks(root,[{}],'candidate_calibration',[2,3])
-    tasks(root,[{}],'candidates',[2,3])
-    from tools.charades_prototype import frames,freeze
+    if not reused:
+        tasks(root,[{}],'candidate_calibration',[2,3])
+        tasks(root,[{}],'candidates',[2,3])
+    from tools.charades_prototype import freeze
     save(root/'state.json',dict(phase='exact-raw-frame-preparation',active={},parent_pid=os.getpid()))
-    frames(root,RAW)
+    # 已有Qwen环境安装PyAV18；仅把CPU精确解码交给它，不改正在运行的SADA环境。
+    frame_command=[TEACHER_PYTHON,'-B','-c','from pathlib import Path; from tools.charades_prototype import frames; '
+        +'frames(Path('+repr(str(root))+'),Path('+repr(str(RAW))+'))']
+    subprocess.run(frame_command,cwd=CODE,env=dict(os.environ,CUDA_VISIBLE_DEVICES='',PYTHONDONTWRITEBYTECODE='1'),check=True)
     tasks(root,[dict(shard=i) for i in [0,1]],'teacher',[2,3],TEACHER_PYTHON)
     freeze(root);save(root/'cache_independent_audit.json',verify_cache(root))
     for arm in POLICY['variants']:
@@ -188,6 +215,7 @@ def main(args):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',type=Path,required=True)
+    p.add_argument('--previous-root',type=Path,help='只引用未查询教师/未正式训练根的完整准备工件')
     p.add_argument('--worker',action='store_true');p.add_argument('--stage',choices=['candidate_calibration','candidates','teacher','probe','train','evaluate'])
     p.add_argument('--variant',choices=POLICY['variants']);p.add_argument('--shard',type=int,choices=[0,1]);a=p.parse_args()
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
