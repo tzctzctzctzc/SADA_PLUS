@@ -2,3 +2,7 @@ vendor/dyfadet/** -text
 tools/dyfadet*.py text eol=lf
 tools/run_dyfadet_so.py text eol=lf
 tests/test_dyfadet_so.py text eol=lf
+vendor/cltdr/** -text
+tools/cltdr*.py text eol=lf
+tools/run_cltdr_so.py text eol=lf
+tests/test_cltdr_so.py text eol=lf
