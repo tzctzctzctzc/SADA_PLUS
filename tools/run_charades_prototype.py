@@ -4,13 +4,19 @@ from copy import deepcopy
 from pathlib import Path
 CODE=Path(__file__).resolve().parents[1];sys.path.insert(0,str(CODE))
 from tools.baseline_protocol import read,save,sha,code_identity,termination
-from tools.run_sada_baseline import acquire,prepare_file_limit
+from tools.run_sada_baseline import acquire
 from tools.charades_prototype import POLICY,SCHEMA,MODEL
 ACTIVE={}
 BASE=Path('/vepfs/vlms/charades_baseline2_e7b9876_1101/formal/third_to_first')
 RAW=Path('/vepfs/vlms/charades_resources_1031/raw_videos_1101/CharadesEgo_v1_480')
 PYTHON='/vepfs/vlms/envs/sada_py39/bin/python'
 TEACHER_PYTHON='/vepfs/vlms/envs/rq1-cu121/bin/python'
+
+def prepare_file_limit():
+    import resource
+    soft,hard=resource.getrlimit(resource.RLIMIT_NOFILE)
+    wanted=max(soft,65536 if hard==resource.RLIM_INFINITY else min(65536,hard))
+    resource.setrlimit(resource.RLIMIT_NOFILE,(wanted,hard))
 
 def stop(signum,frame):
     for task in ACTIVE.values():

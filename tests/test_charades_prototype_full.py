@@ -2,6 +2,9 @@ import unittest,math
 from tools.charades_prototype import LABEL_NAMES,POLICY,mapping,prompt,interface,choose,participate
 
 class FullCharadesTests(unittest.TestCase):
+    def test_complete_entrypoint_imports(self):
+        from tools import run_charades_prototype as runner
+        self.assertTrue(callable(runner.main));self.assertTrue(callable(runner.prepare_file_limit))
     def test_vocabulary_and_prompt_are_charades(self):
         p=prompt('a');self.assertIn('SIT',p);self.assertIn('LAUGH',p);self.assertNotIn('POUR',p)
         self.assertEqual(set(mapping('a')),set(LABEL_NAMES));self.assertEqual(mapping('a'),mapping('a'))
