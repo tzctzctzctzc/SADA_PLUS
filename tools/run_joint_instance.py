@@ -52,19 +52,19 @@ def train(job,probe=False):
         gs=torch.autograd.grad(loss,list(parameters),allow_unused=True,retain_graph=True)
         return sum(float(g.detach().square().sum()) for g in gs if g is not None)**.5
     if probe:
-        probe_video=unlabeled(src[0]);a=predict_full(model,probe_video);b=predict(model,head,probe_video,0)
-        assert all(torch.equal(a[k],b[k]) for k in ('segments','scores','labels'))
+        probe_video=unlabeled(src[0]);reference_predictions=predict_full(model,probe_video);b=predict(model,head,probe_video,0)
+        assert all(torch.equal(reference_predictions[k],b[k]) for k in ('segments','scores','labels'))
         head_reset={k:v.detach().cpu().clone() for k,v in head.state_dict().items()}
     def best_payload(epoch):
         return dict(config=cfg,ema_state_dict=teacher.state_dict(),head_state_dict=ema_head.state_dict(),epoch=epoch,
             specification=SPEC,variant=variant,parent_checkpoint_sha256=job['checkpoint_sha256'],initial_state_sha256=initial,initial_head_sha256=head_initial)
     if not probe:checkpoint(out/'best.pt',best_payload(0))
-    max_epoch=3 if probe else 30
+    max_epoch=SPEC['target_start_epoch'] if probe else SPEC['max_epochs']
     for epoch in range(1,max_epoch+1):
         if shutil.disk_usage(out).free<2*2**30:raise RuntimeError('剩余磁盘低于2GiB，保留工件停止，不删除旧结果')
         # 真实重新遍历loader；不使用cycle缓存整轮crop。
         si=iter(sl);ti=iter(tl);reports=[]
-        for group,index in zip(optimizer.param_groups,range(2)):group['lr']=(1e-5 if index==0 else 1e-4)*(.1 if epoch>15 else 1.)
+        for group,index in zip(optimizer.param_groups,range(2)):group['lr']=(1e-5 if index==0 else 1e-4)*(.1 if epoch>25 else 1.)
         model.train();head.train();model.train_label_smoothing=0.
         for step in range(budget):
             global_step=(epoch-1)*budget+step;random.seed(123+global_step);np.random.seed(123+global_step)
@@ -95,7 +95,7 @@ def train(job,probe=False):
                     (loss/len(sv)).backward();row['source_region']+=float(loss.detach())/len(sv)
                     for k,vv in metrics.items():row[k]+=vv
                     del loss,outputs,packet
-                active=variant=='ema_joint' and epoch>=3
+                active=variant=='ema_joint' and epoch>=SPEC['target_start_epoch']
                 if active:
                     for v in tv:
                         clean=unlabeled(v);pseudo=pseudo_instances(teacher,ema_head,clean,epoch)
@@ -105,7 +105,7 @@ def train(job,probe=False):
                         if not torch.isfinite(loss):raise ValueError('完整目标实例损失非有限')
                         if probe and len(pseudo['boxes']) and step in (1,10,budget-1):
                             for key,params in [('target_backbone',model.backbone_target.stem[-1].parameters()),('target_classifier',model.cls_head.parameters()),('target_regressor',model.reg_head.parameters()),('target_region_encoder',head.stages[0].encoder.parameters())]:signals[key] |= norm(loss,params)>1e-8
-                        weight=min((epoch-2)/5.,1.)
+                        weight=min((epoch-SPEC['target_start_epoch']+1)/SPEC['ramp_epochs'],1.)
                         (weight*loss/len(tv)).backward();row['target']+=float(loss.detach())/len(tv)
                         for k,vv in metrics.items():row[k]+=vv
                         del loss,pseudo
@@ -119,7 +119,7 @@ def train(job,probe=False):
             if step%20==0:print('TRAIN',variant,epoch,step+1,budget,json.dumps(row),flush=True)
         aggregate={k:sum(r[k] for r in reports)/budget for k in reports[0] if isinstance(reports[0][k],(int,float))}
         aggregate.update(epoch=epoch,steps=budget,target_annotations=0,target_GT_used=False);epochs.append(aggregate);save(out/'epochs.json',epochs)
-        if probe and epoch<3:continue
+        if probe and epoch<SPEC['target_start_epoch']:continue
         if probe:
             assert signals['source_backbone'] and signals['source_region_encoder'],signals
             if variant=='ema_joint':assert all(signals.values()),signals
@@ -128,9 +128,9 @@ def train(job,probe=False):
             # 精确恢复所有参数和控制之后，普通原模型推理必须逐值相同。
             parent=torch.load(job['checkpoint'],map_location='cpu');model.load_state_dict(parent['ema_state_dict'],strict=True);model.eval();head.load_state_dict(head_reset,strict=True);head.eval()
             assert tensor_digest(model.state_dict())==initial and tensor_digest(head.state_dict())==head_initial
-            z=predict(model,head,probe_video,0);assert all(torch.equal(z[k],a[k]) for k in ('segments','scores','labels'))
+            z=predict(model,head,probe_video,0);assert all(torch.equal(z[k],reference_predictions[k]) for k in ('segments','scores','labels'))
             return dict(status='passed',signals=signals,ordinary_epoch0_inference_exact=True,updated_student_and_head=True,updated_independent_teacher_and_head=True,restore_digest_and_original_prediction_exact=True,initial_state_sha256=initial,initial_head_sha256=head_initial,source_map0=history[0]['map'],steps=budget,source_regions=sum(r['source_regions'] for r in reports),pseudo_instances=sum(r['pseudo_instances'] for r in reports),target_GT_used=False,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20)
-        if epoch%2==0:
+        if epoch%SPEC['validate_every']==0:
             score=validate(teacher,ema_head,cfg,epoch);previous=select(history)[0]['map'];history.append(dict(epoch=epoch,map=score));save(out/'source_history.json',history)
             if score>previous:checkpoint(out/'best.pt',best_payload(epoch))
             print('SOURCE_VALIDATION',epoch,score,flush=True)
@@ -138,7 +138,7 @@ def train(job,probe=False):
             state_dict=model.state_dict(),ema_state_dict=teacher.state_dict(),head_state_dict=head.state_dict(),ema_head_state_dict=ema_head.state_dict(),optimizer=optimizer.state_dict(),model_controls=controls(model),ema_controls=controls(teacher),
             parent_checkpoint_sha256=job['checkpoint_sha256'],initial_state_sha256=initial,initial_head_sha256=head_initial,
             rng=dict(python=random.getstate(),numpy=np.random.get_state(),cpu=torch.get_rng_state(),cuda=torch.cuda.get_rng_state(0),loaders={k:g.get_state() for k,g in generators.items()})))
-        if epoch%2==0 and select(history)[1]:break
+        if epoch%SPEC['validate_every']==0 and select(history)[1]:break
     chosen,stopped=select(history);assert stopped
     save(out/'termination.json',dict(status='passed',best_epoch=chosen['epoch'],stop_epoch=epoch,source_history=history,epochs=epochs,initial_state_sha256=initial,initial_head_sha256=head_initial,target_GT_used=False,specification=SPEC))
     return dict(status='passed',best_epoch=chosen['epoch'],stop_epoch=epoch,initial_state_sha256=initial,initial_head_sha256=head_initial,target_GT_used=False,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20)

@@ -55,7 +55,7 @@ def test_boundary_decode_always_positive_and_diou_gradient():
     assert pair_iou(b,b).item()==1
 
 def test_source_selection_epoch_zero_ties_and_first_stop():
-    h=[dict(epoch=e,map=.5) for e in range(0,11,2)]
+    h=[dict(epoch=e,map=.5) for e in range(0,16,5)]
     assert select(h)==(h[0],True)
     assert not select(h[:-1])[1]
 

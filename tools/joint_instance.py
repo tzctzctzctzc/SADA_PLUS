@@ -11,9 +11,9 @@ from torch.nn import functional as F
 from tools.tta_core import dense,unlabeled,postprocess,raw_prediction,assert_unlabeled
 
 SPEC=dict(schema='prototype-joint-instance-v1',variants=['source_joint','ema_joint'],seed=123,batch=2,
-    max_epochs=30,validate_every=2,patience_epochs=10,include_epoch_zero=True,
+    max_epochs=50,validate_every=5,patience_epochs=15,include_epoch_zero=True,
     learning_rate=1e-5,head_learning_rate=1e-4,weight_decay=.01,clip_grad=1.,ema_momentum=.99,
-    target_start_epoch=3,ramp_epochs=5,target_weight=1.,train_dense_proposals=128,
+    target_start_epoch=6,ramp_epochs=5,target_weight=1.,train_dense_proposals=128,
     source_jitters=4,source_jitter_fraction=.3,source_background_proposals=128,source_positive_iou=.5,source_ignore_iou=.1,
     dimension=128,attention_heads=4,encoder_layers=2,stages=2,proposal_chunk=32,
     ordered_tokens=[8,16,8],sample_ranges=[[-.25,.25],[0.,1.],[.75,1.25]],
@@ -191,7 +191,7 @@ def predict(model,head,video,epoch):
     return postprocess(model,video,raw)
 
 def select(history):
-    assert [x['epoch'] for x in history]==list(range(0,history[-1]['epoch']+1,2))
+    assert [x['epoch'] for x in history]==list(range(0,history[-1]['epoch']+1,SPEC['validate_every']))
     assert all(math.isfinite(x['map']) and 0<=x['map']<=1 for x in history)
     best=max(history,key=lambda x:x['map']);last=history[-1]['epoch']
-    return best,last>=30 or last-best['epoch']>=10
+    return best,last>=SPEC['max_epochs'] or last-best['epoch']>=SPEC['patience_epochs']
