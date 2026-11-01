@@ -21,7 +21,24 @@ SPEC = dict(schema=SCHEMA, seed=123, hidden=128, layers=2, heads=4,
     domain_supervision='source-only; target original Prototype and adversarial protocol unchanged',
     teacher_cache='original-Qwen8B-40-of-200-no-new-query',
     score='negative-energy-not-normalized-continuous-density',
-    original_class_scores_unchanged=True, target_gt=False)
+    minimum_duration=.05, original_class_scores_unchanged=True, target_gt=False)
+
+
+def interval_limits(metadata):
+    """把实际视频的[0,duration]变回原检测器使用的特征坐标。
+
+    第一个SlowFast窗口中心有偏移，合法动作起点可以是负的特征坐标。
+    不能把0格错误地当成0秒。训练crop使用自身局部[0,crop_length]。
+    """
+    if metadata['use_temporal_grid_feats']:
+        shift=.5*float(metadata['feat_num_frames']);stride=float(metadata['feat_stride'])
+        return -shift/stride,(float(metadata['duration'])*float(metadata['fps'])-shift)/stride
+    return 0.,float(metadata['video_length'])
+
+
+def clamp_intervals(boxes,bounds):
+    low,high=bounds if isinstance(bounds,(tuple,list)) else (0.,float(bounds))
+    return boxes.clamp(float(low),float(high))
 
 
 def joint_decision(history):
@@ -109,7 +126,7 @@ def candidate_group(anchor, truth, segments, labels, instance, length):
     别的真实实例不是全局背景。kind=5表示同类邻居，记录其真实身份；
     无匹配anchor通过accept监督拒绝，不强拉向随意选择的GT。
     """
-    d=(anchor[1]-anchor[0]).clamp_min(1.);s,e=anchor
+    d=(anchor[1]-anchor[0]).clamp_min(SPEC['minimum_duration']);s,e=anchor
     axis=anchor.new_tensor([-.5,-.25,0,.25,.5]);a,b=torch.meshgrid(axis,axis,indexing='ij')
     boxes=anchor[None]+d*torch.stack([a.flatten(),b.flatten()],-1)
     kinds=torch.zeros(len(boxes),device=anchor.device,dtype=torch.long)
@@ -129,7 +146,7 @@ def candidate_group(anchor, truth, segments, labels, instance, length):
         extras.append(torch.stack([torch.minimum(truth[0],segments[near,0]),torch.maximum(truth[1],segments[near,1])]))
         kind.append(4)
     boxes=torch.cat([boxes,torch.stack(extras)]);kinds=torch.cat([kinds,torch.tensor(kind,device=anchor.device)])
-    boxes=boxes.clamp(0,float(length));legal=boxes[:,1]-boxes[:,0]>=1
+    boxes=clamp_intervals(boxes,length);legal=boxes[:,1]-boxes[:,0]>SPEC['minimum_duration']
     q=interval_iou(boxes,truth[None]) if instance>=0 else boxes.new_zeros(len(boxes))
     return boxes[legal],q[legal],kinds[legal]
 
@@ -154,11 +171,11 @@ def score_intervals(head,features,masks,anchor,boxes,levels,labels,strides):
     n,k=boxes.shape[:2];lv=levels[:,None].expand(-1,k).reshape(-1)
     bt,bv=sample_tokens(features,masks,boxes.reshape(-1,2),lv,strides)
     bt=bt.reshape(n,k,*bt.shape[1:]);bv=bv.reshape(n,k,-1)
-    delta=(boxes-anchor[:,None])/(anchor[:,1]-anchor[:,0]).clamp_min(1)[:,None,None]
+    delta=(boxes-anchor[:,None])/(anchor[:,1]-anchor[:,0]).clamp_min(SPEC['minimum_duration'])[:,None,None]
     scores,accept=head(at,av,bt,bv,delta,labels)
     # 缺少区内或端点采样的区间不允许成为高能量峰。外侧越界是正常背景。
     inner=bv[:,:,:24].sum(-1)>=18
-    valid=inner&((boxes[:,:,1]-boxes[:,:,0])>=1)
+    valid=inner&((boxes[:,:,1]-boxes[:,:,0])>SPEC['minimum_duration'])
     return scores,accept,valid
 
 
@@ -169,9 +186,9 @@ def search(head,features,masks,anchors,levels,labels,strides,length):
     对有限模式解释相对竞争，不声称全空间概率校准。
     """
     if not len(anchors):return anchors.clone(),dict(searched=0,moved=0,rejected=0)
-    head.eval();n=len(anchors);d=(anchors[:,1]-anchors[:,0]).clamp_min(1)
+    head.eval();n=len(anchors);d=(anchors[:,1]-anchors[:,0]).clamp_min(SPEC['minimum_duration'])
     axis=anchors.new_tensor([-.5,-.25,0,.25,.5]);a,b=torch.meshgrid(axis,axis,indexing='ij')
-    boxes=(anchors[:,None]+d[:,None,None]*torch.stack([a.flatten(),b.flatten()],-1)).clamp(0,float(length))
+    boxes=clamp_intervals(anchors[:,None]+d[:,None,None]*torch.stack([a.flatten(),b.flatten()],-1),length)
     with torch.no_grad():
         scores,accept,valid=score_intervals(head,features,masks,anchors,boxes,levels,labels,strides)
         oldscore=score_intervals(head,features,masks,anchors,anchors[:,None],levels,labels,strides)[0][:,0].sigmoid()
@@ -188,16 +205,16 @@ def search(head,features,masks,anchors,levels,labels,strides,length):
     lr=anchors.new_full((n,SPEC['retained_modes'],1),SPEC['step_size'])
     for _ in range(SPEC['refinement_steps']):
         with torch.enable_grad():
-            u.requires_grad_(True);b0=(anchors[:,None]+d[:,None,None]*u).clamp(0,float(length))
+            u.requires_grad_(True);b0=clamp_intervals(anchors[:,None]+d[:,None,None]*u,length)
             sc,_,ok=score_intervals(head,features,masks,anchors,b0,levels,labels,strides)
             grad=torch.autograd.grad((sc*ok).sum(),u)[0]
         with torch.no_grad():
             trial=(u+lr*grad.clamp(-1,1)).clamp(-1,1)
-            proposal=(anchors[:,None]+d[:,None,None]*trial).clamp(0,float(length))
+            proposal=clamp_intervals(anchors[:,None]+d[:,None,None]*trial,length)
             ns,_,nv=score_intervals(head,features,masks,anchors,proposal,levels,labels,strides)
             take=nv&(ns>=sc);u=torch.where(take[:,:,None],trial,u.detach());lr=torch.where(take[:,:,None],lr,lr*.5)
     with torch.no_grad():
-        final=(anchors[:,None]+d[:,None,None]*u).clamp(0,float(length))
+        final=clamp_intervals(anchors[:,None]+d[:,None,None]*u,length)
         sc,_,ok=score_intervals(head,features,masks,anchors,final,levels,labels,strides)
         sc=sc.sigmoid().masked_fill(~ok,-1);j=sc.argmax(1);index=torch.arange(n,device=anchors.device);best=final[index,j]
         conflict=((interval_iou(best[:,None],final)<SPEC['conflict_iou'])&((sc[index,j,None]-sc)<SPEC['conflict_margin'])&ok).any(1)
@@ -257,7 +274,7 @@ def install_joint(ctx, head, ledger=None):
             if not len(truth):continue
             f=[x[video_index:video_index+1] for x in features];m=[x[video_index:video_index+1] for x in masks]
             # 轮换四种已声明的错误方向，覆盖每个crop内全部源实例，不用目标GT。
-            d=(truth[:,1]-truth[:,0]).clamp_min(1);axis=truth.new_tensor([[-.2,0],[0,.2],[.2,-.2],[-.2,.2]])
+            d=(truth[:,1]-truth[:,0]).clamp_min(SPEC['minimum_duration']);axis=truth.new_tensor([[-.2,0],[0,.2],[.2,-.2],[-.2,.2]])
             offsets=axis[(torch.arange(len(truth),device=truth.device)+ctx.temporal_energy_state['step'])%4]
             anchors=(truth+d[:,None]*offsets).clamp(0,v['feats'].shape[-1]);levels=duration_levels(anchors,ctx.model.reg_range)
             parts=[]

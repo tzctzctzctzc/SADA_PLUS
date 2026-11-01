@@ -2,7 +2,7 @@ import unittest
 from copy import deepcopy
 import torch
 from tools.temporal_interval_energy import (sample_tokens,TemporalIntervalEnergy,
-    candidate_group,energy_loss,score_intervals,search,interval_iou,SPEC,joint_decision)
+    candidate_group,energy_loss,score_intervals,search,interval_iou,SPEC,joint_decision,interval_limits)
 
 
 class TemporalEnergyTests(unittest.TestCase):
@@ -63,6 +63,20 @@ class TemporalEnergyTests(unittest.TestCase):
         h=TemporalIntervalEnergy(channels=4,hidden=16).eval();f=[torch.randn(1,4,100)];m=[torch.ones(1,1,100,dtype=torch.bool)];b=torch.tensor([[20.,35.],[45.,65.]])
         out,stats=search(h,f,m,b,torch.tensor([0,0]),torch.tensor([0,1]),[1],100)
         self.assertTrue(torch.equal(out,b));self.assertEqual(stats['searched'],2)
+
+    def test_sub_grid_action_GT_remains_legal(self):
+        gt=torch.tensor([[20.,20.4],[21.,21.6]])
+        b,q,k=candidate_group(torch.tensor([19.92,20.4]),gt[0],gt,torch.tensor([0,0]),0,50)
+        self.assertTrue((q[k==2]>.99999).any())
+        h=TemporalIntervalEnergy(channels=4,hidden=16);score,accept,valid=score_intervals(h,[torch.randn(1,4,60)],[torch.ones(1,1,60,dtype=torch.bool)],gt[:1],gt[:1,None],torch.tensor([0]),torch.tensor([0]),[1])
+        self.assertTrue(valid.all())
+
+    def test_seconds_zero_is_negative_grid_center_offset(self):
+        low,high=interval_limits(dict(use_temporal_grid_feats=True,feat_num_frames=32,feat_stride=16,duration=10,fps=30))
+        self.assertEqual(low,-1.);self.assertEqual(high,17.75)
+        gt=torch.tensor([[-.9,-.3],[2.,3.]])
+        b,q,k=candidate_group(gt[0],gt[0],gt,torch.tensor([0,0]),0,(low,high))
+        self.assertTrue((q[k==2]>.99999).any())
 
 
 if __name__=='__main__':unittest.main()

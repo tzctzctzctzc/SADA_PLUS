@@ -29,7 +29,7 @@ def gpu(args):
     from libs.utils import fix_random_seed
     from tools import baseline_engine as base
     from tools.prototype_target_cache import detector_features,duration_levels,assert_same_prediction
-    from tools.temporal_interval_energy import TemporalIntervalEnergy,interval_iou,video_groups,score_intervals,energy_loss,search,install_joint
+    from tools.temporal_interval_energy import TemporalIntervalEnergy,interval_iou,video_groups,score_intervals,energy_loss,search,install_joint,interval_limits,clamp_intervals
     e=args.entry;cfg=read(e/'config.json');bound=read(e/'inputs.json');identity=code_identity();assert identity==read(args.output/'plan.json')['code']
     os.chdir(args.data_root);fix_random_seed(123,include_cuda=True);torch.cuda.manual_seed(123)
     ref=Path(bound['reference']);assert sha(ref/'best.pt')==bound['checkpoint_sha256']
@@ -50,20 +50,20 @@ def gpu(args):
         output=e/'source_cache'/role;output.mkdir(parents=True);index=[];counts=dict(gt_instances=0,real_proposals=0,matched_real=0,unmatched_real=0,ambiguous_real=0)
         with torch.no_grad():
             for i in range(len(ds) if limit is None else min(limit,len(ds))):
-                v=move_to_device([ds[i]],'cuda:0')[0];f,m,raw,lv=forward_raw(v,model);gt=v['segments'];classes=v['labels'];length=v['feats'].shape[-1]
+                v=move_to_device([ds[i]],'cuda:0')[0];f,m,raw,lv=forward_raw(v,model);gt=v['segments'];classes=v['labels'];length=interval_limits(v['metadata'])
                 # 两种确定性anchor覆盖每个源GT，无按视频32组截断。
                 anchors=[];truths=[];labels=[];instances=[];levels=[]
                 for j,t in enumerate(gt):
-                    d=(t[1]-t[0]).clamp_min(1)
+                    d=(t[1]-t[0]).clamp_min(SPEC['minimum_duration'])
                     for off in [t.new_tensor([-.2,0.]),t.new_tensor([0.,.2])]:
-                        a=(t+d*off).clamp(0,length)
+                        a=clamp_intervals(t+d*off,length)
                         anchors.append(a);truths.append(t);labels.append(classes[j]);instances.append(j);levels.append(int(duration_levels(a[None],model.reg_range)[0]))
                 counts['gt_instances']+=len(gt)
                 for cls in raw['labels'].unique().tolist():
                     ids=(raw['labels']==cls).nonzero(as_tuple=True)[0];ids=ids[raw['scores'][ids].argsort(descending=True)[:20]]
                     for idx in ids:
-                        a=raw['segments'][idx].clamp(0,length)
-                        if a[1]-a[0]<1:continue
+                        a=clamp_intervals(raw['segments'][idx],length)
+                        if a[1]-a[0]<=SPEC['minimum_duration']:continue
                         same=(classes==cls).nonzero(as_tuple=True)[0];instance=-1
                         if len(same):
                             overlaps=interval_iou(a[None],gt[same]);best,which=overlaps.max(0)
@@ -172,7 +172,7 @@ def gpu(args):
         # 真正边界梯度与实际多起点搜索，不将仅head更新当完整机制验收。
         sample=move_to_device([next(iter(ctx.val_loader_src))[0]],'cuda:0')[0];ctx.model.eval()
         f,m,raw,levels=forward_raw(sample,ctx.model);ids=raw['scores'].argsort(descending=True)[:2];head=ctx.model.temporal_energy.eval()
-        boxes=raw['segments'][ids].detach();new,stats=search(head,f,m,boxes,levels[ids],raw['labels'][ids],ctx.model.fpn_strides,sample['feats'].shape[-1]);assert torch.isfinite(new).all()
+        boxes=raw['segments'][ids].detach();new,stats=search(head,f,m,boxes,levels[ids],raw['labels'][ids],ctx.model.fpn_strides,interval_limits(sample['metadata']));assert torch.isfinite(new).all()
         save(e/'probe_complete.json',dict(status='passed',code=identity,full_state_roundtrip=True,actual_joint_fpn_gradient=ctx.temporal_energy_state['gradient_checks'],source_backbone_updated=True,source_curriculum_all_GT=False,diagnostic_only=True,joint_probe_initial_head='latest diagnostic head, formal uses source-selected best',search=stats,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,target_gt_used=False,guard=guard,guard_sha256=sha(guard)));return
     # 三条完整推理路径：原参照 / 只训能量 / 联合训练，原类别分数和NMS均保留。
     best_joint=torch.load(joint/'best.pt',map_location='cpu');ctx.model.load_state_dict(best_joint['ema_state_dict'],strict=True);ctx.model.eval().requires_grad_(False);joint_model=ctx.model
@@ -190,7 +190,7 @@ def gpu(args):
                     if mode!='control':
                         energy=frozen if mode=='frozen' else joint_model.temporal_energy
                         for ids in torch.arange(len(raw['scores']),device='cuda:0').split(16):
-                            b,stats=search(energy,f,m,raw['segments'][ids],levels[ids],raw['labels'][ids],net.fpn_strides,v['feats'].shape[-1]);candidate['segments'][ids]=b;observations.append(dict(video=v['metadata']['video_id'],mode=mode,**stats))
+                            b,stats=search(energy,f,m,raw['segments'][ids],levels[ids],raw['labels'][ids],net.fpn_strides,interval_limits(v['metadata']));candidate['segments'][ids]=b;observations.append(dict(video=v['metadata']['video_id'],mode=mode,**stats))
                     with torch.no_grad():pred=net.postprocessing([candidate])[0]
                     if mode=='control' and i==0:
                         expected=net(video_list_src=[v],video_list_tgt=[v],mode='test',domain=domain,curr_epoch=0)[0 if domain=='source' else 1][0];assert_same_prediction(pred,expected)
@@ -225,7 +225,7 @@ def main(args):
     identity=code_identity();args.output.mkdir(parents=True,exist_ok=False);save(args.output/'plan.json',dict(schema=SCHEMA,specification=SPEC,code=identity,method='full-source-curriculum-temporal-energy-with-joint-adaptation',extra_training_budget=True))
     prepare(args.output,REFERENCE,INVENTORY,identity)
     for s in SHIFTS:
-        e=args.output/'formal'/s;cfg=read(e/'config.json');db=read(cfg['dataset']['json_file'])['database']
+        e=args.output/'formal'/s;cfg=read(e/'config.json');assert cfg['test_cfg']['duration_thresh']==SPEC['minimum_duration'];db=read(cfg['dataset']['json_file'])['database']
         for role,split in [('source_train',cfg['src_train_split']),('source_val',cfg['src_val_split'])]:save(e/(role+'_gt.json'),dict(database={k:v for k,v in db.items() if v['subset'] in split}),sort_keys=False)
     pending=list(SHIFTS);active={};evals=[];complete=[];probe_pending=list(SHIFTS);probe_reports={};accepted=False;minimum=12288
     def spawn(s,stage,card=None):
