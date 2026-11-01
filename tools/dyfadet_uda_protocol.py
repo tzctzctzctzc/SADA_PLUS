@@ -128,7 +128,8 @@ def audit(entry):
             assert set(x['target_videos'])<=set(members['target_train'])
             if mode=='source_control':assert x['target_videos']==[]
         assert digest==t['ledger_digest']
-        if mode=='uda':assert sum(x['target_positive_points'] for x in events)>0
+        if mode=='uda':
+            assert sum(x['target_positive_points'] for x in events)>0
             assert sum(x['target_regression_points'] for x in events)>0
             assert all(0<=x['target_regression_proposals']<=x['target_proposals'] for x in events)
             assert all(0<=x['target_cls_weight']<=1 for x in events)
