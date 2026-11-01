@@ -31,14 +31,16 @@ SPEC=dict(seed=123,source_batch=2,target_batch=2,max_epochs=30,validation_every=
 SPEC.update(text_variant=VARIANT,vlm=True,text_encoder='frozen_OpenAI_CLIP_B16',
     text_source='fixed_class_names_and_assistant_authored_start_middle_end_global_descriptions',
     target_video_VLM_queries=False,text_phases=4,feature_dimension=512,feature_levels=6,
-    semantic_initialization='zero_residual_readouts_SO_predictions_equal',semantic_learning_rate='same_1e-5_as_visual',
+    semantic_initialization='full_strength_Xavier_TiCA_and_standard_PDA_fusion_no_zero_gate',semantic_learning_rate=1e-4,
     source_loss=('official_DyFADet_plus_hard_and_Gaussian_soft_foreground' if VARIANT=='tifad' else 'official_DyFADet_plus_hard_foreground'),
     architecture=('six_level_bidirectional_text_visual_attention_with_salient_Gaussian_support' if VARIANT=='tifad' else
                   'four_phase_temporal_importance_filter_cross_attention_phase_token_MHSA_adaptive_fusion_classification_and_three_layer_regression_MLP'),
-    adaptation_to_closed_set='retain_original_cls_reg_heads_add_trainable_semantic_residuals_and_foreground_readout',
+    adaptation_to_closed_set='retain_pretrained_DyFA_pyramid_and_closed_set_heads_full_text_feature_fusion_plus_class_similarity_foreground_probability_product_at_inference',
     foreground=('hard_focal_and_sigma1_Gaussian_soft_focal' if VARIANT=='tifad' else 'hard_focal'),
     PDA_descriptions_are_original_paper_GPT4o=False,PDA_stage_order=['start','middle','end','global'],
-    TiFAD_salience='valid_point_top10percent_sorted_neighbor_center_merge_threshold10_scaled_by_length1152_sigmoid_grid_sigma_sum_max_normalization',
+    TiFAD_salience='author_THUMOS_top1percent_threshold100_scaled_by_valid_length1152_sigmoid_grid_sigma_sum_max_normalization',
+    pseudo_foreground_fusion=False,final_foreground_fusion=('sqrt_sigmoid_classification_times_soft_then_times_hard' if VARIANT=='tifad' else 'sigmoid_classification_times_hard'),
+    pretrained_visual_learning_rate=1e-5,new_text_learning_rate=1e-4,epoch0_is_SO_prediction=False,
     transfer_not_original_paper_reproduction=True,source_control='same_text_architecture_and_exact_UDA_source_update_count_without_target_learning')
 
 def identity():
@@ -110,7 +112,7 @@ def audit(entry):
     for proof in acceptance['reports'].values():
         assert sha(proof['path'])==proof['sha256'];p=read(proof['path']);guard_audit(p['guard'],p['guard_sha256'],b['code']['commit'])
         assert p['full_state_restore'] and p['next_step_numerical'] and p['target_gradient_positive'] and p['source_disabled_path_equal'] and p['source_disabled_calls_official']
-        assert p['initial_SO_dense_equal'] and p['semantic_parameters_updated'] and p['text_counterfactual_max_delta']>0
+        assert p['disabled_SO_dense_equal'] and p['full_strength_semantic_path'] and p['initial_semantic_max_delta']>0 and p['semantic_parameters_updated'] and p['text_counterfactual_max_delta']>0
         assert p['text_projection_gradient_norm']>0 and p['semantic_parameter_count']>0
         routing=p['split_loss_routing'];support=p['split_support']
         assert routing['classification_to_cls']>0 and routing['regression_to_reg']>0
@@ -171,7 +173,7 @@ def audit(entry):
             assert proof['videos']==list(db) and not proof['target_GT_used'] and proof['manifest_sha256']==sha(manifest)
             report=read(d/'evaluation'/(role+'.json'));assert report['prediction_sha256']==sha(d/(role+'.npz'))
             assert report['selected_epoch']==t['decision']['best_epoch']
-            if t['decision']['best_epoch']==0:assert abs(report['map_0.1_to_0.5']-read(ref/'evaluation'/(role+'.json'))['map_0.1_to_0.5'])<1e-7
+            # best0表示新架构未被源选模改进，不再声称等于原SO。
     g=read(e/'gpu_complete.json');guard_audit(g['guard'],g['guard_sha256'],b['code']['commit'])
     uda=read(e/'uda/evaluation/target_val.json')['map_0.1_to_0.5'];control=read(e/'source_control/evaluation/target_val.json')['map_0.1_to_0.5']
     so=read(ref/'evaluation/target_val.json')['map_0.1_to_0.5']

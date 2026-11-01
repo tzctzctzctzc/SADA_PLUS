@@ -2,9 +2,10 @@ from copy import deepcopy
 import pytest
 import torch
 from tools.dyfadet_text_modules import SemanticPyramid,masked_softmax,salient_mask
+from vendor.tifad.tv_attn import TVCA
 
 @pytest.mark.parametrize('variant',['tifad','pda'])
-def test_initial_identity_padding_then_text_and_visual_gradients(variant):
+def test_full_strength_padding_text_and_visual_gradients(variant):
  torch.set_num_threads(2);torch.manual_seed(11)
  net=SemanticPyramid(torch.randn(10,4,24),variant,dim=32,levels=2)
  features=[torch.randn(2,32,16,requires_grad=True),torch.randn(2,32,8,requires_grad=True)]
@@ -12,9 +13,9 @@ def test_initial_identity_padding_then_text_and_visual_gradients(variant):
  for m in masks:m[1,:,-3:]=False
  features=[x*m for x,m in zip(features,masks)]
  cf,rf,logits,*_=net(features,masks)
- assert all(torch.equal(a,b) for a,b in zip(cf,features))
- assert all(torch.equal(a,b) for a,b in zip(rf,features))
- assert all(torch.count_nonzero(x)==0 for x in logits)
+ assert any(not torch.equal(a,b) for a,b in zip(cf,features))
+ assert any(not torch.equal(a,b) for a,b in zip(rf,features))
+ assert any(torch.count_nonzero(x)>0 for x in logits)
  opt=torch.optim.AdamW(net.parameters(),lr=.001)
  for step in range(4):
   fresh=[x.detach().requires_grad_() for x in features]
@@ -40,3 +41,17 @@ def test_empty_mask_and_salience_ignore_padding():
  a=salient_mask(x,text,valid,torch.zeros(2,7));x[~valid]=10000
  b=salient_mask(x,text,valid,torch.zeros(2,7))
  assert torch.equal(a,b) and not a[~valid].any() and torch.isfinite(a).all()
+
+def test_author_attention_masks_follow_each_sample_not_other_batch_member():
+ torch.set_num_threads(2);torch.manual_seed(19)
+ m=TVCA(16,16,16,4,dropout=0.).eval()
+ v=torch.randn(2,8,16);t=torch.randn(2,10,16);sam=torch.rand(2,8,1)
+ valid=torch.ones(2,8,dtype=torch.bool);valid[1,-3:]=False
+ with torch.no_grad():
+  both=m(v,t,sam,attention_mask_v=valid)
+  for i in range(2):
+   single=m(v[i:i+1],t[i:i+1],sam[i:i+1],attention_mask_v=valid[i:i+1])
+   for a,b in zip(both,single):torch.testing.assert_close(a[i:i+1],b,atol=2e-6,rtol=1e-5)
+  changed=v.clone();changed[~valid]=10000
+  masked=m(changed,t,sam,attention_mask_v=valid)
+  torch.testing.assert_close(masked[1],both[1],atol=2e-6,rtol=1e-5)

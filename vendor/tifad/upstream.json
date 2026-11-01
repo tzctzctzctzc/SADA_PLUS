@@ -1,0 +1,24 @@
+{
+  "repository": "https://github.com/YearangLee/Ti-FAD",
+  "source": "libs/modeling/tv_attn.py",
+  "upstream_notice": "Modified from GroundingDINO; original copyright header retained",
+  "local_sha256": "35e5461291194c3ec337cee106c50af42a5d9f7e1b7d57fdc0c2386f9f4707c1",
+  "changes": [
+    "Mask visual keys before softmax rather than an unused post-softmax tensor",
+    "Repeat each sample salience mask per head in batch-major order"
+  ],
+  "model_config_source": "https://github.com/YearangLee/Ti-FAD/blob/main/configs/thumos14_i3d.yaml",
+  "reused_hyperparameters": {
+    "text_encoder": "CLIP-B16",
+    "topk_ratio": 0.01,
+    "threshold": 100,
+    "new_module_learning_rate": 0.0001
+  },
+  "closed_set_transfer": [
+    "Retain pretrained DyFADet visual pyramid and classifier/regressor",
+    "Apply full-strength TiCA at six pyramid outputs",
+    "Sum closed-set classifier and author-style text logits with original classifier supplying prior bias",
+    "No zero-initialized path gate",
+    "Source-supervise hard/soft foreground; author sqrt(class*soft)*hard final score"
+  ]
+}

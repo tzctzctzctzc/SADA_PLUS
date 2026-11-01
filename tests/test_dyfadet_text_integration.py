@@ -17,7 +17,7 @@ def test_full_model_optimizer_ema_resume_routing_and_text(variant,tmp_path,monke
  val=next(iter(ctx['val']))
  with torch.no_grad():
   orig=e._ORIGINAL_DENSE(m.detector,val);new=e.base.dense(m,val)
-  assert e.base.digest(orig)==e.base.digest(new)
+  assert e.base.digest(orig)!=e.base.digest(new)
   m.enabled=False;assert e.base.digest(e.base.dense(m,val))==e.base.digest(orig);m.enabled=True
  m.loss_normalizer=17.;assert m.detector.loss_normalizer==17.
  assert e.base.digest(m.detector.state_dict())==ctx['initial_sha']

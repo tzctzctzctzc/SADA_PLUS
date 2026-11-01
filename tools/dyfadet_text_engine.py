@@ -134,9 +134,12 @@ def build(cfg,mode,device='cuda:0',workers=None):
     ctx['initial_sha']=base.digest(ref['ema']);del ref
     ctx['model']=wrap(ctx['model'],cfg,device)
     ctx['ema']=TextModelEma(ctx['model'],decay=.999)
+    groups=[[],[]]
     for name,p in ctx['model'].semantic.named_parameters():
-        group=0 if p.ndim>=2 and name!='phase_positions' else 1
-        ctx['opt'].param_groups[group]['params'].append(p)
+        groups[0 if p.ndim>=2 and name!='phase_positions' else 1].append(p)
+    for index,params in enumerate(groups):
+        ctx['opt'].add_param_group(dict(params=params,lr=1e-4,weight_decay=.05 if index==0 else 0.))
+    ctx['sched']=base.make_scheduler(ctx['opt'],cfg['opt'],cfg['benchmark']['steps_per_epoch'])
     assert {id(p) for g in ctx['opt'].param_groups for p in g['params']}=={id(p) for p in ctx['model'].parameters()}
     for p in ctx['ema'].module.parameters():p.requires_grad_(False)
     ctx['generators']['target']=torch.Generator().manual_seed(3123)
@@ -224,10 +227,14 @@ def numerical_step_check(a,b,ga,gb,learning_rate):
     difference=math.sqrt(sum(float((ga[k].double()-gb[k].double()).square().sum()) for k in ga))
     relative=difference/max(norm_a,norm_b,1e-12)
     assert relative<=1e-4,('relative_gradient_error',relative)
-    bound=2*learning_rate+1e-7
-    for name,atol in [('model',bound),('ema',.001*bound+1e-7)]:
+    rates=learning_rate if isinstance(learning_rate,tuple) else (learning_rate,learning_rate,learning_rate)
+    bound=2*rates[0]+1e-7;semantic_bound=2*rates[2]+1e-7
+    for name in ('model','ema'):
         assert set(a[name])==set(b[name])
-        for k in a[name]:assert torch.allclose(a[name][k],b[name][k],atol=atol,rtol=1e-6),(name,k)
+        for k in a[name]:
+            atol=semantic_bound if k.startswith('semantic.') else bound
+            if name=='ema':atol=.001*atol+1e-7
+            assert torch.allclose(a[name][k],b[name][k],atol=atol,rtol=1e-6),(name,k)
     assert a['optimizer']['param_groups']==b['optimizer']['param_groups']
     assert set(a['optimizer']['state'])==set(b['optimizer']['state'])
     for index,values in a['optimizer']['state'].items():
@@ -237,20 +244,22 @@ def numerical_step_check(a,b,ga,gb,learning_rate):
             else:assert torch.allclose(v,other[k],atol=1e-6 if k=='exp_avg' else 1e-7,rtol=1e-5),('optimizer',index,k)
     for k in set(a)-{'model','ema','optimizer'}:assert base.digest(a[k])==base.digest(b[k]),k
     return dict(exact=base.digest(a)==base.digest(b),max_parameter_delta=max(float((a['model'][k]-b['model'][k]).abs().max()) for k in a['model']),
-        max_gradient_delta=max(float((ga[k]-gb[k]).abs().max()) for k in ga),gradient_relative_l2=relative,gradient_relative_l2_limit=1e-4,parameter_atol=bound)
+        max_gradient_delta=max(float((ga[k]-gb[k]).abs().max()) for k in ga),gradient_relative_l2=relative,gradient_relative_l2_limit=1e-4,parameter_atol=bound,semantic_parameter_atol=semantic_bound)
 
 def probe(cfg,entry,guard):
     ctx=build(cfg,'uda');initial=ctx['initial_sha'];source=next(iter(ctx['train']))
     m=ctx['model'];m.eval()
     with torch.no_grad():
-        old=_ORIGINAL_DENSE(m.detector,source[:1]);new=base.dense(m,source[:1])
-        assert base.digest(old)==base.digest(new),'initial semantic path changed SO outputs'
+        old=_ORIGINAL_DENSE(m.detector,source[:1]);m.enabled=False;disabled=base.dense(m,source[:1]);m.enabled=True
+        assert base.digest(old)==base.digest(disabled),'disabled path differs from SO detector'
+        new=base.dense(m,source[:1]);initial_semantic_delta=max(float((a-b).abs().max()) for a,b in zip(old[2],new[2]))
+        assert initial_semantic_delta>0
     m.last_semantic=None
 
     target_batches=list(itertools.islice(ctx['target'],8));assert target_batches
     before={k:base.digest(getattr(ctx['model'],k).state_dict()) for k in MODULES}
     # At identical state the disabled adaptation path must equal official source training.
-    state=frozen_state(ctx);state['probe']=True;lr=ctx['opt'].param_groups[0]['lr']
+    state=frozen_state(ctx);state['probe']=True;lr=tuple(g['lr'] for g in ctx['opt'].param_groups)
     a,_=base.step(ctx,source);ctx['step']+=1;official=frozen_state(ctx);ga=gradients(ctx)
     restore(ctx,deepcopy(state));b,_=update(ctx,source)
     assert all(a[k]==b[k] for k in a)
@@ -293,7 +302,7 @@ def probe(cfg,entry,guard):
     state=frozen_state(ctx);state['probe']=True
     restore(ctx,deepcopy(state));again=capture(ctx,0,[],[]);again['probe']=True
     assert base.digest(again)==base.digest(state);del again
-    lr=ctx['opt'].param_groups[0]['lr'];l1,_=update(ctx,source,chosen);after1=frozen_state(ctx);g1=gradients(ctx)
+    lr=tuple(g['lr'] for g in ctx['opt'].param_groups);l1,_=update(ctx,source,chosen);after1=frozen_state(ctx);g1=gradients(ctx)
     restore(ctx,deepcopy(state));l2,_=update(ctx,source,chosen);after2=frozen_state(ctx)
     assert all(np.allclose(l1[k],l2[k],atol=1e-6,rtol=1e-5) for k in l1)
     resumed=numerical_step_check(after1,after2,g1,gradients(ctx),lr)
@@ -305,7 +314,7 @@ def probe(cfg,entry,guard):
         p3=predict_unlabeled(m,un)
     assert base.digest(p1)==base.digest(p2)==base.digest(p3)
     torch.cuda.synchronize()
-    save(entry/'probe.json',dict(status='passed',initial_ema_sha256=initial,initial_SO_dense_equal=True,semantic_parameters_updated=changed['semantic'],text_projection_gradient_norm=text_grad,text_counterfactual_max_delta=text_delta,semantic_parameter_count=sum(p.numel() for p in ctx['model'].semantic.parameters()),parameters_updated=changed,
+    save(entry/'probe.json',dict(status='passed',initial_ema_sha256=initial,disabled_SO_dense_equal=True,initial_semantic_max_delta=initial_semantic_delta,full_strength_semantic_path=True,semantic_parameters_updated=changed['semantic'],text_projection_gradient_norm=text_grad,text_counterfactual_max_delta=text_delta,semantic_parameter_count=sum(p.numel() for p in ctx['model'].semantic.parameters()),parameters_updated=changed,
         target_gradient_norms=all_norms,target_gradient_positive=True,source_disabled_path_equal=True,source_disabled_calls_official=True,
         disabled_GPU_repeat=disabled,full_state_restore=True,next_step_exact=resumed['exact'],next_step_numerical=True,next_step_GPU_repeat=resumed,
         teacher_no_grad=True,target_GT_used=False,split_loss_routing=routing,split_support=split_support,
@@ -336,9 +345,7 @@ def train_mode(cfg,entry,mode,guard,matched_stop=None):
         del saved
     else:
         value=base.validation(ctx['ema'].module,ctx['val']);history=[[0,value]]
-        original=torch.load(Path(cfg['benchmark']['reference'])/'best.pt',map_location='cpu')
-        old=min(original['history'],key=lambda x:x[1])[1];del original
-        assert abs(value-old)<1e-7,('source epoch0 mismatch',value,old)
+        # 新全强度跨模态架构从epoch0已改变预测；epoch0是该架构的初始化候选，不伪称SO原样回退。
         state=capture(ctx,0,history,rows);base.checkpoint(d/'best.pt',state);base.checkpoint(d/'latest.pt',state);del state
         (d/'events.jsonl').touch();save(d/'metrics.json',rows)
     best=min(x[1] for x in history)
@@ -357,7 +364,7 @@ def train_mode(cfg,entry,mode,guard,matched_stop=None):
                 if k!='target_classes':totals[k]=totals.get(k,0.)+v
             record(ctx,d/'events.jsonl',src,tgt,losses)
         del source_iter,target_iter
-        row={k:v/(n+1) for k,v in totals.items()};row.update(epoch=epoch,steps=n+1,target_gradient_norms=norms,target_classes=classes,
+        row={k:v/(n+1) for k,v in totals.items()};row.update(epoch=epoch,semantic_lr=ctx['opt'].param_groups[2]['lr'],steps=n+1,target_gradient_norms=norms,target_classes=classes,
             target_zero_positive_batches=zeros,target_training_batches=n+1 if mode=='uda' else 0,lr=ctx['opt'].param_groups[0]['lr'])
         improved=False
         if epoch%5==0:
