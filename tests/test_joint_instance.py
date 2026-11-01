@@ -61,3 +61,9 @@ def test_source_selection_epoch_zero_ties_and_first_stop():
 
 def test_missing_source_history_rejected():
     with pytest.raises(AssertionError):select([dict(epoch=0,map=.5),dict(epoch=4,map=.6)])
+
+def test_target_gt_rejected_before_any_model_or_selector_call():
+    from tools.joint_instance import target_objective,pseudo_instances
+    v=dict(feats=torch.zeros(8,64),metadata={},segments=torch.tensor([[1.,5.]]),labels=torch.tensor([2]))
+    for fn,args in [(target_objective,(None,None,v,None)),(pseudo_instances,(None,None,v,3))]:
+        with pytest.raises(ValueError,match='GT'):fn(*args)
