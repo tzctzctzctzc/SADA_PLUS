@@ -63,5 +63,13 @@ class BoundaryDiagnosticTest(unittest.TestCase):
         self.assertEqual(rows[0]['point'],16.)
         self.assertEqual(rows[0]['segment'],[8.,32.])
 
+    def test_gate_needs_incremental_reliability_within_confidence_bins(self):
+        rows=[dict(score=.5,relative_std=i/10,boundary_error=i/10,base_iou=1-i/40,mean_iou=1-i/40,gt_supported=True) for i in range(32)]
+        group=dict(statistics=statistics(rows),scored_rows=rows)
+        self.assertTrue(decide([group]*6)['mechanism_gate_passed'])
+        reversed_iou=[dict(x,base_iou=1-x['base_iou']) for x in rows]
+        group=dict(statistics=statistics(reversed_iou),scored_rows=reversed_iou)
+        self.assertFalse(decide([group]*6)['mechanism_gate_passed'])
+
 
 if __name__=='__main__':unittest.main()
