@@ -2,7 +2,7 @@ import unittest
 from copy import deepcopy
 import torch
 from tools.temporal_interval_energy import (sample_tokens,TemporalIntervalEnergy,
-    candidate_group,energy_loss,score_intervals,search,interval_iou,SPEC)
+    candidate_group,energy_loss,score_intervals,search,interval_iou,SPEC,joint_decision)
 
 
 class TemporalEnergyTests(unittest.TestCase):
@@ -53,6 +53,16 @@ class TemporalEnergyTests(unittest.TestCase):
         h=TemporalIntervalEnergy(channels=4,hidden=16).eval();x=torch.randn(1,40,4);valid=torch.ones(1,40,dtype=torch.bool);labels=torch.tensor([0])
         a=h.encode(x,valid,labels);b=h.encode(x.flip(1),valid,labels)
         self.assertGreater(float((a-b).abs().max()),1e-5)
+
+    def test_joint_extra_adaptation_epoch0_and_first_stop(self):
+        h=[[0,.5],[5,.6],[10,.7],[15,.8]];d=joint_decision(h)
+        self.assertEqual(d['best_epoch'],0);self.assertEqual(d['reason'],'source_patience_exhausted')
+        with self.assertRaises(ValueError):joint_decision(h+[[20,.9]])
+
+    def test_batch_search_matches_single_for_identity(self):
+        h=TemporalIntervalEnergy(channels=4,hidden=16).eval();f=[torch.randn(1,4,100)];m=[torch.ones(1,1,100,dtype=torch.bool)];b=torch.tensor([[20.,35.],[45.,65.]])
+        out,stats=search(h,f,m,b,torch.tensor([0,0]),torch.tensor([0,1]),[1],100)
+        self.assertTrue(torch.equal(out,b));self.assertEqual(stats['searched'],2)
 
 
 if __name__=='__main__':unittest.main()

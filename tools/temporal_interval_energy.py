@@ -24,6 +24,19 @@ SPEC = dict(schema=SCHEMA, seed=123, hidden=128, layers=2, heads=4,
     original_class_scores_unchanged=True, target_gt=False)
 
 
+def joint_decision(history):
+    """额外适配须允许成熟epoch0胜出，不能强迫选一个更差的训练后模型。"""
+    epochs=[x[0] for x in history]
+    if epochs!=[0]+list(range(5,epochs[-1]+1,5)):raise ValueError('联合源验证历史缺失')
+    best=float('inf');which=0
+    for i,(epoch,value) in enumerate(history):
+        if not math.isfinite(value):raise ValueError('源验证非有限')
+        if value<best:best=value;which=epoch
+        if i<len(history)-1 and epoch-which>=15:raise ValueError('错过首次合法停止')
+    epoch=epochs[-1]
+    return dict(epoch=epoch,best_epoch=which,best_loss=best,reason='source_patience_exhausted' if epoch-which>=15 else 'max_epochs' if epoch==50 else 'running')
+
+
 def interval_iou(a, b):
     inter=(torch.minimum(a[...,1],b[...,1])-torch.maximum(a[...,0],b[...,0])).clamp_min(0)
     return inter/((a[...,1]-a[...,0])+(b[...,1]-b[...,0])-inter).clamp_min(1e-6)

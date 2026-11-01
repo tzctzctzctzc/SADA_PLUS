@@ -140,7 +140,11 @@ def gpu(args):
                     if torch.is_tensor(current):current.copy_(item.to(current.device))
             else:setattr(network,name,deepcopy(value))
     del saved;install_joint(ctx,head,e/'joint_source_events.jsonl')
-    joint=e/'joint';joint.mkdir();best=float('inf');joint_history=[];joint_rows=[]
+    joint=e/'joint';joint.mkdir();ctx.valid_metrics_src.reset()
+    validation_loader=base.StepLoader(ctx.val_loader_src,1) if args.stage=='probe' else ctx.val_loader_src
+    initial_loss=float(ctx._valid_epoch(0,validation_loader,domain='src'))
+    best=initial_loss;joint_history=[[0,initial_loss]];joint_rows=[]
+    torch.save(base.capture(ctx,cfg,0,joint_history),joint/'best.pt')
     for epoch in range(1,(2 if args.stage=='probe' else SPEC['joint_epochs'])+1):
         base.epoch_setup(ctx,epoch);before=base.tensor_digest(ctx.model.backbone_source.state_dict())
         original_loaders=ctx.train_loader_src,ctx.train_loader_tgt
@@ -157,8 +161,8 @@ def gpu(args):
             torch.save(state,joint/'latest.pt')
         save(joint/'metrics.json',joint_rows);save(joint/'source_history.json',joint_history);print('TEMPORAL_ENERGY_JOINT',epoch,joint_rows[-1],flush=True)
         if args.stage!='probe' and epoch%5==0:
-            from tools.baseline_protocol import decision
-            stop=decision(joint_history)
+            from tools.temporal_interval_energy import joint_decision
+            stop=joint_decision(joint_history)
             if stop['reason']!='running':save(joint/'termination.json',stop);break
     if args.stage=='probe':
         import io

@@ -2,8 +2,8 @@
 import math
 from pathlib import Path
 import torch
-from tools.baseline_protocol import read,sha,termination
-from tools.temporal_interval_energy import SCHEMA,SPEC
+from tools.baseline_protocol import read,sha
+from tools.temporal_interval_energy import SCHEMA,SPEC,joint_decision
 
 
 def audit_entry(entry):
@@ -27,7 +27,7 @@ def audit_entry(entry):
         if z is not hist[-1]:assert z['epoch']-which<15
     assert source['best_epoch']==which and (source['stop_epoch']==50 or source['stop_epoch']-which>=15)
     frozen=torch.load(e/'best_energy.pt',map_location='cpu');latest=torch.load(e/'latest_energy.pt',map_location='cpu');assert frozen['epoch']==which and latest['history']==hist and latest['cuda_rng'].numel()>0
-    joint=e/'joint';t=termination(read(joint/'source_history.json'));assert t==read(joint/'termination.json');saved=torch.load(joint/'best.pt',map_location='cpu');last=torch.load(joint/'latest.pt',map_location='cpu');assert saved['epoch']==t['best_epoch'] and saved['config']==cfg and last['epoch']==t['epoch'] and last['rng']['cuda'][0].numel()>0
+    joint=e/'joint';t=joint_decision(read(joint/'source_history.json'));assert t['reason']!='running' and t==read(joint/'termination.json');saved=torch.load(joint/'best.pt',map_location='cpu');last=torch.load(joint/'latest.pt',map_location='cpu');assert saved['epoch']==t['best_epoch'] and saved['config']==cfg and last['epoch']==t['epoch'] and last['rng']['cuda'][0].numel()>0
     assert any(k.startswith('temporal_energy.') for k in saved['ema_state_dict'])
     assert last['model_controls']['temporal_energy_state']['step']>0
     a=read(e/'acceptance.json');j=read(e/'joint_acceptance.json');assert a['parameters_updated'] and a['head_gradient_norm']>0 and a['temporal_token_count']==40 and j['backbone_updated'] and j['actual_source_fpn_gradient'][0]['source_fpn_gradient_norm']>0
