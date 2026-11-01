@@ -4,6 +4,7 @@
 batch、FP32、损失、梯度裁剪、优化器、EMA、scheduler、数据和RNG均不改。
 """
 import argparse,os,sys,time,statistics,json
+from copy import deepcopy
 from pathlib import Path
 CODE=Path(__file__).resolve().parents[1];sys.path.insert(0,str(CODE))
 
@@ -38,11 +39,15 @@ def main(args):
     assert source_only
     os.chdir('/vepfs/vlms/SADA_PLUS');torch.set_num_threads(8)
     ctx=e.build(cfg);batches=list(itertools.islice(ctx['train'],args.steps));assert len(batches)==args.steps
-    # 预热后重置到同一完整保存点；所有测量输入在CPU缓存，不改实际训练数据流。
-    e.restore(ctx,saved);e.step(ctx,batches[0]);torch.cuda.synchronize()
+    # AdamW的CPU step标量可能被load_state_dict直接引用，重放必须深拷贝，
+    # 否则测速本身会递增保存点里的step计数；正式训练路径完全未修改。
+    saved_digest=e.digest(saved)
+    e.restore(ctx,deepcopy(saved))
+    for batch in batches:e.step(ctx,batch)
+    torch.cuda.synchronize();assert e.digest(saved)==saved_digest
     reference=None;timings={};comparisons={};losses={}
     for label,fn in [('original1',e.step),('batched1',batched_step),('batched2',batched_step),('original2',e.step)]:
-        e.restore(ctx,saved);torch.cuda.synchronize();start=time.perf_counter();trace=[]
+        e.restore(ctx,deepcopy(saved));torch.cuda.synchronize();start=time.perf_counter();trace=[]
         for i,batch in enumerate(batches):
             value,_=fn(ctx,batch,measure=i==0);trace.append(value)
         torch.cuda.synchronize();timings[label]=time.perf_counter()-start
@@ -53,6 +58,7 @@ def main(args):
             comparisons[label]['rng_exact']=e.digest(reference['rng'])==e.digest(after['rng'])
             comparisons[label]['loss_max_absolute_difference']=max(abs(x[k]-y[k]) for x,y in zip(losses['original1'],trace) for k in x)
         losses[label]=trace
+        assert e.digest(saved)==saved_digest,'benchmark mutated reference checkpoint'
         if after is not reference:del after
         print('BENCH',label,timings[label],comparisons.get(label),flush=True)
     original=statistics.median([timings['original1'],timings['original2']]);batched=statistics.median([timings['batched1'],timings['batched2']])
@@ -63,6 +69,7 @@ def main(args):
         median_speedup=original/batched,source_only=True,target_GT_read=False,active_training_modified=False,
         batch_changed=False,precision_changed=False,mathematics_changed=False,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,
         criterion='atol1e-6-rtol1e-5-same-as-official-operator-replay-gate',
+        immutable_checkpoint_replay=True,all_measured_shapes_warmed=True,
         recommended_adoption=passed and original/batched>=1.1))
 
 
