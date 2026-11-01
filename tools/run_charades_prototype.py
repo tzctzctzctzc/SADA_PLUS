@@ -67,8 +67,8 @@ def evaluate_safe(root,variant):
             columns['label'] += row['labels'];columns['score'] += row['scores']
         evaluator=ANETdetection(cfg['baseline']['annotation_for_offline_evaluation'],split,num_workers=4,action_subsampling='all')
         ap,score,*_=evaluator.evaluate({k:np.asarray(v) for k,v in columns.items()},verbose=False)
-        results[domain]=dict(map_0.1_to_0.5=float(score),map_by_tiou=[float(v) for v in ap],
-            videos=len(ds),selected_epoch=saved['epoch'],predictions_sha256=sha(dest),GT_read_after_saved_predictions=True)
+        results[domain]={'map_0.1_to_0.5':float(score),'map_by_tiou':[float(v) for v in ap],
+            'videos':len(ds),'selected_epoch':saved['epoch'],'predictions_sha256':sha(dest),'GT_read_after_saved_predictions':True}
         save(entry/'evaluation'/(domain+'_val.json'),results[domain])
     save(entry/'evaluation/manifest.json',dict(results=results,checkpoint_sha256=sha(entry/'best.pt'),source_selected=True,target_GT_for_adaptation=False))
     return results
