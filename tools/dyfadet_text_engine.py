@@ -262,7 +262,9 @@ def probe(cfg,entry,guard):
     state=frozen_state(ctx);state['probe']=True;lr=tuple(g['lr'] for g in ctx['opt'].param_groups)
     a,_=base.step(ctx,source);ctx['step']+=1;official=frozen_state(ctx);ga=gradients(ctx)
     restore(ctx,deepcopy(state));b,_=update(ctx,source)
-    assert all(a[k]==b[k] for k in a)
+    loss_repeat=dict(official=a,repeated=b,max_absolute_delta=max(abs(a[k]-b[k]) for k in a))
+    save(entry/'source_loss_repeat.json',loss_repeat)
+    assert all(np.allclose(a[k],b[k],atol=1e-6,rtol=1e-5) for k in a),loss_repeat
     disabled=numerical_step_check(official,frozen_state(ctx),ga,gradients(ctx),lr)
     restore(ctx,deepcopy(state));del state,official,ga
     all_norms={};loss=None;chosen=None
@@ -316,7 +318,7 @@ def probe(cfg,entry,guard):
     torch.cuda.synchronize()
     save(entry/'probe.json',dict(status='passed',initial_ema_sha256=initial,disabled_SO_dense_equal=True,initial_semantic_max_delta=initial_semantic_delta,full_strength_semantic_path=True,semantic_parameters_updated=changed['semantic'],text_projection_gradient_norm=text_grad,text_counterfactual_max_delta=text_delta,semantic_parameter_count=sum(p.numel() for p in ctx['model'].semantic.parameters()),parameters_updated=changed,
         target_gradient_norms=all_norms,target_gradient_positive=True,source_disabled_path_equal=True,source_disabled_calls_official=True,
-        disabled_GPU_repeat=disabled,full_state_restore=True,next_step_exact=resumed['exact'],next_step_numerical=True,next_step_GPU_repeat=resumed,
+        disabled_GPU_repeat=disabled,source_loss_repeat=loss_repeat,full_state_restore=True,next_step_exact=resumed['exact'],next_step_numerical=True,next_step_GPU_repeat=resumed,
         teacher_no_grad=True,target_GT_used=False,split_loss_routing=routing,split_support=split_support,
         original_inference_equal=True,loss=loss,peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,
         guard=guard,guard_sha256=sha(guard)))

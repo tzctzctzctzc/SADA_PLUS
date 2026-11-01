@@ -8,7 +8,8 @@ import subprocess
 import sys
 import time
 
-CODE=Path(__file__).resolve().parents[1]
+CONTROLLER_CODE=Path(__file__).resolve().parents[1]
+CODE=Path(os.environ.get('DYFA_WORKER_CODE',str(CONTROLLER_CODE)))
 sys.path.insert(0,str(CODE))
 from tools.dyfadet_text_protocol import SPEC,SCHEMA,read,save,sha,identity,prepare,audit,guard_audit
 from tools.dyfadet_uda_gpu import admit,first_cuda_guard
@@ -17,7 +18,7 @@ def run(args):
     code=identity();root=args.output
     if args.resume_existing:
         assert read(root/'plan.json')['code']==code,'resume requires same committed code'
-        save(root/('resume_launch_%d.json'%int(time.time())),dict(pid=os.getpid(),code=code))
+        save(root/('resume_launch_%d.json'%int(time.time())),dict(pid=os.getpid(),code=code,controller_code=str(CONTROLLER_CODE),max_gpu_workers=args.max_gpu_workers))
     else:prepare(root,code)
     shifts=['S'+str(i) for i in range(1,7)]
     active={};done={};probe_pending=[];pending=[];evals=[]
@@ -36,12 +37,12 @@ def run(args):
             OMP_NUM_THREADS='8',MKL_NUM_THREADS='8',PYTHONHASHSEED='123',CUBLAS_WORKSPACE_CONFIG=':4096:8')
         if card:env.update(CUDA_VISIBLE_DEVICES=card['uuid'],SADA_BASELINE_LEASE=card['lease'],SADA_BASELINE_LEASE_SHA256=card['lease_sha256'])
         log=(e/(stage+'.log')).open('a')
-        p=subprocess.Popen([sys.executable,'-u','-B',str(Path(__file__).resolve()),'--output',str(root),'--entry',str(e),'--stage',stage,'--extension',args.extension],
+        p=subprocess.Popen([sys.executable,'-u','-B',str(CODE/'tools/run_dyfadet_text.py'),'--output',str(root),'--entry',str(e),'--stage',stage,'--extension',args.extension],
             cwd=CODE,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True);log.close()
         return dict(process=p,stage=stage,shift=s,gpu=card['index'] if card else None)
     def acquire():
         busy={t['gpu'] for t in active.values() if t['gpu'] is not None}
-        if len(busy)>=2:return None
+        if len(busy)>=args.max_gpu_workers:return None
         for index in ([0,2,1,3] if SPEC['text_variant']=='tifad' else [1,3,0,2]):
             if index in busy:continue
             try:card=admit(index,root,minimum,code['commit'])
@@ -96,7 +97,7 @@ def run(args):
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--entry',type=Path)
     p.add_argument('--data',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'));p.add_argument('--extension',required=True)
-    p.add_argument('--stage',choices=['probe','gpu','evaluate']);p.add_argument('--resume-existing',action='store_true');args=p.parse_args()
+    p.add_argument('--stage',choices=['probe','gpu','evaluate']);p.add_argument('--resume-existing',action='store_true');p.add_argument('--max-gpu-workers',type=int,choices=[2,4],default=4);args=p.parse_args()
     sys.path.insert(0,args.extension)
     def stop(sig,frame):raise SystemExit(128+sig)
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
