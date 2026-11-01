@@ -109,27 +109,33 @@ def cpu(job):
   target_gt_used=False,checkpoint_sha256=manifest['checkpoint_sha256'],prediction_sha256=receipt['prediction_sha256'])
  save(job/'complete.json',result);print(json.dumps(result),flush=True)
 
-def snapshot(entry,out):
+def snapshot_file(source,out,entry):
  import torch
+ entry=Path(entry);out=Path(out);source=Path(source)
+ candidate=out/('pending_'+source.name);candidate.parent.mkdir(parents=True,exist_ok=True)
+ if candidate.exists():candidate.unlink()
+ os.link(source,candidate)
+ state=torch.load(candidate,map_location='cpu');epoch=state['epoch'];cfg=state['config'];del state
+ job=out/('epoch%03d'%epoch);job.mkdir(exist_ok=True)
+ if not (job/'snapshot.json').exists():
+  candidate.replace(job/'checkpoint.pt')
+  save(job/'snapshot.json',dict(epoch=epoch,origin=str(source),checkpoint_sha256=sha(job/'checkpoint.pt'),immutable_atomic_inode=True))
+  save(job/'config.json',cfg);save(job/'source_val_unlabeled.json',read(entry/'source_val_unlabeled.json'),sort_keys=False)
+ else:candidate.unlink()
+ return job
+
+def snapshot(entry,out):
  entry=Path(entry);out=Path(out);found=[]
  for name in ['latest.pt','best.pt']:
   source=entry/name
   if not source.exists():continue
-  candidate=out/('pending_'+name);candidate.parent.mkdir(parents=True,exist_ok=True)
-  if candidate.exists():candidate.unlink()
-  os.link(source,candidate)  # 原路径被replace后，此inode仍不可变。
-  state=torch.load(candidate,map_location='cpu');epoch=state['epoch'];cfg=state['config'];del state
-  job=out/('epoch%03d'%epoch);job.mkdir(exist_ok=True)
-  if not (job/'snapshot.json').exists():
-   candidate.replace(job/'checkpoint.pt')
-   save(job/'snapshot.json',dict(epoch=epoch,origin=str(source),checkpoint_sha256=sha(job/'checkpoint.pt'),immutable_atomic_inode=True))
-   save(job/'config.json',cfg);save(job/'source_val_unlabeled.json',read(entry/'source_val_unlabeled.json'),sort_keys=False)
-  else:candidate.unlink()
-  found.append(job)
+  found.append(snapshot_file(source,out,entry))
  return found
 
 def watch(args):
  root=Path(args.root);output=root/'monitor/source_signals';seen=set();child=None
+ for p in (root/'monitor/source_signal_preservation').glob('S*_*.pt_*'):
+  shift=p.name.split('_')[0];snapshot_file(p,output/shift,root/'formal'/shift/'phase')
  # CPU supervisor始终保留每个新保存点；单GPU旁路评估串行，训练继续运行。
  while True:
   jobs=[]
