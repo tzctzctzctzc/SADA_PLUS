@@ -327,7 +327,7 @@ def pretrain_candidate_head(ctx, cfg, output):
                     strong_videos.append(x);views.append(view)
                 strong = direct(model, strong_videos, training=role == 'train')
             path = cache_root / role / ('%04d.pt' % index)
-            base.checkpoint(path, _cpu_tree(dict(weak=weak, strong=strong, videos=videos, strong_videos=strong_videos, views=views)))
+            write_source_cache(path, dict(weak=weak, strong=strong, videos=videos, strong_videos=strong_videos, views=views))
             caches[role].append(dict(path=str(path), sha256=sha(path), videos=[v['metadata']['video_id'] for v in videos]))
             print('SOURCE_CANDIDATE_CACHE', role, index, flush=True)
     save(output.parent / 'source_candidate_cache_index.json', dict(roles=caches, source_only=True, target_gt_used=False))
@@ -401,6 +401,14 @@ def _cpu_tree(value):
     if isinstance(value, (tuple, list)):
         return type(value)(_cpu_tree(v) for v in value)
     return value
+
+
+def write_source_cache(path, value):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + '.tmp')
+    torch.save(_cpu_tree(value), tmp)
+    tmp.replace(path)
 
 
 def _device_tree(value, device):

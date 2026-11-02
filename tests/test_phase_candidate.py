@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 import torch
 from tools.phase_boundary import PhaseBoundary, sequence_loss, map_coordinates
-from tools.phase_candidate_components import TokenProjection, OrderedTemporalConv, refine, candidate_coordinates, source_candidates_loss, paired_source_error_loss, endpoint_mask, _device_tree, _cpu_tree
+from tools.phase_candidate_components import write_source_cache, TokenProjection, OrderedTemporalConv, refine, candidate_coordinates, source_candidates_loss, paired_source_error_loss, endpoint_mask, _device_tree, _cpu_tree
 
 
 def test_foreground_joint_probability_changes_and_has_real_rejection_gradient():
@@ -132,3 +132,12 @@ def test_flattened_token_projection_preserves_full_forward_and_derivative():
         expected = reference(a);expected.square().sum().backward()
     observed = actual(b);observed.square().sum().backward()
     assert torch.allclose(expected, observed, atol=1e-12) and torch.allclose(a.grad, b.grad, atol=1e-12)
+
+
+def test_source_cache_creates_nested_role_directory_and_roundtrips(tmp_path):
+    path = tmp_path / 'source_cache' / 'train' / '0000.pt'
+    value = dict(weak=(torch.randn(2, 3), torch.tensor([True, False])), videos=[dict(metadata=dict(video_id='source'), labels=torch.tensor([0]))])
+    write_source_cache(path, value)
+    restored = torch.load(path)
+    assert torch.equal(restored['weak'][0], value['weak'][0]) and restored['videos'][0]['metadata']['video_id'] == 'source'
+    assert not path.with_name(path.name + '.tmp').exists()

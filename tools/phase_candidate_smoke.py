@@ -15,7 +15,7 @@ def main(args):
     import torch
     from tools import baseline_engine as base
     from tools.phase_boundary import direct,strong_view,map_coordinates,source_loss
-    from tools.phase_candidate_components import _cpu_tree,_device_tree,paired_source_error_loss
+    from tools.phase_candidate_components import write_source_cache,_cpu_tree,_device_tree,paired_source_error_loss
     cfg=read(args.entry/'config.json');assert cfg['baseline']['code']==code_identity()
     os.chdir('/vepfs/vlms/SADA_PLUS');ctx=base.build(cfg);model=ctx.model;head=model.phase_boundary
     videos=base.move_to_device(next(iter(ctx.train_loader_src)),model.device);model.eval()
@@ -28,6 +28,8 @@ def main(args):
             strong_videos.append(x);views.append(view)
         strong=direct(model,strong_videos)
     data=_device_tree(_cpu_tree(dict(weak=weak,strong=strong,videos=videos,strong_videos=strong_videos,views=views)),model.device)
+    cache_path=args.entry/'source_cache_probe'/'train'/'0000.pt';write_source_cache(cache_path,data)
+    assert base.tensor_digest(torch.load(cache_path,map_location='cpu'))==base.tensor_digest(_cpu_tree(data))
     opt=torch.optim.AdamW(head.parameters(),lr=.0003);opt.zero_grad()
     f,m,c,r=data['weak'];loss,stats=source_loss(model,head,f,m,r,data['videos'],c)
     paired,pair_stats=paired_source_error_loss(model,head,data['weak'],data['strong'],data['views'],data['videos'])
@@ -46,6 +48,7 @@ def main(args):
     result=dict(status='passed',scope='one_shift_source_candidate_kernel_and_two_original_optimizer_steps; no formal weights',
         source_videos=[v['metadata']['video_id'] for v in videos],source_loss=float(loss.detach()),source_stats=stats,
         paired_source_stats=pair_stats,source_head_gradients=gradients,backbone_updated=True,regression_updated=True,
+        source_cache_disk_roundtrip='passed',
         original_optimizer_steps=2,full_state_roundtrip='passed',new_target_channel_tested=False,
         metrics={k:float(v) for k,v in metrics.items() if k.startswith('t_phase_')},
         peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,guard=guard,guard_sha256=sha(guard),code=code_identity(),formal_training=False)
