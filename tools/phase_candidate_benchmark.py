@@ -18,7 +18,14 @@ def main(a):
     state=torch.load(a.snapshot,map_location='cpu');h=PhaseBoundary(torch.load(SPEC['text_cache'],map_location='cpu')['embeddings']).cuda();h.load_state_dict(state['state_dict'])
     model=SimpleNamespace(fpn_strides=[cfg['model']['scale_factor']**i for i in range(cfg['model']['backbone_arch'][-1]+1)])
     out=[];models=[];optimizers=[];grads=[]
+    import tools.phase_boundary as phase
+    accelerated_partition=phase.path_partition
+    def original_partition(lp):
+        a=lp[...,0,0];b=torch.full_like(a,-1e4);c=b.clone()
+        for t in range(1,lp.shape[-2]):a,b,c=a+lp[...,t,0],torch.logaddexp(a,b)+lp[...,t,1],torch.logaddexp(b,c)+lp[...,t,2]
+        return c
     for batch in [False,True]:
+        phase.path_partition=accelerated_partition if batch else original_partition
         head=deepcopy(h);head.batch_candidate_errors=batch;opt=torch.optim.AdamW(head.parameters(),lr=.0003,weight_decay=.05);opt.load_state_dict(deepcopy(state['optimizer']))
         torch.cuda.reset_peak_memory_stats();rows=[]
         for step in range(3):

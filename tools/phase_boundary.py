@@ -63,10 +63,11 @@ def assert_pair(c,old):
 def path_partition(logp):
  """所有非空三阶段顺序路径的log partition；阶段长度可为任意正整数。"""
  assert logp.shape[-1]==3 and logp.shape[-2]>=3
- a=logp[...,0,0];b=torch.full_like(a,-1e4);c=b.clone()
- for t in range(1,logp.shape[-2]):
-  a,b,c=a+logp[...,t,0],torch.logaddexp(a,b)+logp[...,t,1],torch.logaddexp(b,c)+logp[...,t,2]
- return c
+ a=logp[...,0].cumsum(-1);p=logp[...,1].cumsum(-1);q=logp[...,2].cumsum(-1)
+ initial=torch.full_like(a[...,:1],-1e4)
+ b=p+torch.logcumsumexp(torch.cat([initial-p[...,:1],a[...,:-1]-p[...,:-1]],-1),-1)
+ c=q+torch.logcumsumexp(torch.cat([initial-q[...,:1],b[...,:-1]-q[...,:-1]],-1),-1)
+ return c[...,-1]
 
 def phase_posterior(logits):
  """前向后向精确边缘化，支持端点固定但内部阶段任意变长。"""

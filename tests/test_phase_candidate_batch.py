@@ -45,3 +45,14 @@ def test_source_batch_preserves_candidate_counts_loss_and_update():
         assert sa==sb and torch.allclose(la,lb,atol=1e-6)
         la.backward();lb.backward();oa.step();ob.step()
     assert max((p-q).abs().max() for p,q in zip(a.parameters(),b.parameters()))<2e-5
+
+
+def test_prefix_partition_matches_original_recurrence_and_derivatives(double_default):
+    from tools.phase_boundary import path_partition
+    torch.manual_seed(11);x=torch.randn(3,10,24,3,requires_grad=True);y=x.detach().clone().requires_grad_()
+    a=x[...,0,0];b=torch.full_like(a,-1e4);c=b.clone()
+    for t in range(1,x.shape[-2]):a,b,c=a+x[...,t,0],torch.logaddexp(a,b)+x[...,t,1],torch.logaddexp(b,c)+x[...,t,2]
+    actual=path_partition(y)
+    assert torch.allclose(c,actual,atol=1e-11,rtol=1e-10)
+    c.sum().backward();actual.sum().backward()
+    assert torch.allclose(x.grad,y.grad,atol=1e-10,rtol=1e-9)
