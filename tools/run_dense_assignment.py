@@ -119,7 +119,7 @@ def probe(cfg,entry,guard):
     base.restore(ctx,restored);expected=base.tensor_digest(draws())
     base.restore(ctx,restored);assert expected==base.tensor_digest(draws())
     save(entry/'result.json',dict(status='passed',schema=SCHEMA,mode=cfg['dense_assignment']['mode'],
-        shift=cfg['baseline']['shift'],code=code_identity(),cold_initial_state_sha=ctx.initial_state_sha,
+        shift=cfg['baseline']['shift'],code=code_identity(),config_sha256=sha(entry/'config.json'),cold_initial_state_sha=ctx.initial_state_sha,
         cold_initial_detector_sha=ctx.initial_detector_sha,disabled_all_losses_exact=True,
         disabled_complete_forward_NMS_voting_exact=True,
         phases=phases,full_model_EMA_three_optimizer_scheduler_controls_RNG_restore=True,
@@ -294,7 +294,8 @@ def worker(args):
         ap=source_ap_selection(args.entry,terminal['history']);save(args.entry/'source_AP_selection.json',ap)
         inference(cfg,args.entry,sorted({d['epoch'],d['best_epoch'],ap['epoch']}),['target'],'inference_manifest.json')
     name='signal_%03d_gpu.json'%args.epoch if args.stage=='signal' else args.stage+'_gpu.json'
-    save(args.entry/name,dict(guard=guard,guard_sha256=sha(guard),code=code_identity(),GT_loaded=False))
+    save(args.entry/name,dict(guard=guard,guard_sha256=sha(guard),code=code_identity(),
+        target_GT_loaded=False,source_GT_used=args.stage in ('probe','train')))
 
 
 def main(args):
@@ -307,6 +308,13 @@ def main(args):
     configs={}
     for shift in SHIFTS:
         original=read(REFERENCE/shift/'config.json')
+        source_db=read(original['dataset']['json_file'])['database']
+        target_db=read(original['baseline']['target_manifest'])['database']
+        train_ids={k for k,v in source_db.items() if v['subset'] in original['src_train_split']}
+        val_ids={k for k,v in source_db.items() if v['subset'] in original['src_val_split']}
+        assert train_ids and val_ids and not train_ids&val_ids
+        assert not (train_ids|val_ids)&set(target_db)
+        assert all('annotations' not in v for v in target_db.values())
         for mode in MODES:
             cfg=deepcopy(original);cfg['baseline'].update(code=identity,tmpdir=str(tmp),schema=SCHEMA)
             cfg['dense_assignment']=dict(mode=mode,spec=SPEC,reference=str(REFERENCE/shift),target_GT_used=False)
