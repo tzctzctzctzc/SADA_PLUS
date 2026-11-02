@@ -53,6 +53,37 @@ def candidate_coordinates(reference, side):
     return reference[side] + offsets * (reference[1] - reference[0])
 
 
+def endpoint_error_many(head, x, requests, stride, length, mask=None):
+    """同层端点合批；保留每个端点原候选顺序、上下文和独立损失权重。"""
+    from tools.phase_boundary import sample, interval_tokens
+    sizes = [len(r[1]) for r in requests]
+    refs = torch.stack([r[0] for r in requests])
+    counts = torch.tensor(sizes, device=x.device)
+    reference = refs.repeat_interleave(counts, dim=0)
+    coordinates = torch.cat([r[1] for r in requests])
+    duration = (reference[:, 1] - reference[:, 0]).clamp_min(1e-6)
+    side = torch.cat([coordinates.new_full((n,), r[3]) for r, n in zip(requests, sizes)]).long()
+    labels = torch.tensor([r[2] for r in requests], device=x.device).repeat_interleave(counts)
+    offsets = torch.linspace(-.125, .125, 7, device=x.device, dtype=x.dtype)
+    positions = coordinates[:, None] + offsets[None] * duration[:, None]
+    available = (positions >= 0) & (positions < length)
+    z = sample(x, positions.flatten(), stride).reshape(len(coordinates), 7, -1) * available[..., None]
+    completeness = available.to(x.dtype)
+    if mask is not None:
+        completeness = completeness * sample(mask.to(x.dtype)[None], positions.flatten(), stride).reshape_as(positions)
+    h = head.visual(z) + head.boundary_position[None]
+    h = head.boundary_compress(head.boundary_temporal(h.transpose(1, 2)).flatten(1))
+    tokens = torch.stack([interval_tokens(x, r[0], stride) for r in requests])
+    context = head.visual(tokens).mean(1).repeat_interleave(counts, dim=0)
+    text = head.text_proj(head.text[labels, side * 2])
+    ids = torch.arange(len(coordinates), device=x.device)
+    geometry = torch.stack([(coordinates - reference[ids, side]) / duration,
+        (coordinates - reference[ids, 1-side]) / duration, torch.log1p(duration / stride),
+        completeness.mean(-1), ((coordinates >= 0) & (coordinates < length)).to(x.dtype), side.to(x.dtype)], -1)
+    values = F.softplus(head.error_model(torch.cat([h, context, text, geometry], -1)).squeeze(-1)) + 1e-4
+    return values.split(sizes)
+
+
 def refine(head, feature, mask, reference, label, stride, length):
     selected, risks, rawrisks, moved = [], [], [], []
     for side in range(2):
@@ -139,6 +170,7 @@ def source_candidates_loss(model, head, f, masks, reg, videos, cls=None):
         # 两类分别平均，避免全部GT正例淹没真实未匹配候选。
         categories = [ce[labels_all < 10], ce[labels_all == 10]]
         classification.append(torch.stack([x.mean() for x in categories if len(x)]).mean())
+        jobs = []
         for box, assigned, gi, proposed, level in groups:
             if gi is None or assigned != proposed:
                 continue
@@ -150,8 +182,21 @@ def source_candidates_loss(model, head, f, masks, reg, videos, cls=None):
                 coordinates = torch.cat([coordinates, gt[side:side + 1].detach()])
                 coordinates = coordinates[(coordinates >= 0) & (coordinates < length)]
                 target = ((coordinates - gt[side]) / duration).abs().detach()
-                prediction = head.endpoint_error(f[level][vi], reference, coordinates, assigned, side,
-                                                model.fpn_strides[level], length, masks[level][vi, 0])
+                jobs.append((level, reference, coordinates, assigned, side, target))
+        predictions = [None] * len(jobs)
+        for level in range(len(f)):
+            ids = [i for i, r in enumerate(jobs) if r[0] == level]
+            for start in range(0, len(ids), 32):
+                selected = ids[start:start+32]
+                requests = [(jobs[i][1], jobs[i][2], jobs[i][3], jobs[i][4]) for i in selected]
+                if getattr(head, 'batch_candidate_errors', True):
+                    values = endpoint_error_many(head, f[level][vi], requests, model.fpn_strides[level], length, masks[level][vi, 0])
+                else:
+                    values = [head.endpoint_error(f[level][vi], *r, model.fpn_strides[level], length, masks[level][vi, 0]) for r in requests]
+                for i, value in zip(selected, values):
+                    predictions[i] = value
+        for prediction, job in zip(predictions, jobs):
+                target = job[-1]
                 p, q = torch.log1p(prediction), torch.log1p(target)
                 fit = F.smooth_l1_loss(p, q)
                 different = target[:, None] < target[None, :] - 1e-6
