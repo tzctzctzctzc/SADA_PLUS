@@ -11,7 +11,7 @@ from torch import nn
 from torch.nn import functional as F
 from tools.baseline_protocol import assert_no_target_gt
 
-SCHEMA='sada-prototype-phase-boundary-v1'
+SCHEMA='sada-prototype-candidate-phase-risk-v2'
 SPEC=dict(schema=SCHEMA,hidden=128,tokens=24,phases=3,text_phases=4,
  text_cache='/vepfs/vlms/dyfadet_text_cache_e5d83cc_1102/text.pt',
  text_sha256='87ecb25a1331172171ddc30ee8878091d0e116ddbe2fe85b091f35b3065976cc',
@@ -22,16 +22,30 @@ SPEC=dict(schema=SCHEMA,hidden=128,tokens=24,phases=3,text_phases=4,
  source_weight=.1,target_weight=.1,target_score=.5,target_nms=.6,target_cap=32,
  onset=5,target_ramp_epochs=5,crop_fraction=.8,view_lengths=[.9,1.,1.1],
  uncertainty='per_endpoint_source_supervised_Laplace_normalized_residual_NLL',
- endpoint_gate='teacher_scale_less_than_student_scale_and_teacher_edge_ge_.5',
+ endpoint_gate='same_candidate_normalized_error_teacher_less_than_student_per_side_and_phase_11class_agreement',
  source_boundary='Gaussian_edge_BCE_all_valid_points',boundary_search_fraction=.25,
  target_classification='teacher_class_and_phase_class_agree_positive_points_only',
  target_regression='phase_edge_refined_teacher_endpoints_separate_masks',
  target_phase='ordered_posterior_KL_on_physical_correspondences',
  precision='float32',initialization='mature_Prototype_EMA_extra_source_head_pretrain_and_joint_adaptation',
- source_head_epochs=5,source_head_lr=.0003,source_head_selection='complete_source_val_auxiliary_loss',
+ source_head_epochs=15,source_head_lr=.0003,source_head_selection='equal_video_real_raw_candidate_class_NLL_plus_selected_endpoint_error_CPU',
  source_selection='original_complete_source_cls_plus_reg_EMA_every5_patience15_max50',
  adversarial='original_conditional_rev_unchanged',prototype='original128_frozen_VLM40of200_membership',
  inference='original_heads_NMS_voting_no_auxiliary_score_product',target_GT=False)
+SPEC.update(scientific_revision=1,foreground='hierarchical_11class_action_or_background_log_probability',
+ uncertainty='per_endpoint_candidate_absolute_error_prediction_not_calibrated_probability',
+ legacy_dense_scale_auxiliary='source_raw_regression_Laplace_NLL_only_never_the_target_candidate_gate',
+ source_candidate_curriculum='all_GT_and_two_nearby_intervals_plus_current_raw_proposals_with_source_GT_assignment',
+ source_background='all_major10_GT_gaps_plus_real_unmatched_candidates_not_physical_background',
+ candidate_error='log1p_absolute_endpoint_error_per_common_reference_duration_labels_detached',
+ candidate_context=dict(points=7,radius_fraction=.125,temporal_convolutions=2,class_and_endpoint_role=True),
+ candidate_search=dict(points=17,radius_fraction=.25,first_choice='exact_original_endpoint',tie='original_first'),
+ source_boundary='Gaussian_auxiliary_only_never_forced_peak_snap',
+ source_head_views='frozen_mature_weak_and_actual_strong_feature_views_cached_on_CPU',
+ source_joint_views='additional_actual_strong_source_SGP_path_with_source_GT_and_common_reference_pair_calibration',
+ source_pair_error='same_weak_anchor_mapped_to_strong_actual_student_endpoint_source_GT_error_targets_detached',
+ source_quality_readiness='CPU_real_source_raw_candidates_nonnegative_refinement_gain_and_positive_accepted_teacher_gain_with_both_sides',
+ target_regression='selected_candidate_teacher_endpoint_normalized_before_smoothL1_separate_masks')
 
 def paired_config(old,identity,tmp):
  c=deepcopy(old);c['baseline'].update(code=identity,tmpdir=str(tmp));c['phase_boundary']=deepcopy(SPEC)
@@ -94,6 +108,11 @@ class PhaseBoundary(nn.Module):
   self.cross=nn.MultiheadAttention(128,4,dropout=0.,batch_first=True)
   self.foreground=nn.Linear(128,1);self.edge=nn.Linear(128,2);self.scale=nn.Linear(128,2)
   self.phase_weight=nn.Linear(128,4)
+  self.boundary_temporal=nn.Sequential(nn.Conv1d(128,128,3,padding=1),nn.GELU(),nn.Conv1d(128,128,3,padding=1),nn.GELU())
+  self.boundary_compress=nn.Linear(7*128,128)
+  self.error_model=nn.Sequential(nn.Linear(128*3+6,128),nn.GELU(),nn.Linear(128,1))
+  nn.init.zeros_(self.error_model[-1].weight);nn.init.zeros_(self.error_model[-1].bias)
+  self.register_buffer('boundary_position',torch.sin(torch.linspace(-1,1,7)[:,None]*torch.arange(1,129)[None]*.1))
  def dense(self,x):
   h=self.visual(x);return self.edge(h),F.softplus(self.scale(h))+.01,self.foreground(h).squeeze(-1)
  def sequence(self,x):
@@ -104,16 +123,24 @@ class PhaseBoundary(nn.Module):
   key=text.flatten(0,1)[None].expand(h.shape[0],-1,-1)
   infused=h+self.cross(h,key,key,need_weights=False)[0]
   similarity=torch.einsum('nth,cph->nctp',F.normalize(infused,dim=-1),text)*10
-  gate=self.foreground(infused).sigmoid()[:,None]
-  logits=similarity[...,:3]+gate.log().clamp_min(-8)
+  logits=similarity[...,:3]
   weight=self.phase_weight(infused).softmax(-1)
   scores=(similarity*weight[:,None]).mean(-2).sum(-1)
   ordered=path_partition(logits.log_softmax(-1))/x.shape[-2]
-  return logits, scores+ordered
+  # 联合前景/类别概率含显式背景类10，前景项不再在阶段softmax中被抵消。
+  fg=self.foreground(infused).mean(-2)
+  actions=F.logsigmoid(fg)+(scores+ordered).log_softmax(-1)
+  return logits,torch.cat([actions,F.logsigmoid(-fg)],-1)
+ def endpoint_error(self,x,reference,coordinates,label,side,stride,length,mask=None):
+  from tools.phase_candidate_components import endpoint_error
+  return endpoint_error(self,x,reference,coordinates,label,side,stride,length,mask)
 
 def sequence_loss(head,tokens,labels):
  logits,scores=head.sequence(tokens);idx=torch.arange(len(labels),device=labels.device)
- chosen=logits[idx,labels];normal=path_partition(chosen.log_softmax(-1))
+ positive=labels<10
+ chosen=logits[idx[positive],labels[positive]]
+ if not positive.any():return F.cross_entropy(scores,labels),chosen,scores
+ normal=path_partition(chosen.log_softmax(-1))
  reverse=path_partition(chosen.flip(-1).log_softmax(-1))
  return F.cross_entropy(scores,labels)+(-normal/tokens.shape[1]).mean()+F.softplus((reverse-normal)/tokens.shape[1]).mean(),chosen,scores
 
@@ -147,12 +174,13 @@ def select_proposals(f,m,cls,reg,model,video_index,length):
   if len(keep)==SPEC['target_cap']:break
  return [(b[j],labels[j],levels[j],indices[j],s[j]) for j in keep]
 
-def source_loss(model,head,f,m,reg,videos):
+def _source_base_loss(model,head,f,m,reg,videos):
  losses=[];seq=[];ys=[];stats=dict(source_instances=0,source_scale_error=0.)
  for vi,v in enumerate(videos):
   truth=v['segments'];labels=v['labels'];validgt=(labels<10)&((truth[:,1]-truth[:,0])>.05)
   truth,labels=truth[validgt],labels[validgt]
   for box,c in zip(truth,labels):
+   if box[0]<=.05 or box[1]>=v['feats'].shape[-1]-.05:continue
    level=int(torch.clamp(torch.log2((box[1]-box[0]).clamp_min(1)/8).round(),0,len(f)-1))
    seq.append(interval_tokens(f[level][vi],box,model.fpn_strides[level]));ys.append(c)
   stats['source_instances']+=len(truth)
@@ -176,44 +204,16 @@ def source_loss(model,head,f,m,reg,videos):
   losses.append(torch.stack(batch).mean())
  return torch.stack(losses).mean(),stats
 
+def source_loss(model,head,f,m,reg,videos,cls=None):
+ from tools.phase_candidate_components import source_candidates_loss
+ base,stats=_source_base_loss(model,head,f,m,reg,videos)
+ extra,more=source_candidates_loss(model,head,f,m,reg,videos,cls)
+ stats.update(more)
+ return base+extra,stats
+
 def target_loss(model,teacher,head,weak,strong,views,step):
- sf,sm,sc,sr=strong;tf,tm,tc,tr=weak;losses=[]
- stats=dict(target_proposals=0,target_class_used=0,target_left_used=0,target_right_used=0,target_phase_used=0,
-            target_teacher_scale=0.,target_student_scale=0.)
- for vi,view in enumerate(views):
-  proposals=select_proposals(tf,tm,tc,tr,teacher,vi,int(view['original_length']))
-  for box,c,l,j,confidence in proposals:
-   stats['target_proposals']+=1;stride=model.fpn_strides[l]
-   if box[0]<view['lo'] or box[1]>view['lo']+view['width']-1:continue
-   mapped=map_coordinates(box,view);point=map_coordinates(box.new_tensor(j*stride),view);k=int((point/stride).round())
-   if k<0 or k>=sf[l].shape[-1] or not sm[l][vi,0,k]:continue
-   with torch.no_grad():
-    tt=interval_tokens(tf[l][vi],box,stride)[None];tl,tclass=teacher.phase_boundary.sequence(tt)
-    if int(tclass.argmax(-1))!=int(c):continue
-    post=phase_posterior(tl[:,c]).detach()
-    te,tunc,_=teacher.phase_boundary.dense(tf[l][vi,:,j][None]);tunc=tunc[0]
-    # 每端点在自身邻域找源监督边界证据，保留端点身份；非互斥峰均值。
-    refined=box.clone();edgeconf=[];width=box[1]-box[0]
-    for side in range(2):
-     coords=box[side]+torch.linspace(-.25,.25,17,device=box.device)*width
-     valid=(coords>=0)&(coords<view['original_length']);ev=teacher.phase_boundary.dense(sample(tf[l][vi],coords,stride))[0][:,side].sigmoid().masked_fill(~valid,0)
-     best=ev.argmax();refined[side]=coords[best];edgeconf.append(ev[best])
-    if refined[1]-refined[0]<=.05:continue
-    mapped_ref=map_coordinates(refined,view)
-   st=interval_tokens(sf[l][vi],mapped,stride)[None];sl,sclass=head.sequence(st)
-   losses.append(F.kl_div(sl[:,c].log_softmax(-1),post,reduction='batchmean')/SPEC['tokens'])
-   losses.append(F.cross_entropy(sclass,c[None]));stats['target_phase_used']+=1
-   label=torch.zeros_like(sc[l][vi,:,k]);label[c]=1
-   losses.append(F.binary_cross_entropy_with_logits(sc[l][vi,:,k],label)*confidence);stats['target_class_used']+=1
-   _,sunc,_=head.dense(sf[l][vi,:,k][None]);sunc=sunc[0]
-   mask=(tunc<sunc.detach())&(torch.stack(edgeconf)>=.5)&(mapped_ref>=0)&(mapped_ref<view['length'])
-   stats['target_teacher_scale']+=float(tunc.mean());stats['target_student_scale']+=float(sunc.detach().mean())
-   pred=torch.stack([k*stride-sr[l][vi,0,k]*stride,k*stride+sr[l][vi,1,k]*stride])
-   if mask.any():
-    # 以同一伪实例时长归一化，避免长动作/裁剪缩放造成尺度比较混淆。
-    losses.append((F.smooth_l1_loss(pred,mapped_ref.detach(),reduction='none')/(mapped[1]-mapped[0]).clamp_min(1))[mask].mean())
-    stats['target_left_used']+=int(mask[0]);stats['target_right_used']+=int(mask[1])
- return (torch.stack(losses).mean() if losses else sf[0].sum()*0),stats
+ from tools.phase_candidate_components import candidate_target_loss
+ return candidate_target_loss(model,teacher,head,weak,strong,views,step)
 
 def install(ctx,cfg):
  from tools.baseline_protocol import sha
@@ -255,7 +255,18 @@ def install(ctx,cfg):
   finally:captured['active']=False
   assert len(captured['features'])==len(captured['reg'])==3
   f,m=captured['features'][0];reg=captured['reg'][0][0]
-  loss,stats=source_loss(model,model.phase_boundary,f,m,reg,kwargs['video_list_src'])
+  loss,stats=source_loss(model,model.phase_boundary,f,m,reg,kwargs['video_list_src'],captured['cls'][0][0])
+  source_strong=[];source_views=[]
+  for i,v in enumerate(kwargs['video_list_src']):
+   x,view=strong_view(v,state['step'],i);view['original_length']=v['feats'].shape[-1]
+   x['segments']=map_coordinates(v['segments'],view);x['labels']=v['labels']
+   source_strong.append(x);source_views.append(view)
+  sf,sm,sc,sr=direct(model,source_strong)
+  strong_loss,strong_stats=source_loss(model,model.phase_boundary,sf,sm,sr,source_strong,sc)
+  from tools.phase_candidate_components import paired_source_error_loss
+  paired,pair_stats=paired_source_error_loss(model,model.phase_boundary,(f,m,captured['cls'][0][0],reg),
+                                           (sf,sm,sc,sr),source_views,kwargs['video_list_src'])
+  loss=.5*(loss+strong_loss)+paired;stats.update(pair_stats)
   epoch=kwargs['curr_epoch'];total=SPEC['source_weight']*loss
   stats['source_loss']=float(loss.detach());stats['target_loss']=0.
   if epoch>=SPEC['onset']:
@@ -286,42 +297,8 @@ def install(ctx,cfg):
  model.forward=forward
 
 def pretrain_source_head(ctx,cfg,output):
- """成熟冻结SGP上缓存原训练crop，完整源split训练新头；不访问target/目标GT。"""
- from tools import baseline_engine as base
- from tools.baseline_protocol import save,sha
- model=ctx.model;model.eval();head=model.phase_boundary
- caches={}
- source_loader=base.loader(ctx.train_loader_src.dataset,True,torch.Generator().manual_seed(123),1,cfg['loader']['num_workers'])
- for role,loader in [('train',source_loader),('val',ctx.val_loader_src)]:
-  cache=[]
-  for videos in loader:
-   videos=base.move_to_device(videos,model.device)
-   with torch.no_grad():f,m,c,r=direct(model,videos,training=role=='train')
-   cache.append((tuple(x.detach() for x in f),m,tuple(x.detach() for x in r),videos))
-  caches[role]=cache
- optimizer=torch.optim.AdamW(head.parameters(),lr=SPEC['source_head_lr'],weight_decay=.05)
- best=float('inf');history=[];beststate=None
- for epoch in range(1,SPEC['source_head_epochs']+1):
-  head.train();train=[]
-  for f,m,r,videos in caches['train']:
-   optimizer.zero_grad();loss,_=source_loss(model,head,f,m,r,videos);assert torch.isfinite(loss)
-   loss.backward();torch.nn.utils.clip_grad_norm_(head.parameters(),1.);optimizer.step();train.append(float(loss.detach()))
-  head.eval();val=[]
-  with torch.no_grad():
-   for f,m,r,videos in caches['val']:val.append(float(source_loss(model,head,f,m,r,videos)[0]))
-  row=dict(epoch=epoch,train_loss=sum(train)/len(train),validation_loss=sum(val)/len(val));history.append(row)
-  if row['validation_loss']<best:
-   best=row['validation_loss'];beststate=deepcopy(head.state_dict());bestepoch=epoch
-  print('SOURCE_PHASE_HEAD',json.dumps(row),flush=True)
- base.checkpoint(output,dict(spec=SPEC,state_dict=beststate,best_epoch=bestepoch,history=history,
-  optimizer=optimizer.state_dict(),rng_cpu=torch.get_rng_state(),rng_cuda=torch.cuda.get_rng_state(0),
-  source_only=True,scope='all_source_training_videos_one_original_GT_crop_cached_for_five_head_epochs',
-  source_videos=[[v['metadata']['video_id'] for v in vs] for _,_,_,vs in caches['train']],
-  validation_videos=[[v['metadata']['video_id'] for v in vs] for _,_,_,vs in caches['val']]))
- save(Path(output).with_suffix('.json'),dict(spec=SPEC,best_epoch=bestepoch,history=history,head_sha256=sha(output),target_gt_used=False))
- head.load_state_dict(beststate,strict=True);ctx.model_ema.module.phase_boundary.load_state_dict(beststate,strict=True)
- del caches
- torch.cuda.empty_cache()
+ from tools.phase_candidate_components import pretrain_candidate_head
+ return pretrain_candidate_head(ctx,cfg,output)
 
 def audit(entry):
  from tools import baseline_protocol as protocol
@@ -330,6 +307,17 @@ def audit(entry):
  assert cfg['phase_boundary_runtime']['reference']==str(ref)
  headfile=Path(cfg['phase_boundary_runtime']['source_head']);headreceipt=read(headfile.with_suffix('.json'))
  assert sha(headfile)==headreceipt['head_sha256']
+ head=torch.load(headfile,map_location='cpu');history=head['history']
+ assert [x['epoch'] for x in history]==list(range(SPEC['source_head_epochs']+1))
+ expected=min(history,key=lambda x:(x['source_candidate_score'],x['epoch']))
+ assert head['best_epoch']==headreceipt['best_epoch']==expected['epoch'] and headreceipt['source_readiness']['passed']
+ latesthead=torch.load(headfile.with_name('source_head_latest.pt'),map_location='cpu')
+ assert latesthead['epoch']==SPEC['source_head_epochs'] and latesthead['history']==history and latesthead['optimizer']['state']
+ protocol.validate_cuda_rng([latesthead['rng_cuda']])
+ index=headfile.parent/'source_candidate_cache_index.json';assert sha(index)==headreceipt['cache_index_sha256']==latesthead['cache_index_sha256']
+ cache=read(index)['roles'];database=read(cfg['dataset']['json_file'])['database']
+ for role,split in [('train',cfg['src_train_split']),('val',cfg['src_val_split'])]:
+  assert {v for a in cache[role] for v in a['videos']}=={v for v,d in database.items() if d['subset'] in split}
  result=protocol.audit_entry(e,expected_schema=SCHEMA)
  assert sha(SPEC['text_cache'])==SPEC['text_sha256'] and sha(SPEC['text_provenance'])==SPEC['text_provenance_sha256']
  rows=[json.loads(z) for z in (e/'metrics.jsonl').read_text().splitlines()]

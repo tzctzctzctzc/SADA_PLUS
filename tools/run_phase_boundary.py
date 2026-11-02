@@ -17,6 +17,26 @@ REFERENCE=Path('/vepfs/vlms/prototype_capacity12_5f9a157_1029/formal/control')
 SHIFTS=tuple('S%d'%i for i in range(1,7))
 
 
+def reuse_reference_snapshot(root):
+    # 上轮已完整审过同一reference；只对审计后变化的权重重算大SHA。
+    previous=Path('/vepfs/vlms/sada_phase_boundary6_7bc7151_1102')
+    inputs=read(previous/'inputs.json');snapshot=read(previous/'reference_snapshot/inputs.json')
+    assert sha(previous/'reference_snapshot/inputs.json')==inputs['reference_snapshot_sha256']
+    checked=[];audit_time=(previous/'inputs.json').stat().st_mtime_ns
+    for s in SHIFTS:
+        ref=REFERENCE/s;old=inputs['references'][s];entry=snapshot['entries'][s]
+        assert sha(ref/'complete.json')==old['complete_sha256']==entry['reference_complete_sha256']
+        assert sha(ref/'config.json')==entry['config_sha256']
+        weight=ref/'best.pt';stat=weight.stat();reused=stat.st_mtime_ns<=audit_time
+        if not reused:assert sha(weight)==entry['checkpoint_sha256']
+        checked.append(dict(shift=s,checkpoint=str(weight),known_sha256=entry['checkpoint_sha256'],
+                            size=stat.st_size,mtime_ns=stat.st_mtime_ns,reused_prior_full_audit=reused))
+    (root/'reference_snapshot').symlink_to(previous/'reference_snapshot',target_is_directory=True)
+    save(root/'reference_reuse.json',dict(previous_inputs=str(previous/'inputs.json'),previous_inputs_sha256=sha(previous/'inputs.json'),
+         previous_full_audit_record_mtime_ns=audit_time,checks=checked,old_snapshot_read_only=True))
+    return inputs['references']
+
+
 def gpu_stage(args):
     from tools.phase_runner_gpu import first_cuda_guard
     cfg=read(args.entry/'config.json');identity=code_identity();assert identity==cfg['baseline']['code']
@@ -39,6 +59,13 @@ def gpu_stage(args):
         ctx.model_ema.module.load_state_dict(dict(ctx.model_ema.module.state_dict(),**saved['ema_state_dict']),strict=True);del saved
         from tools.phase_boundary import pretrain_source_head
         pretrain_source_head(ctx,cfg,Path(cfg['phase_boundary_runtime']['source_head']))
+        source_head=read(Path(cfg['phase_boundary_runtime']['source_head']).with_suffix('.json'))
+        if not source_head['source_readiness']['passed']:
+            save(e/'result.json',dict(status='source_mechanism_unready',code=identity,phases={},
+                source_readiness=source_head['source_readiness'],source_pretrain_peak_mib=source_head['source_pretrain_peak_mib'],
+                initial_state_sha=ctx.initial_state_sha,initial_detector_sha=ctx.initial_detector_sha,
+                formal_training=False,checkpoint_written=False,guard=guard,guard_sha256=sha(guard)))
+            return
         ctx.phase_ledger=str(e/'probe_events.jsonl');phases={}
         for epoch,steps in [(1,2),(5,8)]:
             base.epoch_setup(ctx,epoch);loaders=ctx.train_loader_src,ctx.train_loader_tgt
@@ -54,18 +81,20 @@ def gpu_stage(args):
             print('PHASE_GPU_CHECK',json.dumps(phases[str(epoch)]),flush=True)
             ctx.train_loader_src,ctx.train_loader_tgt=loaders
         assert phases['1']['phase']['phase_source_instances']>0
-        for k in ['phase_target_phase_used','phase_target_sgp_gradient','phase_target_regression_gradient']:
-            assert phases['5']['phase'].get(k,0)>0,k
+        target_ready=all(phases['5']['phase'].get(k,0)>0 for k in
+            ['phase_target_phase_used','phase_target_sgp_gradient','phase_target_regression_gradient'])
         assert phases['5']['backbone_updated'] and phases['5']['regression_updated']
         ctx.valid_metrics_src.reset();validation=ctx._valid_epoch(5,base.StepLoader(ctx.val_loader_src,2),domain='src')
         assert math.isfinite(validation) and validation>0
         captured=base.capture(ctx,cfg,5,[[5,validation]]);stream=io.BytesIO();torch.save(captured,stream);stream.seek(0)
         captured=torch.load(stream,map_location='cpu');stream.close();base.restore(ctx,captured)
         actual=base.capture(ctx,cfg,5,[[5,validation]]);assert base.tensor_digest(actual)==base.tensor_digest(captured)
-        save(e/'result.json',dict(status='passed',code=identity,phases=phases,initial_state_sha=ctx.initial_state_sha,
+        source_head=read(Path(cfg['phase_boundary_runtime']['source_head']).with_suffix('.json'))
+        save(e/'result.json',dict(status='passed' if target_ready else 'target_mechanism_unready',code=identity,phases=phases,initial_state_sha=ctx.initial_state_sha,
             initial_detector_sha=ctx.initial_detector_sha,source_validation_loss=validation,source_validation_scope='two videos only; formal uses complete split',
             full_state_roundtrip='passed',diagnostic_initialization='cold identity checked; mature EMA and five-epoch source-selected phase head; formal uses same mature weights/head with fresh joint optimizers',
-            checkpoint_written=False,formal_training=False,guard=guard,guard_sha256=sha(guard)))
+            checkpoint_written=False,formal_training=False,guard=guard,guard_sha256=sha(guard),
+            source_readiness=source_head['source_readiness'],source_pretrain_peak_mib=source_head['source_pretrain_peak_mib']))
     elif args.stage=='train':
         base.train(cfg,e)
     elif args.stage=='inference':
@@ -137,10 +166,10 @@ def main(args):
     save(root/'plan.json',dict(schema=SCHEMA,code=identity,specification=SPEC,shifts=SHIFTS,gpus=[0,1,2,3],
         seed=123,batch=2,policy=POLICY,reference_retrained=False,new_formal_count=6,initialization='mature reference EMA plus source-selected head; extra adaptation budget'))
     save(root/'state.json',dict(phase='input_audit',pid=os.getpid(),active={},completed=[]))
-    prepare(root/'reference_snapshot',REFERENCE.parents[1],INVENTORY,identity)
+    old_references=reuse_reference_snapshot(root)
     configs={};references={}
     for s in SHIFTS:
-        ref=REFERENCE/s;references[s]=audit_reference(ref);old=read(ref/'config.json')
+        ref=REFERENCE/s;references[s]=old_references[s];old=read(ref/'config.json')
         cfg=paired_config(old,identity,tmp);cfg['phase_boundary_runtime']=dict(reference=str(ref),source_head=str(root/'formal'/s/'phase'/'source_head.pt'));configs[s]=cfg
         entry=root/'formal'/s/'phase';entry.mkdir(parents=True);save(entry/'config.json',cfg)
         for domain in ['source','target']:save(entry/(domain+'_val_unlabeled.json'),read(root/'reference_snapshot/formal'/s/(domain+'_val_unlabeled.json')),sort_keys=False)
@@ -168,15 +197,24 @@ def main(args):
                 if rc:raise RuntimeError('阶段失败 '+key+' exit='+str(rc))
                 s=t['shift']
                 if t['stage']=='probe':
-                    path=root/'probes'/s/'result.json';r=read(path);assert r['status']=='passed' and r['full_state_roundtrip']=='passed'
+                    path=root/'probes'/s/'result.json';r=read(path)
+                    assert r['status'] in ['passed','source_mechanism_unready','target_mechanism_unready']
+                    if r['status']!='source_mechanism_unready':assert r['full_state_roundtrip']=='passed'
                     reports[s]=dict(path=str(path),sha256=sha(path),report=r)
                 elif t['stage']=='train':infer.append(s)
                 elif t['stage']=='inference':cpu.append(s)
                 else:finished.append(complete(root/'formal'/s/'phase',root,identity))
             if phase=='real_data_acceptance' and len(reports)==6:
-                minimum=max(12288,math.ceil(max(p['peak_reserved_mib'] for r in reports.values() for p in r['report']['phases'].values())+4096))
-                save(root/'acceptance.json',dict(status='passed',batch=2,code=identity,reports=reports,minimum_free_mib=minimum,
+                minimum=max(12288,math.ceil(max([p['peak_reserved_mib'] for r in reports.values() for p in r['report'].get('phases',{}).values()]+
+                    [r['report']['source_pretrain_peak_mib'] for r in reports.values()])+4096))
+                ready=all(r['report']['status']=='passed' for r in reports.values())
+                save(root/'acceptance.json',dict(status='passed' if ready else 'mechanism_unready',batch=2,code=identity,reports=reports,minimum_free_mib=minimum,
                     scope='warm-reference mechanism diagnostics; formal initialization fresh and paired',inputs_sha256=sha(root/'inputs.json')))
+                if not ready:
+                    phase='source_mechanism_unready';pending=[];state()
+                    save(root/'source_mechanism_review.json',dict(status='review_source_fit_and_generalization_before_formal',
+                        readiness={s:r['report']['source_readiness'] for s,r in reports.items()},formal_started=False))
+                    return
                 phase='formal';pending=list(SHIFTS)
             while cpu and sum(t['stage']=='evaluate_cpu' for t in active.values())<2:
                 s=cpu.pop(0);active[s+'/evaluate_cpu']=spawn(s,'evaluate_cpu')

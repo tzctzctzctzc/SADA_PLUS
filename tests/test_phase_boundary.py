@@ -44,7 +44,7 @@ def test_actual_text_phase_network_has_text_and_temporal_gradients():
 def test_source_gt_trains_both_offsets_and_independent_error_scales():
  torch.manual_seed(123);h=PhaseBoundary(torch.randn(10,4,512));f=[torch.randn(1,512,32,requires_grad=True)]
  mask=[torch.ones(1,1,32,dtype=torch.bool)];reg=[torch.full((1,2,32),4.,requires_grad=True)]
- v=[{'segments':torch.tensor([[4.,13.],[18.,25.]]),'labels':torch.tensor([0,1])}]
+ v=[{'feats':torch.zeros(512,32),'segments':torch.tensor([[4.,13.],[18.,25.]]),'labels':torch.tensor([0,1])}]
  loss,stats=source_loss(SimpleNamespace(fpn_strides=[1]),h,f,mask,reg,v);loss.backward()
  assert stats['source_instances']==2 and torch.isfinite(loss)
  assert f[0].grad.norm()>0 and reg[0].grad.norm()>0 and h.scale.weight.grad.norm()>0
@@ -68,11 +68,14 @@ def test_target_endpoint_gate_separates_left_and_right_and_trains_real_regressio
    # 教师左端点更可靠，右端点更不可靠；必须只训练左边。
    scales=x.new_tensor([.1,2.] if self.teacher else [1.,1.]).expand(len(x),-1)
    return x.new_full((len(x),2),6.),scales,x.new_ones(len(x))
+  def endpoint_error(self,x,reference,coordinates,label,side,stride,length,mask=None):
+   return coordinates.new_full(coordinates.shape,([.1,2.] if self.teacher else [1.,1.])[side])
  student=Head(False);teacher=SimpleNamespace(fpn_strides=[1],phase_boundary=Head(True))
  f=[torch.randn(1,512,32,requires_grad=True)];m=[torch.ones(1,1,32,dtype=torch.bool)]
  cls=torch.full((1,97,32),-20.);cls[0,0,16]=10
  r=[torch.full((1,2,32),4.,requires_grad=True)]
- tl,stats=target_loss(SimpleNamespace(fpn_strides=[1]),teacher,student,(f,m,[cls],r),(f,m,[cls.clone().requires_grad_()],r),[dict(original_length=32,lo=0,width=32,ratio=1,length=32)],1)
+ teacher_r=[torch.full((1,2,32),3.)]
+ tl,stats=target_loss(SimpleNamespace(fpn_strides=[1]),teacher,student,(f,m,[cls],teacher_r),(f,m,[cls.clone().requires_grad_()],r),[dict(original_length=32,lo=0,width=32,ratio=1,length=32)],1)
  assert stats['target_left_used']==1 and stats['target_right_used']==0
  tl.backward();assert r[0].grad[0,0,16]!=0 and r[0].grad[0,1,16]==0
  assert f[0].grad.norm()>0
