@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from tools.background_risk import BackgroundRisk,video_split,calibrated,fit_calibration,negative_loss
 from tools.background_risk_signals import weighted_metrics,aggregate,group_readiness
-from tools.background_risk_source import result_record
+from tools.background_risk_source import result_record,restore_source
 
 
 def test_background_head_detaches_detector_and_has_one_output():
@@ -81,3 +81,23 @@ def test_source_result_separates_calibration_quality_from_calibrator():
     assert result['calibration']==calibration and result['calibration_quality']==metrics['calibration']
     import json
     assert json.loads(json.dumps(result))['validation']==metrics['validation']
+
+
+def test_source_resume_preserves_adamw_shuffle_and_cpu_random_streams(monkeypatch):
+    import random
+    monkeypatch.setattr(torch.cuda,'set_rng_state',lambda *args,**kwargs:None)
+    torch.manual_seed(3);random.seed(3);np.random.seed(3)
+    head=BackgroundRisk(4);optimizer=torch.optim.AdamW(head.parameters(),lr=1e-3)
+    generator=torch.Generator().manual_seed(6)
+    def step():
+        order=torch.randperm(5,generator=generator)
+        x=torch.randn(1,4,9)*(random.random()+float(np.random.rand()))
+        optimizer.zero_grad();value=head([x],[torch.zeros(1,10,9)],[torch.ones(1,1,9,dtype=torch.bool)])[0].square().mean()
+        value.backward();optimizer.step();return value.detach(),order
+    step();saved=deepcopy(dict(state_dict=head.state_dict(),optimizer=optimizer.state_dict(),generator=generator.get_state(),
+        cpu_rng=torch.get_rng_state(),cuda_rng=torch.zeros(8,dtype=torch.uint8),python_rng=random.getstate(),numpy_rng=np.random.get_state()))
+    expected=[step() for _ in range(3)];weights=deepcopy(head.state_dict())
+    restore_source(head,optimizer,generator,saved)
+    actual=[step() for _ in range(3)]
+    assert all(torch.equal(x[0],y[0]) and torch.equal(x[1],y[1]) for x,y in zip(expected,actual))
+    assert all(torch.equal(v,head.state_dict()[k]) for k,v in weights.items())
