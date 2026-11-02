@@ -45,6 +45,29 @@ def case(entry, checkpoint, output, steps):
             oracle_step=state['model_controls']['cold_oracle_state']['step'])
         del state
     exact=reports['native']['state_sha256']==reports['fast']['state_sha256'] and reports['native']['metrics_sha256']==reports['fast']['metrics_sha256']
+    # 新建完整训练上下文，真实检查进程重建语义的恢复helper及接续结果。
+    from tools.cold_oracle_resume import restore_training,validate_prefix
+    recovery=output.parent/(output.stem+'_restore');recovery.mkdir()
+    old=torch.load(io.BytesIO(serialized),map_location='cpu')
+    rows=[x for x in read(entry/'metrics.json') if x['epoch']<=old['epoch']]
+    with (entry/'oracle_events.jsonl').open('rb') as stream:
+        ledger=validate_prefix(old,rows,cfg['baseline']['epoch_budget']['iterations_per_epoch'],stream)
+    os.link(checkpoint,recovery/'latest.pt');save(recovery/'metrics.json',rows)
+    (recovery/'oracle_events.jsonl').write_bytes(ledger)
+    save(recovery/'resume.json',dict(checkpoint_sha256=sha(checkpoint),pause_receipt_sha256='GPU_test_only'))
+    del old,ctx
+    import gc
+    gc.collect();torch.cuda.empty_cache()
+    ctx=build(cfg);loaders=ctx.train_loader_src,ctx.train_loader_tgt
+    recovered_history,recovered_rows,start_epoch=restore_training(ctx,cfg,recovery)
+    assert start_epoch==epoch and recovered_history==history and recovered_rows==rows
+    ctx.cold_oracle_gradient_epoch=None;ctx.cold_oracle_ledger=None
+    ctx.train_loader_src,ctx.train_loader_tgt=[base.StepLoader(x,steps) for x in loaders]
+    base.epoch_setup(ctx,epoch);ctx._train_epoch(epoch);torch.cuda.synchronize()
+    restarted=dict(state_sha256=base.tensor_digest(base.capture(ctx,cfg,epoch,history)),
+        metrics_sha256=base.tensor_digest(ctx.train_metrics.result()))
+    restart_exact=all(restarted[k]==reports['fast'][k] for k in restarted)
+    exact=exact and restart_exact
     # 真正无GT源验证视频的完整forward/NMS/voting也逐tensor核验。
     ctx.train_loader_src,ctx.train_loader_tgt=loaders
     model=ctx.model_ema.module;model.eval()
@@ -64,6 +87,7 @@ def case(entry, checkpoint, output, steps):
         mode=cfg['cold_oracle']['mode'],shift=cfg['baseline']['shift'],epoch=epoch,training=reports,evaluation=evaluation,
         train_speedup=reports['native']['seconds']/reports['fast']['seconds'],eval_speedup=evaluation['native']['seconds']/evaluation['fast']['seconds'],
         full_state_model_EMA_three_optimizers_schedulers_controls_all_RNG_exact=exact,source_eval_all_outputs_and_RNG_exact=exact_eval,
+        rebuilt_context_resume_exact=restart_exact,resume_proof=str(recovery/'restore_proof.json'),
         source_eval_video=video[0]['metadata']['video_id'],formal_training=False)
     save(output,report);print(json.dumps(report),flush=True)
 
@@ -72,7 +96,8 @@ def main(args):
     from tools.phase_runner_gpu import acquire
     root=args.output;root.mkdir(exist_ok=False);identity=code_identity()
     cases=[('joint','S6',5),('classification','S4',20),('localization','S5',5)]
-    save(root/'plan.json',dict(code=identity,cases=cases,steps=args.steps,new_training=False,changes='skip discarded PL compute with exact DropPath RNG replay; identical eval passes cached'))
+    save(root/'plan.json',dict(code=identity,cases=cases,steps=args.steps,new_training=False,
+        changes='discarded PL RNG replay; conditional loss host-sync removal; batch scalar readback; rebuilt-context exact resume'))
     for mode,shift,epoch in cases:
         entry=args.original/'formal'/mode/shift;checkpoint=entry/('epoch%03d.pt'%epoch)
         assert checkpoint.exists()

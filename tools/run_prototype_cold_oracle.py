@@ -112,8 +112,12 @@ def train(cfg, entry):
     save(entry/'cold_initialization.json', dict(initial_state_sha=ctx.initial_state_sha,
         initial_detector_sha=ctx.initial_detector_sha, mature_checkpoint_loaded=False,
         new_trainable_parameters=0, reference=cfg['cold_oracle']['reference']))
-    history, rows, best = [], [], float('inf')
-    for epoch in range(1, 51):
+    history, rows, start = [], [], 1
+    if (entry/'resume.json').exists():
+        from tools.cold_oracle_resume import restore_training
+        history, rows, start = restore_training(ctx,cfg,entry)
+    best = min([value for _,value in history],default=float('inf'))
+    for epoch in range(start, 51):
         base.epoch_setup(ctx, epoch)
         checked = ctx.checked_steps; started = time.monotonic()
         ctx._train_epoch(epoch); torch.cuda.synchronize()
@@ -178,7 +182,10 @@ def infer(cfg, entry, epochs, domains, prefix):
                     for name,value in [('t-start',pred['segments'][:,0]),('t-end',pred['segments'][:,1]),('label',pred['labels']),('score',pred['scores'])]:
                         columns[name].extend(value.cpu().tolist())
             prediction = entry/('predictions/%s_e%03d.npz'%(domain,epoch)); prediction.parent.mkdir(exist_ok=True)
-            np.savez_compressed(prediction, **{k:np.asarray(v) for k,v in columns.items()})
+            temporary=prediction.with_name(prediction.name+'.tmp')
+            with temporary.open('wb') as stream:
+                np.savez_compressed(stream, **{k:np.asarray(v) for k,v in columns.items()})
+            temporary.replace(prediction)
             reports.append(dict(epoch=epoch, domain=domain, prediction=str(prediction), prediction_sha256=sha(prediction), checkpoint=str(path), checkpoint_sha256=sha(path)))
     save(entry/prefix, dict(reports=reports, GT_loaded=False, mature_checkpoint_loaded=False, code=code_identity()))
 
@@ -270,11 +277,21 @@ def main(args):
     from tools.run_phase_boundary import reuse_reference_snapshot
     from tools.phase_runner_gpu import acquire
     from tools.baseline_gpu import snapshot
-    root = args.output; root.mkdir(exist_ok=False)
-    identity = code_identity(); references = reuse_reference_snapshot(root)
-    tmp = Path('/vepfs/vlms/tmp')/('cold_oracle_'+identity['commit'][:7]); tmp.mkdir(exist_ok=False)
-    configs = {}
-    for shift in SHIFTS:
+    root = args.output; identity = code_identity()
+    configs = {}; resumed_done=[]; resumed_pending=[]; resumed_signals=set()
+    if args.resume_from:
+        from tools.cold_oracle_resume import prepare_matrix
+        configs,resumed_done,resumed_pending,resumed_signals=prepare_matrix(args.resume_from,root,identity,args.pause_receipt)
+        old_acceptance=read(args.resume_from/'acceptance.json')
+        save(root/'acceptance.json',old_acceptance)
+        tmp=Path(next(iter(configs.values()))['baseline']['tmpdir'])
+        save(root/'plan.json',dict(schema=SCHEMA,spec=SPEC,count=18,code=identity,
+            resumed_from=str(args.resume_from),completed_entries_reused=len(resumed_done),
+            scientific_protocol_unchanged=True,completed_epochs_replayed=0))
+    else:
+        root.mkdir(exist_ok=False); references = reuse_reference_snapshot(root)
+        tmp = Path('/vepfs/vlms/tmp')/('cold_oracle_'+identity['commit'][:7]); tmp.mkdir(exist_ok=False)
+    for shift in ([] if args.resume_from else SHIFTS):
         original = read(REFERENCE/shift/'config.json'); truth = root/'oracle_train_truth'/(shift+'.json')
         prepare_truth(original, truth)
         for mode in MODES:
@@ -286,12 +303,13 @@ def main(args):
                 if folder=='formal':
                     for domain in ('source','target'):
                         save(entry/(domain+'_val_unlabeled.json'), read(root/'reference_snapshot/formal'/shift/(domain+'_val_unlabeled.json')), sort_keys=False)
-    save(root/'plan.json', dict(schema=SCHEMA, spec=SPEC, count=18, modes=list(MODES), shifts=list(SHIFTS), code=identity,
-        A_reused_not_retrained=True, old_queues_remain_stopped=True, original_libs_and_training_loop_unmodified=True))
-    save(root/'inputs.json', dict(references=references, configs={m+'/'+s:sha(root/'formal'/m/s/'config.json') for m,s in configs}))
-    pending = [(m,s,'probe',None) for s in SHIFTS for m in MODES]
-    active, reports, done, queued_signals = {}, {}, [], set()
-    formal_started = False; minimum = 12288
+    if not args.resume_from:
+        save(root/'plan.json', dict(schema=SCHEMA, spec=SPEC, count=18, modes=list(MODES), shifts=list(SHIFTS), code=identity,
+            A_reused_not_retrained=True, old_queues_remain_stopped=True, equivalent_efficiency_fastpath=True))
+        save(root/'inputs.json', dict(references=references, configs={m+'/'+s:sha(root/'formal'/m/s/'config.json') for m,s in configs}))
+    pending = resumed_pending if args.resume_from else [(m,s,'probe',None) for s in SHIFTS for m in MODES]
+    active, reports, done, queued_signals = {}, {}, resumed_done, resumed_signals
+    formal_started = bool(args.resume_from); minimum = old_acceptance['minimum_free_mib'] if args.resume_from else 12288
     def spawn(mode, shift, stage, epoch, card):
         entry = root/('probes' if stage=='probe' else 'formal')/mode/shift
         env = dict(os.environ, CUDA_VISIBLE_DEVICES='', PYTHONPATH=str(CODE), PYTHONDONTWRITEBYTECODE='1',
@@ -299,7 +317,7 @@ def main(args):
         if card: env.update(CUDA_VISIBLE_DEVICES=card['uuid'], SADA_BASELINE_LEASE=card['lease'], SADA_BASELINE_LEASE_SHA256=card['lease_sha256'])
         command = [sys.executable,'-u','-B',__file__,'--output',str(root),'--entry',str(entry),'--stage',stage]
         if epoch is not None: command += ['--epoch',str(epoch)]
-        name = stage+('_%03d'%epoch if epoch is not None else '')+'.log'
+        name = ('resume_' if args.resume_from else '')+stage+('_%03d'%epoch if epoch is not None else '')+'.log'
         with (entry/name).open('x') as stream:
             process = subprocess.Popen(command, cwd=CODE, env=env, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
         return dict(process=process,mode=mode,shift=shift,stage=stage,epoch=epoch,gpu=card['index'] if card else None)
@@ -347,7 +365,7 @@ def main(args):
                     if is_signal and any(t['stage']=='signal' for t in active.values()): continue
                     if not is_signal and sum(t['gpu'] is not None and t['stage']!='signal' for t in active.values())>=8: continue
                     counts = {g:sum(t['gpu']==g for t in active.values()) for g in range(4)}
-                    cards = [g for g in sorted(counts,key=counts.get) if counts[g]<(3 if is_signal else 2)]
+                    cards = [g for g in sorted([2,0,3,1],key=counts.get) if counts[g]<(3 if is_signal else 2)]
                     cards = [g for g in cards if not (stage in ('probe','train') and any(t['gpu']==g and t['mode']==m and t['stage'] in ('probe','train') for t in active.values()))]
                     cards = [g for g in cards if snapshot(g)['free_mib']>=minimum*(1+counts[g])]
                     found = acquire(cards,args.data_root,root,minimum,identity['commit'])
@@ -379,6 +397,7 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--entry',type=Path);parser.add_argument('--stage',choices=['probe','train','inference','evaluate_cpu','signal','signal_cpu'])
     parser.add_argument('--epoch',type=int);parser.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'))
+    parser.add_argument('--resume-from',type=Path);parser.add_argument('--pause-receipt',type=Path)
     args=parser.parse_args()
     def stop(sig,frame): raise SystemExit(128+sig)
     signal.signal(signal.SIGTERM,stop); signal.signal(signal.SIGINT,stop)
