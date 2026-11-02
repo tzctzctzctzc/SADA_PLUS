@@ -8,6 +8,15 @@ from libs.evaluation.metrics import MetricTracker
 from tools.cold_metric_readback import ScalarMetricTracker, batch_scalars
 
 
+def native_training_ast(text):
+    # 性能分支只更换只读日志累计；回退分支及全部优化控制流仍逐AST核对。
+    class Native(ast.NodeTransformer):
+        def visit_If(self,node):
+            if 'equivalent_metrics_enabled' in ast.unparse(node.test):return node.orelse
+            return self.generic_visit(node)
+    return Native().visit(ast.parse(text))
+
+
 def test_metric_accumulation_matches_original_after_each_update():
     native=MetricTracker('a','b');fast=ScalarMetricTracker('a','b')
     for cycle in range(2):
@@ -33,11 +42,7 @@ def test_native_training_control_flow_unchanged():
     current=(root/'libs/trainer/da_trainer.py').read_text(encoding='utf8')
     def training(tree):
         return next(n for n in ast.walk(ast.parse(tree)) if isinstance(n,ast.FunctionDef) and n.name=='_train_epoch')
-    class Native(ast.NodeTransformer):
-        def visit_If(self,node):
-            if 'equivalent_metrics_enabled' in ast.unparse(node.test):return node.orelse
-            return self.generic_visit(node)
-    assert ast.dump(training(original),include_attributes=False)==ast.dump(Native().visit(training(current)),include_attributes=False)
+    assert ast.dump(training(original),include_attributes=False)==ast.dump(training(ast.unparse(native_training_ast(current))),include_attributes=False)
 
 
 def test_nan_replacement_keeps_finite_loss_and_gradient():

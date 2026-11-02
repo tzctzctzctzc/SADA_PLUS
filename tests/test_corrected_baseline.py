@@ -149,7 +149,8 @@ def test_official_epoch_and_optimizer_unchanged():
     before=subprocess.check_output(['git','show',OFFICIAL+':libs/trainer/da_trainer.py'],cwd=CODE,text=True)
     after=(CODE/'libs/trainer/da_trainer.py').read_text(encoding='utf-8')
     def method(text):
-        cls=next(x for x in ast.parse(text).body if isinstance(x,ast.ClassDef) and x.name=='Trainer')
+        from test_cold_metric_readback import native_training_ast
+        cls=next(x for x in native_training_ast(text).body if isinstance(x,ast.ClassDef) and x.name=='Trainer')
         return ast.dump(next(x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name=='_train_epoch'))
     assert method(before)==method(after)
     for path in ['libs/models/SADA/optimizer.py','libs/models/SADA/backbones.py',

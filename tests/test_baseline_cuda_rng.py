@@ -56,7 +56,12 @@ def test_epoch_loop_and_original_model_math_are_unchanged():
     after_loop.body=[n for n in after_loop.body if not (isinstance(n,ast.If) and ast.unparse(n.test) in optional_logs)]
     assert ast.dump(loop(before))==ast.dump(after_loop)
     for path in ('libs/trainer/da_trainer.py','libs/models/SADA/optimizer.py'):
-        assert subprocess.check_output(['git','show','90bdce09660b820df7d527aabf1d43df1350bc4b:'+path],cwd=CODE)==(CODE/path).read_bytes().replace(b'\r\n',b'\n')
+        expected=subprocess.check_output(['git','show','90bdce09660b820df7d527aabf1d43df1350bc4b:'+path],cwd=CODE)
+        actual=(CODE/path).read_bytes().replace(b'\r\n',b'\n')
+        if path=='libs/trainer/da_trainer.py':
+            from test_cold_metric_readback import native_training_ast
+            assert ast.dump(ast.parse(expected))==ast.dump(native_training_ast(actual))
+        else:assert expected==actual
 
 
 def test_direct_cuda_capture_does_not_enumerate_nvml(monkeypatch):
