@@ -1,7 +1,7 @@
 from copy import deepcopy
 import numpy as np
 import torch
-from tools.background_risk import BackgroundRisk,video_split,calibrated,fit_calibration,negative_loss,balanced_negative_BCE
+from tools.background_risk import BackgroundRisk,video_split,calibrated,fit_calibration,negative_loss,balanced_negative_BCE,counterfactual_logits
 from tools.background_risk_signals import weighted_metrics,aggregate,group_readiness
 from tools.background_risk_source import result_record,restore_source
 
@@ -71,6 +71,8 @@ def test_group_readiness_uses_all_six_not_best_shift_or_zero_mass():
     v=dict(candidate_videos=1,weight_mass=.3,effective_fraction=.5,gain_vs_uniform=.02,gain_vs_same_weight_confidence=.01)
     reports=[dict(validation=deepcopy(v)) for _ in range(6)]
     assert group_readiness(reports) and not group_readiness(reports[:5])
+    import json
+    assert json.loads(json.dumps(dict(ready=group_readiness(reports))))['ready'] is True
     reports[0]['validation']['weight_mass']=0
     assert not group_readiness(reports)
 
@@ -118,3 +120,20 @@ def test_physical_background_gain_cannot_override_oracle_positive_harm():
     occupancy=np.array([1,1,0,0],bool);raw=np.array([2.,-2.,2.,2.],np.float32)
     r=weighted_metrics(p,raw,np.ones(4,bool),~classes.any(-1),occupancy,classes,dict(slope=1.,bias=0.))
     assert r['physical_gain_vs_uniform']>0 and r['gain_vs_uniform']<0
+
+
+def test_counterfactual_source_logits_preserve_detector_and_use_real_same_level_negatives():
+    p=torch.full((2,10,6),-5.);p[:,2,1]=4.;p[:,3,3]=3.
+    old=p.clone();negative=torch.ones(2,6,dtype=torch.bool);negative[:,[1,3]]=False
+    masks=[torch.ones(2,1,6,dtype=torch.bool)]
+    synthetic,changed=counterfactual_logits([p],masks,negative,torch.tensor([True,False]),7)
+    assert torch.equal(p,old) and changed[0].tolist()==[False,True,False,True,False,False]
+    assert not changed[1].any() and torch.equal(synthetic[0][1],p[1])
+    assert (synthetic[0][0,:,changed[0]].sigmoid().max(0).values<.1).all()
+    assert torch.equal(synthetic[0][0,:,~changed[0]],p[0,:,~changed[0]])
+
+
+def test_counterfactual_no_negative_donor_does_not_fabricate_data():
+    p=torch.full((1,10,3),4.);negative=torch.zeros(1,3,dtype=torch.bool)
+    out,changed=counterfactual_logits([p],[torch.ones(1,1,3,dtype=torch.bool)],negative,torch.ones(1,dtype=torch.bool),0)
+    assert not changed.any() and torch.equal(out[0],p)

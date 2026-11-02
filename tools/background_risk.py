@@ -8,7 +8,7 @@ from tools.supervision_risk import (enable_controls,capture_path,from_call,teach
     source_truth,risk_labels)
 
 MODES=('negative',)
-SCHEMA='sada-prototype-oracle-negative-risk-v2'
+SCHEMA='sada-prototype-oracle-negative-risk-v3'
 SPEC=dict(schema=SCHEMA,initialization='original_cold_fresh_background_head',seed=123,batch=2,
     head='detached_FPN_10_logits_and_normalized_FPN_level;Conv3_523to64_ReLU_Conv1_64to1',
     source_detection='unchanged',original_Prototype_adversarial='unchanged',inference='unchanged',
@@ -18,6 +18,8 @@ SPEC=dict(schema=SCHEMA,initialization='original_cold_fresh_background_head',see
     source_aux_role='fit_videos_only; original_source_detector_still_uses_all_source_train',
     supervision='original_Oracle_center_range_shortest_multilabel_GT_assignment; label1_iff_all10_detection_labels_zero',
     fit_loss='equal_mean_BCE_of_valid_negative_and_GT_positive_low_class_groups_per_video; source_calibration_restores_population_prior',
+    source_error_curriculum='risk_head_only: same_level_same_video_GT_positive_points_receive_detached_real_low_class_GT_negative_logit_vectors; FPN_and_detector_outputs_unchanged',
+    source_curriculum_weight=.5,
     source_split='stable_hash_20percent_calibration_rest_fit',
     normalization='EMA_count_of_all_candidate_negative_points; no_normalization_by_predicted_weight_sum',
     calibration='CPU_monotone_logistic_video_mean_NLL_on_source_calib_low_class_points; repeat_every5_on_current_EMA',
@@ -43,6 +45,23 @@ def balanced_negative_BCE(raw,negative,candidate):
     for group in [candidate&negative,candidate&~negative]:
         if group.any():values.append(F.binary_cross_entropy_with_logits(raw[group],negative[group].float()))
     return torch.stack(values).mean() if values else raw.sum()*0
+
+
+@torch.no_grad()
+def counterfactual_logits(logits,masks,negative,eligible,step):
+    """仅源风险头的漏检课程；真实低分向量同视频/同层搬到GT正点，不修改检测器。"""
+    result=[];changed=[];offset=0
+    for level,(p,m) in enumerate(zip(logits,masks)):
+        t=p.shape[-1];copy=p.detach().clone();mask=torch.zeros_like(m[:,0],dtype=torch.bool)
+        for i in range(len(p)):
+            valid=m[i,0].bool();is_negative=negative[i,offset:offset+t]
+            recipients=(valid&~is_negative&eligible[i]).nonzero().flatten()
+            donors=(valid&is_negative&(p[i].sigmoid().max(0).values<SPEC['candidate_max_class_score'])).nonzero().flatten()
+            if not len(recipients) or not len(donors):continue
+            pick=donors[(torch.arange(len(recipients),device=p.device)+step*37+level*13)%len(donors)]
+            copy[i,:,recipients]=p[i,:,pick].detach();mask[i,recipients]=True
+        result.append(copy);changed.append(mask);offset+=t
+    return tuple(result),torch.cat(changed,1)
 
 
 def oracle_source_truth(cfg):
@@ -123,25 +142,37 @@ def install(ctx,cfg):
         finally:state['active']=False
         assert len(state['calls'])==3
         source=from_call(ctx.model,state['calls'][0]);student_call=state['calls'][1]
-        coordinates=torch.cat(source['points'])[:,0];source_losses=[]
+        coordinates=torch.cat(source['points'])[:,0];source_losses=[];negative_truth=[]
         nfit=0;ncal=0
         for i,v in enumerate(source_videos):
             video=v['metadata']['video_id']
-            if video not in fit_ids:ncal+=1;continue
-            nfit+=1;segments=coordinates.new_tensor(truth[video]['segments']).reshape(-1,2)-float(v['metadata'].get('crop_start',0))
+            segments=coordinates.new_tensor(truth[video]['segments']).reshape(-1,2)-float(v['metadata'].get('crop_start',0))
             # 与冷启动classification Oracle相同：全部相交源GT、精确crop、原正负指派。
             length=v['feats'].shape[-1];labels=torch.tensor(truth[video]['labels'],device=coordinates.device,dtype=torch.long)
             keep=(segments[:,1]>0)&(segments[:,0]<length)
             classes,_=ctx.model.label_points(source['points'],[segments[keep].clamp(0,float(length))],[labels[keep]])
             valid=source['valid'][i];background=~classes[0].any(-1)
+            negative_truth.append(background)
+            if video not in fit_ids:ncal+=1;continue
+            nfit+=1
             candidate=valid&(source['cls'][i].detach().sigmoid().max(-1).values<SPEC['candidate_max_class_score'])
             raw=source['risk'][i,:,0]
             source_losses.append(balanced_negative_BCE(raw,background,candidate))
         source_risk=torch.stack(source_losses).mean() if source_losses else source['risk'].sum()*0
+        negative_truth=torch.stack(negative_truth)
+        eligible=torch.tensor([v['metadata']['video_id'] in fit_ids for v in source_videos],device=coordinates.device)
+        synthetic,changed=counterfactual_logits(source['raw_cls'],source['masks'],negative_truth,eligible,ctx.model.risk_state['step'])
+        synthetic_raw=torch.cat(ctx.model.supervision_risk(source['features'],synthetic,source['masks']),1)[:,:,0]
+        synth_losses=[]
+        for i in range(len(source_videos)):
+            if not eligible[i]:continue
+            candidate=source['valid'][i]&(torch.cat([p[i] for p in synthetic],1).sigmoid().max(0).values<SPEC['candidate_max_class_score'])
+            synth_losses.append(balanced_negative_BCE(synthetic_raw[i],negative_truth[i],candidate))
+        if synth_losses:source_risk=(1-SPEC['source_curriculum_weight'])*source_risk+SPEC['source_curriculum_weight']*torch.stack(synth_losses).mean()
         losses=output[0];epoch=kwargs['curr_epoch'];control=ctx.model.risk_state
         ramp=max(0.,min(1.,(epoch-SPEC['warmup_epochs'])/SPEC['ramp_epochs']))
         extra=losses['cls_loss']*0;observations=[]
-        stats=dict(source_fit_videos=nfit,source_calibration_excluded=ncal,ramp=ramp,
+        stats=dict(source_fit_videos=nfit,source_calibration_excluded=ncal,source_simulated_misses=int(changed.sum()),ramp=ramp,
             negative=0,valid=0,weight_sum=0.,target_regression=0.,positive=0)
         if ramp:
             with torch.no_grad():teacher=teacher_predictions(ctx.model_ema.module,target_videos)

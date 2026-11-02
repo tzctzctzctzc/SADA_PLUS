@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 from tools.baseline_protocol import read,save,sha
-from tools.background_risk import BackgroundRisk,SPEC,video_split,fit_calibration,balanced_negative_BCE
+from tools.background_risk import BackgroundRisk,SPEC,video_split,fit_calibration,balanced_negative_BCE,counterfactual_logits
 from tools.background_risk_signals import weighted_metrics,aggregate
 
 
@@ -66,10 +66,16 @@ def run(cfg,entry):
     for epoch in range(start_epoch+1,11):
         started=time.monotonic();values=[];head.train()
         for j in torch.randperm(len(fit),generator=generator).tolist():
-            c=torch.load(fit[j]['path'],map_location='cpu');raw=raw_prediction(head,c)
+            c=torch.load(fit[j]['path'],map_location='cpu')
+            features=[x.cuda() for x in c['features']];logits=[x.cuda() for x in c['logits']];masks=[x.cuda() for x in c['masks']]
+            raw=torch.cat(head(features,logits,masks),1)[0,:,0]
             candidate=(c['valid']&(c['probability'].max(-1).values<SPEC['candidate_max_class_score'])).cuda()
             target=torch.from_numpy(~c['classes'].any(-1)).cuda()
             loss=balanced_negative_BCE(raw,target,candidate)
+            synthetic,changed=counterfactual_logits(logits,masks,target[None],torch.ones(1,dtype=torch.bool,device='cuda:0'),(epoch-1)*len(fit)+j)
+            raw_synthetic=torch.cat(head(features,synthetic,masks),1)[0,:,0]
+            synthetic_candidate=c['valid'].cuda()&(torch.cat(synthetic,2)[0].sigmoid().max(0).values<SPEC['candidate_max_class_score'])
+            loss=(1-SPEC['source_curriculum_weight'])*loss+SPEC['source_curriculum_weight']*balanced_negative_BCE(raw_synthetic,target,synthetic_candidate)
             optimizer.zero_grad();loss.backward();torch.nn.utils.clip_grad_norm_(head.parameters(),1.);optimizer.step()
             values.append(float(loss.detach()));del c
         history.append(dict(epoch=epoch,loss=float(np.mean(values)),seconds=time.monotonic()-started))

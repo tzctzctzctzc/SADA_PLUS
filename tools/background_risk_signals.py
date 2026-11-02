@@ -45,7 +45,7 @@ def group_readiness(reports):
     if len(reports)!=6:return False
     m=[r['validation'] for r in reports]
     if any(not r.get('candidate_videos') or r['weight_mass']<.1 or r['effective_fraction']<.25 for r in m):return False
-    return np.mean([r['gain_vs_uniform'] for r in m])>0 and np.mean([r['gain_vs_same_weight_confidence'] for r in m])>0
+    return bool(np.mean([r['gain_vs_uniform'] for r in m])>0 and np.mean([r['gain_vs_same_weight_confidence'] for r in m])>0)
 
 
 def diagnostic_arrays(model,video):
