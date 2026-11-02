@@ -138,6 +138,7 @@ def pause_matrix(root,output,timeout=900):
                 assert time.monotonic()<deadline,'等待完整保存点超时'
                 latest=entry/'latest.pt';metrics=entry/'metrics.json'
                 coherent=stage!='train' or (not latest.exists() and not metrics.exists()) or (latest.exists() and metrics.exists() and metrics.stat().st_mtime_ns>=latest.stat().st_mtime_ns)
+                if stage=='train' and (entry/'termination.json').exists() and not (entry/'train_gpu.json').exists():coherent=False
                 if coherent:
                     os.killpg(info['pgid'],signal.SIGSTOP);time.sleep(.1)
                     if stage!='train' or not latest.exists() or (metrics.exists() and metrics.stat().st_mtime_ns>=latest.stat().st_mtime_ns):break
@@ -169,6 +170,12 @@ def pause_matrix(root,output,timeout=900):
             try:actual=process_info(info['pid'])
             except FileNotFoundError:continue
             if actual['start_ticks']==info['start_ticks'] and actual['state']!='Z':alive.append(info['pid'])
+        groups={x['pgid'] for x in stopped}
+        for path in Path('/proc').iterdir():
+            if not path.name.isdigit():continue
+            try:stat=(path/'stat').read_text().split()
+            except FileNotFoundError:continue
+            if int(stat[4]) in groups and stat[2]!='Z' and int(path.name) not in alive:alive.append(int(path.name))
         if not alive:break
         time.sleep(.5)
     assert not alive,alive

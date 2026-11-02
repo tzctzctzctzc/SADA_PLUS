@@ -36,3 +36,34 @@ def test_resume_only_allows_execution_code_metadata_change():
     new=deepcopy(old);new['baseline']['code']='b';paired_config(old,new)
     new['seed']=124
     with pytest.raises(AssertionError):paired_config(old,new)
+
+
+def test_matrix_only_resumes_missing_job_and_preserves_original_files(tmp_path):
+    import os
+    import torch
+    from tools.baseline_protocol import save,sha
+    from tools.cold_oracle_resume import prepare_matrix
+    old=tmp_path/'old';new=tmp_path/'new';results=[]
+    saved,rows,lines=fixture()
+    for mode in ('joint','classification','localization'):
+        for shift in ('S1','S2','S3','S4','S5','S6'):
+            entry=old/'formal'/mode/shift;entry.mkdir(parents=True)
+            save(entry/'config.json',dict(baseline=dict(code='original',epoch_budget=dict(iterations_per_epoch=2))))
+            if (mode,shift)==('joint','S6'):
+                torch.save(saved,entry/'latest.pt');save(entry/'metrics.json',rows)
+                (entry/'oracle_events.jsonl').write_bytes(b''.join(lines))
+            else:
+                save(entry/'complete.json',dict(status='complete'))
+                results.append(dict(mode=mode,shift=shift,complete_sha256=sha(entry/'complete.json')))
+    save(old/'progress.json',dict(results=results));save(old/'acceptance.json',dict(status='passed'))
+    pause=tmp_path/'pause.json';save(pause,dict(status='stopped',root=str(old),processes=[]))
+    configs,done,pending,signals=prepare_matrix(old,new,'new',pause)
+    assert len(done)==17 and list(configs)==[('joint','S6')]
+    assert pending==[('joint','S6','train',None)] and not signals
+    entry=new/'formal/joint/S6'
+    assert (entry/'oracle_events.jsonl').read_bytes()==b''.join(lines[:4])
+    assert os.path.samefile(entry/'latest.pt',old/'formal/joint/S6/latest.pt')
+    before=sha(old/'formal/joint/S6/latest.pt')
+    # 原子替换新保存点不能污染旧工件。
+    temp=entry/'latest.pt.tmp';torch.save(dict(epoch=3),temp);temp.replace(entry/'latest.pt')
+    assert sha(old/'formal/joint/S6/latest.pt')==before
