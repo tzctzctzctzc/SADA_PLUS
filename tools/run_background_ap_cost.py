@@ -62,8 +62,8 @@ def prepare(entry):
         if checked==0 and hard.any():
             for i in np.flatnonzero(hard.numpy())[:3]:
                 c=int(cpu['labels'][i]); f=pf[pf.label==c]; t=g[g.label==c]
-                before=compute_average_precision_detection(t,f,np.linspace(.1,.5,5)).mean() if len(t) else 0.
-                after=compute_average_precision_detection(t,f.drop(i),np.linspace(.1,.5,5)).mean() if len(t) else 0.
+                before=compute_average_precision_detection(t,f,np.linspace(.1,.5,5))[0].mean() if len(t) else 0.
+                after=compute_average_precision_detection(t,f.drop(i),np.linspace(.1,.5,5))[0].mean() if len(t) else 0.
                 assert abs(delta[i]-(after-before))<1e-7
                 checked+=1
         rows.append(dict(record=record,hard_indices=np.flatnonzero(hard.numpy()).tolist(),
@@ -189,7 +189,7 @@ def evaluate(entry):
                 keep=np.ones(len(sub),dtype=bool);keep[selected]=False;ck=np.ones(len(sub),dtype=bool);ck[confidence]=False
                 actual=engine.evaluate(keep);control=engine.evaluate(ck)
                 # 完整官方AP复算每操作点，不用只看标签精度。
-                official=compute_average_precision_detection(t,sub[keep],np.linspace(.1,.5,5)) if len(t) else np.zeros(5)
+                official=compute_average_precision_detection(t,sub[keep],np.linspace(.1,.5,5))[0] if len(t) else np.zeros(5)
                 assert np.max(np.abs(official-np.asarray(actual['ap'])))<1e-7
                 ap.append(actual['map']);ca.append(control['map'])
                 if rate==RATES[0]:original.append(base['map'])

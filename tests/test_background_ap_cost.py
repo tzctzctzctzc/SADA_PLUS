@@ -34,10 +34,10 @@ def test_ties_match_independent_official():
     from libs.evaluation.evaluator_anet import compute_average_precision_detection
     gt = frames([1.,1.], [(0,1),(3,4)])
     pred = frames([.8,.8,.8,.8,.2], [(0,1),(2,3),(3,4),(0,1),(3,4)])
-    base = compute_average_precision_detection(gt, pred, np.linspace(.1,.5,5)).mean()
+    base = compute_average_precision_detection(gt, pred, np.linspace(.1,.5,5))[0].mean()
     delta = deletion_costs(gt,pred)
     for i in range(4):
-        ap = compute_average_precision_detection(gt,pred.drop(i).reset_index(drop=True),np.linspace(.1,.5,5)).mean()
+        ap = compute_average_precision_detection(gt,pred.drop(i).reset_index(drop=True),np.linspace(.1,.5,5))[0].mean()
         assert abs(delta[i] - (ap-base)) < 1e-12
 
 
