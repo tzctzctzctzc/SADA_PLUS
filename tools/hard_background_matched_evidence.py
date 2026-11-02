@@ -18,6 +18,18 @@ def mask_at_budget(labels,scores,risk,fraction):
     return mask
 
 
+def removed_by_video(frame,keep,bg):
+    import numpy as np
+    result=[]
+    for video,positions in frame.groupby('video-id').indices.items():
+        removed=positions[~keep[positions]]
+        result.append(dict(video=video,removed=len(removed),BG_removed=int(bg[removed].sum()),
+                           nonBG_removed=int((~bg[removed]).sum())))
+    observed=[r['BG_removed']/r['removed'] for r in result if r['removed']]
+    return dict(videos=result,affected_videos=len(observed),
+                video_macro_BG_precision=float(np.mean(observed)) if observed else None)
+
+
 def analyze(s,root):
     import numpy as np
     import torch
@@ -27,23 +39,33 @@ def analyze(s,root):
     for domain,split in [('source_val',cfg['src_val_split']),('target_val',cfg['tgt_val_split'])]:
         path=e/(domain+'_predictions.pt');assert sha(path)==done['artifacts'][str(path)]
         rows=torch.load(path,map_location='cpu');truth=load_truth(cfg['dataset']['json_file'] if domain=='source_val' else cfg['baseline']['annotation_for_offline_evaluation'],split)
-        reports={}
-        for mode in MODES:
-            f=prediction_frame(rows[mode]);bg=background_mask(truth,f);curves=[]
+        reports={};reference=prediction_frame(rows[MODES[0]])
+        for mode in (*MODES,'confidence'):
+            f=reference.copy() if mode=='confidence' else prediction_frame(rows[mode])
+            assert f.iloc[:,:5].equals(reference.iloc[:,:5]),'原候选必须完全相同'
+            bg=background_mask(truth,f);curves=[]
             engines={int(c):ClassAP(truth[truth.label==c],f[f.label==c].reset_index(drop=True)) for c in sorted(truth.label.unique())}
             base={c:engine.evaluate(np.ones(len(engine.scores),dtype=bool)) for c,engine in engines.items()}
             baseline=float(np.mean([v['map'] for v in base.values()]))
             for b in BUDGETS:
-                keep=mask_at_budget(f.label.to_numpy(),f.score.to_numpy(),f.pbg.to_numpy(),b)
+                # confidence对照删最低原分数；预算、候选范围与小头完全相同。
+                risk=-f.score.to_numpy() if mode=='confidence' else f.pbg.to_numpy()
+                keep=mask_at_budget(f.label.to_numpy(),f.score.to_numpy(),risk,b)
                 values=[];before=[];after=[]
                 for c,engine in engines.items():
                     positions=np.flatnonzero(f.label.to_numpy()==c);r=engine.evaluate(keep[positions]);values.append(r['map']);before.append(base[c]['tp']);after.append(r['tp'])
                 curves.append(dict(fraction=b,delta_pp=100*(float(np.mean(values))-baseline),
                     removed=int((~keep).sum()),BG_removed=int((~keep&bg).sum()),nonBG_removed=int((~keep&~bg).sum()),
-                    tp_change_by_tiou=(np.sum(after,axis=0)-np.sum(before,axis=0)).tolist()))
+                    tp_change_by_tiou=(np.sum(after,axis=0)-np.sum(before,axis=0)).tolist(),
+                    per_video=removed_by_video(f,keep,bg)))
             reports[mode]=dict(baseline=baseline,all_fixed_budgets=curves)
         # 各版本预算按同一原候选集确定，必须实际删相同数量，不能靠全忽略获胜。
-        for i,b in enumerate(BUDGETS):assert len({reports[m]['all_fixed_budgets'][i]['removed'] for m in MODES})==1
+        for i,b in enumerate(BUDGETS):
+            assert len({r['all_fixed_budgets'][i]['removed'] for r in reports.values()})==1
+            for mode in MODES:
+                r=reports[mode]['all_fixed_budgets'][i]
+                r['delta_vs_confidence_pp']=r['delta_pp']-reports['confidence']['all_fixed_budgets'][i]['delta_pp']
+                r['delta_vs_conditional_pp']=r['delta_pp']-reports['conditional']['all_fixed_budgets'][i]['delta_pp']
         results[domain]=reports
     save(root/(s+'.json'),dict(shift=s,results=results,parameter_search=False,no_best_budget_selection=True,
         target_val_labels_only_for_observation=True,artifacts={str(e/(d+'_predictions.pt')):sha(e/(d+'_predictions.pt')) for d in ['source_val','target_val']}))
@@ -53,7 +75,9 @@ if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--root',type=Path,required=True);a=p.parse_args();os.chdir('/vepfs/vlms/SADA_PLUS')
     a.root.mkdir(exist_ok=False,parents=True)
     save(a.root/'plan.json',dict(code=code_identity(),budgets=BUDGETS,scope='score>=.3; equal_counts_per_predicted_class',
-        parameter_search=False,no_best_budget_selection=True,not_formal_UDA=True))
+        parameter_search=False,no_best_budget_selection=True,not_formal_UDA=True,
+        simple_control='remove_lowest_original_score_same_class_counts',
+        interpretation='all_four_budgets_are_observations; no_budget_or_variant_argmax'))
     completed=[]
     for s in SHIFTS:
         if (PILOT/s/'gpu_complete.json').exists():analyze(s,a.root);completed.append(s)
