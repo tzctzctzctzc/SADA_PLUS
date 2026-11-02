@@ -172,7 +172,7 @@ def infer(root):
             save(root/'progress.json',dict(stage='waiting_request_memory',candidate=row['candidate_id'],cards=now));time.sleep(10);now=cards()
         content=[]
         for i,(f,t) in enumerate(zip(frame_paths,row['times'])):
-            region='BEFORE' if i<2 else 'INSIDE' if i<14 else 'AFTER'
+            region='BEFORE' if t<row['proposal'][0] else 'INSIDE' if t<row['proposal'][1] else 'AFTER'
             content.extend([dict(type='text',text=f'{region} frame at {t:.6f} seconds:'),
                 dict(type='image',image=Path(f).as_uri(),min_pixels=SPEC['min_pixels'],max_pixels=SPEC['max_pixels'])])
         content.append(dict(type='text',text=text_prompt));messages=[dict(role='user',content=content)]
@@ -342,7 +342,9 @@ def run(root,resume=False):
         p=subprocess.Popen(args,cwd=CODE,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True);log.close();active[name]=p;return p
     try:
         if not (root/'prepare_complete.json').exists():
-            p=spawn('prepare');assert p.wait()==0,'CPU preparation failed';del active['prepare']
+            p=spawn('prepare')
+            save(root/'state.json',dict(owner_pid=os.getpid(),stage='preparing_CPU',active={'prepare':p.pid}))
+            assert p.wait()==0,'CPU preparation failed';del active['prepare']
         groups=read(root/'groups.json');evaluated=set();engine=None;cpu=None;cpu_group=None
         while len(evaluated)<len(groups) or not (root/'inference_complete.json').exists() or engine is not None or cpu is not None:
             if engine is None and not (root/'inference_complete.json').exists():
@@ -362,6 +364,7 @@ def run(root,resume=False):
                 active={k:p.pid for k,p in active.items()},complete_groups=sorted(evaluated),total_groups=len(groups),cards=cards()))
             if len(evaluated)<len(groups) or not (root/'inference_complete.json').exists():time.sleep(10)
         audit(root)
+        save(root/'state.json',dict(owner_pid=os.getpid(),stage='complete',active={},complete_groups=sorted(evaluated)))
     except Exception as e:
         save(root/'error.json',dict(error=repr(e),owner_pid=os.getpid(),time=time.time()));raise
     finally:
