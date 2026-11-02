@@ -40,13 +40,14 @@ def analyze(s,root):
         path=e/(domain+'_predictions.pt');assert sha(path)==done['artifacts'][str(path)]
         rows=torch.load(path,map_location='cpu');truth=load_truth(cfg['dataset']['json_file'] if domain=='source_val' else cfg['baseline']['annotation_for_offline_evaluation'],split)
         reports={};reference=prediction_frame(rows[MODES[0]])
+        bg=background_mask(truth,reference)
+        engines={int(c):ClassAP(truth[truth.label==c],reference[reference.label==c].reset_index(drop=True)) for c in sorted(truth.label.unique())}
+        base={c:engine.evaluate(np.ones(len(engine.scores),dtype=bool)) for c,engine in engines.items()}
+        baseline=float(np.mean([v['map'] for v in base.values()]))
         for mode in (*MODES,'confidence'):
             f=reference.copy() if mode=='confidence' else prediction_frame(rows[mode])
             assert f.iloc[:,:5].equals(reference.iloc[:,:5]),'原候选必须完全相同'
-            bg=background_mask(truth,f);curves=[]
-            engines={int(c):ClassAP(truth[truth.label==c],f[f.label==c].reset_index(drop=True)) for c in sorted(truth.label.unique())}
-            base={c:engine.evaluate(np.ones(len(engine.scores),dtype=bool)) for c,engine in engines.items()}
-            baseline=float(np.mean([v['map'] for v in base.values()]))
+            curves=[]
             for b in BUDGETS:
                 # confidence对照删最低原分数；预算、候选范围与小头完全相同。
                 risk=-f.score.to_numpy() if mode=='confidence' else f.pbg.to_numpy()
