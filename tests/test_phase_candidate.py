@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 import torch
 from tools.phase_boundary import PhaseBoundary, sequence_loss, map_coordinates
-from tools.phase_candidate_components import refine, candidate_coordinates, source_candidates_loss, paired_source_error_loss, _device_tree, _cpu_tree
+from tools.phase_candidate_components import refine, candidate_coordinates, source_candidates_loss, paired_source_error_loss, endpoint_mask, _device_tree, _cpu_tree
 
 
 def test_foreground_joint_probability_changes_and_has_real_rejection_gradient():
@@ -93,3 +93,9 @@ def test_paired_calibration_uses_both_real_views_and_detaches_regression_labels(
     loss.backward()
     assert weak_reg[0].grad is None and strong_reg[0].grad is None
     assert head.error_model[-1].weight.grad.norm() > 0
+
+
+def test_endpoint_masks_reject_unrepresentable_offsets_without_discarding_other_side():
+    teacher = torch.tensor([.1, .1]);student = torch.tensor([.4, .4])
+    assert endpoint_mask(teacher, student, torch.tensor([6., 12.]), 20, 5).tolist() == [False, True]
+    assert endpoint_mask(teacher, student, torch.tensor([2., 4.]), 20, 5).tolist() == [True, False]

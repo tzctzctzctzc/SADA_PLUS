@@ -48,6 +48,12 @@ def refine(head, feature, mask, reference, label, stride, length):
     return torch.stack(selected), torch.stack(risks), torch.stack(rawrisks), moved
 
 
+def endpoint_mask(teacher_error, student_error, mapped_refined, length, student_point):
+    # 回归塔输出非负左右距离，不能监督位于正点另一侧的不可表示端点。
+    representable = torch.stack([mapped_refined[0] <= student_point, mapped_refined[1] >= student_point])
+    return (teacher_error < student_error) & (mapped_refined >= 0) & (mapped_refined < length) & representable
+
+
 def _truth(video):
     truth, labels = video['segments'], video['labels']
     length = video['feats'].shape[-1]
@@ -159,21 +165,26 @@ def candidate_target_loss(model, teacher, head, weak, strong, views, step, obser
                 stats['target_background_rejected'] += int(phase_class == 10)
                 if phase_class != int(c):
                     continue
-                post = phase_posterior(tl[:, c])
                 refined, t_error, _, moved = refine(teacher.phase_boundary, tf[level][vi], tm[level][vi, 0], box, c,
                                                    stride, view['original_length'])
                 mapped_ref = map_coordinates(refined, view)
-            sl, sclass = head.sequence(interval_tokens(sf[level][vi], mapped, stride)[None])
+                refined_logits, refined_class = teacher.phase_boundary.sequence(interval_tokens(tf[level][vi], refined, stride)[None])
+                if int(refined_class.argmax(-1)) != int(c):
+                    stats['target_background_rejected'] += int(refined_class.argmax(-1) == 10)
+                    continue
+                post = phase_posterior(refined_logits[:, c])
+            sl, sclass = head.sequence(interval_tokens(sf[level][vi], mapped_ref, stride)[None])
             losses.append(F.kl_div(sl[:, c].log_softmax(-1), post, reduction='batchmean') / 24)
             losses.append(F.nll_loss(sclass, c[None]));stats['target_phase_used'] += 1
-            label = torch.zeros_like(sc[level][vi, :, k]);label[c] = 1
-            losses.append(F.binary_cross_entropy_with_logits(sc[level][vi, :, k], label) * confidence)
-            stats['target_class_used'] += 1
+            if mapped_ref[0] <= k * stride <= mapped_ref[1]:
+                label = torch.zeros_like(sc[level][vi, :, k]);label[c] = 1
+                losses.append(F.binary_cross_entropy_with_logits(sc[level][vi, :, k], label) * confidence)
+                stats['target_class_used'] += 1
             pred = torch.stack([k * stride - sr[level][vi, 0, k] * stride, k * stride + sr[level][vi, 1, k] * stride])
             with torch.no_grad():
                 s_error = torch.stack([head.endpoint_error(sf[level][vi], mapped, pred[side:side + 1].detach(), c, side,
                     stride, view['length'], sm[level][vi, 0])[0] for side in range(2)])
-                mask = (t_error < s_error) & (mapped_ref >= 0) & (mapped_ref < view['length'])
+                mask = endpoint_mask(t_error, s_error, mapped_ref, view['length'], k * stride)
             stats['target_teacher_scale'] += float(t_error.mean());stats['target_student_scale'] += float(s_error.mean())
             stats['target_no_move_endpoints'] += 2 - sum(moved)
             if mask.any():
@@ -271,7 +282,9 @@ def _source_predictions(model, head, weak, strong, views):
                 errors = torch.stack([head.endpoint_error(sf[level][vi], mapped, pred[s:s + 1], c, s, stride,
                                       view['length'], sm[level][vi, 0])[0] for s in range(2)])
                 mapped_ref = map_coordinates(refined, view)
-                mask = (teacher_error < errors) & (mapped_ref >= 0) & (mapped_ref < view['length']) & (scores.argmax(-1)[0] == c)
+                _, refined_scores = head.sequence(interval_tokens(tf[level][vi], refined, stride)[None])
+                mask = endpoint_mask(teacher_error, errors, mapped_ref, view['length'], k * stride)
+                mask = mask & (scores.argmax(-1)[0] == c) & (refined_scores.argmax(-1)[0] == c)
                 student = map_coordinates(pred, view, True)
             rows.append(dict(video_index=vi, box=box.cpu().tolist(), label=int(c), point=index * stride, refined=refined.cpu().tolist(),
                         student=student.cpu().tolist(), mask=mask.cpu().tolist(), class_log_probability=scores[0].cpu().tolist(), view=view))

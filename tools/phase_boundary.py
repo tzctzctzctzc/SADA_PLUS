@@ -46,6 +46,8 @@ SPEC.update(scientific_revision=1,foreground='hierarchical_11class_action_or_bac
  source_pair_error='same_weak_anchor_mapped_to_strong_actual_student_endpoint_source_GT_error_targets_detached',
  source_quality_readiness='CPU_real_source_raw_candidates_nonnegative_refinement_gain_and_positive_accepted_teacher_gain_with_both_sides',
  target_regression='selected_candidate_teacher_endpoint_normalized_before_smoothL1_separate_masks')
+SPEC.update(target_phase='ordered_posterior_KL_on_same_refined_physical_interval_with_second_class_verification',
+            endpoint_representability='left_le_student_positive_point_le_right_separate_endpoint_masks')
 
 def paired_config(old,identity,tmp):
  c=deepcopy(old);c['baseline'].update(code=identity,tmpdir=str(tmp));c['phase_boundary']=deepcopy(SPEC)
