@@ -49,8 +49,23 @@ def kernel(entry):
         torch.set_rng_state(saved['CPU']);torch.cuda.set_rng_state(saved['CUDA'],0)
         assert torch.equal(torch.get_rng_state(),saved['CPU']) and torch.equal(torch.cuda.get_rng_state(0),saved['CUDA'])
         reports[mode]=dict(gradient_norm=float(norm),mechanisms=stats,state_sha256=sha(path))
+    # 新共享native前向也必须真实验收，不能等源头训完才发现目标读出接口错。
+    from tools.run_foreground_calibration_oracle import load_detector
+    from tools.proposal_foreground_math import seconds_to_grid
+    cfg=read(parent/'config.json');model=load_detector(parent);before=base.tensor_digest(model.state_dict());captured=[]
+    handle=model.cls_head_target.register_forward_pre_hook(lambda module,args:captured.append(args))
+    ds=base.dataset(cfg,parent/'target_train_unlabeled.json',cfg['tgt_train_split'],False,True)
+    v=base.move_to_device([ds[0]],'cuda:0');assert not v[0]['segments'].numel()
+    with torch.no_grad():result=model(video_list_src=v,video_list_tgt=v,mode='test',domain='target',curr_epoch=0)[1][0]
+    assert len(captured)==3;f,masks=captured[1]
+    row=dict(video=v[0]['metadata']['video_id'],feature=f[0][0].detach(),valid=masks[0][0,0].bool(),
+        boxes=seconds_to_grid(result['segments'],v[0]['metadata']).cuda(),segments=result['segments'],scores=result['scores'],labels=result['labels'])
+    out=predict(head,row);assert (out['pbg'][out['scores']<.3]==0).all()
+    assert all(torch.equal(out[k],result[k]) for k in ['segments','scores','labels'])
+    handle.remove();assert before==base.tensor_digest(model.state_dict())
     save(entry/'kernel_complete.json',dict(passed=True,video=video,guard=guard,guard_sha256=sha(guard),reports=reports,
         all_four_same_initialization=True,all_four_head_optimizer_CPU_CUDA_RNG_restore=True,
+        original_native_target_GT_free_and_detector_unchanged=True,low_score_candidates_unchanged=True,
         peak_mib=torch.cuda.max_memory_reserved()/2**20,not_formal_training=True))
 
 
@@ -205,6 +220,12 @@ def evaluate(entry):
         ('source_train',cfg['dataset']['json_file'],cfg['src_train_split']),('source_val',cfg['dataset']['json_file'],cfg['src_val_split']),
         ('target_train',parent/'target_train_truth_cpu.json',cfg['tgt_train_split']),('target_val',cfg['baseline']['annotation_for_offline_evaluation'],cfg['tgt_val_split'])]}
     predictions={role:torch.load(entry/(role+'_predictions.pt'),map_location='cpu') for role in truth}
+    for role,group in predictions.items():
+        for mode in MODES:
+            assert len(group[mode])==len(group[MODES[0]])
+            for a,b in zip(group[mode],group[MODES[0]]):
+                assert a['video']==b['video'] and all(torch.equal(a[k],b[k]) for k in ['segments','scores','labels'])
+                assert (a['pbg'][a['scores']<SPEC['cutoff']]==0).all()
     results={}
     for mode in MODES:
         frames={role:prediction_frame(v[mode]) for role,v in predictions.items()}

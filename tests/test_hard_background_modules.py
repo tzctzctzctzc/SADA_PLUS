@@ -58,3 +58,11 @@ def test_complete_optimizer_and_rng_roundtrip():
     assert all(torch.equal(h.state_dict()[k],other.state_dict()[k]) for k in h.state_dict())
     assert torch.equal(h(**{k:x[k] for k in ['feature','valid','boxes','labels','scores']}),other(**{k:x[k] for k in ['feature','valid','boxes','labels','scores']}))
     assert len(second.state_dict()['state'])==len(opt.state_dict()['state'])
+
+
+def test_prediction_only_scores_high_pool_and_preserves_all_original_arrays():
+    from tools.run_hard_background_pilots import predict
+    x=item();x.update(video='v',segments=x['boxes'].clone(),scores=torch.tensor([.2,.3,.9]))
+    h=HardBackgroundHead();out=predict(h,x)
+    assert out['pbg'][0]==0 and out['pbg'][1]>0
+    assert all(torch.equal(out[k],x[k]) for k in ['segments','scores','labels'])
