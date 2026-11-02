@@ -1,7 +1,14 @@
 import json
 from pathlib import Path
 import pytest
-from tools.phase_endpoint_preview import FILES, link_completed, validate_completed
+from tools.phase_endpoint_preview import FILES, link_completed, validate_completed, parse_jobs
+
+
+def test_explicit_jobs_reject_duplicates_and_invalid_modes():
+    assert parse_jobs(['grid:S1']) == [('grid','S1')]
+    assert parse_jobs(['control:S1','gt:S1']) == [('control','S1'),('gt','S1')]
+    for values in ([], ['grid:S1','grid:S1'], ['wrong:S1'], ['gt:S7'], ['gt:S1:extra']):
+        with pytest.raises(AssertionError):parse_jobs(values)
 
 
 def completed(path):

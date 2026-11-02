@@ -16,6 +16,13 @@ FILES = ('config.json', 'runtime_config.json', 'seed_proof.json',
          'epoch000.pt', 'epoch005.pt', 'epoch010.pt', 'epoch015.pt', 'epoch020.pt')
 
 
+def parse_jobs(values):
+    jobs = [tuple(v.split(':')) for v in values]
+    assert jobs and len(set(jobs)) == len(jobs)
+    assert all(len(j) == 2 and j[0] in ('control','gate','grid','gt') and j[1] in ('S1','S2','S3','S4','S5','S6') for j in jobs)
+    return jobs
+
+
 def read(path):
     return json.loads(Path(path).read_text(encoding='utf-8'))
 
@@ -103,7 +110,10 @@ def main(a):
     identity = code_identity()
     assert identity['commit'] == a.expected_worker_commit
     a.output.mkdir(parents=True, exist_ok=False)
-    jobs = [('control', s) for s in ('S1', 'S3')] + [('gate', s) for s in ('S1', 'S3')]
+    jobs = parse_jobs(a.jobs)
+    # 整个预声明集合全部合法完成才创建快照，避免部分创建后混入未完成训练。
+    for mode, shift in jobs:
+        validate_completed(a.original / 'formal' / mode / shift)
     for mode, shift in jobs:
         link_completed(a.original / 'formal' / mode / shift, a.output / 'formal' / mode / shift)
     controller_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=Path(__file__).resolve().parents[1], text=True).strip()
@@ -181,11 +191,12 @@ def main(a):
             save(a.output / 'state.json', dict(pid=os.getpid(), pending=pending, completed=finished,
                 active={k:dict(pid=t['process'].pid, mode=t['mode'], shift=t['shift'], stage=t['stage'], gpu=t['gpu']) for k,t in active.items()}))
             time.sleep(3)
-        assert len(finished) == 4 and {(r['mode'],r['shift']) for r in finished} == set(jobs)
+        assert len(finished) == len(jobs) and {(r['mode'],r['shift']) for r in finished} == set(jobs)
         paired = {s: (next(r['primary_map'] for r in finished if r['mode']=='gate' and r['shift']==s)
-                     - next(r['primary_map'] for r in finished if r['mode']=='control' and r['shift']==s))*100 for s in ('S1','S3')}
-        save(a.output / 'final.json', dict(count=4, results=finished, gate_minus_control_pp=paired,
-             group_mean_reported=False, scope='target-train-supervised Oracle; fixed20; two directions only'))
+                     - next(r['primary_map'] for r in finished if r['mode']=='control' and r['shift']==s))*100
+                  for s in sorted({s for _,s in jobs}) if ('gate',s) in jobs and ('control',s) in jobs}
+        save(a.output / 'final.json', dict(count=len(jobs), results=finished, gate_minus_control_pp=paired,
+             group_mean_reported=False, scope='target-train-supervised Oracle; fixed20; predeclared completed entries only'))
     except BaseException as exc:
         save(a.output / 'error.json', dict(type=type(exc).__name__, message=str(exc)))
         raise
@@ -209,5 +220,6 @@ if __name__ == '__main__':
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--worker-code', type=Path, required=True)
     p.add_argument('--expected-worker-commit', default='f3aabecbe3f81563ce9177c6ca3ac153ede2cbb4')
+    p.add_argument('--jobs', nargs='+', default=['control:S1','control:S3','gate:S1','gate:S3'])
     p.add_argument('--data-root', type=Path, default=Path('/vepfs/vlms/SADA_PLUS'))
     main(p.parse_args())
