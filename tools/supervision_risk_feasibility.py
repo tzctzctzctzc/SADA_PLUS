@@ -51,7 +51,7 @@ def run(cfg,entry):
                 masks=tuple(x.cpu() for x in pred['masks']),probability=probability,valid=torch.from_numpy(valid),
                 correct=torch.from_numpy((classes[np.arange(len(label)),label]>0).astype(np.float32)),
                 background=torch.from_numpy(bg.astype(np.float32)),classes=classes,occupancy=occupancy,
-                video=video['metadata']['video_id'],metadata=video['metadata'])
+                points=points,video=video['metadata']['video_id'],metadata=video['metadata'])
             path=folder/(role+'_'+video['metadata']['video_id']+'.pt');tmp=path.with_suffix('.tmp')
             torch.save(cached,tmp);tmp.replace(path)
             paths.append(dict(path=str(path),sha256=sha(path),video=cached['video'],subset=role))
@@ -104,3 +104,42 @@ def run(cfg,entry):
         best_epoch=best_epoch,macro_by_video=result['macro_by_video'],history_sha256=sha(entry/'history.json'),
         best_sha256=sha(entry/'best_risk.pt'),index_sha256=sha(entry/'cache_index.json'),head_not_transferred_to_formal=True,
         source_fit_only=True,target_GT_used=False))
+
+
+def audit(cfg,entry):
+    """源阶段结束后只读全审：独立从原manifest重算GT、坐标与每份标签。"""
+    manifest=read(cfg['dataset']['json_file'])['database'];index=read(entry/'cache_index.json')['index']
+    checked={}
+    for role,splits in [('source_train',cfg['src_train_split']),('source_val',cfg['src_val_split'])]:
+        expected={k for k,v in manifest.items() if v['subset'] in splits}
+        assert {x['video'] for x in index[role]}==expected
+        assert len(index[role])==len(expected)
+        for item in index[role]:
+            assert sha(item['path'])==item['sha256']
+            c=torch.load(item['path'],map_location='cpu');m=c['metadata'];row=manifest[item['video']]
+            gt=[x for x in row.get('annotations',[]) if 0<=int(x['label_id'])<10]
+            segments=np.asarray([x['segment'] for x in gt],np.float32).reshape(-1,2)
+            segments=(segments*m['fps']-.5*m['feat_num_frames'])/m['feat_stride']-m['crop_start']
+            length=m['crop_feat_len'];keep=(segments[:,1]>0)&(segments[:,0]<length)
+            labels=np.asarray([int(x['label_id']) for x in gt])[keep];segments=segments[keep].clip(0,length)
+            classes,bg,occupancy=truth_arrays(cfg,c['points'],segments,labels,c['valid'].numpy())
+            assert np.array_equal(classes,c['classes']) and np.array_equal(bg,c['background'].numpy().astype(bool))
+            assert np.array_equal(occupancy,c['occupancy'])
+            label=c['probability'].argmax(-1).numpy()
+            assert np.array_equal(classes[np.arange(len(label)),label]>0,c['correct'].numpy().astype(bool))
+            points=np.concatenate([np.arange(x.shape[-1],dtype=np.float32)*float(2**i) for i,x in enumerate(c['features'])])
+            assert np.array_equal(points,c['points'][:,0])
+        checked[role]=len(expected)
+    assert not {x['video'] for x in index['source_train']}&{x['video'] for x in index['source_val']}
+    history=read(entry/'history.json');assert [x['epoch'] for x in history]==list(range(11))
+    selected=min(history,key=lambda x:(x['validation_loss'],x['epoch']))
+    best=torch.load(entry/'best_risk.pt',map_location='cpu');latest=torch.load(entry/'latest_risk.pt',map_location='cpu')
+    assert best['epoch']==selected['epoch'] and latest['epoch']==10 and latest['history']==history
+    assert len(latest['optimizer']['param_groups'])==1 and latest['optimizer']['state']
+    quality=read(entry/'best_quality.json');result=read(entry/'result.json')
+    assert quality['epoch']==selected['epoch'] and quality['macro_by_video']==selected['macro_by_video']
+    assert result['status']==('ready' if readiness(quality['macro_by_video']) else 'source_mechanism_unready')
+    assert result['best_sha256']==sha(entry/'best_risk.pt') and result['index_sha256']==sha(entry/'cache_index.json')
+    report=dict(passed=True,checked_members=checked,all_cache_SHA_and_GT_labels_recomputed=True,best_epoch=selected['epoch'],
+        result_sha256=sha(entry/'result.json'),latest_sha256=sha(entry/'latest_risk.pt'),head_not_transferred_to_formal=True)
+    save(entry/'independent_source_audit.json',report);return report

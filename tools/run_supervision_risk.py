@@ -327,6 +327,8 @@ def main(args):
                 del active[key];assert rc==0,(key,rc)
                 m,s,stage,epoch=[t[k] for k in ['mode','shift','stage','epoch']];e=root/'formal'/m/s
                 if stage=='source_fit':
+                    from tools.supervision_risk_feasibility import audit as audit_source
+                    audit_source(configs[m,s],root/'feasibility'/m/s)
                     path=root/'feasibility'/m/s/'result.json';source_reports[m+'/'+s]=dict(path=str(path),sha256=sha(path),report=read(path))
                 elif stage=='probe':
                     path=root/'probes'/m/s/'result.json';r=read(path)
