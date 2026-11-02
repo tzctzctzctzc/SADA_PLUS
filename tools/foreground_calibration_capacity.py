@@ -88,8 +88,12 @@ def watch(source,root):
                 r=read(root/active['shift']/'complete.json')
                 for path,digest in r['artifacts'].items():assert sha(path)==digest
                 completed.append(active['shift']);active=None
-            # 等旧两CPU队列全收尾，避免与主队列合计超过2路完整AP。
-            old_done=all((p/'final.json').exists() for p in [OLD_PILOT,Path('/vepfs/vlms/sada_negative_curriculum6_f20e133_1103')])
+            # 按真实CPU进程占用判断；已退出的失败队列不能阻塞当前独立分析。
+            old_done=True
+            for old in [OLD_PILOT,Path('/vepfs/vlms/sada_negative_curriculum6_f20e133_1103')]:
+                if (old/'final.json').exists():continue
+                state=read(old/'state.json')
+                old_done=old_done and not any(Path('/proc/'+str(t['pid'])).exists() for t in state.get('active',{}).values())
             if not active and old_done:
                 for s in SHIFTS:
                     if s in completed or not (root/s/'unconstrained_frozen.json').exists() or not (source/s/'target_val_gpu_complete.json').exists():continue
