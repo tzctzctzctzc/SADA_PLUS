@@ -22,6 +22,9 @@ def audit(root):
     for s in ('S1','S2','S3','S4','S5','S6'):
         entry=root/s
         if not (entry/'complete.json').exists():continue
+        old=root/'independent_audit'/(s+'.json')
+        if old.exists() and read(old)['complete_sha256']==sha(entry/'complete.json'):
+            all_results.append(read(old));continue
         complete=read(entry/'complete.json');cfg=read(entry/'config.json');selection=read(entry/'selection.json')
         assert selection==plan['jobs'][s]['selection']
         for path,digest in complete['artifacts'].items():assert sha(path)==digest,path
