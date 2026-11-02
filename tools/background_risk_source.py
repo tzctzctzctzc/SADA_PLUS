@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 from tools.baseline_protocol import read,save,sha
-from tools.background_risk import BackgroundRisk,SPEC,video_split,fit_calibration
+from tools.background_risk import BackgroundRisk,SPEC,video_split,fit_calibration,balanced_negative_BCE
 from tools.background_risk_signals import weighted_metrics,aggregate
 
 
@@ -68,8 +68,8 @@ def run(cfg,entry):
         for j in torch.randperm(len(fit),generator=generator).tolist():
             c=torch.load(fit[j]['path'],map_location='cpu');raw=raw_prediction(head,c)
             candidate=(c['valid']&(c['probability'].max(-1).values<SPEC['candidate_max_class_score'])).cuda()
-            target=c['background'].cuda()
-            loss=F.binary_cross_entropy_with_logits(raw[candidate],target[candidate]) if candidate.any() else raw.sum()*0
+            target=torch.from_numpy(~c['classes'].any(-1)).cuda()
+            loss=balanced_negative_BCE(raw,target,candidate)
             optimizer.zero_grad();loss.backward();torch.nn.utils.clip_grad_norm_(head.parameters(),1.);optimizer.step()
             values.append(float(loss.detach()));del c
         history.append(dict(epoch=epoch,loss=float(np.mean(values)),seconds=time.monotonic()-started))
@@ -82,7 +82,8 @@ def run(cfg,entry):
         for item in calibration:
             c=torch.load(item['path'],map_location='cpu');raw=raw_prediction(head,c).cpu()
             keep=c['valid']&(c['probability'].max(-1).values<SPEC['candidate_max_class_score'])
-            calrows.append(dict(video=item['video'],logits=raw[keep],background=c['background'][keep]))
+            negative=torch.from_numpy(~c['classes'].any(-1)).float()
+            calrows.append(dict(video=item['video'],logits=raw[keep],background=negative[keep]))
     cal=fit_calibration(calrows,epoch=10);save(entry/'calibration.json',cal)
     result={}
     with torch.no_grad():
@@ -90,7 +91,7 @@ def run(cfg,entry):
             rows=[]
             for item in items:
                 c=torch.load(item['path'],map_location='cpu');raw=raw_prediction(head,c).cpu().numpy()
-                row=weighted_metrics(c['probability'].numpy(),raw,c['valid'].numpy(),c['background'].numpy().astype(bool),
+                row=weighted_metrics(c['probability'].numpy(),raw,c['valid'].numpy(),~c['classes'].any(-1),
                     c['occupancy'],c['classes'],cal)
                 rows.append(dict(row,video=item['video']))
             result[name]=aggregate(rows);save(entry/(name+'_quality.json'),dict(macro=result[name],videos=rows))
@@ -138,9 +139,14 @@ def recalibrate(ctx,cfg,entry,epoch):
                 score=pred['cls'][0].sigmoid().max(-1).values.cpu();raw=pred['risk'][0,:,0].cpu()
                 points=torch.cat(pred['points'])[:,0].cpu()
                 full=torch.tensor(ctx.model.risk_source_truth[item['id']]['segments'],dtype=torch.float32).reshape(-1,2)-v['metadata']['crop_start']
-                occupied=((points[:,None]>=full[None,:,0])&(points[:,None]<=full[None,:,1])).any(-1) if len(full) else torch.zeros_like(valid)
+                labels=np.asarray(ctx.model.risk_source_truth[item['id']]['labels'],int)
+                length=v['feats'].shape[-1];intersection=(full[:,1]>0)&(full[:,0]<length)
+                from tools.supervision_risk_signals import truth_arrays
+                classes,_,_=truth_arrays(cfg,torch.cat(pred['points']).cpu().numpy(),full[intersection].clamp(0,float(length)).numpy(),
+                    labels[intersection.numpy()],valid.numpy())
+                negative=torch.from_numpy(~classes.any(-1))
                 keep=valid&(score<SPEC['candidate_max_class_score'])
-                rows.append(dict(video=item['id'],logits=raw[keep],background=(~occupied[keep]).float(),
+                rows.append(dict(video=item['id'],logits=raw[keep],background=negative[keep].float(),
                     crop_start=v['metadata']['crop_start'],length=v['feats'].shape[-1]))
         assert {r['video'] for r in rows}==ids
         cal=fit_calibration(rows,epoch=epoch)

@@ -19,15 +19,18 @@ def weighted_metrics(probability,raw,valid,background,occupancy,classes,calibrat
     physical=occupancy[ids].astype(float);detection=classes[ids].any(-1).astype(float)
     def mean(v,weight):return float((v*weight).sum()/max(float(weight.sum()),1e-12))
     uniform=float(physical.mean());learned=mean(physical,w);confidence=mean(physical,matched)
+    detector_uniform=float(detection.mean());detector_learned=mean(detection,w);detector_confidence=mean(detection,matched)
     rawq=1/(1+np.exp(-np.clip(raw[ids],-80,80)))
     bg=background[ids].astype(float)
     return dict(candidates=total,weight_mass=mass/total,effective_fraction=mass**2/(max(float((w*w).sum()),1e-12)*total),
         weighted_physical_contamination=learned,uniform_physical_contamination=uniform,
         same_weight_confidence_physical_contamination=confidence,
-        gain_vs_uniform=uniform-learned,gain_vs_same_weight_confidence=confidence-learned,
-        weighted_detection_positive_contamination=mean(detection,w),
+        gain_vs_uniform=detector_uniform-detector_learned,gain_vs_same_weight_confidence=detector_confidence-detector_learned,
+        physical_gain_vs_uniform=uniform-learned,physical_gain_vs_same_weight_confidence=confidence-learned,
+        weighted_detection_positive_contamination=detector_learned,uniform_detection_positive_contamination=detector_uniform,
+        same_weight_confidence_detection_positive_contamination=detector_confidence,
         raw_brier=float(((rawq-bg)**2).mean()),calibrated_brier=float(((q-bg)**2).mean()),
-        calibrated_mean_background=float(q.mean()),actual_background=float(bg.mean()))
+        calibrated_mean_negative=float(q.mean()),actual_negative=float(bg.mean()))
 
 
 def aggregate(rows):
@@ -66,7 +69,7 @@ def evaluate_diagnostics(cfg,entry,epoch):
         segments=segments[keep].clip(0,length);labels=np.asarray([int(g['label_id']) for g in gt])[keep]
         with np.load(row['arrays'],allow_pickle=False) as a:
             classes,bg,occ=truth_arrays(cfg,a['points'],segments,labels,a['valid'])
-            r=weighted_metrics(a['probability'],a['raw'],a['valid'],bg,occ,classes,row['calibration'])
+            r=weighted_metrics(a['probability'],a['raw'],a['valid'],~classes.any(-1),occ,classes,row['calibration'])
         rows.append(dict(r,video=row['video']))
     result=dict(epoch=epoch,macro_by_video=aggregate(rows),videos=rows,target_GT_used=False,
         scope='source_val_only_fixed_crop_not_target_AP',diagnostics_sha256=sha(d/'diagnostics.json'))

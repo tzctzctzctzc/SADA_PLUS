@@ -1,7 +1,7 @@
 from copy import deepcopy
 import numpy as np
 import torch
-from tools.background_risk import BackgroundRisk,video_split,calibrated,fit_calibration,negative_loss
+from tools.background_risk import BackgroundRisk,video_split,calibrated,fit_calibration,negative_loss,balanced_negative_BCE
 from tools.background_risk_signals import weighted_metrics,aggregate,group_readiness
 from tools.background_risk_source import result_record,restore_source
 
@@ -54,7 +54,8 @@ def test_empty_negative_set_zero_loss_and_gradient():
 def test_equal_weight_distribution_control_catches_real_order_gain():
     p=np.full((4,10),.001,np.float32);p[:,0]=[.01,.02,.03,.04]
     raw=np.array([-2.,-1.,1.,2.],np.float32);occupied=np.array([1,1,0,0],bool)
-    result=weighted_metrics(p,raw,np.ones(4,bool),~occupied,occupied,np.zeros((4,10)),dict(slope=1.,bias=0.))
+    classes=np.zeros((4,10));classes[occupied,0]=1
+    result=weighted_metrics(p,raw,np.ones(4,bool),~occupied,occupied,classes,dict(slope=1.,bias=0.))
     assert result['gain_vs_uniform']>0 and result['gain_vs_same_weight_confidence']>0
     assert 0<result['weight_mass']<1 and 0<result['effective_fraction']<=1
 
@@ -101,3 +102,19 @@ def test_source_resume_preserves_adamw_shuffle_and_cpu_random_streams(monkeypatc
     actual=[step() for _ in range(3)]
     assert all(torch.equal(x[0],y[0]) and torch.equal(x[1],y[1]) for x,y in zip(expected,actual))
     assert all(torch.equal(v,head.state_dict()[k]) for k,v in weights.items())
+
+
+def test_rare_oracle_positive_points_have_nonvanishing_training_weight():
+    raw=torch.zeros(100,requires_grad=True);negative=torch.ones(100,dtype=torch.bool);negative[0]=False
+    loss=balanced_negative_BCE(raw,negative,torch.ones(100,dtype=torch.bool));loss.backward()
+    assert raw.grad[0]>0 and (raw.grad[1:]<0).all()
+    assert torch.allclose(raw.grad[0].abs(),raw.grad[1:].abs().sum())
+
+
+def test_physical_background_gain_cannot_override_oracle_positive_harm():
+    # 点0是检测正点，点1为动作边缘（物理前景但原检测负点）。
+    p=np.full((4,10),.001,np.float32);p[:,0]=[.09,.01,.02,.03]
+    classes=np.zeros((4,10));classes[0,0]=1
+    occupancy=np.array([1,1,0,0],bool);raw=np.array([2.,-2.,2.,2.],np.float32)
+    r=weighted_metrics(p,raw,np.ones(4,bool),~classes.any(-1),occupancy,classes,dict(slope=1.,bias=0.))
+    assert r['physical_gain_vs_uniform']>0 and r['gain_vs_uniform']<0

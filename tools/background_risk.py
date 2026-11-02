@@ -7,21 +7,23 @@ from torch.nn import functional as F
 from tools.supervision_risk import (enable_controls,capture_path,from_call,teacher_predictions,
     source_truth,risk_labels)
 
-MODES=('background',)
-SCHEMA='sada-prototype-background-risk-v1'
+MODES=('negative',)
+SCHEMA='sada-prototype-oracle-negative-risk-v2'
 SPEC=dict(schema=SCHEMA,initialization='original_cold_fresh_background_head',seed=123,batch=2,
-    head='detached_FPN_and_10_logits;Conv3_522_to64_ReLU_Conv1_64to1',
+    head='detached_FPN_10_logits_and_normalized_FPN_level;Conv3_523to64_ReLU_Conv1_64to1',
     source_detection='unchanged',original_Prototype_adversarial='unchanged',inference='unchanged',
     target_positive_classification=False,target_regression=False,candidate_max_class_score=.1,
     weighting='sigmoid(a*background_logit+b)^2; a>0; source_video_calibration_only',
     source_aux_weight=.1,target_weight=.1,negative_alpha=.25,warmup_epochs=10,ramp_epochs=5,
     source_aux_role='fit_videos_only; original_source_detector_still_uses_all_source_train',
+    supervision='original_Oracle_center_range_shortest_multilabel_GT_assignment; label1_iff_all10_detection_labels_zero',
+    fit_loss='equal_mean_BCE_of_valid_negative_and_GT_positive_low_class_groups_per_video; source_calibration_restores_population_prior',
     source_split='stable_hash_20percent_calibration_rest_fit',
     normalization='EMA_count_of_all_candidate_negative_points; no_normalization_by_predicted_weight_sum',
     calibration='CPU_monotone_logistic_video_mean_NLL_on_source_calib_low_class_points; repeat_every5_on_current_EMA',
     feasibility=dict(cache_reuse='old_source_FPN_cache_readonly_and_SHA_bound',epochs=10,lr=3e-4,
         head_selection='fixed_epoch10_not_source_val',head_not_transferred_to_formal=True),
-    source_readiness='six_shift_mean_physical_contamination_gain_vs_uniform_and_equal_weight_confidence>0; every_shift_mass>=.1_and_ESS_fraction>=.25',
+    source_readiness='six_shift_mean_detector_positive_contamination_gain_vs_uniform_and_equal_weight_confidence>0; every_shift_mass>=.1_and_ESS_fraction>=.25',
     max_epochs=50,validation_every=5,patience=15,
     checkpoint_selection='original_source_cls_reg_EMA_and_all_saved_source_AP_max_earliest_tie',
     target_GT=False,efficiency='reuse_existing_source_target_FPN; teacher_cls_only; reuse_frozen_cache_only_in_feasibility')
@@ -29,10 +31,26 @@ SPEC=dict(schema=SCHEMA,initialization='original_cold_fresh_background_head',see
 
 class BackgroundRisk(nn.Module):
     def __init__(self,channels):
-        super().__init__();self.temporal=nn.Conv1d(channels+10,64,3,padding=1);self.output=nn.Conv1d(64,1,1)
+        super().__init__();self.temporal=nn.Conv1d(channels+11,64,3,padding=1);self.output=nn.Conv1d(64,1,1)
     def forward(self,features,logits,masks):
-        return tuple((self.output(F.relu(self.temporal(torch.cat([x.detach()*m,p.detach()*m],1))))*m).permute(0,2,1)
-            for x,p,m in zip(features,logits,masks))
+        return tuple((self.output(F.relu(self.temporal(torch.cat([x.detach()*m,p.detach()*m,
+            torch.ones_like(p[:,:1])*float(level)/max(1,len(features)-1)*m],1))))*m).permute(0,2,1)
+            for level,(x,p,m) in enumerate(zip(features,logits,masks)))
+
+
+def balanced_negative_BCE(raw,negative,candidate):
+    values=[]
+    for group in [candidate&negative,candidate&~negative]:
+        if group.any():values.append(F.binary_cross_entropy_with_logits(raw[group],negative[group].float()))
+    return torch.stack(values).mean() if values else raw.sum()*0
+
+
+def oracle_source_truth(cfg):
+    from tools.baseline_protocol import read
+    records=source_truth(cfg)
+    for video,row in read(cfg['dataset']['json_file'])['database'].items():
+        if video in records:records[video]['labels']=[int(a['label_id']) for a in row.get('annotations',[]) if 0<=int(a['label_id'])<10]
+    return records
 
 
 def video_split(ids):
@@ -89,7 +107,7 @@ def install(ctx,cfg):
     from tools.cold_oracle_fastpath import install as fast
     enable_controls()
     for m in [ctx.model,ctx.model_ema.module]:attach(m);fast(m)
-    truth=source_truth(cfg);ctx.model.risk_source_truth=truth
+    truth=oracle_source_truth(cfg);ctx.model.risk_source_truth=truth
     ctx.background_roles=video_split(truth);fit_ids=set(ctx.background_roles['fit'])
     ctx.model_ema.module.supervision_risk.load_state_dict(ctx.model.supervision_risk.state_dict())
     for opt in [ctx.optimizer_gen_source,ctx.optimizer_gen_source_alignment]:
@@ -111,11 +129,14 @@ def install(ctx,cfg):
             video=v['metadata']['video_id']
             if video not in fit_ids:ncal+=1;continue
             nfit+=1;segments=coordinates.new_tensor(truth[video]['segments']).reshape(-1,2)-float(v['metadata'].get('crop_start',0))
-            # 背景监督不依赖被裁剪丢弃的原训练segments，完整源GT覆盖才有效。
-            valid=source['valid'][i];background=risk_labels(torch.zeros(len(valid),10,device=coordinates.device),coordinates,segments,valid)
+            # 与冷启动classification Oracle相同：全部相交源GT、精确crop、原正负指派。
+            length=v['feats'].shape[-1];labels=torch.tensor(truth[video]['labels'],device=coordinates.device,dtype=torch.long)
+            keep=(segments[:,1]>0)&(segments[:,0]<length)
+            classes,_=ctx.model.label_points(source['points'],[segments[keep].clamp(0,float(length))],[labels[keep]])
+            valid=source['valid'][i];background=~classes[0].any(-1)
             candidate=valid&(source['cls'][i].detach().sigmoid().max(-1).values<SPEC['candidate_max_class_score'])
             raw=source['risk'][i,:,0]
-            source_losses.append(F.binary_cross_entropy_with_logits(raw[candidate],background[candidate].float()) if candidate.any() else raw.sum()*0)
+            source_losses.append(balanced_negative_BCE(raw,background,candidate))
         source_risk=torch.stack(source_losses).mean() if source_losses else source['risk'].sum()*0
         losses=output[0];epoch=kwargs['curr_epoch'];control=ctx.model.risk_state
         ramp=max(0.,min(1.,(epoch-SPEC['warmup_epochs'])/SPEC['ramp_epochs']))
