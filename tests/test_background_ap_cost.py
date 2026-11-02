@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import torch
-from tools.background_ap_cost import deletion_costs, cost_balanced_bg
+from tools.background_ap_cost import deletion_costs, cost_balanced_bg,official_ap
 from tools.foreground_oracle_ap import ClassAP
 
 
@@ -55,3 +55,11 @@ def test_zero_cost_fallback_finite_and_uniform():
     loss = cost_balanced_bg(logits,torch.zeros(3),torch.zeros(3))
     loss.backward()
     assert torch.isfinite(loss) and torch.allclose(logits.grad,torch.full((3,),1/6))
+
+
+def test_official_noncontiguous_and_empty_prediction_indices():
+    gt=frames([1.],[(0,1)]);gt.index=[19]
+    pred=frames([.9,.8,.7],[(2,3),(0,1),(0,1)]);pred.index=[2,7,13]
+    assert np.allclose(official_ap(gt,pred),.5)
+    assert np.allclose(official_ap(gt,pred.drop(2)),1.)
+    assert np.array_equal(official_ap(gt,pred.iloc[:0]),np.zeros(5))

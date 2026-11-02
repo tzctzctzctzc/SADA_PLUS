@@ -40,7 +40,7 @@ def prepare(entry):
     import torch
     import pandas as pd
     import numpy as np
-    from tools.background_ap_cost import deletion_costs
+    from tools.background_ap_cost import deletion_costs,official_ap
     from tools.hard_background_modules import targets
     from libs.evaluation.evaluator_anet import compute_average_precision_detection
     parent = SOURCE/entry.name
@@ -62,8 +62,8 @@ def prepare(entry):
         if checked==0 and hard.any():
             for i in np.flatnonzero(hard.numpy())[:3]:
                 c=int(cpu['labels'][i]); f=pf[pf.label==c]; t=g[g.label==c]
-                before=compute_average_precision_detection(t,f,np.linspace(.1,.5,5))[0].mean() if len(t) else 0.
-                after=compute_average_precision_detection(t,f.drop(i),np.linspace(.1,.5,5))[0].mean() if len(t) else 0.
+                before=official_ap(t,f).mean()
+                after=official_ap(t,f.drop(i)).mean()
                 assert abs(delta[i]-(after-before))<1e-7
                 checked+=1
         rows.append(dict(record=record,hard_indices=np.flatnonzero(hard.numpy()).tolist(),
@@ -170,6 +170,7 @@ def evaluate(entry):
     from tools.foreground_oracle_ap import ClassAP,prediction_frame,background_mask
     from tools.run_foreground_calibration_oracle import load_truth
     from libs.evaluation.evaluator_anet import compute_average_precision_detection
+    from tools.background_ap_cost import official_ap
     done=read(entry/'gpu_complete.json')
     for p,h in done['artifacts'].items():assert sha(p)==h
     cfg=read(SOURCE/entry.name/'config.json');gt=load_truth(cfg['dataset']['json_file'],cfg['src_val_split'])
@@ -189,7 +190,7 @@ def evaluate(entry):
                 keep=np.ones(len(sub),dtype=bool);keep[selected]=False;ck=np.ones(len(sub),dtype=bool);ck[confidence]=False
                 actual=engine.evaluate(keep);control=engine.evaluate(ck)
                 # 完整官方AP复算每操作点，不用只看标签精度。
-                official=compute_average_precision_detection(t,sub[keep],np.linspace(.1,.5,5))[0] if len(t) else np.zeros(5)
+                official=official_ap(t,sub[keep])
                 assert np.max(np.abs(official-np.asarray(actual['ap'])))<1e-7
                 ap.append(actual['map']);ca.append(control['map'])
                 if rate==RATES[0]:original.append(base['map'])

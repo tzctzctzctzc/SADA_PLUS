@@ -6,6 +6,16 @@ from tools.foreground_oracle_ap import ClassAP
 from tools.hard_background_modules import balanced_bg, quality_loss
 
 
+def official_ap(truth, predictions):
+    """旧官方API用loc读取argsort位置；筛选后必须恢复连续索引。"""
+    from libs.evaluation.evaluator_anet import compute_average_precision_detection
+    if not len(truth):
+        return np.zeros(5)
+    result = compute_average_precision_detection(truth.reset_index(drop=True),
+        predictions.reset_index(drop=True), np.linspace(.1, .5, 5))
+    return result[0] if isinstance(result, tuple) else result
+
+
 def deletion_costs(truth, predictions, cutoff=.3):
     """每视频每类，删后重新排序/匹配；包含全部低分预测作为替补。
 
