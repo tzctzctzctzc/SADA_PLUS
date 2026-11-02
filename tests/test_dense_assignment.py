@@ -154,3 +154,38 @@ def test_source_signal_reports_multilabel_shortest_assignment_not_occupancy():
     classes=assign_cpu(points,boxes,np.array([0,1,2]),1.5)
     assert classes[0].tolist()==[1.,1.,0.,0.,0.,0.,0.,0.,0.,0.]
     assert classes[1,2]==1 and classes[1].sum()==1
+
+
+def dense_fixture():
+    from types import SimpleNamespace
+    points=point_tensor([0.,1.,2.]);prob=torch.full((1,3,10),.01);prob[0,1,0]=.9
+    teacher=dict(cls=(torch.logit(prob),),reg=(torch.full((1,3,2),.5),),
+        quality=(torch.full((1,3,1),torch.logit(torch.tensor(.9))),),masks=(torch.ones(1,3,dtype=torch.bool),),points=[points])
+    student=dict(cls=(torch.zeros(1,3,10,requires_grad=True),),reg=(torch.full((1,3,2),.4,requires_grad=True),),
+        quality=(torch.zeros(1,3,1,requires_grad=True),),masks=(torch.ones(1,3,dtype=torch.bool),),points=[points])
+    model=SimpleNamespace(dense_state=dict(class_counts=[0.]*10,class_scores=[0.]*10,cls_normalizer=250.,reg_normalizer=250.))
+    videos=[dict(feats=torch.zeros(2,3),metadata=dict(video_id='unit',crop_start=0))]
+    return model,teacher,student,videos,[dict(lo=0,width=3,ratio=1.,length=3)]
+
+
+def test_actual_tri_target_loss_has_no_shared_zero_alias(monkeypatch):
+    import tools.dense_assignment as d
+    model,teacher,student,videos,views=dense_fixture()
+    def assigned(*args):
+        c=torch.zeros(3,10);c[1,0]=1
+        return c,1
+    monkeypatch.setattr(d,'high_pseudo_assignment',assigned)
+    loss,stats,_,_=d.target_losses(model,teacher,student,videos,views,'tri_state')
+    assert stats['reg']==stats['quality']==0 and stats['regression']==0
+    assert loss.item()==pytest.approx(stats['cls'])
+    loss.backward();assert student['reg'][0].grad is None
+
+
+def test_actual_TSA_total_is_sum_of_distinct_three_losses():
+    from tools.dense_assignment import target_losses
+    model,teacher,student,videos,views=dense_fixture()
+    loss,stats,_,_=target_losses(model,teacher,student,videos,views,'quality_tsa')
+    assert stats['regression']==1 and stats['quality']>0 and stats['reg']>0
+    assert loss.item()==pytest.approx(stats['cls']+stats['reg']+.5*stats['quality'])
+    loss.backward();assert student['reg'][0].grad.abs().sum()>0
+    assert student['quality'][0].grad.abs().sum()>0

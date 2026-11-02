@@ -203,14 +203,14 @@ def target_losses(model, teacher, student, videos, views, mode, update=True):
         q=torch.cat([x[vi] for x in student['quality']])[:,0]
         if mode=='tri_state':
             loss=sigmoid_focal_loss(logits,item['classes'].detach(),alpha=.25,gamma=2.,reduction='none')
-            cls_sum += (loss*item['active'][:,None]).sum()/cls_norm
+            cls_sum = cls_sum + (loss*item['active'][:,None]).sum()/cls_norm
         else:
-            cls_sum += quality_focal(logits.sigmoid()*q.sigmoid()[:,None],item['classes'],item['active'],cls_norm)
+            cls_sum = cls_sum + quality_focal(logits.sigmoid()*q.sigmoid()[:,None],item['classes'],item['active'],cls_norm)
             mask=item['regression']; selected=item['boxes'][mask]
             targets=torch.stack([points[mask,0]-selected[:,0],selected[:,1]-points[mask,0]],-1)/points[mask,3,None]
             weights=item['classes'][mask].max(-1).values
-            reg_sum += (ctr_diou_loss_1d(offsets[mask],targets.detach(),reduction='none')*weights).sum()/reg_norm
-            quality_sum += F.binary_cross_entropy_with_logits(q[mask],item['quality'][mask].detach(),reduction='sum')/max(1.,sum(x['regression'] for x in observations))
+            reg_sum = reg_sum + (ctr_diou_loss_1d(offsets[mask],targets.detach(),reduction='none')*weights).sum()/reg_norm
+            quality_sum = quality_sum + F.binary_cross_entropy_with_logits(q[mask],item['quality'][mask].detach(),reduction='sum')/max(1.,sum(x['regression'] for x in observations))
     stats={k:sum(x[k] for x in observations) for k in ['valid','positive','negative','soft','ignored','regression','mined','instance_conflict']}
     stats.update(cls=float(cls_sum.detach()),reg=float(reg_sum.detach()),quality=float(quality_sum.detach()))
     return cls_sum+reg_sum+SPEC['target_quality_weight']*quality_sum,stats,observations,prepared

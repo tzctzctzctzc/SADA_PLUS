@@ -87,13 +87,28 @@ def probe(cfg,entry,guard):
             assert result['dense']['target_cls_gradient']>0
             if cfg['dense_assignment']['mode']=='quality_tsa':
                 assert result['dense']['regression']>0 and result['dense']['target_offset_gradient']>0
-            else:assert result['dense']['regression']==0 and result['dense']['target_offset_gradient']==0
+            else:
+                assert result['dense']['regression']==result['dense']['reg']==result['dense']['quality']==0
+                assert result['dense']['target_offset_gradient']==0
         phases[str(epoch)]=result;ctx.train_loader_src,ctx.train_loader_tgt=loaders
         print('DENSE_GPU_PROBE',json.dumps(result),flush=True)
     # 模型与EMA已有quality参数都必须在原优化器中，不能遗漏新增语义的旧参数。
     for opt in [ctx.optimizer_gen_source,ctx.optimizer_gen_source_alignment]:
         ids={id(p) for group in opt.param_groups for p in group['params']}
         assert all(id(p) in ids for p in ctx.model.reg_head.actionness_head.parameters())
+    # 真实源视频贯穿完整weak/strong诊断及磁盘NPZ重载，避免仅训练接线通过。
+    from tools.dense_assignment_signals import diagnostic_arrays
+    batch=base.move_to_device(next(iter(ctx.train_loader_src)),ctx.model.device)
+    video=dict(batch[0],segments=batch[0]['segments'].new_empty((0,2)),labels=batch[0]['labels'].new_empty(0))
+    digest_before=base.tensor_digest([ctx.model.state_dict(),ctx.model_ema.module.state_dict()])
+    arrays,diagnostic=diagnostic_arrays(ctx.model,ctx.model_ema.module,ctx.dense_states,video,
+        ctx.model.dense_state['step'],cfg['dense_assignment']['mode'])
+    assert base.tensor_digest([ctx.model.state_dict(),ctx.model_ema.module.state_dict()])==digest_before
+    import numpy as np
+    path=entry/'source_diagnostic_arrays.npz';np.savez_compressed(path,**arrays)
+    with np.load(path,allow_pickle=False) as loaded:
+        assert all(np.array_equal(loaded[k],v) for k,v in arrays.items())
+    save(entry/'source_diagnostic.json',dict(diagnostic,arrays=str(path),arrays_sha256=sha(path),GT_loaded=False))
     saved=deepcopy(base.capture(ctx,cfg,15,[]));stream=io.BytesIO();torch.save(saved,stream);stream.seek(0)
     restored=torch.load(stream,map_location='cpu');stream.close();base.restore(ctx,restored)
     assert base.tensor_digest(base.capture(ctx,cfg,15,[]))==base.tensor_digest(saved)
@@ -109,6 +124,7 @@ def probe(cfg,entry,guard):
         disabled_complete_forward_NMS_voting_exact=True,
         phases=phases,full_model_EMA_three_optimizer_scheduler_controls_RNG_restore=True,
         diagnostic_mature_weights_only_after_cold_source_check=True,formal_initialization='fresh_cold',
+        source_exact_mask_diagnostic_disk_roundtrip=True,
         peak_mib=max(x['peak_mib'] for x in phases.values()),guard=guard,guard_sha256=sha(guard),
         scientific_effectiveness_not_claimed=True))
 

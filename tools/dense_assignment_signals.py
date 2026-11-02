@@ -9,7 +9,7 @@ def frozen_crop(video, maximum):
     length=video['feats'].shape[-1];width=min(length,maximum)
     value=int(hashlib.sha256(('dense-assignment-source-v1/'+video['metadata']['video_id']).encode()).hexdigest()[:16],16)
     lo=value % (length-width+1)
-    result=dict(video);result['metadata']=dict(video['metadata'],crop_start=lo)
+    result=dict(video);result['metadata']=dict(video['metadata'],crop_start=video['metadata'].get('crop_start',0)+lo)
     result['feats']=video['feats'][:,lo:lo+width]
     return result
 
