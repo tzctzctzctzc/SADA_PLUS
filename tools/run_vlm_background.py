@@ -80,6 +80,11 @@ def video_frames(video,rows,root):
 
 
 def prepare(root):
+    from tools.vlm_background_short import prepare_short
+    return prepare_short(root)
+
+
+def prepare_full_unused(root):
     import torch
     assert read(root/'plan.json')['spec']==SPEC
     jobs={};cases={};inputs={}
@@ -278,7 +283,7 @@ def evaluate(root,group):
             removed=int((~keep).sum()),BG_removed=int((~keep&bg).sum()),nonBG_removed=int((~keep&~bg).sum()),
             CPU_BG_only_counterfactual=metric(keep|~bg),CPU_nonBG_only_counterfactual=metric(keep|bg))
     save(root/'evaluations'/(group+'.json'),dict(group=group,video=job['video'],baseline=baseline,results=results,
-        scope='one complete selected video; all ten task classes; not full domain validation mAP',
+        scope='one selected full video with only 8 predetermined candidates eligible for intervention; all others retained; not exhaustive VLM filtering',
         target_val_read=False,GT_only_CPU=True,artifacts=artifacts))
 
 

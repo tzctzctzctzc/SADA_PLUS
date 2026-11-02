@@ -16,7 +16,7 @@ SPEC = dict(schema='prototype-high-score-VLM-background-three-v1',cutoff=.3,
     target='pure task background: any-task-class max tIoU<.01',
     goal='delete AP-damaging high-score BG while protecting useful foreground',
     perfect_filter_reference_pp=4.557834209554855,
-    selection='one complete source_val and one complete target_train video per S; SHA metadata only; at least one high-score prediction',
+    selection='8 candidates per each of 12 preselected videos; SHA metadata only; no labels or outcomes',
     frames='12 interval midpoints plus 2 before/2 after; nearest actual PTS; chronological timestamped RGB images',
     context_seconds='max(.5,.25*duration)',minimum_unique_inside=4,
     no_GT_to_VLM=True,detector_frozen=True,model='Qwen3-VL-32B-Instruct',
@@ -27,7 +27,7 @@ SPEC = dict(schema='prototype-high-score-VLM-background-three-v1',cutoff=.3,
     contrast='1.5*original option logits-.5*static repeated-frame option logits; not exact VCD/SEASON reproduction',
     primary_rule='unique absent argmax; uncertain/ties/insufficient frame visibility preserve original',
     original_scores_labels_endpoints_unchanged=True,prompt_or_parameter_search=False,
-    scope='fixed selected complete-video capacity pilot, not full six-direction UDA training')
+    scope='96-candidate short mechanism pilot; full-video AP under partial intervention, not exhaustive filtering or full-domain UDA')
 
 
 def digest(value):
