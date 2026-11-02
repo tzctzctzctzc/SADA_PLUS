@@ -1,10 +1,9 @@
 """独立只读输入审计：重选视频、逐候选核原预测、按真实PTS重算采样。"""
 import argparse
-import bisect
 import hashlib
 import json
-import math
 import os
+import time
 from pathlib import Path
 
 
@@ -126,4 +125,11 @@ def audit(root):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(); parser.add_argument('root', type=Path)
-    audit(parser.parse_args().root)
+    parser.add_argument('--wait-prepare', action='store_true')
+    args = parser.parse_args()
+    while args.wait_prepare and not (args.root/'prepare_complete.json').exists():
+        assert not (args.root/'error.json').exists() and not (args.root/'stop.json').exists()
+        state = read(args.root/'state.json')
+        assert Path('/proc'/Path(str(state['owner_pid']))).exists(), 'preparation owner exited'
+        time.sleep(10)
+    audit(args.root)
