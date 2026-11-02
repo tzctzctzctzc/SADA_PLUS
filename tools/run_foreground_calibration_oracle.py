@@ -120,7 +120,9 @@ def kernel(entry):
     vid=video[0]['metadata']['video_id'];meta=video[0]['metadata']
     gt=torch.tensor(read(entry/'source_truth.json')[vid]['segments'],dtype=torch.float32,device='cuda').reshape(-1,2)
     low=-.5*meta['feat_num_frames']/meta['feat_stride'];high=(meta['duration']*meta['fps']-.5*meta['feat_num_frames'])/meta['feat_stride']
-    boxes=full_candidates(seconds_to_grid(result['segments'],meta),gt,low,high);labels,_=interval_labels(boxes,gt)
+    # 原NMS/voting把最终segments返回CPU；小头在GPU，显式映射到feature设备。
+    boxes=full_candidates(seconds_to_grid(result['segments'],meta).to(feature.device),gt,low,high)
+    labels,_=interval_labels(boxes,gt)
     torch.manual_seed(SPEC['head_seed']);head=ProposalForeground(512).cuda()
     opt=torch.optim.AdamW(head.parameters(),lr=SPEC['lr'],weight_decay=SPEC['weight_decay'])
     before=base.tensor_digest(head.state_dict());grads=[]
@@ -241,7 +243,7 @@ def predict_target(entry,role):
         video=base.move_to_device([ds[i]],'cuda:0');assert not video[0]['segments'].numel()
         feature,valid,result=native_features(model,video,i==0)
         with torch.no_grad():
-            boxes=seconds_to_grid(result['segments'],video[0]['metadata'])
+            boxes=seconds_to_grid(result['segments'],video[0]['metadata']).to(feature.device)
             probability=head(feature,valid,boxes).softmax(-1).cpu()
         rows.append(dict(video=video[0]['metadata']['video_id'],segments=result['segments'].cpu(),scores=result['scores'].cpu(),
                          labels=result['labels'].cpu(),pbg=probability[:,0]))
