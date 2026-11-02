@@ -110,7 +110,8 @@ class PhaseBoundary(nn.Module):
   self.cross=nn.MultiheadAttention(128,4,dropout=0.,batch_first=True)
   self.foreground=nn.Linear(128,1);self.edge=nn.Linear(128,2);self.scale=nn.Linear(128,2)
   self.phase_weight=nn.Linear(128,4)
-  self.boundary_temporal=nn.Sequential(nn.Conv1d(128,128,3,padding=1),nn.GELU(),nn.Conv1d(128,128,3,padding=1),nn.GELU())
+  from tools.phase_candidate_components import OrderedTemporalConv
+  self.boundary_temporal=nn.Sequential(OrderedTemporalConv(128,128,3,padding=1),nn.GELU(),OrderedTemporalConv(128,128,3,padding=1),nn.GELU())
   self.boundary_compress=nn.Linear(7*128,128)
   self.error_model=nn.Sequential(nn.Linear(128*3+6,128),nn.GELU(),nn.Linear(128,1))
   nn.init.zeros_(self.error_model[-1].weight);nn.init.zeros_(self.error_model[-1].bias)

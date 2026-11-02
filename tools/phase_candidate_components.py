@@ -5,7 +5,17 @@ from pathlib import Path
 import random
 import numpy as np
 import torch
+from torch import nn
 from torch.nn import functional as F
+
+
+class OrderedTemporalConv(nn.Conv1d):
+    """同一3点卷积的unfold+linear实现，避开旧CPU MKLDNN的零梯度污染。"""
+    def forward(self, x):
+        assert self.kernel_size == (3,) and self.stride == (1,) and self.padding == (1,) and self.groups == 1
+        patches = F.pad(x, (1, 1)).unfold(-1, 3, 1).permute(0, 2, 1, 3)
+        patches = patches.reshape(x.shape[0], x.shape[-1], -1)
+        return F.linear(patches, self.weight.flatten(1), self.bias).transpose(1, 2).contiguous()
 
 
 def endpoint_error(head, x, reference, coordinates, label, side, stride, length, mask=None):

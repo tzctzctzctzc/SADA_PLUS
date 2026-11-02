@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 import torch
 from tools.phase_boundary import PhaseBoundary, sequence_loss, map_coordinates
-from tools.phase_candidate_components import refine, candidate_coordinates, source_candidates_loss, paired_source_error_loss, endpoint_mask, _device_tree, _cpu_tree
+from tools.phase_candidate_components import OrderedTemporalConv, refine, candidate_coordinates, source_candidates_loss, paired_source_error_loss, endpoint_mask, _device_tree, _cpu_tree
 
 
 def test_foreground_joint_probability_changes_and_has_real_rejection_gradient():
@@ -99,3 +99,25 @@ def test_endpoint_masks_reject_unrepresentable_offsets_without_discarding_other_
     teacher = torch.tensor([.1, .1]);student = torch.tensor([.4, .4])
     assert endpoint_mask(teacher, student, torch.tensor([6., 12.]), 20, 5).tolist() == [False, True]
     assert endpoint_mask(teacher, student, torch.tensor([2., 4.]), 20, 5).tolist() == [True, False]
+
+
+def test_explicit_temporal_convolution_matches_reference_values_and_gradients():
+    torch.manual_seed(123)
+    reference = torch.nn.Conv1d(3, 4, 3, padding=1).double()
+    actual = OrderedTemporalConv(3, 4, 3, padding=1).double()
+    actual.load_state_dict(reference.state_dict())
+    a = torch.randn(2, 3, 7, dtype=torch.double, requires_grad=True);b = a.detach().clone().requires_grad_()
+    with torch.backends.mkldnn.flags(enabled=False):
+        expected = reference(a);expected.square().sum().backward()
+    observed = actual(b);observed.square().sum().backward()
+    assert torch.allclose(expected, observed, atol=1e-12)
+    assert torch.allclose(a.grad, b.grad, atol=1e-12)
+    assert torch.allclose(reference.weight.grad, actual.weight.grad, atol=1e-12)
+
+
+def test_zero_initialized_error_output_cannot_invent_feature_gradients():
+    for _ in range(3):
+        head = PhaseBoundary(torch.randn(10, 4, 512));x = torch.randn(512, 32, requires_grad=True)
+        box = torch.tensor([6., 18.]);points = candidate_coordinates(box, 0)
+        head.endpoint_error(x, box, points, 0, 0, 1, 32).sum().backward()
+        assert torch.isfinite(x.grad).all() and x.grad.abs().sum() == 0
