@@ -323,6 +323,11 @@ def audit(entry):
  cache=read(index)['roles'];database=read(cfg['dataset']['json_file'])['database']
  for role,split in [('train',cfg['src_train_split']),('val',cfg['src_val_split'])]:
   assert {v for a in cache[role] for v in a['videos']}=={v for v,d in database.items() if d['subset'] in split}
+  if (headfile.parent/'source_resume.json').exists():
+   for item in cache[role]:assert sha(item['path'])==item['sha256']
+ if (headfile.parent/'source_resume.json').exists():
+  resume=read(headfile.parent/'source_resume.json');assert sha(resume['checkpoint'])==resume['checkpoint_sha256']
+  old=torch.load(resume['checkpoint'],map_location='cpu');assert history[:old['epoch']+1]==old['history']
  result=protocol.audit_entry(e,expected_schema=SCHEMA)
  assert sha(SPEC['text_cache'])==SPEC['text_sha256'] and sha(SPEC['text_provenance'])==SPEC['text_provenance_sha256']
  rows=[json.loads(z) for z in (e/'metrics.jsonl').read_text().splitlines()]

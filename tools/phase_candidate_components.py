@@ -63,7 +63,7 @@ def endpoint_error_many(head, x, requests, stride, length, mask=None):
     coordinates = torch.cat([r[1] for r in requests])
     duration = (reference[:, 1] - reference[:, 0]).clamp_min(1e-6)
     side = torch.cat([coordinates.new_full((n,), r[3]) for r, n in zip(requests, sizes)]).long()
-    labels = torch.tensor([r[2] for r in requests], device=x.device).repeat_interleave(counts)
+    labels = torch.tensor([r[2] for r in requests], device=x.device)
     offsets = torch.linspace(-.125, .125, 7, device=x.device, dtype=x.dtype)
     positions = coordinates[:, None] + offsets[None] * duration[:, None]
     available = (positions >= 0) & (positions < length)
@@ -75,7 +75,8 @@ def endpoint_error_many(head, x, requests, stride, length, mask=None):
     h = head.boundary_compress(head.boundary_temporal(h.transpose(1, 2)).flatten(1))
     tokens = torch.stack([interval_tokens(x, r[0], stride) for r in requests])
     context = head.visual(tokens).mean(1).repeat_interleave(counts, dim=0)
-    text = head.text_proj(head.text[labels, side * 2])
+    roles = torch.tensor([r[3] * 2 for r in requests], device=x.device)
+    text = head.text_proj(head.text[labels, roles]).repeat_interleave(counts, dim=0)
     ids = torch.arange(len(coordinates), device=x.device)
     geometry = torch.stack([(coordinates - reference[ids, side]) / duration,
         (coordinates - reference[ids, 1-side]) / duration, torch.log1p(duration / stride),
@@ -186,8 +187,9 @@ def source_candidates_loss(model, head, f, masks, reg, videos, cls=None):
         predictions = [None] * len(jobs)
         for level in range(len(f)):
             ids = [i for i, r in enumerate(jobs) if r[0] == level]
-            for start in range(0, len(ids), 32):
-                selected = ids[start:start+32]
+            microbatch = getattr(head, 'candidate_error_batch_size', 4)
+            for start in range(0, len(ids), microbatch):
+                selected = ids[start:start+microbatch]
                 requests = [(jobs[i][1], jobs[i][2], jobs[i][3], jobs[i][4]) for i in selected]
                 if getattr(head, 'batch_candidate_errors', True):
                     values = endpoint_error_many(head, f[level][vi], requests, model.fpn_strides[level], length, masks[level][vi, 0])
@@ -365,26 +367,38 @@ def pretrain_candidate_head(ctx, cfg, output):
     output = Path(output);model = ctx.model;model.eval();head = model.phase_boundary
     detector_before = base.tensor_digest({k:v for k,v in model.state_dict().items() if not k.startswith('phase_boundary.')})
     torch.cuda.reset_peak_memory_stats();cache_root = output.parent / 'source_candidate_cache';caches = {}
-    source_loader = base.loader(ctx.train_loader_src.dataset, True, torch.Generator().manual_seed(123), 1, cfg['loader']['num_workers'])
-    for role, loader in [('train', source_loader), ('val', ctx.val_loader_src)]:
-        caches[role] = []
-        for index, videos in enumerate(loader):
-            videos = base.move_to_device(videos, model.device)
-            with torch.no_grad():
-                weak = direct(model, videos, training=role == 'train');strong_videos = [];views = []
-                for vi, v in enumerate(videos):
-                    x, view = strong_view(v, index + 1, vi);view['original_length'] = v['feats'].shape[-1]
-                    x['segments'] = map_coordinates(v['segments'], view);x['labels'] = v['labels']
-                    strong_videos.append(x);views.append(view)
-                strong = direct(model, strong_videos, training=role == 'train')
-            path = cache_root / role / ('%04d.pt' % index)
-            write_source_cache(path, dict(weak=weak, strong=strong, videos=videos, strong_videos=strong_videos, views=views))
-            caches[role].append(dict(path=str(path), sha256=sha(path), videos=[v['metadata']['video_id'] for v in videos]))
-            print('SOURCE_CANDIDATE_CACHE', role, index, flush=True)
-    save(output.parent / 'source_candidate_cache_index.json', dict(roles=caches, source_only=True, target_gt_used=False))
+    resume_path = output.parent / 'source_resume.json'
+    resumed = None
+    if resume_path.exists():
+        from tools.baseline_protocol import read
+        receipt = read(resume_path)
+        assert sha(receipt['checkpoint']) == receipt['checkpoint_sha256']
+        resumed = torch.load(receipt['checkpoint'], map_location='cpu')
+        caches = read(output.parent / 'source_candidate_cache_index.json')['roles']
+    else:
+        source_loader = base.loader(ctx.train_loader_src.dataset, True, torch.Generator().manual_seed(123), 1, cfg['loader']['num_workers'])
+        for role, loader in [('train', source_loader), ('val', ctx.val_loader_src)]:
+            caches[role] = []
+            for index, videos in enumerate(loader):
+                videos = base.move_to_device(videos, model.device)
+                with torch.no_grad():
+                    weak = direct(model, videos, training=role == 'train');strong_videos = [];views = []
+                    for vi, v in enumerate(videos):
+                        x, view = strong_view(v, index + 1, vi);view['original_length'] = v['feats'].shape[-1]
+                        x['segments'] = map_coordinates(v['segments'], view);x['labels'] = v['labels']
+                        strong_videos.append(x);views.append(view)
+                    strong = direct(model, strong_videos, training=role == 'train')
+                path = cache_root / role / ('%04d.pt' % index)
+                write_source_cache(path, dict(weak=weak, strong=strong, videos=videos, strong_videos=strong_videos, views=views))
+                caches[role].append(dict(path=str(path), sha256=sha(path), videos=[v['metadata']['video_id'] for v in videos]))
+                print('SOURCE_CANDIDATE_CACHE', role, index, flush=True)
+        save(output.parent / 'source_candidate_cache_index.json', dict(roles=caches, source_only=True, target_gt_used=False))
     optimizer = torch.optim.AdamW(head.parameters(), lr=SPEC['source_head_lr'], weight_decay=.05)
-    history = [];best = float('inf');best_state = None;best_metrics = None
-    for epoch in range(SPEC['source_head_epochs'] + 1):
+    history = [];best = float('inf');best_state = None;best_metrics = None;start_epoch = 0
+    if resumed is not None:
+        from tools.phase_source_resume import restore_source_head
+        history,best,best_epoch,best_state,best_metrics,start_epoch = restore_source_head(head,optimizer,resumed,SPEC,sha(output.parent / 'source_candidate_cache_index.json'))
+    for epoch in range(start_epoch, SPEC['source_head_epochs'] + 1):
         train_losses = [];counts = dict(groups=0, background=0, wrong_class=0)
         if epoch:
             head.train()
@@ -425,7 +439,7 @@ def pretrain_candidate_head(ctx, cfg, output):
         if selection < best:
             best = selection;best_epoch = epoch;best_state = deepcopy(head.state_dict());best_metrics = deepcopy(quality)
         base.checkpoint(output.with_name('source_head_latest.pt'), dict(spec=SPEC, state_dict=head.state_dict(), epoch=epoch,
-             history=history, optimizer=optimizer.state_dict(), rng_cpu=torch.get_rng_state(), rng_cuda=torch.cuda.get_rng_state(0),
+             history=history, best_state_dict=best_state, optimizer=optimizer.state_dict(), rng_cpu=torch.get_rng_state(), rng_cuda=torch.cuda.get_rng_state(0),
              rng_python=random.getstate(), rng_numpy=np.random.get_state(), cache_index_sha256=sha(output.parent / 'source_candidate_cache_index.json')))
         save(output.with_name('source_candidate_history.json'), history)
         print('SOURCE_CANDIDATE_HEAD', __import__('json').dumps(row), flush=True)

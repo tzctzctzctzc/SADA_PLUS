@@ -172,6 +172,16 @@ def main(args):
         ref=REFERENCE/s;references[s]=old_references[s];old=read(ref/'config.json')
         cfg=paired_config(old,identity,tmp);cfg['phase_boundary_runtime']=dict(reference=str(ref),source_head=str(root/'formal'/s/'phase'/'source_head.pt'));configs[s]=cfg
         entry=root/'formal'/s/'phase';entry.mkdir(parents=True);save(entry/'config.json',cfg)
+        if args.resume_source_from:
+            import shutil
+            previous=args.resume_source_from/'formal'/s/'phase'
+            latest=previous/'source_head_latest.pt'
+            if latest.exists():
+                assert not (previous/'source_head.json').exists(), '已完成源阶段应直接复用，不能走partial入口'
+                destination=entry/'source_resume_checkpoint.pt';shutil.copy2(latest,destination)
+                shutil.copy2(previous/'source_candidate_cache_index.json',entry/'source_candidate_cache_index.json')
+                save(entry/'source_resume.json',dict(checkpoint=str(destination),checkpoint_sha256=sha(destination),
+                    previous_root=str(args.resume_source_from),pause_receipt_sha256=sha(args.resume_source_from/'monitor/efficiency_pause_receipt.json')))
         for domain in ['source','target']:save(entry/(domain+'_val_unlabeled.json'),read(root/'reference_snapshot/formal'/s/(domain+'_val_unlabeled.json')),sort_keys=False)
         probe=root/'probes'/s;probe.mkdir(parents=True);save(probe/'config.json',cfg)
     save(root/'inputs.json',dict(code=identity,references=references,reference_snapshot_sha256=sha(root/'reference_snapshot/inputs.json')))
@@ -243,6 +253,7 @@ def main(args):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--entry',type=Path)
+    p.add_argument('--resume-source-from',type=Path)
     p.add_argument('--shift',choices=SHIFTS);p.add_argument('--stage',choices=['probe','train','inference','evaluate_cpu'])
     p.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'));a=p.parse_args()
     if a.stage=='evaluate_cpu':evaluate_cpu(a)
