@@ -19,6 +19,41 @@ SPEC=dict(schema='prototype-high-score-strict-background-source-pilot-v1',modes=
     new_mechanisms_are_hypotheses_not_claimed_novel=True)
 
 
+def kernel(entry):
+    import torch
+    from tools import baseline_engine as base
+    from tools.hard_background_modules import HardBackgroundHead,targets,step_loss
+    from tools.run_proposal_foreground import first_cuda_guard
+    guard=first_cuda_guard(entry);parent=SOURCE/entry.name;truth=read(parent/'source_truth.json')
+    chosen=None
+    for record in read(parent/'cache_index.json')['records']:
+        assert sha(record['path'])==record['sha256'];cpu=torch.load(record['path'],map_location='cpu');hard=cpu['scores']>=SPEC['cutoff']
+        if not hard.any():continue
+        gt=torch.tensor(truth[record['video']]['segments'],dtype=torch.float32).reshape(-1,2);gl=torch.tensor(truth[record['video']]['labels'],dtype=torch.long)
+        labels=cpu['labels'][hard];bg,q=targets(cpu['boxes'][hard],labels,gt,gl)
+        if not any(((bg==0)&(labels==c)).any() and ((bg==1)&(labels==c)).any() for c in labels.unique()):continue
+        chosen=dict(feature=cpu['feature'],valid=cpu['valid'],boxes=cpu['boxes'][hard],scores=cpu['scores'][hard],labels=labels,bg=bg,quality=q,truth=gt,truth_labels=gl)
+        video=record['video'];break
+    assert chosen is not None
+    item={k:v.cuda() for k,v in chosen.items()};reports={};seed=HardBackgroundHead().cuda();initial=deepcopy(seed.state_dict())
+    for mode in MODES:
+        head=HardBackgroundHead().cuda();head.load_state_dict(initial);opt=torch.optim.AdamW(head.parameters(),lr=SPEC['lr'],weight_decay=SPEC['wd'])
+        for _ in range(2):
+            opt.zero_grad(set_to_none=True);loss,stats=step_loss(head,item,mode,torch.full_like(item['boxes'],.05))
+            loss.backward();norm=torch.nn.utils.clip_grad_norm_(head.parameters(),1.);assert torch.isfinite(norm) and norm>0;opt.step()
+        path=entry/(mode+'_kernel.pt');base.checkpoint(path,dict(head=head.state_dict(),optimizer=opt.state_dict(),CPU=torch.get_rng_state(),CUDA=torch.cuda.get_rng_state(0)))
+        saved=torch.load(path,map_location='cpu');new=HardBackgroundHead().cuda();new.load_state_dict(saved['head'])
+        no=torch.optim.AdamW(new.parameters());no.load_state_dict(saved['optimizer'])
+        assert base.tensor_digest(no.state_dict())==base.tensor_digest(opt.state_dict())
+        assert base.tensor_digest(new.state_dict())==base.tensor_digest(head.state_dict())!=base.tensor_digest(initial)
+        torch.set_rng_state(saved['CPU']);torch.cuda.set_rng_state(saved['CUDA'],0)
+        assert torch.equal(torch.get_rng_state(),saved['CPU']) and torch.equal(torch.cuda.get_rng_state(0),saved['CUDA'])
+        reports[mode]=dict(gradient_norm=float(norm),mechanisms=stats,state_sha256=sha(path))
+    save(entry/'kernel_complete.json',dict(passed=True,video=video,guard=guard,guard_sha256=sha(guard),reports=reports,
+        all_four_same_initialization=True,all_four_head_optimizer_CPU_CUDA_RNG_restore=True,
+        peak_mib=torch.cuda.max_memory_reserved()/2**20,not_formal_training=True))
+
+
 def predict(head,item):
     import torch
     hard=item['scores']>=SPEC['cutoff'];bg=torch.zeros(len(hard));quality=torch.zeros(len(hard))
@@ -192,7 +227,7 @@ def run(root):
     from tools.baseline_gpu import snapshot
     root.mkdir(parents=True,exist_ok=False);save(root/'plan.json',dict(code=code_identity(),spec=SPEC,shifts=SHIFTS,base_predictions=SOURCE.as_posix()))
     lock=(root/'controller.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-    pending=list(SHIFTS);active={};cpu=[];done=[]
+    pending=list(SHIFTS);probe_pending=list(SHIFTS);probes=[];active={};cpu=[];done=[]
     def stop(sig,frame):
         for t in active.values():
             if t['p'].poll() is None:os.killpg(t['p'].pid,signal.SIGTERM)
@@ -201,23 +236,27 @@ def run(root):
     def spawn(s,stage,gpu=None):
         e=root/s;e.mkdir(exist_ok=True);env=dict(os.environ,CUDA_VISIBLE_DEVICES='',PYTHONDONTWRITEBYTECODE='1',PYTHONPATH=str(CODE),OMP_NUM_THREADS='8',MKL_NUM_THREADS='8')
         if gpu is not None:
-            observed=snapshot(gpu);lease=e/'lease.json';save(lease,dict(owner_pid=os.getpid(),index=gpu,uuid=observed['uuid'],minimum_free_mib=12288,commit=code_identity()['commit']))
+            observed=snapshot(gpu);lease=e/(stage+'_lease.json');save(lease,dict(owner_pid=os.getpid(),index=gpu,uuid=observed['uuid'],minimum_free_mib=12288,commit=code_identity()['commit']))
             env.update(CUDA_VISIBLE_DEVICES=observed['uuid'],PROPOSAL_FOREGROUND_LEASE=str(lease),PROPOSAL_FOREGROUND_LEASE_SHA256=sha(lease))
         log=(e/(stage+'.log')).open('a');p=subprocess.Popen([sys.executable,'-u','-B',str(Path(__file__)),'--worker',stage,'--entry',str(e)],env=env,cwd=CODE,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
         active[s]=dict(p=p,stage=stage,gpu=gpu,log=log)
     try:
-        while pending or active or cpu:
+        while pending or probe_pending or active or cpu:
             for s,t in list(active.items()):
                 if t['p'].poll() is None:continue
                 t['log'].close();del active[s]
                 if t['p'].returncode:raise RuntimeError(s+'/'+t['stage']+' failed')
-                if t['stage']=='gpu':cpu.append(s)
+                if t['stage']=='kernel':
+                    assert read(root/s/'kernel_complete.json')['passed'];probes.append(s)
+                elif t['stage']=='gpu':cpu.append(s)
                 else:done.append(s)
             used={t['gpu'] for t in active.values()}
             for g in [2,0,3,1]:
-                if pending and g not in used and snapshot(g)['free_mib']>=12288:spawn(pending.pop(0),'gpu',g)
+                if g in used or snapshot(g)['free_mib']<12288:continue
+                if probe_pending:spawn(probe_pending.pop(0),'kernel',g)
+                elif len(probes)==6 and pending:spawn(pending.pop(0),'gpu',g)
             if cpu and not any(t['stage']=='evaluate' for t in active.values()):spawn(cpu.pop(0),'evaluate')
-            save(root/'state.json',dict(pid=os.getpid(),pending=pending,cpu_pending=cpu,completed=done,
+            save(root/'state.json',dict(pid=os.getpid(),pending=pending,kernel_pending=probe_pending,kernels=probes,cpu_pending=cpu,completed=done,
                 active={s:dict(pid=t['p'].pid,stage=t['stage'],gpu=t['gpu']) for s,t in active.items()}))
             if pending or cpu or active:time.sleep(3)
         rows=[read(root/s/'complete.json') for s in SHIFTS]
@@ -230,7 +269,7 @@ def run(root):
 
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--run',type=Path);p.add_argument('--worker',choices=['gpu','evaluate']);p.add_argument('--entry',type=Path);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--run',type=Path);p.add_argument('--worker',choices=['kernel','gpu','evaluate']);p.add_argument('--entry',type=Path);a=p.parse_args()
     if a.run:run(a.run)
     else:
-        os.chdir('/vepfs/vlms/SADA_PLUS');(gpu if a.worker=='gpu' else evaluate)(a.entry)
+        os.chdir('/vepfs/vlms/SADA_PLUS');dict(kernel=kernel,gpu=gpu,evaluate=evaluate)[a.worker](a.entry)
