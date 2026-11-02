@@ -28,6 +28,9 @@ def build(cfg):
     path = cfg['cold_oracle']['truth']
     assert sha(path) == cfg['cold_oracle']['truth_sha256']
     install(ctx, cfg, read(path)['records'])
+    from tools.cold_oracle_fastpath import install as install_fastpath
+    install_fastpath(ctx.model)
+    install_fastpath(ctx.model_ema.module)
     return ctx
 
 
@@ -143,6 +146,8 @@ def infer(cfg, entry, epochs, domains, prefix):
     from tools import baseline_engine as base
     fix_random_seed(123, include_cuda=True); torch.cuda.manual_seed(123)
     model = make_meta_arch('sada', deepcopy(cfg), device='cuda:0').cuda(); model.eval()
+    from tools.cold_oracle_fastpath import install as install_fastpath
+    install_fastpath(model)
     reports = []
     for epoch in epochs:
         path = entry/('epoch%03d.pt'%epoch)
