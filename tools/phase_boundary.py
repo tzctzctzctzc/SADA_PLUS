@@ -104,7 +104,8 @@ def map_coordinates(x,view,inverse=False):
 class PhaseBoundary(nn.Module):
  def __init__(self,text):
   super().__init__();self.register_buffer('text',text.float())
-  self.visual=nn.Sequential(nn.LayerNorm(512),nn.Linear(512,128),nn.GELU())
+  from tools.phase_candidate_components import TokenProjection
+  self.visual=TokenProjection(nn.LayerNorm(512),nn.Linear(512,128),nn.GELU())
   self.text_proj=nn.Linear(512,128,bias=False)
   self.temporal=nn.TransformerEncoder(nn.TransformerEncoderLayer(128,4,256,dropout=0.,batch_first=True),2)
   self.cross=nn.MultiheadAttention(128,4,dropout=0.,batch_first=True)

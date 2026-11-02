@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 import torch
 from tools.phase_boundary import PhaseBoundary, sequence_loss, map_coordinates
-from tools.phase_candidate_components import OrderedTemporalConv, refine, candidate_coordinates, source_candidates_loss, paired_source_error_loss, endpoint_mask, _device_tree, _cpu_tree
+from tools.phase_candidate_components import TokenProjection, OrderedTemporalConv, refine, candidate_coordinates, source_candidates_loss, paired_source_error_loss, endpoint_mask, _device_tree, _cpu_tree
 
 
 def test_foreground_joint_probability_changes_and_has_real_rejection_gradient():
@@ -121,3 +121,14 @@ def test_zero_initialized_error_output_cannot_invent_feature_gradients():
         box = torch.tensor([6., 18.]);points = candidate_coordinates(box, 0)
         head.endpoint_error(x, box, points, 0, 0, 1, 32).sum().backward()
         assert torch.isfinite(x.grad).all() and x.grad.abs().sum() == 0
+
+
+def test_flattened_token_projection_preserves_full_forward_and_derivative():
+    reference = torch.nn.Sequential(torch.nn.LayerNorm(8), torch.nn.Linear(8, 4), torch.nn.GELU()).double()
+    actual = TokenProjection(torch.nn.LayerNorm(8), torch.nn.Linear(8, 4), torch.nn.GELU()).double()
+    actual.load_state_dict(reference.state_dict())
+    a = torch.randn(2, 7, 8, dtype=torch.double, requires_grad=True);b = a.detach().clone().requires_grad_()
+    with torch.backends.mkldnn.flags(enabled=False):
+        expected = reference(a);expected.square().sum().backward()
+    observed = actual(b);observed.square().sum().backward()
+    assert torch.allclose(expected, observed, atol=1e-12) and torch.allclose(a.grad, b.grad, atol=1e-12)

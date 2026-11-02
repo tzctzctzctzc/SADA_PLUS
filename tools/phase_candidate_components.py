@@ -10,12 +10,18 @@ from torch.nn import functional as F
 
 
 class OrderedTemporalConv(nn.Conv1d):
-    """同一3点卷积的unfold+linear实现，避开旧CPU MKLDNN的零梯度污染。"""
+    """同一3点卷积的unfold+linear实现，保留完整有序窗口和权重。"""
     def forward(self, x):
         assert self.kernel_size == (3,) and self.stride == (1,) and self.padding == (1,) and self.groups == 1
         patches = F.pad(x, (1, 1)).unfold(-1, 3, 1).permute(0, 2, 1, 3)
         patches = patches.reshape(x.shape[0], x.shape[-1], -1)
         return F.linear(patches, self.weight.flatten(1), self.bias).transpose(1, 2).contiguous()
+
+
+class TokenProjection(nn.Sequential):
+    """逐token投影先展为2D，避开旧GELU对3D非连续反向输入的错误。"""
+    def forward(self, x):
+        return super().forward(x.reshape(-1, x.shape[-1])).reshape(*x.shape[:-1], -1)
 
 
 def endpoint_error(head, x, reference, coordinates, label, side, stride, length, mask=None):
