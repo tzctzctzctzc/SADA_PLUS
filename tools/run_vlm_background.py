@@ -80,8 +80,8 @@ def video_frames(video,rows,root):
 
 
 def prepare(root):
-    from tools.vlm_background_short import prepare_short
-    return prepare_short(root)
+    from tools.vlm_background_inside import prepare_inside
+    return prepare_inside(root)
 
 
 def prepare_full_unused(root):
@@ -160,7 +160,7 @@ def infer(root):
     def query(row,question,static=False):
         nonlocal calls,active_key
         frames=row['frame_records'];frame_paths=[x['path'] for x in frames]
-        if static:frame_paths=[frame_paths[8]]*len(frames)
+        if static:frame_paths=[frame_paths[6]]*len(frames)
         text_prompt=prompt(row,question)
         request=dict(model_identity_sha256=ready['artifacts'][str(root/'model_identity.json')],
             prompt=text_prompt,option_order=option_order(row['view_id'],question),
@@ -298,7 +298,7 @@ def audit(root):
             assert sha(item['path'])==item['sha256'];r=read(item['path']);verify_response(r['request'],r)
             assert r['request']['prompt']==prompt(row,'presence' if name=='static' else name)
             expected=[f['sha256'] for f in row['frame_records']]
-            if name=='static':expected=[expected[8]]*len(expected)
+            if name=='static':expected=[expected[6]]*len(expected)
             assert r['request']['frame_sha256']==expected and r['request']['times']==row['times']
             assert r['request']['option_order']==option_order(row['view_id'],'presence' if name=='static' else name)
             assert r['request']['model_identity_sha256']==sha(root/'model_identity.json')
