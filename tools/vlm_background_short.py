@@ -8,11 +8,22 @@ from tools.vlm_background_protocol import SPEC, digest, verify_response
 ORIGIN = Path('/vepfs/vlms/vlm_background_pilot3_4efeaad_1103')
 
 
-def select(groups, count=8):
+def select_first(groups, count=8):
     result = {}
     for name, group in groups.items():
         keys = sorted(group['candidate_map'], key=lambda k: digest(['vlm-bg-short-v1', name, k, group['candidate_map'][k]]))[:count]
         result[name] = {k: group['candidate_map'][k] for k in keys}
+    return result
+
+
+def select(groups, count=8):
+    first = select_first(groups, count)
+    result = {}
+    for name, group in groups.items():
+        eligible = [k for k in group['candidate_map'] if k not in first[name]]
+        keys = sorted(eligible, key=lambda k: digest(['vlm-bg-replication-v1', name, k, group['candidate_map'][k]]))[:count]
+        assert len(keys) == count
+        result[name] = {k:group['candidate_map'][k] for k in keys}
     return result
 
 

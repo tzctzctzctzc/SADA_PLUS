@@ -1,4 +1,4 @@
-from tools.vlm_background_short import select
+from tools.vlm_background_short import select, select_first
 
 
 def test_fixed_count_and_insertion_order_independence():
@@ -14,3 +14,5 @@ def test_twelve_groups_fixed_budget():
               for s in range(1,7) for d in ('source_val','target_train')}
     chosen = select(groups)
     assert len(chosen) == 12 and sum(map(len, chosen.values())) == 96
+    first = select_first(groups)
+    assert all(not (set(chosen[g]) & set(first[g])) for g in groups)
