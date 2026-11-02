@@ -7,6 +7,7 @@ import math
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -295,6 +296,10 @@ def main(args):
     from tools.run_phase_boundary import reuse_reference_snapshot
     from tools.phase_runner_gpu import acquire
     from tools.baseline_gpu import snapshot
+    if args.resume_source_from:
+        stopped=read(args.resume_source_from/'state.json')
+        assert not stopped['formal_started'] and (args.resume_source_from/'error.json').exists()
+        assert not any(Path('/proc/%d'%pid).exists() for pid in [stopped['pid']]+[t['pid'] for t in stopped['active'].values()])
     root=args.output;root.mkdir(exist_ok=False);identity=code_identity()
     references=reuse_reference_snapshot(root)
     tmp=Path('/vepfs/vlms/tmp')/('background_risk_'+identity['commit'][:7]);tmp.mkdir(exist_ok=False)
@@ -316,6 +321,17 @@ def main(args):
             configs[mode,shift]=cfg
             for folder in ['feasibility','probes','formal']:
                 e=root/folder/mode/shift;e.mkdir(parents=True);save(e/'config.json',cfg)
+                if folder=='feasibility' and args.resume_source_from:
+                    old=args.resume_source_from/'feasibility'/mode/shift
+                    if (old/'latest_risk.pt').exists():
+                        old_cfg=read(old/'config.json');assert old_cfg['background_risk']['spec']==SPEC
+                        checkpoint=__import__('torch').load(old/'latest_risk.pt',map_location='cpu')
+                        assert checkpoint['history']==read(old/'history.json')
+                        assert [x['epoch'] for x in checkpoint['history']]==list(range(1,checkpoint['epoch']+1))
+                        for name in ['latest_risk.pt','history.json','best_risk.pt']:
+                            if (old/name).exists():shutil.copy2(old/name,e/name)
+                        save(e/'source_resume.json',dict(origin=str(old),checkpoint_sha256=sha(e/'latest_risk.pt'),
+                            epoch=checkpoint['epoch'],source_config_sha256=sha(old/'config.json'),preserved_history_sha256=sha(e/'history.json')))
                 if folder=='formal':
                     for domain in ['source','target']:
                         save(e/(domain+'_val_unlabeled.json'),read(root/'reference_snapshot/formal'/shift/(domain+'_val_unlabeled.json')),sort_keys=False)
@@ -427,6 +443,7 @@ def main(args):
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--entry',type=Path)
     p.add_argument('--stage',choices=['source_fit','probe','train','inference','evaluate_cpu','signal','signal_cpu']);p.add_argument('--epoch',type=int)
+    p.add_argument('--resume-source-from',type=Path)
     p.add_argument('--data-root',type=Path,default=Path('/vepfs/vlms/SADA_PLUS'));args=p.parse_args()
     def stop(sig,frame):raise SystemExit(128+sig)
     signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)

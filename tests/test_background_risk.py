@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from tools.background_risk import BackgroundRisk,video_split,calibrated,fit_calibration,negative_loss
 from tools.background_risk_signals import weighted_metrics,aggregate,group_readiness
+from tools.background_risk_source import result_record
 
 
 def test_background_head_detaches_detector_and_has_one_output():
@@ -71,3 +72,12 @@ def test_group_readiness_uses_all_six_not_best_shift_or_zero_mass():
     assert group_readiness(reports) and not group_readiness(reports[:5])
     reports[0]['validation']['weight_mass']=0
     assert not group_readiness(reports)
+
+
+def test_source_result_separates_calibration_quality_from_calibrator():
+    metrics=dict(fit={'loss':.2},calibration={'error':.1},validation={'error':.15})
+    calibration=dict(slope=1.,bias=-.2)
+    result=result_record(metrics,calibration,target_GT_used=False)
+    assert result['calibration']==calibration and result['calibration_quality']==metrics['calibration']
+    import json
+    assert json.loads(json.dumps(result))['validation']==metrics['validation']

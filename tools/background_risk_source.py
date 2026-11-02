@@ -10,6 +10,19 @@ from tools.background_risk import BackgroundRisk,SPEC,video_split,fit_calibratio
 from tools.background_risk_signals import weighted_metrics,aggregate
 
 
+def result_record(metrics,calibration,**fields):
+    # 校准集质量与校准器参数是两种不同工件，不能共用calibration键。
+    return dict(status='source_evaluated',fit=metrics['fit'],calibration_quality=metrics['calibration'],
+        validation=metrics['validation'],calibration=calibration,**fields)
+
+
+def restore_source(head,optimizer,generator,saved):
+    head.load_state_dict(saved['state_dict'],strict=True);optimizer.load_state_dict(saved['optimizer'])
+    generator.set_state(saved['generator'].cpu());torch.set_rng_state(saved['cpu_rng'].cpu())
+    torch.cuda.set_rng_state(saved['cuda_rng'].cpu(),device=0)
+    random.setstate(saved['python_rng']);np.random.set_state(saved['numpy_rng'])
+
+
 def raw_prediction(head,cached,device='cuda:0'):
     return torch.cat(head([x.to(device) for x in cached['features']],[x.to(device) for x in cached['logits']],
                          [x.to(device) for x in cached['masks']]),1)[0,:,0]
@@ -37,8 +50,20 @@ def run(cfg,entry):
         torch.manual_seed(198731);head=BackgroundRisk(sample['features'][0].shape[1]).cuda()
     del sample
     optimizer=torch.optim.AdamW(head.parameters(),lr=3e-4,weight_decay=.05)
-    generator=torch.Generator().manual_seed(198731);history=[]
-    for epoch in range(1,11):
+    generator=torch.Generator().manual_seed(198731);history=[];start_epoch=0
+    if (entry/'source_resume.json').exists():
+        receipt=read(entry/'source_resume.json');assert sha(entry/'latest_risk.pt')==receipt['checkpoint_sha256']
+        saved=torch.load(entry/'latest_risk.pt',map_location='cpu')
+        history=deepcopy(saved['history']);start_epoch=saved['epoch']
+        assert history==read(entry/'history.json') and [x['epoch'] for x in history]==list(range(1,start_epoch+1))
+        restore_source(head,optimizer,generator,saved)
+        from tools.baseline_engine import tensor_digest
+        restored=dict(epoch=start_epoch,state_dict=head.state_dict(),optimizer=optimizer.state_dict(),history=history,
+            generator=generator.get_state(),cpu_rng=torch.get_rng_state(),cuda_rng=torch.cuda.get_rng_state(0),python_rng=random.getstate(),numpy_rng=np.random.get_state())
+        assert tensor_digest(restored)==tensor_digest(saved)
+        save(entry/'source_restore_proof.json',dict(epoch=start_epoch,all_state_digest=tensor_digest(restored),
+            original_state_digest=tensor_digest(saved),checkpoint_sha256=receipt['checkpoint_sha256'],completed_epochs_replayed=0))
+    for epoch in range(start_epoch+1,11):
         started=time.monotonic();values=[];head.train()
         for j in torch.randperm(len(fit),generator=generator).tolist():
             c=torch.load(fit[j]['path'],map_location='cpu');raw=raw_prediction(head,c)
@@ -70,8 +95,12 @@ def run(cfg,entry):
                 rows.append(dict(row,video=item['video']))
             result[name]=aggregate(rows);save(entry/(name+'_quality.json'),dict(macro=result[name],videos=rows))
     from tools.baseline_engine import checkpoint
-    checkpoint(entry/'best_risk.pt',dict(epoch=10,state_dict=head.state_dict(),calibration=cal,selection='fixed_epoch10'))
-    save(entry/'result.json',dict(status='source_evaluated',**result,calibration=cal,
+    if (entry/'best_risk.pt').exists():
+        previous=torch.load(entry/'best_risk.pt',map_location='cpu')
+        assert previous['epoch']==10 and all(torch.equal(v,head.state_dict()[k].cpu()) for k,v in previous['state_dict'].items())
+        assert previous['calibration']==cal
+    else:checkpoint(entry/'best_risk.pt',dict(epoch=10,state_dict=head.state_dict(),calibration=cal,selection='fixed_epoch10'))
+    save(entry/'result.json',result_record(result,cal,
         roles=role,history_sha256=sha(entry/'history.json'),cache_reuse_sha256=sha(entry/'cache_reuse.json'),
         best_sha256=sha(entry/'best_risk.pt'),target_GT_used=False,head_not_transferred_to_formal=True))
 
