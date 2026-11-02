@@ -60,7 +60,8 @@ def prepare_matrix(old,root,identity,pause):
     assert receipt['root']==str(old)
     for process in receipt['processes']:
         p=Path('/proc')/str(process['pid'])/'stat'
-        assert not p.exists() or p.read_text().split()[2]=='Z' or p.read_text().split()[21]!=process['start_ticks']
+        actual=parse_stat(p.read_text()) if p.exists() else None
+        assert actual is None or actual['state']=='Z' or actual['start_ticks']!=process['start_ticks']
     root.mkdir(exist_ok=False)
     save(root/'resume_origin.json',dict(root=str(old),pause_receipt=str(pause),pause_receipt_sha256=sha(pause),
         original_acceptance_sha256=sha(old/'acceptance.json'),scientific_protocol_unchanged=True))
@@ -108,11 +109,16 @@ def prepare_matrix(old,root,identity,pause):
     return configs,done,pending,signals
 
 
+def parse_stat(text):
+    # comm字段允许空格，不能直接对完整/proc/PID/stat按空格切分。
+    fields=text[text.rfind(')')+2:].split()
+    return dict(state=fields[0],ppid=int(fields[1]),pgid=int(fields[2]),start_ticks=fields[19])
+
+
 def process_info(pid):
     p=Path('/proc')/str(pid)
-    stat=(p/'stat').read_text().split()
-    return dict(pid=pid,ppid=int(stat[3]),pgid=int(stat[4]),start_ticks=stat[21],
-        state=stat[2],command=(p/'cmdline').read_bytes().replace(b'\0',b' ').decode())
+    return dict(pid=pid,**parse_stat((p/'stat').read_text()),
+        command=(p/'cmdline').read_bytes().replace(b'\0',b' ').decode())
 
 
 def pause_matrix(root,output,timeout=900):
@@ -125,9 +131,10 @@ def pause_matrix(root,output,timeout=900):
         children=[]
         for p in Path('/proc').iterdir():
             if not p.name.isdigit():continue
-            try:info=process_info(int(p.name))
+            try:stat=parse_stat((p/'stat').read_text())
             except (FileNotFoundError,ProcessLookupError):continue
-            if info['ppid']!=parent['pid'] or info['state']=='Z':continue
+            if stat['ppid']!=parent['pid'] or stat['state']=='Z':continue
+            info=process_info(int(p.name))
             assert str(root) in info['command'] and 'run_prototype_cold_oracle.py' in info['command']
             assert info['pgid']==info['pid']
             children.append(info)
@@ -173,9 +180,9 @@ def pause_matrix(root,output,timeout=900):
         groups={x['pgid'] for x in stopped}
         for path in Path('/proc').iterdir():
             if not path.name.isdigit():continue
-            try:stat=(path/'stat').read_text().split()
+            try:stat=parse_stat((path/'stat').read_text())
             except FileNotFoundError:continue
-            if int(stat[4]) in groups and stat[2]!='Z' and int(path.name) not in alive:alive.append(int(path.name))
+            if stat['pgid'] in groups and stat['state']!='Z' and int(path.name) not in alive:alive.append(int(path.name))
         if not alive:break
         time.sleep(.5)
     assert not alive,alive

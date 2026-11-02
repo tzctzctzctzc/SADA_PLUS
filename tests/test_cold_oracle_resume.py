@@ -8,6 +8,12 @@ import pytest
 from tools.cold_oracle_resume import paired_config,validate_prefix
 
 
+def test_proc_stat_comm_with_spaces_does_not_shift_process_identity():
+    from tools.cold_oracle_resume import parse_stat
+    tail=['S','123','456']+['0']*16+['789']+['0']*5
+    assert parse_stat('999 (name with ) spaces) '+' '.join(tail))==dict(state='S',ppid=123,pgid=456,start_ticks='789')
+
+
 def fixture():
     digest='0'*64;lines=[]
     for step in range(1,7):
