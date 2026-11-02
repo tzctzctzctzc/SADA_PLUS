@@ -130,9 +130,16 @@ def build(cfg):
             ctx.checked_steps += 1
         result = original(*args, **kwargs)
         if kwargs.get('mode') != 'test':
-            for name, value in result[0].items():
-                if not torch.isfinite(value).all():
-                    raise ValueError('非有限loss: '+name)
+            if getattr(ctx, 'equivalent_metrics_enabled', False):
+                valid = torch.stack([torch.isfinite(value).all() for value in result[0].values()]).all()
+                if not valid:
+                    for name, value in result[0].items():
+                        if not torch.isfinite(value).all():
+                            raise ValueError('非有限loss: '+name)
+            else:
+                for name, value in result[0].items():
+                    if not torch.isfinite(value).all():
+                        raise ValueError('非有限loss: '+name)
         return result
     ctx.model.forward = checked_forward
     if cfg.get('context_mix'):

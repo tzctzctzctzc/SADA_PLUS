@@ -31,6 +31,8 @@ def build(cfg):
     from tools.cold_oracle_fastpath import install as install_fastpath
     install_fastpath(ctx.model)
     install_fastpath(ctx.model_ema.module)
+    from tools.cold_metric_readback import configure
+    configure(ctx)
     return ctx
 
 

@@ -182,11 +182,19 @@ class Trainer(BaseTrainerDA):
             
             
             # Define all these as training losses
-            for loss_name, loss_tr in losses.items():
-                loss_name = 't_' + loss_name
-                if not self.train_metrics.contains(loss_name):
-                    self.train_metrics.add_new(loss_name)
-                self.train_metrics.update(loss_name, loss_tr.item())
+            if getattr(self, 'equivalent_metrics_enabled', False):
+                from tools.cold_metric_readback import batch_scalars
+                for loss_name, loss_value in batch_scalars(losses).items():
+                    loss_name = 't_' + loss_name
+                    if not self.train_metrics.contains(loss_name):
+                        self.train_metrics.add_new(loss_name)
+                    self.train_metrics.update(loss_name, loss_value)
+            else:
+                for loss_name, loss_tr in losses.items():
+                    loss_name = 't_' + loss_name
+                    if not self.train_metrics.contains(loss_name):
+                        self.train_metrics.add_new(loss_name)
+                    self.train_metrics.update(loss_name, loss_tr.item())
             
             
             # OPTIONAL: Update the learning rate

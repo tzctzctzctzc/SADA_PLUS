@@ -1420,24 +1420,31 @@ class SADA(nn.Module):
                             
                             # 2.5) Apply the reverse gradient strategy
                             # Prepare the domain annotations
-                            source_domain_label = torch.zeros(da_cond_pred_src.size(0), dtype=torch.float32).to(self.device) # shape: T'
-                            target_domain_label = torch.ones(da_cond_pred_tgt.size(0), dtype=torch.float32).to(self.device)  # shape: T''
+                            if getattr(self, 'equivalent_fast_enabled', False):
+                                source_domain_label = torch.zeros(da_cond_pred_src.size(0), dtype=torch.float32, device=self.device)
+                                target_domain_label = torch.ones(da_cond_pred_tgt.size(0), dtype=torch.float32, device=self.device)
+                            else:
+                                source_domain_label = torch.zeros(da_cond_pred_src.size(0), dtype=torch.float32).to(self.device) # shape: T'
+                                target_domain_label = torch.ones(da_cond_pred_tgt.size(0), dtype=torch.float32).to(self.device)  # shape: T''
                             
                             # Compute the adversarial domain loss
                             domain_loss_src = self.criterion_domain(torch.squeeze(da_cond_pred_src, -1), source_domain_label)
                             domain_loss_tgt = self.criterion_domain(torch.squeeze(da_cond_pred_tgt, -1), target_domain_label)
 
                             # Check for nan values and replace with 0
-                            if torch.isnan(domain_loss_src).any():
-                                domain_loss_src = torch.where(torch.isnan(domain_loss_src), torch.zeros_like(domain_loss_src), domain_loss_src).to(self.device)
+                            if getattr(self, 'equivalent_fast_enabled', False):
+                                domain_loss_src = torch.where(torch.isnan(domain_loss_src), torch.zeros_like(domain_loss_src), domain_loss_src)
+                                domain_loss_tgt = torch.where(torch.isnan(domain_loss_tgt), torch.zeros_like(domain_loss_tgt), domain_loss_tgt)
+                            else:
+                                if torch.isnan(domain_loss_src).any():
+                                    domain_loss_src = torch.where(torch.isnan(domain_loss_src), torch.zeros_like(domain_loss_src), domain_loss_src).to(self.device)
+                                if torch.isnan(domain_loss_tgt).any():
+                                    domain_loss_tgt = torch.where(torch.isnan(domain_loss_tgt), torch.zeros_like(domain_loss_tgt), domain_loss_tgt).to(self.device)
                             
-                            if torch.isnan(domain_loss_tgt).any():
-                                domain_loss_tgt = torch.where(torch.isnan(domain_loss_tgt), torch.zeros_like(domain_loss_tgt), domain_loss_tgt).to(self.device)
-                            
-                            if torch.sum(class_c_mask_src) > 0:
+                            if (out_features_src.shape[0] > 0 if getattr(self, 'equivalent_fast_enabled', False) else torch.sum(class_c_mask_src) > 0):
                                 loss_cond_reverse_level_source += class_c_weight * domain_loss_src
                                 counter_src += 1
-                            if torch.sum(class_c_mask_tgt) > 0:
+                            if (out_features_tgt.shape[0] > 0 if getattr(self, 'equivalent_fast_enabled', False) else torch.sum(class_c_mask_tgt) > 0):
                                 loss_cond_reverse_level_target += class_c_weight * domain_loss_tgt
                                 counter_tgt += 1
 

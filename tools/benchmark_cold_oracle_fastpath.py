@@ -27,6 +27,8 @@ def case(entry, checkpoint, output, steps):
         state=torch.load(io.BytesIO(serialized),map_location='cpu');base.restore(ctx,state)
         assert base.tensor_digest(base.capture(ctx,cfg,state['epoch'],history))==base.tensor_digest(state)
         ctx.model.equivalent_fast_enabled=ctx.model_ema.module.equivalent_fast_enabled=enabled
+        from tools.cold_metric_readback import configure
+        configure(ctx,enabled)
         ctx.cold_oracle_gradient_epoch=None;ctx.cold_oracle_ledger=None
         ctx.train_loader_src,ctx.train_loader_tgt=[base.StepLoader(x,n) for x in loaders]
         base.epoch_setup(ctx,epoch)
