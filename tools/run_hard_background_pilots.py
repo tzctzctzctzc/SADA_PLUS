@@ -243,6 +243,29 @@ def evaluate(entry):
         artifacts={str(p):sha(p) for p in list(entry.glob('*.pt'))+list(entry.glob('*calibration.json'))+[entry/'gpu_complete.json',entry/'history.json']}))
 
 
+def audit(entry):
+    d=read(entry/'complete.json');assert d['spec']==SPEC and set(d['results'])==set(MODES)
+    for path,digest in d['artifacts'].items():assert sha(path)==digest,path
+    history=read(entry/'history.json');assert [r['epoch'] for r in history]==list(range(1,21))
+    done=read(entry/'gpu_complete.json');assert done['detector_unchanged'] and done['source_videos']>0
+    selection=read(SOURCE/entry.name/'selection.json');assert set(done['source_members'])==set(selection['source_fit'])
+    assert not set(selection['target_train'])&set(selection['target_val'])
+    for mode in MODES:
+        assert done['first_gradient_norms'][mode]>0 and done['optimizer_steps'][mode]==20*done['source_videos']
+        cal=read(entry/(mode+'_calibration.json'))
+        for domain in ['source','target']:
+            c=cal[domain]
+            for label,item in c['per_class'].items():
+                best=max(range(len(item['rules'])),key=lambda i:(item['grid'][i]['map'],item['grid'][i]['kept'],item['rules'][i]))
+                assert best==item['index'] and item['threshold']==item['rules'][best]
+            idx=max(range(len(c['global_rules'])),key=lambda i:(sum(v['map'] for v in c['global_grid'][i]),sum(v['kept'] for v in c['global_grid'][i]),c['global_rules'][i]))
+            assert c['global_threshold']==c['global_rules'][idx]
+    guard=read(done['guard']);assert sha(done['guard'])==done['guard_sha256'] and sha(guard['lease'])==guard['lease_sha256']
+    lease=read(guard['lease']);assert guard['owner_pid']==lease['owner_pid'] and guard['observed']['uuid']==lease['uuid']
+    assert guard['observed']['free_mib']>=12288
+    return dict(passed=True,complete_sha256=sha(entry/'complete.json'),results={m:{dom:d['results'][m][dom]['summary'] for dom in ['source_val','target_val']} for m in MODES})
+
+
 def run(root):
     import fcntl
     from tools.baseline_gpu import snapshot
@@ -270,7 +293,8 @@ def run(root):
                 if t['stage']=='kernel':
                     assert read(root/s/'kernel_complete.json')['passed'];probes.append(s)
                 elif t['stage']=='gpu':cpu.append(s)
-                else:done.append(s)
+                else:
+                    save(root/'controller_audits'/(s+'.json'),audit(root/s));done.append(s)
             used={t['gpu'] for t in active.values()}
             for g in [2,0,3,1]:
                 if g in used or snapshot(g)['free_mib']<12288:continue
