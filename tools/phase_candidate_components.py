@@ -91,6 +91,11 @@ def _level(box, levels):
     return int(torch.clamp(torch.log2((box[1] - box[0]).clamp_min(1) / 8).round(), 0, levels - 1))
 
 
+def regression_instance(truth, labels, label, point):
+    ids = ((labels == label) & (truth[:, 0] <= point) & (truth[:, 1] >= point)).nonzero().flatten()
+    return int(ids[(truth[ids, 1] - truth[ids, 0]).argmin()]) if len(ids) else None
+
+
 def source_candidates_loss(model, head, f, masks, reg, videos, cls=None):
     from tools.phase_boundary import interval_tokens, select_proposals
     classification, risk_losses = [], []
@@ -115,6 +120,8 @@ def source_candidates_loss(model, head, f, masks, reg, videos, cls=None):
         if cls is not None:
             for box, label, level, index, confidence in select_proposals(f, masks, cls, reg, model, vi, length):
                 assigned, gi = _assignment(box, truth, labels, length)
+                # 分类按候选重叠赋类；误差标签始终与原正点回归实例一致。
+                gi = regression_instance(truth, labels, label, index * model.fpn_strides[level]) if assigned == int(label) else None
                 groups.append((box.detach(), assigned, gi, int(label), level))
                 stats['candidate_wrong_class'] += int(assigned < 10 and int(label) != assigned)
         if not groups:
@@ -221,11 +228,10 @@ def paired_source_error_loss(model, head, weak, strong, views, videos):
     for vi, view in enumerate(views):
         truth, labels = _truth(videos[vi])
         for box, c, level, index, confidence in select_proposals(wf, wm, wc, wr, model, vi, view['original_length']):
-            same = (labels == c) & (truth[:, 0] <= index * model.fpn_strides[level]) & (truth[:, 1] >= index * model.fpn_strides[level])
-            ids = same.nonzero().flatten()
-            if not len(ids) or box[0] < view['lo'] or box[1] > view['lo'] + view['width'] - 1:
+            gi = regression_instance(truth, labels, c, index * model.fpn_strides[level])
+            if gi is None or box[0] < view['lo'] or box[1] > view['lo'] + view['width'] - 1:
                 continue
-            gi = ids[(truth[ids, 1] - truth[ids, 0]).argmin()];gt = truth[gi]
+            gt = truth[gi]
             stride = model.fpn_strides[level];reference = map_coordinates(box, view)
             k = int((map_coordinates(box.new_tensor(index * stride), view) / stride).round())
             if k < 0 or k >= sf[level].shape[-1] or not sm[level][vi, 0, k]:

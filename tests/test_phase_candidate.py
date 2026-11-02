@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 import torch
 from tools.phase_boundary import PhaseBoundary, sequence_loss, map_coordinates
-from tools.phase_candidate_components import write_source_cache, TokenProjection, OrderedTemporalConv, refine, candidate_coordinates, source_candidates_loss, paired_source_error_loss, endpoint_mask, _device_tree, _cpu_tree
+from tools.phase_candidate_components import regression_instance, write_source_cache, TokenProjection, OrderedTemporalConv, refine, candidate_coordinates, source_candidates_loss, paired_source_error_loss, endpoint_mask, _device_tree, _cpu_tree
 
 
 def test_foreground_joint_probability_changes_and_has_real_rejection_gradient():
@@ -141,3 +141,11 @@ def test_source_cache_creates_nested_role_directory_and_roundtrips(tmp_path):
     restored = torch.load(path)
     assert torch.equal(restored['weak'][0], value['weak'][0]) and restored['videos'][0]['metadata']['video_id'] == 'source'
     assert not path.with_name(path.name + '.tmp').exists()
+
+
+def test_overlapping_same_class_instances_keep_the_positive_point_assignment():
+    truth = torch.tensor([[4., 14.], [6., 12.], [5., 11.]])
+    labels = torch.tensor([0, 0, 1])
+    assert regression_instance(truth, labels, 0, 10.) == 1
+    assert regression_instance(truth, labels, 1, 10.) == 2
+    assert regression_instance(truth, labels, 0, 20.) is None
