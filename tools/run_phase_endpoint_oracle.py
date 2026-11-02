@@ -236,7 +236,7 @@ def main(a):
                     save(e/'complete.json',dict(schema=SCHEMA,mode=m,shift=s,code=identity,artifacts={str(p):sha(p) for p in paths},scope='controlled endpoint capacity diagnostic, not formal UDA'))
                     done.append(audit(e))
             for m in MODES:
-                if len(reports[m])==6 and m not in formal_started:
+                if all(len(reports[x])==6 for x in MODES) and m not in formal_started:
                     assert len({r['report']['mature_initial_sha'] for r in reports[m].values()})>=1
                     minimum=max(minimum,math.ceil(max(r['report']['peak_mib'] for r in reports[m].values())+4096))
                     save(root/('acceptance_'+m+'.json'),dict(reports=reports[m],minimum_free_mib=minimum,status='passed'))
@@ -248,7 +248,10 @@ def main(a):
                 else:
                     if sum(t.get('gpu') is not None for t in active.values())>=8:continue
                     counts={g:sum(t.get('gpu')==g for t in active.values()) for g in range(4)}
+                    from tools.baseline_gpu import snapshot
                     cards=[g for g in sorted(counts,key=counts.get) if counts[g]<2 and not any(t['mode']==m and t.get('gpu')==g for t in active.values())]
+                    # 第二个自有CUDA尚未分配显存时也要留出双份准入，避免并发首CUDA竞态。
+                    cards=[g for g in cards if snapshot(g)['free_mib']>=minimum*(1+counts[g])]
                     found=acquire(cards,a.data_root,root,minimum,identity['commit'])
                     if not found:continue
                     context,card=found
