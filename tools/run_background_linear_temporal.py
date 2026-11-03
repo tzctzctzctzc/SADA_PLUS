@@ -81,17 +81,20 @@ def kernel(entry,x,bg,quality,guard):
         assert timed_digests[0]==timed_digests[1]
         reports[m]=dict(parameters=sum(p.numel() for p in a.parameters()),gradient=norm,cached_direct_loss_grad_update_exact=True,full_state_disk_restore_next_update_exact=True,RNG_draws_exact=True,checkpoint_sha256=sha(path),direct_step_seconds=durations[0],cached_step_seconds=durations[1])
     # 正式三头共用一次描述符提取；按这个实际调度测收益，避免把三次重复编码算作基线。
-    aggregate=[];aggregate_digests=[]
+    aggregate=[];aggregate_digests=[];aggregate_repeats=30
     for use_cache in (False,True):
         models={m:LinearBackground(m).cuda() for m in MODES}
         optimizers={m:torch.optim.AdamW(h.parameters(),lr=3e-4,weight_decay=.05) for m,h in models.items()}
         torch.cuda.synchronize();begin=time.perf_counter()
-        for _ in range(repeats):
+        for _ in range(aggregate_repeats):
             reps={m:loaded[m].cuda() for m in MODES} if use_cache else descriptors(**x)
             for m in MODES:update(models[m],optimizers[m],reps[m],bg,quality)
-        torch.cuda.synchronize();aggregate.append((time.perf_counter()-begin)/repeats)
+        torch.cuda.synchronize();aggregate.append((time.perf_counter()-begin)/aggregate_repeats)
         aggregate_digests.append({m:(base.tensor_digest(models[m].state_dict()),base.tensor_digest(optimizers[m].state_dict())) for m in MODES})
-    assert aggregate_digests[0]==aggregate_digests[1] and aggregate[1]<aggregate[0]
+    # 分别保留数值与效率结果，不能让一个联合断言丢掉失败原因。
+    save(entry/'aggregate_benchmark.json',dict(repeats=aggregate_repeats,shared_direct_seconds=aggregate[0],cached_seconds=aggregate[1],numerically_exact=aggregate_digests[0]==aggregate_digests[1],cache_faster=aggregate[1]<aggregate[0]))
+    assert aggregate_digests[0]==aggregate_digests[1], 'shared three-head numerical equivalence failed'
+    assert aggregate[1]<aggregate[0], 'descriptor cache did not improve measured shared-step throughput'
     save(entry/'kernel_complete.json',dict(passed=True,reports=reports,descriptor_seconds=descriptor_seconds,seconds=time.time()-began,guard=guard,guard_sha256=sha(guard),descriptor_sha256=sha(entry/'kernel_descriptors.pt'),cached_benchmark_includes_CPU_to_GPU=True,timed_updates_exact=True,shared_direct_three_head_step_seconds=aggregate[0],cached_three_head_step_seconds=aggregate[1]))
 
 
