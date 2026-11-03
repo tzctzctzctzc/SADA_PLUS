@@ -93,9 +93,29 @@ def run(root, task):
         print('EVALUATION_RECOVERED',task,read(entry/'evaluation/target_val.json'),flush=True)
 
 
+def run_queue(root):
+    """串行补合法失败的评估；仍在训练的任务只等待，不重送、不改父状态。"""
+    while True:
+        if (root/'stop.json').exists():
+            return
+        state=read(root/'state.json')
+        pending=[task for task, item in state['failed'].items()
+                 if item['stage']=='evaluate' and not (root/task/'complete.json').exists()]
+        save(root/'evaluation_repair_queue.json',dict(status='running',owner_pid=os.getpid(),pending=pending,
+             waiting_for_original_final=not (root/'final.json').exists(),training_repeated=False))
+        for task in sorted(pending):
+            run(root,task)
+        if (root/'final.json').exists():
+            save(root/'evaluation_repair_queue.json',dict(status='complete',owner_pid=os.getpid(),pending=[],
+                 training_repeated=False))
+            return
+        time.sleep(10)
+
+
 if __name__ == '__main__':
     parser=argparse.ArgumentParser()
     parser.add_argument('root',type=Path)
     parser.add_argument('--task',default='S1_ae')
+    parser.add_argument('--all-failed-evaluations',action='store_true')
     args=parser.parse_args()
-    run(args.root,args.task)
+    run_queue(args.root) if args.all_failed_evaluations else run(args.root,args.task)

@@ -167,6 +167,10 @@ def run(root):
         save(root/'independent_audit_progress.json', dict(audited=sorted(audited), owner_pid=os.getpid()))
         if (root/'final.json').exists():
             final = read(root/'final.json')
+            queue=root/'evaluation_repair_queue.json'
+            if queue.exists() and read(queue)['status'] != 'complete':
+                time.sleep(5)
+                continue
             if any((root/task/'evaluate_recovery_launch.json').exists()
                    and not (root/task/'evaluate_recovery_complete.json').exists()
                    and not (root/task/'evaluate_recovery_error.json').exists()
