@@ -28,7 +28,7 @@ def compute_average_precision_detection(ground_truth,prediction,tiou_thresholds=
         if ids is None:continue
         boxes=truth_boxes[ids]
         for offset in range(0,len(positions),256):
-            chunk=positions[offset:offset+256];pred=pred_boxes[chunk]
+            chunk=positions[offset:offset+256];pred=pred_boxes[chunk].astype(float,copy=False)
             if boxes.dtype==np.float64:
                 left=np.maximum(pred[:,None,0],boxes[None,:,0])
                 right=np.minimum(pred[:,None,1],boxes[None,:,1])
