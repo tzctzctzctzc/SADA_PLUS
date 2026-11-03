@@ -25,6 +25,7 @@ SPEC=dict(schema='full-detector-AP-IACS-SADA-v1',shifts=['S1','S2'],modes=MODES,
     main_lr=1e-5,weight_decay=.05,clip=1.,ema=.999,seed=311104,order_seed=123,target_seed=311108,
     original_branch='originalconfigured discriminatorlr/architecture/dropout/beta/domainweights/weightclip; fixedadv/downstreamratio; no parametersearch',
     fresh='newmodel/AdamW/EMA/order/RNG from originalPrototype bestEMA, no oldbackgroundexperimentcheckpoint/optimizer/history',
+    reproducibility='deterministic CUDA algorithms and cuDNN; CUBLAS_WORKSPACE_CONFIG=:4096:8 beforeCUDA. Originalfloat32/TF32 precision unchanged, noAMP; preformal backward nondeterminism resolved without relaxing exactchecks',
     inference='recompute all scores/boundaries/candidates with originalNMS config, no deletequota; fixedEMA20 only; native + preregistered3scale composition, all reported',
     readouts=READOUTS,scales=[.75,1.,1.25],primary_tracks=['iacs/native','iacs/scale_boundary'],
     target_train_GT_read=False,target_val_used_for_selection=False,budget_seconds=1800,
@@ -60,6 +61,8 @@ def train(entry):
     from tools.run_dense_revisit import seed,raw_load
     from tools.run_uda_background import TargetStream
     from tools.detector_scale_math import rescale_raw,fuse_heads
+    torch.use_deterministic_algorithms(True);torch.backends.cudnn.deterministic=True;torch.backends.cudnn.benchmark=False
+    assert os.environ['CUBLAS_WORKSPACE_CONFIG']==':4096:8'
     guard=first_cuda_guard(entry);s,mode=entry.name.split('_');quality=mode=='iacs';began=time.monotonic();inputdir=entry.parent/'inputs';prepared=read(entry.parent/'prepare.json')['shifts'][s]
     assert sha(inputdir/(s+'_source.pt'))==prepared['source_sha256'] and sha(inputdir/(s+'_unlabeled.pt'))==prepared['unlabeled_sha256'];fit=torch.load(inputdir/(s+'_source.pt'),map_location='cpu');data=torch.load(inputdir/(s+'_unlabeled.pt'),map_location='cpu');target=data['target_train'];evaluation=data['evaluation'];cfg=read(SOURCE/s/'config.json')
     raw=[r['raw'].pin_memory() for r in fit];gt=[(r['gt_segments'].cuda(),r['gt_labels'].cuda()) for r in fit];targetraw={r['video']:raw_load(r).pin_memory() for r in target}
@@ -170,7 +173,7 @@ def run(root):
                 devices=[None]*max(0,2-len(active)) if stage=='evaluate' else [g for g in range(4) if g not in [t['gpu'] for t in active.values()] and snapshot(g)['free_mib']>=12288]
                 for g in devices:
                     if not pending:break
-                    task=pending.pop(0);e=root/task;e.mkdir(exist_ok=True);env=dict(os.environ,CUDA_VISIBLE_DEVICES='',PYTHONDONTWRITEBYTECODE='1',PYTHONPATH=str(CODE),OMP_NUM_THREADS='2',MKL_NUM_THREADS='2',PYTHONHASHSEED='123')
+                    task=pending.pop(0);e=root/task;e.mkdir(exist_ok=True);env=dict(os.environ,CUDA_VISIBLE_DEVICES='',PYTHONDONTWRITEBYTECODE='1',PYTHONPATH=str(CODE),OMP_NUM_THREADS='2',MKL_NUM_THREADS='2',PYTHONHASHSEED='123',CUBLAS_WORKSPACE_CONFIG=':4096:8')
                     if g is not None:
                         v=snapshot(g);p=e/'lease_train.json';save(p,dict(owner_pid=os.getpid(),index=g,uuid=v['uuid'],minimum_free_mib=12288,commit=code_identity()['commit']));env.update(CUDA_VISIBLE_DEVICES=v['uuid'],PROPOSAL_FOREGROUND_LEASE=str(p),PROPOSAL_FOREGROUND_LEASE_SHA256=sha(p))
                     log=(e/(stage+'.log')).open('w');p=subprocess.Popen([sys.executable,'-u','-B',str(Path(__file__)),'--entry',str(e),'--worker',stage],env=env,cwd=CODE,stdout=log,stderr=subprocess.STDOUT,start_new_session=True);active[task]=dict(p=p,gpu=g,log=log)
