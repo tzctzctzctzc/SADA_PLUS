@@ -181,6 +181,8 @@ def capture(ctx, cfg, epoch, history):
 
 
 def checkpoint(path, state):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = Path(str(path)+'.tmp')
     torch.save(state, tmp)
     tmp.replace(path)

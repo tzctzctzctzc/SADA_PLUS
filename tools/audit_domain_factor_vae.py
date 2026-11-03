@@ -82,7 +82,21 @@ def audit(root, task):
         guard = read(proof['guard'])
         assert sha(guard['lease']) == guard['lease_sha256']
         lease = read(guard['lease'])
-        assert guard['owner_pid'] == lease['owner_pid'] == state['owner_pid']
+        expected_owner = state['owner_pid']
+        if stage == 'evaluate' and (entry/'evaluate_recovery_launch.json').exists():
+            recovery = read(entry/'evaluate_recovery_launch.json')
+            assert recovery['original_training_owner'] == state['owner_pid']
+            assert recovery['source_commit'] == cfg['baseline']['code']['commit']
+            assert not recovery['training_repeated']
+            for name, digest in recovery['before'].items():
+                assert sha(entry/name) == digest, name
+            assert guard['child_pid'] == recovery['child_pid']
+            assert guard['lease'] == recovery['lease'] and sha(guard['lease']) == recovery['lease_sha256']
+            expected_owner = recovery['owner_pid']
+            recovered = read(entry/'evaluate_recovery_complete.json')
+            assert recovered['passed'] and recovered['receipt_sha256'] == sha(entry/'evaluate_recovery_launch.json')
+            assert complete['recovery_sha256'] == sha(entry/'evaluate_recovery_complete.json')
+        assert guard['owner_pid'] == lease['owner_pid'] == expected_owner
         assert lease['commit'] == cfg['baseline']['code']['commit']
         assert guard['observed']['uuid'] == lease['observed']['uuid']
         assert guard['observed']['free_mib'] >= lease['minimum_free_mib'] == 16384
@@ -153,7 +167,18 @@ def run(root):
         save(root/'independent_audit_progress.json', dict(audited=sorted(audited), owner_pid=os.getpid()))
         if (root/'final.json').exists():
             final = read(root/'final.json')
-            assert set(final['completed']) == audited
+            if any((root/task/'evaluate_recovery_launch.json').exists()
+                   and not (root/task/'evaluate_recovery_complete.json').exists()
+                   and not (root/task/'evaluate_recovery_error.json').exists()
+                   for task in final['failed']):
+                time.sleep(5)
+                continue
+            recovered = {task for task in final['failed']
+                         if (root/task/'evaluate_recovery_complete.json').exists()}
+            if any(task not in audited for task in recovered):
+                time.sleep(5)
+                continue
+            assert set(final['completed']) | recovered == audited
             pairs = {}
             for shift in ('S1', 'S2'):
                 ae, vae = shift+'_ae', shift+'_vae'
@@ -164,7 +189,8 @@ def run(root):
                     pairs[shift] = dict(vae_minus_ae_pp=100*(v['results']['target']['map']-a['results']['target']['map']))
             save(root/'independent_final_audit.json', dict(passed=len(audited) == 4, code=code_identity(),
                 producer_final_sha256=sha(root/'final.json'), results={task:sha(root/'independent_results'/(task+'.json')) for task in sorted(audited)},
-                pairs=pairs, failed=final['failed'], scope='S1/S2 development, not six-direction final mean',
+                pairs=pairs, failed=final['failed'], recovered_evaluations=sorted(recovered),
+                scope='S1/S2 development, not six-direction final mean',
                 selection='original source validation only; all four results retained'))
             return
         time.sleep(15)

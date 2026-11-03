@@ -24,3 +24,14 @@ def test_truth_scope_and_annotation_deduplication(tmp_path):
     path.write_text(json.dumps(dict(database=dict(a=item, b=dict(subset='target', annotations=[])))))
     members, gt = truth(path, ['source'])
     assert members == {'a'} and len(gt) == 1 and gt.iloc[0]['label'] == 0
+
+
+def test_checkpoint_creates_output_directory_and_preserves_payload(tmp_path):
+    import torch
+    from tools.baseline_engine import checkpoint
+    path = tmp_path/'missing'/'evaluation'/'predictions.pt'
+    value = {'score': [.4, .7], 'tensor':torch.arange(4)}
+    checkpoint(path, value)
+    actual = torch.load(path, map_location='cpu')
+    assert actual['score'] == value['score'] and torch.equal(actual['tensor'],value['tensor'])
+    assert not path.with_name(path.name+'.tmp').exists()
