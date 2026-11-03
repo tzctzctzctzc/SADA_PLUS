@@ -1,0 +1,7 @@
+{
+  "url": "https://raw.githubusercontent.com/hyz-xmaster/VarifocalNet/master/mmdet/models/losses/varifocal_loss.py",
+  "sha256": "8d66ec43ca609c21e37d349e132e553cad672b2e2d5c863783041e5af3ddb504",
+  "license_url": "https://raw.githubusercontent.com/hyz-xmaster/VarifocalNet/master/LICENSE",
+  "license_sha256": "02c5c55e19772184872c6c455553b15e4acac4b3a757550e7374f47723868ce1",
+  "reference": "CVPR2021 VarifocalNet authors repository; loss reference only, no fullVFNet reproduction"
+}
