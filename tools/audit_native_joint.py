@@ -25,7 +25,7 @@ def teacher_audit(root,s):
         reference=bound['all_FPN_inner'];err=float((mean-reference).abs().max());maxerr=max(maxerr,err);assert torch.allclose(mean,reference,atol=2e-5,rtol=1e-6)
         gt=truth[a['video']];boxes=np.array(gt['segments'],float).reshape(-1,2);labels=np.array(gt['labels']);query=r['grid_boxes'][r['hard']].numpy().astype(float)
         inter=np.maximum(0,np.minimum(query[:,None,1],boxes[None,:,1])-np.maximum(query[:,None,0],boxes[None,:,0]));union=(query[:,1]-query[:,0])[:,None]+(boxes[:,1]-boxes[:,0])[None]-inter;iou=inter/np.maximum(union,1e-12)
-        expected=iou.max(1)<.01;assert np.array_equal(expected,a['bg'].numpy().astype(bool));q=np.array([iou[i,labels==int(c)].max() if (labels==int(c)).any() else 0 for i,c in enumerate(r['labels'][r['hard']])]);assert np.allclose(q,a['quality'].numpy(),atol=3e-6,rtol=0)
+        expected=iou.max(1)<.01 if len(boxes) else np.ones(len(query),bool);assert np.array_equal(expected,a['bg'].numpy().astype(bool));q=np.array([iou[i,labels==int(c)].max() if (labels==int(c)).any() else 0 for i,c in enumerate(r['labels'][r['hard']])]);assert np.allclose(q,a['quality'].numpy(),atol=3e-6,rtol=0)
     return dict(teacher_sha256=report['teacher_sha256'],source_videos=len(teacher['rows']),critical_nonBG_anchors=anchors,FPN0_all_samples_bitwise_equal=True,all_pyramid_inner_means_compared_to_prior_audited_native=True,max_pyramid_mean_error=maxerr,all_BG_quality_independent=True)
 
 
@@ -33,7 +33,7 @@ def states_audit(root,s,rows):
     import torch
     from tools import baseline_engine as base
     from tools.run_foreground_calibration_oracle import REFERENCE
-    teacher=read(root/s/'complete.json');original=torch.load(REFERENCE/s/'best.pt',map_location='cpu')['ema_state_dict'];result={}
+    teacher=read(root/s/'complete.json');assert sha(REFERENCE/s/'best.pt')==teacher['native_checkpoint_sha256'];original=torch.load(REFERENCE/s/'best.pt',map_location='cpu')['ema_state_dict'];result={}
     for mode in MODES:
         e=root/(s+'_'+mode);gpu=read(e/'gpu_complete.json');assert sha(e/'gpu_complete.json')==read(root/'final.json')['allGPU_sha256'][s+'_'+mode]
         for file,key in [('kernel_complete.json','kernel_sha256'),('epoch005.pt','checkpoint_sha256'),('predictions.pt','predictions_sha256')]:assert sha(e/file)==gpu[key]
