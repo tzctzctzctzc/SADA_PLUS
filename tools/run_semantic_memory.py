@@ -16,7 +16,7 @@ SPEC=dict(schema='full-GT-semantic-memory-revisit-v1',tasks=TASKS,shifts=['S1','
     bank='ALL sourceFIT97verb GT intervals; task0..9 anchors alwaysretain, non-task10..96 only if maxIoUwithANYtask<.01; plus original highscore pureBG proposals as unknownclass97',
     descriptor='16 true interpolation points->4 orderedvalidmeans; perbin and concatenatedL2norm; invalid<4points excluded',
     source_exclusion='query physicalvideo excluded from all98classes, including fit queries',metric='exact float64 squaredL2; nearest5 average within each98class, closest among10task versus closest among88BGclasses',
-    readouts='foreground: distance from closest taskclass; dual: foregrounddistance-BGdistance; fixed2mechanistic comparisons, no threshold/temp/ksearch',
+    readout_rule='foreground: distance from closest taskclass; dual: foregrounddistance-BGdistance; fixed2mechanistic comparisons, no threshold/temp/ksearch',
     budget_seconds=900,rates=[.005,.01,.02,.05],source_fit_only=True,target_train_GT_read=False,target_train_model_updates=False,
     caveat='allGT bank changes support as well as metric; raw-vslearned also dimensions differ, no singlefactor causality;S1/S2 historicaldevelopment,not untouched test or fullsixdirections')
 

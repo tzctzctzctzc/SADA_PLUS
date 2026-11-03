@@ -1,6 +1,11 @@
 import numpy as np
 import torch
 from tools.semantic_memory_math import semantic_distances,ordered_descriptor
+from tools.run_semantic_memory import SPEC
+
+
+def test_entrypoint_protocol_imports():
+    assert SPEC['readouts']==['foreground','dual'] and SPEC['target_train_GT_read'] is False
 
 
 def test_exclusion_and_class_balance():
