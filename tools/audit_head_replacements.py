@@ -88,23 +88,41 @@ def audit(root,task):
 
 
 def run(root):
-    done=set()
+    done=set();tasks=tuple(read(root/'plan.json')['tasks'])
+    companion=Path('/vepfs/vlms/head_replacements12_764a29a_1104')
     while not (root/'stop.json').exists():
-        for task in TASKS:
+        for task in tasks:
             if task not in done and (root/task/'complete.json').exists():audit(root,task);done.add(task)
         save(root/'independent_audit_progress.json',dict(audited=sorted(done),owner_pid=os.getpid()))
         if (root/'final.json').exists():
             final=read(root/'final.json');assert done==set(final['completed'])
+            if not (companion/'independent_final_audit.json').exists():
+                time.sleep(15)
+                continue
+            old_audit=read(companion/'independent_final_audit.json')
+            combined={t:(root,read(root/'independent_results'/(t+'.json'))) for t in done}
+            for s in range(1,7):
+                task=f'S{s}_interaction';p=companion/'independent_results'/(task+'.json')
+                assert sha(p)==old_audit['reports'][task]
+                report=read(p);assert report['passed']
+                assert report['complete_sha256']==sha(companion/task/'complete.json')
+                combined[task]=(companion,report)
+                # 原队列内Trident只在验收失败，修复版本没有接它的训练前缀。
+                assert not (companion/f'S{s}_trident'/'formal_initialization.json').exists()
+            assert set(combined)=={f'S{s}_{v}' for s in range(1,7) for v in ('trident','interaction')}
             summaries={}
             for variant in ('trident','interaction'):
-                reports=[read(root/'independent_results'/(f'S{s}_{variant}.json')) for s in range(1,7)
-                         if f'S{s}_{variant}' in done]
+                reports=[combined[f'S{s}_{variant}'][1] for s in range(1,7)]
                 summaries[variant]=dict(count=len(reports),all_six_complete=len(reports)==6,
                     target_mean_percent=float(np.mean([r['results']['target']['map'] for r in reports])*100) if reports else None,
                     mean_delta_pp=float(np.mean([r['delta_vs_baseline_pp'] for r in reports])) if reports else None)
-            save(root/'independent_final_audit.json',dict(passed=len(done)==12,code=code_identity(),
-                producer_final_sha256=sha(root/'final.json'),reports={t:sha(root/'independent_results'/(t+'.json')) for t in sorted(done)},
-                summaries=summaries,failed=final['failed'],selection='source validation only, all results retained'))
+            save(root/'independent_final_audit.json',dict(passed=len(done)==6 and len(combined)==12,code=code_identity(),
+                producer_final_sha256=sha(root/'final.json'),
+                companion_independent_final_sha256=sha(companion/'independent_final_audit.json'),
+                reports={t:dict(root=str(r),sha256=sha(r/'independent_results'/(t+'.json'))) for t,(r,_) in combined.items()},
+                summaries=summaries,failed=final['failed'],
+                scope='exact six shifts x two heads, original failed Trident initialization attempts retained, zero formal prefix reused',
+                selection='source validation only, all results retained'))
             return
         time.sleep(15)
 
