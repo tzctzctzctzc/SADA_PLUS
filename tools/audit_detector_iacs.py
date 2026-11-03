@@ -24,8 +24,10 @@ def states(root,s):
     assert sha(sourcefile)==prep['source_sha256'] and sha(unfile)==prep['unlabeled_sha256'];rows=torch.load(sourcefile,map_location='cpu');data=torch.load(unfile,map_location='cpu');truth=read(SOURCE/s/'source_truth.json');prior=torch.load(DENSE/'inputs'/s/'data.pt',map_location='cpu')
     assert sha(DENSE/'inputs'/s/'data.pt')==prep['prior_audited_input_sha256']==read(DENSE/'prepare_complete.json')['results'][s]['data_sha256'];assert sha(SOURCE/s/'source_truth.json')==prep['source_truth_sha256'];assert sha(SOURCE/s/'config.json')==prep['source_config_sha256']
     assert [r['video'] for r in rows]==prep['source_videos']==sorted(truth);assert set(truth)=={r['video'] for role in ('fit','heldout') for r in prior['roles'][role]}
+    from tools.run_dense_revisit import raw_load
+    raw_index={r['video']:r for role in ('fit','heldout') for r in prior['roles'][role]}
     for r in rows:
-        gt=truth[r['video']];assert np.array_equal(r['gt_segments'].numpy(),np.asarray(gt['segments'],np.float32).reshape(-1,2));assert np.array_equal(r['gt_labels'].numpy(),np.asarray(gt['labels'],np.int64));assert r['raw'].shape[1]==2304 and not {'target_gt','bg','delta'}&set(r)
+        gt=truth[r['video']];assert np.array_equal(r['gt_segments'].numpy(),np.asarray(gt['segments'],np.float32).reshape(-1,2));assert np.array_equal(r['gt_labels'].numpy(),np.asarray(gt['labels'],np.int64));assert r['raw'].shape[1]==2304 and not {'target_gt','bg','delta'}&set(r);assert torch.equal(r['raw'],raw_load(raw_index[r['video']]))
     for role,rs in [('target_train',data['target_train'])]+list(data['evaluation'].items()):
         assert not set(truth)&{r['video'] for r in rs};assert [r['video'] for r in rs]==[r['video'] for r in prior['roles'][role]]
         for r,old in zip(rs,prior['roles'][role]):
@@ -74,6 +76,14 @@ def run(root):
     while not (root/'final.json').exists():
         if (root/'error.json').exists():raise RuntimeError('producer failed; no restart')
         time.sleep(3)
+    link=read(root/'independent_replay_link.json');replayroot=Path(link['root'])
+    while not (replayroot/'final.json').exists():
+        if (replayroot/'error.json').exists():raise RuntimeError('independent savedEMA replay failed')
+        time.sleep(3)
+    rf=read(replayroot/'final.json');assert rf['passed'] and set(rf['results_sha256'])==set(TASKS);replay_owner=read(replayroot/'state.json')['owner_pid']
+    for task in TASKS:
+        p=replayroot/task/'complete.json';r=read(p);assert sha(p)==rf['results_sha256'][task] and r['passed'] and r['optimizer_steps']==0 and r['CPUCUDA_RNG_unchanged'];g=read(r['guard']);lease=read(replayroot/task/'lease_train.json');assert sha(r['guard'])==r['guard_sha256'] and sha(replayroot/task/'lease_train.json')==g['lease_sha256'];assert g['owner_pid']==lease['owner_pid']==replay_owner and g['observed']['uuid']==lease['uuid'] and g['observed']['free_mib']>=12288
+        assert r['origin_GPU_sha256']==sha(root/task/'gpu_complete.json') and r['checkpoint_sha256']==sha(root/task/'epoch020.pt') and r['predictions_sha256']==sha(root/task/'predictions.pt');assert all(c['all_three_methods_and_arrays_bitwise_equal'] for c in r['cases'])
     final=read(root/'final.json');assert set(final['allGPU_sha256'])==set(TASKS);reports={}
     for s in ('S1','S2'):
         checked=states(root,s);prod=read(root/(s+'_evaluation.json'));assert sha(root/(s+'_evaluation.json'))==final['evaluation_sha256'][s];cfg=read(SOURCE/s/'config.json');data=torch.load(root/'inputs'/(s+'_unlabeled.pt'),map_location='cpu');outputs={m:torch.load(root/(s+'_'+m)/'predictions.pt',map_location='cpu') for m in MODES};results={}
@@ -88,7 +98,7 @@ def run(root):
             if role=='target_val':assert abs(results[role]['original']['map']-read(REFERENCE/s/'evaluation/target_val.json')['map_0.1_to_0.5'])<1e-7
         reports[s]=dict(states=checked,results=results);save(root/'independent_results'/(s+'.json'),reports[s]);print('IACS_AP_AUDITED',s,flush=True)
     means={role:{name:float(np.mean([reports[s]['results'][role][name]['delta_pp'] for s in ('S1','S2')])) for name in reports['S1']['results'][role]} for role in ('validation','target_val')}
-    save(root/'independent_final_audit.json',dict(passed=True,code=code_identity(),production_final_sha256=sha(root/'final.json'),results_sha256={s:sha(root/'independent_results'/(s+'.json')) for s in reports},mean_delta_pp=means,exact_new_trainings=4,exact_shifts=2,readouts=list(READOUTS),target_train_GT_read=False,source='allsourceTRAIN; no head-onlyheldout evaluation remains',scope='S1/S2 historically exposed development; not fullsix final; CPU AP and full savedstate audited, trained EMA forward replay requires separate GPU evidence'))
+    save(root/'independent_final_audit.json',dict(passed=True,code=code_identity(),production_final_sha256=sha(root/'final.json'),results_sha256={s:sha(root/'independent_results'/(s+'.json')) for s in reports},mean_delta_pp=means,exact_new_trainings=4,exact_shifts=2,readouts=list(READOUTS),target_train_GT_read=False,source='allsourceTRAIN; no head-onlyheldout evaluation remains',replay_final_sha256=sha(replayroot/'final.json'),full_saved_EMA_all_videos_three_methods_GPU_arrays_bitwise_reproduced=True,scope='S1/S2 historically exposed development; not fullsix final; originalNMS reused, no independentNMS rewrite'))
 
 
 if __name__=='__main__':
