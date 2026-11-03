@@ -181,12 +181,10 @@ def run(root):
             used=[v['gpu'] for v in active.values()]+[v['gpu'] for _,v in waiting]
             # 已有交互头不重训、不打断。两父进程不争用同一自有GPU槽。
             other=read(INTERACTION_ROOT/'state.json')
-            if other['pending']:
+            if other['pending'] or other.get('waiting_evaluate'):
                 used=list(range(4))
             else:
-                used += [x['gpu'] for x in other['active'].values()]+[
-                    read(INTERACTION_ROOT/'state.json')['active'][t]['gpu']
-                    for t in other.get('waiting_evaluate',[]) if t in other['active']]
+                used += [x['gpu'] for x in other['active'].values()]
             for gpu in range(4):
                 if not pending or gpu in used:continue
                 observed=snapshot(gpu)
