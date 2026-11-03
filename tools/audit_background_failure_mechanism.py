@@ -87,6 +87,44 @@ def oracle_curves(root):
         caveats=['not a proof of globally optimal AP deletion subset; score ties retain original benchmark re-sort behavior','two directions not six-direction mean; fullBG endpoint not assumed equal to known six-direction+4.557834pp','GT-selected deletion curves are diagnostic oracles, not deployable UDA methods']))
 
 
+def selection_decomposition(root):
+    import torch
+    from tools.foreground_oracle_ap import ClassAP,prediction_frame
+    from tools.audit_background_ap_cost import IndependentAP,background
+    from tools.run_foreground_calibration_oracle import load_truth
+    original=read(root/'complete.json');assert sha(root/'same_budget_oracle_curves.json')==original['oracle_curve_sha256'];oracle=read(root/'same_budget_oracle_curves.json');audit=read(UDA/'independent_final_audit.json');reports={}
+    for s in ('S1','S2'):
+        task=s+'_density';entry=UDA/task;record=read(UDA/'independent_results'/(task+'.json'));assert sha(entry/'complete.json')==record['complete_sha256'];done=read(entry/'complete.json');cfg=read(SOURCE/s/'config.json')
+        frame=prediction_frame(torch.load(entry/'predictions.pt',map_location='cpu')['target_val']);truth=load_truth(cfg['baseline']['annotation_for_offline_evaluation'],cfg['tgt_val_split']);bg=background(truth,frame);positions={};engines={};refs={};baseline=[]
+        for c in range(10):
+            idx=np.flatnonzero(frame.label.to_numpy()==c);positions[c]=idx;engines[c]=ClassAP(truth[truth.label==c],frame.iloc[idx]);refs[c]=IndependentAP(truth[truth.label==c],frame.iloc[idx].reset_index(drop=True));baseline.append(engines[c].evaluate(np.ones(len(idx),bool))['ap'])
+        def effect(selected):
+            keep=np.ones(len(frame),bool);keep[selected]=False;ap=[engines[c].evaluate(keep[positions[c]])['ap'] for c in range(10)];reference=[refs[c].ap(keep[positions[c]]).tolist() for c in range(10)];assert np.allclose(ap,reference,atol=1e-7,rtol=0)
+            return float(100*(np.mean(ap)-np.mean(baseline)))
+        report=[]
+        for i,budget in enumerate(done['results']['target_val']['density']['budgets']):
+            ids=np.asarray(budget['selected'],dtype=int);actual=effect(ids);assert abs(actual-budget['delta_pp'])<1e-7;bgids=ids[bg[ids]];fgids=ids[~bg[ids]];ideal=[]
+            for c,idx in positions.items():
+                pool=idx[frame.iloc[idx].score.to_numpy()>=.3];quota=int(len(pool)*budget['rate']);choices=[int(j) for j in pool if bg[j]];choices.sort(key=lambda j:(-float(frame.score.iloc[j]),j));ideal.extend(choices[:quota])
+            assert len(ideal)==oracle['results'][s]['curve'][i]['actual_BG_deleted']
+            report.append(dict(rate=budget['rate'],actual_delta_pp=actual,actual_BG_count=len(bgids),actual_nonBG_count=len(fgids),
+                delete_only_model_selected_trueBG_delta_pp=effect(bgids),delete_only_model_selected_nonBG_delta_pp=effect(fgids),
+                configured_pureBG_oracle_delta_pp=oracle['results'][s]['curve'][i]['delta_pp'],configured_pureBG_oracle_count=len(ideal),
+                model_selected_BG_mean_original_score=float(frame.iloc[bgids].score.mean()) if len(bgids) else None,
+                oracle_BG_mean_original_score=float(frame.iloc[ideal].score.mean()) if len(ideal) else None))
+        reports[s]=report
+    means=[]
+    for i,rate in enumerate(RATES[:4]):
+        keys=('actual_delta_pp','delete_only_model_selected_trueBG_delta_pp','delete_only_model_selected_nonBG_delta_pp','configured_pureBG_oracle_delta_pp')
+        means.append(dict(rate=rate,**{k:float(np.mean([reports[s][i][k] for s in reports])) for k in keys}))
+    save(root/'selection_cost_decomposition.json',dict(results=reports,two_shift_means=means,UDA_independent_audit_sha256=sha(UDA/'independent_final_audit.json'),
+        original_oracle_curve_sha256=sha(root/'same_budget_oracle_curves.json'),effects_not_additive=True,not_training_or_selection=True,
+        caveat='nonBG includes partial/wrongclass task-overlap candidates; not every nonBG is a true positive. AP is recomputed after each full intervention, not summed single-box costs'))
+
+
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--root',type=Path,required=True);a=p.parse_args();a.root.mkdir(parents=True,exist_ok=False);save(a.root/'plan.json',dict(code=code_identity(),mode='read_only_CPU_no_training',rates=RATES))
-    source_support(a.root);oracle_curves(a.root);save(a.root/'complete.json',dict(passed=True,source_support_sha256=sha(a.root/'configured_input_support.json'),oracle_curve_sha256=sha(a.root/'same_budget_oracle_curves.json')))
+    p=argparse.ArgumentParser();p.add_argument('--root',type=Path,required=True);p.add_argument('--decompose-existing',action='store_true');a=p.parse_args()
+    if a.decompose_existing:selection_decomposition(a.root)
+    else:
+        a.root.mkdir(parents=True,exist_ok=False);save(a.root/'plan.json',dict(code=code_identity(),mode='read_only_CPU_no_training',rates=RATES));source_support(a.root);oracle_curves(a.root)
+        save(a.root/'complete.json',dict(passed=True,source_support_sha256=sha(a.root/'configured_input_support.json'),oracle_curve_sha256=sha(a.root/'same_budget_oracle_curves.json')))
