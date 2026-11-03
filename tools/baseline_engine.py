@@ -42,10 +42,10 @@ class StepLoader:
         return self.steps
 
 
-def loader(dataset, training, generator, batch, workers):
+def loader(dataset, training, generator, batch, workers, released=False):
     return torch.utils.data.DataLoader(dataset, batch_size=batch, num_workers=workers,
         shuffle=training, drop_last=training, generator=generator,
-        collate_fn=trivial_batch_collator, persistent_workers=False,
+        collate_fn=trivial_batch_collator, persistent_workers=released,
         worker_init_fn=worker_init_reset_seed if training else None)
 
 
@@ -57,7 +57,8 @@ def dataset(cfg, path, splits, training, unlabeled=False):
 
 def build(cfg):
     seeds = random_seeds(cfg['seed'])
-    fix_random_seed(seeds['model'], include_cuda=True)
+    release_generator = fix_random_seed(seeds['model'], include_cuda=True)
+    released = bool(cfg.get('release_data_protocol'))
     # 旧PyTorch的UUID/NVML计数可能为0，直接播种当前逻辑卡，不依赖seed_all的枚举。
     torch.cuda.manual_seed(seeds['model'])
     ctx = object.__new__(Trainer)
@@ -78,21 +79,25 @@ def build(cfg):
     if cfg['baseline']['regime'] == 'so':
         # 模型参数构造与UDA完全相同；仅关闭对抗目标，保持检测与优化器阶段。
         ctx.cfg['model']['adv_method'] = ['None']
-    ctx.generators = {k: torch.Generator().manual_seed(seeds[k])
-                      for k in ('source', 'target', 'validation')}
+    # 作者的fix_random_seed返回CPU默认generator；模型初始化也会推进这条流。
+    ctx.generators = ({k: release_generator for k in ('source', 'target', 'validation')}
+                      if released else {k: torch.Generator().manual_seed(seeds[k])
+                      for k in ('source', 'target', 'validation')})
+    ctx.stream_records = []
     source = dataset(cfg, cfg['dataset']['json_file'], cfg['src_train_split'], True)
     ctx.train_loader_src = loader(source, True, ctx.generators['source'], cfg['loader']['batch_size'],
-                                  cfg['loader']['num_workers'])
+                                  cfg['loader']['num_workers'], released)
     if cfg['baseline']['regime'] == 'uda':
-        target = dataset(cfg, cfg['baseline']['target_manifest'], cfg['tgt_train_split'], True, True)
+        target = dataset(cfg, cfg['baseline']['target_manifest'], cfg['tgt_train_split'], True, not released)
     else:
         target = dataset(cfg, cfg['dataset']['json_file'], cfg['src_train_split'], True, True)
     target_loader = loader(target, True, ctx.generators['target'], cfg['loader']['batch_size'],
-                           cfg['loader']['num_workers'])
+                           cfg['loader']['num_workers'], released)
     budget = cfg['baseline']['epoch_budget']['iterations_per_epoch']
     ctx.train_loader_tgt = BudgetLoader(target_loader, budget)
     val = dataset(cfg, cfg['dataset']['json_file'], cfg['src_val_split'], False)
-    ctx.val_loader_src = loader(val, False, ctx.generators['validation'], 1, cfg['loader']['num_workers'])
+    ctx.val_loader_src = loader(val, False, None if released else ctx.generators['validation'],
+                                1, cfg['loader']['num_workers'], released)
     exclude = ['disc_dom_adv', 'disc_dom_conditional_adv', 'learnable_embeddings']
     for key in ('source', 'alignment', 'discriminator'):
         is_disc = key == 'discriminator'
@@ -121,7 +126,16 @@ def build(cfg):
         opt.step=checked_step
     def checked_forward(*args, **kwargs):
         if kwargs.get('mode') == 'train':
-            assert_no_target_gt(kwargs['video_list_tgt'])
+            if not released:
+                assert_no_target_gt(kwargs['video_list_tgt'])
+            else:
+                def record(v):
+                    m = v['metadata']
+                    return dict(video=m['video_id'], crop_start=m.get('crop_start', 0),
+                        crop_length=v['feats'].shape[-1], label_count=v['labels'].numel(),
+                        GT_sha256=tensor_digest((v['segments'], v['labels'])))
+                ctx.stream_records.append(dict(source=[record(v) for v in kwargs['video_list_src']],
+                    target=[record(v) for v in kwargs['video_list_tgt']]))
             if kwargs.get('domain', 'src') != 'src':
                 raise ValueError('正式训练只能监督源域')
             ctx.checked_steps += 1
@@ -170,11 +184,13 @@ def schedulers(ctx):
 
 
 def capture(ctx, cfg, epoch, history):
-    return dict(schema=SCHEMA, config=cfg, epoch=epoch, history=deepcopy(history),
+    return dict(schema=cfg.get('release_data_protocol',{}).get('schema',SCHEMA), config=cfg, epoch=epoch, history=deepcopy(history),
         state_dict=ctx.model.state_dict(), ema_state_dict=ctx.model_ema.module.state_dict(),
         model_controls=controls(ctx.model), ema_controls=controls(ctx.model_ema.module),
         optimizers=[x.state_dict() for x in optimizers(ctx)],
         schedulers=[x.state_dict() for x in schedulers(ctx)],
+        loader_resume=('unsupported_persistent_worker_RNG_not_captured' if cfg.get('release_data_protocol')
+                       else 'epoch_boundary_generator_states'),
         rng=dict(python=random.getstate(), numpy=np.random.get_state(), cpu=torch.get_rng_state(),
                  cuda=[torch.cuda.get_rng_state(0)], loaders={k:g.get_state() for k,g in ctx.generators.items()}))
 
@@ -205,6 +221,7 @@ def restore(ctx, saved):
 
 
 def epoch_setup(ctx, epoch):
+    ctx.stream_records = []
     warmup = ctx.cfg['train_cfg']['warmup_adv']
     if epoch == warmup and ctx.cfg['model'].get('src_regularization') == 'label_smoothing':
         ctx.model.train_label_smoothing = 0
@@ -274,6 +291,8 @@ def probe(cfg, output, warmup_steps=2, timed_steps=6):
 
 
 def train(cfg, entry, resume=None):
+    if resume and cfg.get('release_data_protocol'):
+        raise ValueError('本对照不支持重建常驻worker随机状态，禁止不精确续跑')
     entry = Path(entry)
     ctx = build(cfg)
     save(entry/'runtime_config.json',ctx.cfg)
@@ -311,6 +330,10 @@ def train(cfg, entry, resume=None):
                    target_gt_cls_loss=0., target_gt_reg_loss=0., target_gt_downstream_loss=0.)
         if cfg.get('prototype_capacity'):
             row['auxiliary']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_rq3_')}
+        if cfg.get('release_data_protocol'):
+            stream_path=entry/'streams'/('epoch%03d.json'%epoch)
+            save(stream_path,ctx.stream_records)
+            row['data_stream_sha256']=sha(stream_path)
         if epoch%5 == 0:
             ctx.valid_metrics_src.reset()
             value = float(ctx._valid_epoch(epoch, ctx.val_loader_src, domain='src'))
@@ -336,7 +359,11 @@ def evaluate(cfg, entry, annotation):
     entry = Path(entry)
     saved = torch.load(entry/'best.pt', map_location='cpu')
     terminal = read(entry/'termination.json')
-    if saved['epoch'] != termination(terminal['history'])['best_epoch']:
+    if cfg.get('release_data_protocol'):
+        from tools.release_data_protocol import release_decision
+        selected=release_decision(terminal['history'])
+    else:selected=termination(terminal['history'])
+    if saved['epoch'] != selected['best_epoch']:
         raise ValueError('不是源域选定的best EMA')
     fix_random_seed(cfg['seed'], include_cuda=True)
     torch.cuda.manual_seed(cfg['seed'])
@@ -357,11 +384,14 @@ def evaluate(cfg, entry, annotation):
                     for k,v in [('t-start',item['segments'][:,0]),('t-end',item['segments'][:,1]),
                                 ('label',item['labels']),('score',item['scores'])]:
                         columns[k].extend(v.detach().cpu().tolist())
-        evaluator = ANETdetection(str(annotation),splits,num_workers=4,action_subsampling='10_majority_classes')
+        evaluation_split=splits[0] if cfg.get('release_data_protocol') else splits
+        evaluator = ANETdetection(str(annotation),evaluation_split,num_workers=4,action_subsampling='10_majority_classes')
+        checkpoint(entry/'evaluation'/('%s_predictions.pt'%domain),columns)
         ap,mean,*_ = evaluator.evaluate({k:np.asarray(v) for k,v in columns.items()},verbose=True)
         result = dict(map_by_tiou=[float(x) for x in ap],
                       videos=len(ds),prediction_count=len(columns['score']),selected_epoch=saved['epoch'],
-                      checkpoint_sha256=sha(entry/'best.pt'),state='ema_state_dict',split=splits)
+                      checkpoint_sha256=sha(entry/'best.pt'),state='ema_state_dict',split=evaluation_split,
+                      prediction_splits=splits)
         result['map_0.1_to_0.5']=float(mean)
         save(entry/'evaluation'/('%s_val.json' % domain),result);results[domain]=result
     save(entry/'evaluation/manifest.json',dict(config_sha256=sha(entry/'config.json'),

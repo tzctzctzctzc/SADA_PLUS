@@ -226,9 +226,9 @@ class EpicKitchensDataset(Dataset):
 
         # sort segments by ascending order of start time
         if segments is not None:
-            sort_idx = torch.argsort(segments[:, 0])
-            segments = segments[sort_idx]
-            labels = labels[sort_idx]
+            # 指定的发布协议对照：逐列排序，包含作者实现的区间配对行为。
+            segments, sort_idx = torch.sort(segments, dim=0)
+            labels = labels[sort_idx[:, 0]]
         
         
         # return a data dict

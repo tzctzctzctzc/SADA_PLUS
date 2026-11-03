@@ -1227,7 +1227,7 @@ class SADA(nn.Module):
             cls_loss[rated_mask] *= (1 - iou_rate) ** self.iou_weight_power
 
         cls_loss = cls_loss.sum()
-        cls_loss = cls_loss / self.loss_normalizer if mode == 'train' else cls_loss/max(num_pos, 1)
+        cls_loss = cls_loss / self.loss_normalizer if mode == 'train' else cls_loss/num_pos
 
         
         # 2. regression using IoU/GIoU loss (defined on positive samples only!)
