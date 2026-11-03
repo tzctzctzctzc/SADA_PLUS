@@ -14,7 +14,7 @@ from tools.baseline_protocol import read,save,sha,code_identity
 from tools.run_native_joint import SOURCE,DENSE
 MODES=('control','quality','teacher','combined');TASKS=tuple(s+'_'+m for s in ('S1','S2') for m in MODES)
 REUSE_ROOT=Path('/vepfs/vlms/highscore_detector_stack_c5dcf56_1103')
-NEW_TASKS=tuple(s+'_'+m for s in ('S1','S2') for m in ('teacher','combined'))
+TEACHER_TASKS=tuple(s+'_'+m for s in ('S1','S2') for m in ('teacher','combined'))
 READOUTS=('native',)
 SPEC=dict(schema='detector-quality-target-teacher-stack-v1',shifts=['S1','S2'],modes=MODES,epochs=20,checkpoints=[1,5,10,20],
     source='ALL originalsourceTRAIN51/124 videos, all dense detection anchors; sourceval excluded. Previoushead-heldout now entersFIT and is NOT independent evaluation.',
@@ -42,33 +42,26 @@ SPEC.update(
     readouts=READOUTS,scales=[1.],primary_tracks=['combined/native'],
     checkpoint_contract='exact disk state/RNG restoration; cross-instance nextbackward NOT bitwise; fresh runs ONLY; no resume and no efficiency replacement',
     attribution='inspired by VarifocalNet and SoftTeacher; no ROI/jitter/online teacher reproduction; dense temporal frozen-teacher adaptation',
-    scientific_budget='four modes x S1/S2; reuse completed immutable control/quality runs from c5dcf56; four fresh teacher/combined trainings, same initialization/order/20epochs; comparisons all reported',
+    scientific_budget='four modes x S1/S2; reuse only COMPLETE immutable control/quality runs from c5dcf56; all other runs FRESH, same initialization/order/20epochs; median E6-E8 throughput budget, pause isolated task only',
     target_train_GT_read=True,target_train_GT_used_for_threshold_calibration=True,strict_UDA=False,
     raw_target_GT_in_GPU_minibatches=False)
 
 
 def prepare(root):
-    import torch
-    from tools import baseline_engine as base
     from tools.calibrate_target_teacher import calibrate
     calibrate(REUSE_ROOT,root)
-    folder=root/'inputs';folder.mkdir();reports={}
-    for s in ('S1','S2'):
-        cfg=read(SOURCE/s/'config.json');manifest=SOURCE/s/'source_fit_unlabeled.json';truth=read(SOURCE/s/'source_truth.json');ds=base.dataset(cfg,manifest,cfg['src_train_split'],False,True);rows=[]
-        dpath=DENSE/'inputs'/s/'data.pt';assert sha(dpath)==read(DENSE/'prepare_complete.json')['results'][s]['data_sha256'];prior=torch.load(dpath,map_location='cpu');allowed={'video','segments','scores','labels','hard','grid_boxes','video_metadata','raw_path','raw_size','raw_mtime_ns','raw_sha256','downsample'}
-        for video in ds:
-            assert not video['segments'].numel() and not video['labels'].numel();vid=video['metadata']['video_id'];gt=truth[vid];labels=torch.tensor(gt['labels'],dtype=torch.long);assert not labels.numel() or (labels.min()>=0 and labels.max()<10)
-            rows.append(dict(video=vid,raw=video['feats'].T.contiguous(),metadata=video['metadata'],gt_segments=torch.tensor(gt['segments'],dtype=torch.float32).reshape(-1,2),gt_labels=labels))
-        rows.sort(key=lambda x:x['video']);ids={r['video'] for r in rows};assert ids==set(truth)==set(read(manifest)['database'])
-        assert ids=={r['video'] for role in ('fit','heldout') for r in prior['roles'][role]}
-        assert all(not ids&{r['video'] for r in prior['roles'][role]} for role in ('validation','target_train','target_val'))
-        target=prior['roles']['target_train'];evaluation={role:prior['roles'][role] for role in ('validation','target_val')};assert all(set(r)<=allowed for r in target+[r for v in evaluation.values() for r in v]);base.checkpoint(folder/(s+'_source.pt'),rows);base.checkpoint(folder/(s+'_unlabeled.pt'),dict(target_train=target,evaluation=evaluation))
-        reports[s]=dict(source_sha256=sha(folder/(s+'_source.pt')),unlabeled_sha256=sha(folder/(s+'_unlabeled.pt')),source_videos=[r['video'] for r in rows],target_videos=[r['video'] for r in target],source_truth_sha256=sha(SOURCE/s/'source_truth.json'),source_config_sha256=sha(SOURCE/s/'config.json'),prior_audited_input_sha256=sha(dpath),source_labels_only=True)
-    save(root/'prepare.json',dict(passed=True,shifts=reports,target_train_GT_read=False))
-    # 已完成的无教师对照完全不受新门限影响；复用完整20轮，避免重复训练。
+    prepared=read(REUSE_ROOT/'prepare.json');assert prepared['passed']
+    folder=root/'inputs';folder.mkdir()
+    for shift,record in prepared['shifts'].items():
+        for suffix,key in (('_source.pt','source_sha256'),('_unlabeled.pt','unlabeled_sha256')):
+            old=REUSE_ROOT/'inputs'/(shift+suffix);assert sha(old)==record[key]
+            os.link(old,folder/old.name);assert sha(folder/old.name)==record[key]
+    save(root/'prepare.json',prepared)
     for task in TASKS:
-        if task in NEW_TASKS:continue
-        old=REUSE_ROOT/task;entry=root/task;entry.mkdir();assert (old/'gpu_complete.json').exists()
+        if task in TEACHER_TASKS:continue
+        old=REUSE_ROOT/task
+        if not (old/'gpu_complete.json').exists():continue
+        entry=root/task;entry.mkdir()
         for path in old.iterdir():
             if path.is_file():os.link(path,entry/path.name)
         save(entry/'reuse_receipt.json',dict(origin=str(old),original_owner_pid=read(REUSE_ROOT/'state.json')['owner_pid'],
@@ -160,9 +153,10 @@ def train(entry):
                 threshold=threshold,source='targetTRAIN label calibration authorized by user; targetVAL excluded',
                 selected_anchor_draws=sum(r['target_selected'] for r in records),mean_target_cls=history[-1]['target_cls'],mean_target_reg=history[-1]['target_reg']))
             assert sum(r['target_selected'] for r in records)>0,'target teacher has no actual training signal; do not continue'
-        if epoch in (1,6):
-            estimate=time.monotonic()-began+seconds*(20-epoch)+180;save(entry/'throughput.json',dict(epoch=epoch,epoch_seconds=seconds,elapsed=time.monotonic()-began,projected_with_readout_seconds=estimate,limit=1800))
-            if estimate>1800:save(entry/'budget_pause.json',dict(scientific_failure=False,automatic_restart_authorized=False));return
+        if epoch in (1,6,8):
+            steady=float(np.median([h['seconds'] for h in history[-3:]])) if epoch==8 else seconds
+            estimate=time.monotonic()-began+steady*(20-epoch)+180;save(entry/'throughput.json',dict(epoch=epoch,epoch_seconds=seconds,steady_epoch_seconds=steady,elapsed=time.monotonic()-began,projected_with_readout_seconds=estimate,limit=1800))
+            if epoch==8 and estimate>1800:save(entry/'budget_pause.json',dict(scientific_failure=False,automatic_restart_authorized=False,projected_seconds=estimate));return
     assert teacher_digest==base.tensor_digest(teacher.state_dict());base.checkpoint(entry/'semantic_teacher_logits.pt',cache);saved=torch.load(entry/'epoch020.pt',map_location='cpu');ema.load_state_dict(saved['ema']);ema.eval();ema.body_mode(False);ed=base.tensor_digest(ema.state_dict());cr=torch.get_rng_state();gr=torch.cuda.get_rng_state(0);outputs={}
     with torch.no_grad():
         for role,rows in evaluation.items():
@@ -198,7 +192,7 @@ def evaluate(root,s):
 
 def run(root):
     from tools.baseline_gpu import snapshot
-    root.mkdir(parents=True,exist_ok=False);save(root/'plan.json',dict(spec=SPEC,code=code_identity()));active={};done=[]
+    root.mkdir(parents=True,exist_ok=False);save(root/'plan.json',dict(spec=SPEC,code=code_identity()));active={};done=[];paused=[]
     def stop(sig,frame):
         save(root/'stop.json',dict(signal=sig,automatic_restart_authorized=False))
         for t in active.values():
@@ -206,19 +200,20 @@ def run(root):
         raise SystemExit(128+sig)
     for sig in (signal.SIGINT,signal.SIGTERM):signal.signal(sig,stop)
     try:
-        while not (REUSE_ROOT/'final.json').exists():
-            if (REUSE_ROOT/'error.json').exists() or (REUSE_ROOT/'stop.json').exists():raise RuntimeError('origin did not complete; preserve artifacts, no automatic restart')
-            save(root/'state.json',dict(stage='waiting_completed_controls_and_teacher_cache',owner_pid=os.getpid(),active={}))
-            time.sleep(3)
+        origin=read(REUSE_ROOT/'state.json');assert not (Path('/proc')/str(origin['owner_pid'])).exists(),'origin still active'
+        assert not (REUSE_ROOT/'stop.json').exists(),'user stop prohibits continuation'
+        if (REUSE_ROOT/'error.json').exists():assert 'budgetpause' in read(REUSE_ROOT/'error.json')['error']
         prepare(root)
-        for stage,tasks in [('train',NEW_TASKS),('evaluate',('S1','S2'))]:
+        new_tasks=tuple(t for t in TASKS if not (root/t/'gpu_complete.json').exists())
+        for stage,tasks in [('train',new_tasks),('evaluate',('S1','S2'))]:
+            if stage=='evaluate':tasks=tuple(s for s in tasks if all((root/(s+'_'+m)/'gpu_complete.json').exists() for m in MODES))
             pending=list(tasks)
             while pending or active:
                 for task,t in list(active.items()):
                     if t['p'].poll() is None:continue
                     t['log'].close();del active[task]
                     if t['p'].returncode:raise RuntimeError(task+'/'+stage+' failed')
-                    if (root/task/'budget_pause.json').exists():raise RuntimeError(task+' budgetpause')
+                    if (root/task/'budget_pause.json').exists():paused.append(task);continue
                     done.append(task+'/'+stage)
                 devices=[None]*max(0,2-len(active)) if stage=='evaluate' else [g for g in range(4) if g not in [t['gpu'] for t in active.values()] and snapshot(g)['free_mib']>=12288]
                 for g in devices:
@@ -228,7 +223,13 @@ def run(root):
                         v=snapshot(g);p=e/'lease_train.json';save(p,dict(owner_pid=os.getpid(),index=g,uuid=v['uuid'],minimum_free_mib=12288,commit=code_identity()['commit']));env.update(CUDA_VISIBLE_DEVICES=v['uuid'],PROPOSAL_FOREGROUND_LEASE=str(p),PROPOSAL_FOREGROUND_LEASE_SHA256=sha(p))
                     log=(e/(stage+'.log')).open('w');p=subprocess.Popen([sys.executable,'-u','-B',str(Path(__file__)),'--entry',str(e),'--worker',stage],env=env,cwd=CODE,stdout=log,stderr=subprocess.STDOUT,start_new_session=True);active[task]=dict(p=p,gpu=g,log=log)
                 save(root/'state.json',dict(stage=stage,owner_pid=os.getpid(),active={k:dict(pid=t['p'].pid,gpu=t['gpu']) for k,t in active.items()},pending=pending,completed=done));time.sleep(3)
-        save(root/'final.json',dict(passed=True,allGPU_sha256={t:sha(root/t/'gpu_complete.json') for t in TASKS},evaluation_sha256={s:sha(root/(s+'_evaluation.json')) for s in ('S1','S2')}));save(root/'state.json',dict(stage='complete',owner_pid=os.getpid(),active={}))
+        complete_shifts=[s for s in ('S1','S2') if (root/(s+'_evaluation.json')).exists()]
+        name='partial_final.json' if paused else 'final.json'
+        save(root/name,dict(passed=not paused,complete_shifts=complete_shifts,paused_tasks=paused,
+            allGPU_sha256={t:sha(root/t/'gpu_complete.json') for t in TASKS if (root/t/'gpu_complete.json').exists()},
+            evaluation_sha256={s:sha(root/(s+'_evaluation.json')) for s in complete_shifts}))
+        save(root/'state.json',dict(stage='partial_budget_pause' if paused else 'complete',owner_pid=os.getpid(),active={},paused=paused))
+
     except Exception as ex:
         save(root/'error.json',dict(error=repr(ex),automatic_restart_authorized=False))
         for t in active.values():

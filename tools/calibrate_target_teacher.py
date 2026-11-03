@@ -41,8 +41,17 @@ def calibrate(origin,root):
         assert not ids&{r['video'] for r in data['evaluation']['target_val']}
         truth=load_truth(truthfile,cfg['tgt_train_split'])
         path=origin/(s+'_teacher')/'semantic_teacher_logits.pt'
-        gpu=read(path.parent/'gpu_complete.json');assert sha(path)==gpu['semantic_logits_sha256']
-        cache=torch.load(path,map_location='cpu');assert set(cache)==ids
+        if path.exists():
+            gpu=read(path.parent/'gpu_complete.json');assert sha(path)==gpu['semantic_logits_sha256']
+            cache=torch.load(path,map_location='cpu')
+        else:
+            # 预算暂停后的不可变E5工件；只取原冻结teacher缓存，不接续学生参数。
+            path=origin/(s+'_teacher')/'epoch005.pt'
+            state=torch.load(path,map_location='cpu');assert state['epoch']==5
+            from tools.run_foreground_calibration_oracle import REFERENCE
+            assert state['original_checkpoint_sha256']==sha(REFERENCE/s/'best.pt')
+            cache=state['semantic_cache']
+        assert set(cache)==ids
         videos=[];identity=[]
         for row in rows:
             item=cache[row['video']];meta=row['video_metadata'];assert meta['use_temporal_grid_feats']
@@ -66,7 +75,7 @@ def calibrate(origin,root):
             c=np.concatenate(conf);g=np.concatenate(correct);videos.append((c,g));identity.append(dict(video=row['video'],anchors=len(c),teacher_correct_at_iou05=int(g.sum()),max_confidence=float(c.max())))
         selected,trials=choose(videos)
         reports[s]=dict(selected_threshold=selected['threshold'],trials=trials,videos=identity,
-            target_train_truth_sha256=sha(truthfile),teacher_cache_sha256=sha(path),unlabeled_input_sha256=sha(datafile),
+            target_train_truth_sha256=sha(truthfile),teacher_cache_path=str(path),teacher_cache_sha256=sha(path),unlabeled_input_sha256=sha(datafile),
             target_val_read=False,criterion='video-macro F0.5 of class-correct teacher boxes at IoU .5; NOT AP',
             original_sada_threshold=cfg['model']['pl_threshold'])
     save(root/'target_calibration.json',dict(passed=True,shifts=reports,target_train_labels_used=True,
