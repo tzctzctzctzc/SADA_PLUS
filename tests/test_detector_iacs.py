@@ -27,3 +27,10 @@ def test_ap_quality_uses_fixed_five_thresholds_without_overpenalizing_valid_boxe
     c=torch.ones(3,1);gt=torch.tensor([[1.,1.]]*3);pred=torch.tensor([[1.,1.],[3.,3.],[10.,10.]])
     q=iou_targets(c,gt,pred,ap_aligned=True)
     assert torch.equal(q,torch.tensor([[1.],[.6],[.2]]))
+def test_optimizer_restore_does_not_mutate_saved_step():
+    from copy import deepcopy
+    from tools.detector_iacs_math import restore_optimizer
+    p=torch.tensor([1.],requires_grad=True);a=torch.optim.AdamW([p]);p.sum().backward();a.step();saved=deepcopy(a.state_dict())
+    q=torch.tensor([1.],requires_grad=True);b=torch.optim.AdamW([q]);restore_optimizer(b,saved);q.sum().backward();b.step()
+    assert saved['state'][0]['step'].item()==1 and b.state_dict()['state'][0]['step'].item()==2
+

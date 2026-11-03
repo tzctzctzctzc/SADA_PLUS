@@ -53,7 +53,7 @@ def prepare(root):
 def train(entry):
     import torch
     from tools import baseline_engine as base
-    from tools.detector_iacs_math import QualityDetector,ema_step
+    from tools.detector_iacs_math import QualityDetector,ema_step,restore_optimizer
     from tools.native_sada_math import conditional_loss
     from tools.run_foreground_calibration_oracle import load_detector,REFERENCE
     from tools.run_proposal_foreground import first_cuda_guard
@@ -73,7 +73,7 @@ def train(entry):
         return dict(model=deepcopy(m.state_dict()),ema=deepcopy(e.state_dict()),optimizer=deepcopy(o.state_dict()),disc_optimizer=deepcopy(d.state_dict()),controls=controls(m),order_rng=order.get_state(),target_order=stream.state(),semantic_cache=deepcopy(cache),
             python_rng=random.getstate(),numpy_rng=np.random.get_state(),cpu_rng=torch.get_rng_state(),cuda_rng=torch.cuda.get_rng_state(0),history=deepcopy(history),epoch=epoch,step=step,spec=SPEC,source_input_sha256=prepared['source_sha256'],unlabeled_input_sha256=prepared['unlabeled_sha256'],original_checkpoint_sha256=sha(REFERENCE/s/'best.pt'))
     def restore(st,m,e,o,d,order,stream):
-        m.load_state_dict(st['model']);e.load_state_dict(st['ema']);o.load_state_dict(st['optimizer']);d.load_state_dict(st['disc_optimizer']);m.loss_normalizer=st['controls']['loss_normalizer'];m.loss_normalizer_pseudo_labels=st['controls']['loss_normalizer_pseudo_labels'];order.set_state(st['order_rng']);stream.restore(st['target_order']);cache.clear();cache.update(deepcopy(st['semantic_cache']));random.setstate(st['python_rng']);np.random.set_state(st['numpy_rng']);torch.set_rng_state(st['cpu_rng']);torch.cuda.set_rng_state(st['cuda_rng'],0)
+        m.load_state_dict(st['model']);e.load_state_dict(st['ema']);restore_optimizer(o,st['optimizer']);restore_optimizer(d,st['disc_optimizer']);m.loss_normalizer=st['controls']['loss_normalizer'];m.loss_normalizer_pseudo_labels=st['controls']['loss_normalizer_pseudo_labels'];order.set_state(st['order_rng']);stream.restore(st['target_order']);cache.clear();cache.update(deepcopy(st['semantic_cache']));random.setstate(st['python_rng']);np.random.set_state(st['numpy_rng']);torch.set_rng_state(st['cpu_rng']);torch.cuda.set_rng_state(st['cuda_rng'],0)
     def update(m,e,o,d,i,epoch,ti=None):
         m.body_mode(True);m.cls_head.train();m.reg_head.train();m.disc_dom_conditional_adv.train(epoch>5);o.zero_grad(set_to_none=True);d.zero_grad(set_to_none=True);r=fit[i];f,v,c,z,a=m.forward_heads(raw[i].to('cuda',non_blocking=True),r['metadata']);loss,details,sl=m.source_loss(f,v,c,z,a,*gt[i],quality);adv=loss.new_zeros(())
         if epoch>5:
@@ -96,9 +96,9 @@ def train(entry):
     before={name:base.tensor_digest(getattr(m,name).state_dict()) for name in ('backbone','cls_head','reg_head')};ti=int(stream.draw(1)[0]);update(m,ema,o,d,probe,6,ti)
     assert all(base.tensor_digest(getattr(m,name).state_dict())!=value for name,value in before.items());base.checkpoint(entry/'kernel.pt',capture(m,ema,o,d,order,stream,[],0,1));st=torch.load(entry/'kernel.pt',map_location='cpu')
     restore(st,m,ema,o,d,order,stream);a=(torch.randperm(len(fit),generator=order),stream.draw(1),torch.rand(3),torch.rand(3,device='cuda'));restore(st,m,ema,o,d,order,stream);b=(torch.randperm(len(fit),generator=order),stream.draw(1),torch.rand(3),torch.rand(3,device='cuda'));assert all(torch.equal(x,y) for x,y in zip(a,b))
-    restore(st,m,ema,o,d,order,stream);ti=int(stream.draw(1)[0]);a=update(m,ema,o,d,probe,6,ti);md=base.tensor_digest(m.state_dict());ed=base.tensor_digest(ema.state_dict());od=base.tensor_digest(o.state_dict());dd=base.tensor_digest(d.state_dict());cd=controls(m)
+    checkpoint_digest=base.tensor_digest(st);restore(st,m,ema,o,d,order,stream);ti=int(stream.draw(1)[0]);a=update(m,ema,o,d,probe,6,ti);md=base.tensor_digest(m.state_dict());ed=base.tensor_digest(ema.state_dict());od=base.tensor_digest(o.state_dict());dd=base.tensor_digest(d.state_dict());cd=controls(m);assert checkpoint_digest==base.tensor_digest(st)
     other,oo,odisc=build();otherema,_,_=build();otherema.requires_grad_(False);restore(st,other,otherema,oo,odisc,order,stream);ti=int(stream.draw(1)[0]);b=update(other,otherema,oo,odisc,probe,6,ti)
-    assert a==b and md==base.tensor_digest(other.state_dict()) and ed==base.tensor_digest(otherema.state_dict()) and od==base.tensor_digest(oo.state_dict()) and dd==base.tensor_digest(odisc.state_dict()) and cd==controls(other)
+    comparisons=dict(loss_terms=a==b,model=md==base.tensor_digest(other.state_dict()),ema=ed==base.tensor_digest(otherema.state_dict()),optimizer=od==base.tensor_digest(oo.state_dict()),disc_optimizer=dd==base.tensor_digest(odisc.state_dict()),normalizers=cd==controls(other),saved_state_immutable=checkpoint_digest==base.tensor_digest(st));save(entry/'kernel_reconstruction_comparison.json',comparisons);assert all(comparisons.values()),comparisons
     save(entry/'kernel_complete.json',dict(passed=True,original_pretrained_decode_arrays_bitwise_equal=True,original_focal_loss_exact_when_disabled=True,authors_VFL_used_directly=True,real_backbone_classifier_regressor_updates=True,full_model_EMA_dualopts_controls_RNG_targetcache_nextstep_exact=True,kernel_sha256=sha(entry/'kernel.pt'),guard_sha256=sha(guard)))
     del m,o,d,ema,other,oo,odisc,otherema,st;torch.cuda.empty_cache();cache.clear();m,o,d=build();ema,_,_=build();ema.load_state_dict(m.state_dict());ema.requires_grad_(False);ema.eval();initial=base.tensor_digest(m.state_dict());seed();order=torch.Generator().manual_seed(123);stream=TargetStream(len(target));history=[];step=0;formal=time.monotonic()
     for epoch in range(1,21):

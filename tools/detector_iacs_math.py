@@ -10,6 +10,11 @@ from tools.native_sada_math import NativeSADA
 from tools.background_four_routes_math import source_symbols
 
 
+def restore_optimizer(optimizer,state):
+    # AdamW的CPU step标量可能与传入state共享存储，恢复分支必须各自持有副本。
+    optimizer.load_state_dict(deepcopy(state))
+
+
 @lru_cache(None)
 def original_varifocal():
     def reduce(loss,weight=None,reduction='mean',avg_factor=None):
