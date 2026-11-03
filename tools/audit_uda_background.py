@@ -15,6 +15,41 @@ from tools.audit_highscore_pairs import audit_inputs
 from tools.prepare_uda_background import target_rows
 
 
+def density_receipt(root,shift):return root/(shift+'_density')/'density_stage_complete_recovered.json'
+
+
+def recover_density_receipts(root):
+    """只补不可变元数据：必须重建到全部原检查点已记录的完全相同SHA。"""
+    import torch
+    launch=read(Path(str(root)+'_launch.json'));records={}
+    for s in SPEC['shifts']:
+        entry=root/(s+'_density');state=torch.load(entry/'density.pt',map_location='cpu');w=state['weights'];guards=[p for p in entry.glob('guard_*.json') if Path(read(p)['lease']).name=='lease_density.json'];assert len(guards)==1
+        guard=guards[0];target_count=sum(len(torch.load(rec['path'],map_location='cpu')['seq']) for rec in read(root/(s+'_target_train')/'complete.json')['records'])
+        restored=dict(passed=True,guard=str(guard),guard_sha256=sha(guard),artifact_sha256=sha(entry/'density.pt'),source_candidates=len(w),target_train_candidates=target_count,target_GT_read=False,
+            source_weights_min_mean_max=[float(w.min()),float(w.mean()),float(w.max())],clipped_fraction=float(((w==.25)|(w==4)).float().mean()),loss_first_last=[state['history'][0],state['history'][-1]],
+            limitation='bounded domain-discriminator density ratio is a covariate-shift hypothesis, not a guaranteed true ratio; no targetBG labels')
+        guardcheck(restored,launch['pid'],launch['head']);path=density_receipt(root,s)
+        if path.exists():assert read(path)==restored
+        else:save(path,restored)
+        digest=sha(path);checkpoints={}
+        for mode in SPEC['modes']:
+            for name in ('kernel.pt','epoch001.pt','epoch005.pt','epoch010.pt','epoch020.pt'):
+                cp=root/(s+'_'+mode)/name;original=torch.load(cp,map_location='cpu');assert original['density_complete_sha256']==digest;checkpoints[str(cp)]=sha(cp)
+        records[s]=dict(recovered_sha256=digest,original_checkpoint_SHA_contracts_verified=checkpoints,evaluation_complete_sha256_preserved=sha(entry/'complete.json'))
+    save(root/'density_receipt_collision_recovery.json',dict(passed=True,reason='density preprocessing and density method evaluation shared complete.json; producer markers collided',
+        density_models_weights_optimizers_predictions_unchanged=True,no_training_or_prediction_rerun=True,all40_original_checkpoint_density_SHA_contracts_match=True,records=records))
+
+
+def audit_guard(root,report):
+    owner=read(report['guard'])['owner_pid']
+    for name in ('independent_audit_launch.json','independent_audit_recovery_launch.json'):
+        p=root/name
+        if p.exists():
+            receipt=read(p)
+            if receipt['pid']==owner:guardcheck(report,receipt['pid'],receipt['head']);return
+    raise AssertionError('audit owner not in immutable launch receipts')
+
+
 def semantic_numpy(boxes,truth,labels):
     from tools.audit_background_ap_cost import overlaps
     out=np.full(len(boxes),-1,dtype=np.int64);matrix=overlaps(boxes,truth);task=(labels>=0)&(labels<10);other=(labels>=10)&(labels<97)
@@ -104,7 +139,7 @@ def native_density(entry):
     from tools.prepare_uda_background import target_rows
     from tools.run_layer_signals import seed
     from tools.run_proposal_foreground import first_cuda_guard
-    guard=first_cuda_guard(entry);seed();s=entry.name.split('_')[0];complete=read(entry/'complete.json');assert sha(entry/'density.pt')==complete['artifact_sha256'];saved=torch.load(entry/'density.pt',map_location='cpu')
+    guard=first_cuda_guard(entry);seed();s=entry.name.split('_')[0];complete=read(density_receipt(entry.parent,s));assert sha(entry/'density.pt')==complete['artifact_sha256'];saved=torch.load(entry/'density.pt',map_location='cpu')
     source=torch.load(entry.parent/'inputs'/s/'source.pt',map_location='cpu')['fit'];target=target_rows(entry.parent,s,'target_train')
     def mean(rows):return torch.cat([(r['seq'][:,4:20]*r['valid'][:,4:20,None]).sum(1)/r['valid'][:,4:20].sum(1,keepdim=True).clamp_min(1) for r in rows])
     a=mean(source);b=mean(target);sc=torch.cat([r['metadata'][:,:10].argmax(1) for r in source]);tc=torch.cat([r['metadata'][:,:10].argmax(1) for r in target]);centers=torch.stack([a[sc==c].mean(0) if (sc==c).any() else a.mean(0) for c in range(10)]);std=(a-centers[sc]).std(0,unbiased=False).clamp_min(1e-5)
@@ -118,7 +153,7 @@ def native_density(entry):
     assert base.tensor_digest(model.state_dict())==base.tensor_digest(saved['model']) and base.tensor_digest(opt.state_dict())==base.tensor_digest(saved['optimizer']) and torch.equal(g.get_state(),saved['order_rng'])
     with torch.no_grad():p=model(a)[:,0].sigmoid().cpu();ratio=(p/(1-p).clamp_min(1e-6)).clamp(.25,4)
     assert torch.equal(ratio,saved['weights'])
-    save(entry/'independent_density.json',dict(passed=True,complete_sha256=sha(entry/'complete.json'),all100steps_model_optimizer_sampler_bitwise_equal=True,all_weights_bitwise_equal=True,no_target_GT=True,guard=guard,guard_sha256=sha(guard)))
+    save(entry/'independent_density.json',dict(passed=True,complete_sha256=sha(density_receipt(entry.parent,s)),all100steps_model_optimizer_sampler_bitwise_equal=True,all_weights_bitwise_equal=True,no_target_GT=True,guard=guard,guard_sha256=sha(guard)))
 
 
 AP_CACHE={}
@@ -133,15 +168,13 @@ def audit_result(root,task):
     from tools.audit_background_fit_gap import independent_auc
     e=root/task;shift,mode=task.split('_');done=read(e/'complete.json');gpu=read(e/'gpu_complete.json');launch=read(Path(str(root)+'_launch.json'));native=read(e/'independent_native.json')
     assert sha(e/'gpu_complete.json')==done['gpu_complete_sha256']==native['source_gpu_sha256']
-    for d,owner,head in [(gpu,launch['pid'],launch['head']),(native,read(root/'independent_audit_launch.json')['pid'],read(root/'independent_audit_launch.json')['head'])]:
-        guard=read(d['guard']);lease=read(guard['lease']);assert sha(d['guard'])==d['guard_sha256'] and sha(guard['lease'])==guard['lease_sha256']
-        assert guard['owner_pid']==lease['owner_pid']==owner and lease['commit']==head and guard['observed']['uuid']==lease['uuid'] and guard['observed']['free_mib']>=12288
+    guardcheck(gpu,launch['pid'],launch['head']);audit_guard(root,native)
     history=read(e/'history.json');assert [h['epoch'] for h in history]==list(range(1,21));checkpoints={}
     for epoch in (1,5,10,20):
         p=e/f'epoch{epoch:03d}.pt';state=torch.load(p,map_location='cpu')
         assert {'model','ema','optimizer','order_rng','pair_rng','target_stream','augmentation_rng','python_rng','numpy_rng','cpu_rng','cuda_rng','history','global_step','source_sha256','target_train_complete_sha256','density_complete_sha256','spec'}<=set(state)
         assert state['history']==history[:epoch] and state['source_sha256']==read(root/'source_prepare.json')['results'][shift]['source_sha256']
-        assert state['target_train_complete_sha256']==sha(root/(shift+'_target_train')/'complete.json') and state['density_complete_sha256']==sha(root/(shift+'_density')/'complete.json')
+        assert state['target_train_complete_sha256']==sha(root/(shift+'_target_train')/'complete.json') and state['density_complete_sha256']==sha(density_receipt(root,shift))
         n=sum(h['steps'] for h in history[:epoch]);assert state['global_step']==n and int(state['target_stream']['seen'].sum())==n*128 and all(float(v['step'])==n for v in state['optimizer']['state'].values())
         checkpoints[str(epoch)]=sha(p)
     assert checkpoints['20']==gpu['checkpoint_sha256'] and base.tensor_digest(state['ema'])==gpu['final_ema_digest'] and base.tensor_digest(state['model'])==gpu['final_student_digest']
@@ -187,21 +220,33 @@ def watch(root):
     while not all((root/t/'complete.json').exists() for t in EXTRACT):
         if (root/'error.json').exists():raise RuntimeError('main failed')
         time.sleep(3)
-    audit_scope(root)
+    recover_density_receipts(root)
+    if (root/'independent_UDA_scope.json').exists():
+        scope=read(root/'independent_UDA_scope.json');assert scope['passed'] and scope['source_prepare_sha256']==sha(root/'source_prepare.json')
+    else:audit_scope(root)
     while not all((root/t/'gpu_complete.json').exists() for t in TASKS):
         if (root/'error.json').exists() or (root/'stop.json').exists():raise RuntimeError('main stopped')
         time.sleep(3)
     while read(root/'state.json')['stage']=='train':time.sleep(3)
-    launch=read(Path(str(root)+'_launch.json'));al=read(root/'independent_audit_launch.json')
+    launch=read(Path(str(root)+'_launch.json'));al=read(root/'independent_audit_recovery_launch.json')
     for stage,tasks in [('features',EXTRACT),('density',('S1_density','S2_density')),('head',TASKS)]:
-        pending=list(tasks);active={}
+        filename={'features':'independent_native_features.json','density':'independent_density.json','head':'independent_native.json'}[stage]
+        pending=[];active={}
+        for task in tasks:
+            existing=root/task/filename
+            if existing.exists():
+                report=read(existing);assert report['passed'];audit_guard(root,report)
+                if stage=='features':assert report['source_complete_sha256']==sha(root/task/'complete.json')
+                elif stage=='density':assert report['complete_sha256']==sha(density_receipt(root,task.split('_')[0]))
+                else:assert report['source_gpu_sha256']==sha(root/task/'gpu_complete.json')
+            else:pending.append(task)
         while pending or active:
             for task,t in list(active.items()):
                 if t['p'].poll() is None:continue
                 t['log'].close();del active[task]
                 if t['p'].returncode:raise RuntimeError(task+'/'+stage+' independent replay failed')
             for task in list(pending):
-                key='gpu_complete.json' if stage=='head' else 'complete.json';src=read(root/task/key);guardcheck(src,launch['pid'],launch['head']);g=read(src['guard'])['observed']['index']
+                key='gpu_complete.json' if stage=='head' else 'complete.json';src=read(density_receipt(root,task.split('_')[0])) if stage=='density' else read(root/task/key);guardcheck(src,launch['pid'],launch['head']);g=read(src['guard'])['observed']['index']
                 if g in [t['gpu'] for t in active.values()] or snapshot(g)['free_mib']<12288:continue
                 observed=snapshot(g);assert observed['uuid']==read(src['guard'])['observed']['uuid'];lease=root/task/('independent_'+stage+'_lease.json');save(lease,dict(owner_pid=os.getpid(),index=g,uuid=observed['uuid'],minimum_free_mib=12288,commit=code_identity()['commit']))
                 env=dict(os.environ,CUDA_VISIBLE_DEVICES=observed['uuid'],PYTHONDONTWRITEBYTECODE='1',PYTHONPATH=str(CODE),OMP_NUM_THREADS='2',MKL_NUM_THREADS='2',PROPOSAL_FOREGROUND_LEASE=str(lease),PROPOSAL_FOREGROUND_LEASE_SHA256=sha(lease));log=(root/task/('independent_'+stage+'.log')).open('w')
@@ -218,11 +263,11 @@ def watch(root):
             st=torch.load(root/(s+'_'+mode)/'epoch005.pt',map_location='cpu');warm[s][mode]=dict(model=base.tensor_digest(st['model']),ema=base.tensor_digest(st['ema']),optimizer=base.tensor_digest(st['optimizer']),order=base.tensor_digest(st['order_rng']),pair=base.tensor_digest(st['pair_rng']))
         assert warm[s]['ontology']==warm[s]['coral']==warm[s]['teacher']
         assert len({read(root/(s+'_'+m)/'gpu_complete.json')['initial_digest'] for m in SPEC['modes']})==1
-    for task in EXTRACT:guardcheck(read(root/task/'independent_native_features.json'),al['pid'],al['head'])
-    for task in ('S1_density','S2_density'):guardcheck(read(root/task/'independent_density.json'),al['pid'],al['head'])
+    for task in EXTRACT:audit_guard(root,read(root/task/'independent_native_features.json'))
+    for task in ('S1_density','S2_density'):audit_guard(root,read(root/task/'independent_density.json'))
     save(root/'independent_final_audit.json',dict(passed=True,UDA_training=True,target_train_GT_read=False,exact_tasks=TASKS,source_scope_sha256=sha(root/'independent_UDA_scope.json'),
         final_sha256=sha(root/'final.json'),audits={t:sha(root/'independent_results'/(t+'.json')) for t in TASKS},target_feature_audits={t:sha(root/t/'independent_native_features.json') for t in EXTRACT},
-        density_audits={t:sha(root/t/'independent_density.json') for t in ('S1_density','S2_density')},shared_source_warmup5_bitwise_equal=warm))
+        density_audits={t:sha(root/t/'independent_density.json') for t in ('S1_density','S2_density')},density_metadata_recovery_sha256=sha(root/'density_receipt_collision_recovery.json'),shared_source_warmup5_bitwise_equal=warm))
 
 
 if __name__=='__main__':
