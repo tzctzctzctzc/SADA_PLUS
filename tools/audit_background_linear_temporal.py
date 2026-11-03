@@ -55,6 +55,13 @@ def numpy_descriptors(feature,valid,boxes,labels,scores):
 
 def audit(root,s):
     entry=root/s;done=read(entry/'complete.json');gpu=read(entry/'gpu_complete.json');split=read(entry/'split.json');launch=read(root/'_launch.json')
+    replay_link=read(root/'native_replay_audit_link.json');replay_root=Path(replay_link['root'])
+    assert sha(replay_root/'final.json')==replay_link['final_sha256']
+    replay_final=read(replay_root/'final.json');assert replay_final['passed'] and sha(replay_root/s/'complete.json')==replay_final['reports'][s]
+    native=read(replay_root/s/'complete.json');assert native['passed'] and native['all_native_predictions_bitwise_equal'] and native['all_disabled_TF32_CPU_checks_within_3e6'] and native['optimizer_steps']==0
+    for p,digest in native['source_artifacts'].items():assert sha(p)==digest
+    native_rows={(r['role'],r['mode'],r['video']):r for r in native['rows']}
+    assert len(native_rows)==len(native['rows'])
     assert done['passed'] and gpu['passed'] and sha(entry/'gpu_complete.json')==done['gpu_complete_sha256']
     assert sha(entry/'split.json')==done['split_sha256']==gpu['split_sha256']
     assert gpu['spec']['schema']=='background-linear-temporal-source-v1' and not gpu['spec']['target_read']
@@ -92,7 +99,7 @@ def audit(root,s):
     predictions=torch.load(prediction,map_location='cpu');assert set(predictions)=={'fit','heldout','validation'}
     assert sha(entry/'descriptors.pt')==gpu['descriptors_sha256'];prepared=torch.load(entry/'descriptors.pt',map_location='cpu')
     assert set(prepared)==set(predictions)
-    originals={r:{} for r in prepared};descriptors_checked=0;descriptor_error=0.;readout_error=0.
+    originals={r:{} for r in prepared};descriptors_checked=0;descriptor_error=0.;readout_error=0.;CPU_non_equivalent_rows=0;checked_native=set()
     source_rows={r['record']['video']:r for r in cost['rows']}
     for role,records in [('source',[r['record'] for r in cost['rows']]),('validation',cost['validation'])]:
         for rec in records:
@@ -128,7 +135,11 @@ def audit(root,s):
                 replay=1/(1+np.exp(-logits[:,0].astype(np.float64)))
                 actual=row['pbg'][p['hard']].numpy()
                 if len(actual):readout_error=max(readout_error,float(np.abs(actual-replay).max()))
-                assert np.allclose(actual,replay,atol=3e-6,rtol=1e-6)
+                key=(role,mode,row['video']);n=native_rows[key];checked_native.add(key)
+                assert n['native_bitwise_equal'] and n['candidates']==len(actual) and n['disabled_TF32_cpu_max_error']<4e-6
+                # NumPy使用完整float32乘法，不能冒称它与原CUDA默认TF32相同。
+                # 原预测必须在原CUDA设置下逐位重放；禁TF32的独立对照仍走原严格门禁。
+                CPU_non_equivalent_rows+=int(not np.allclose(actual,replay,atol=3e-6,rtol=1e-6))
         frames={m:make_frame(rows) for m,rows in modes.items()};f=frames[MODES[0]]
         assert all(f.drop(columns='pbg').equals(frame.drop(columns='pbg')) for frame in frames.values())
         bg=background(truth[role],f);engines={};positions={};baseline=[]
@@ -152,7 +163,8 @@ def audit(root,s):
                 assert int(bg[selected].sum())==rep['BG_removed'] and int((~bg[selected]).sum())==rep['nonBG_removed']
                 budgets.append(dict(rate=rate,delta_pp=rep['delta_pp'],per_class_AP=ap,BG_removed=rep['BG_removed'],nonBG_removed=rep['nonBG_removed']))
             reports[role][mode]=dict(video_macro_AUC=reported['video_macro_AUC'],AUC_valid_videos=len(aucs),budgets=budgets)
-    out=dict(passed=True,complete_sha256=sha(entry/'complete.json'),gpu_complete_sha256=sha(entry/'gpu_complete.json'),split_sha256=sha(entry/'split.json'),checkpoint_sha256=checkpoints,descriptor_sha256=sha(entry/'descriptors.pt'),all_video_descriptors_independently_rebuilt=descriptors_checked,max_descriptor_abs_error=descriptor_error,all_saved_predictions_numpy_linear_replay=True,max_readout_abs_error=readout_error,all_original_arrays_exact=True,all_checkpoint_state_and_history=True,results=reports)
+    assert checked_native==set(native_rows)
+    out=dict(passed=True,complete_sha256=sha(entry/'complete.json'),gpu_complete_sha256=sha(entry/'gpu_complete.json'),split_sha256=sha(entry/'split.json'),checkpoint_sha256=checkpoints,descriptor_sha256=sha(entry/'descriptors.pt'),all_video_descriptors_independently_rebuilt=descriptors_checked,max_descriptor_abs_error=descriptor_error,all_saved_predictions_native_GPU_bitwise_replay=True,native_replay_report_sha256=sha(replay_root/s/'complete.json'),all_saved_predictions_numpy_linear_replay=CPU_non_equivalent_rows==0,numpy_precision_difference_video_mode_count=CPU_non_equivalent_rows,max_numpy_readout_abs_error=readout_error,all_original_arrays_exact=True,all_checkpoint_state_and_history=True,results=reports)
     save(root/'independent_results'/f'{s}.json',out);print('AUDITED',s,flush=True);return out
 
 
