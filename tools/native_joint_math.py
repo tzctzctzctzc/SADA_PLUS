@@ -1,7 +1,7 @@
 """原Prototype时序表示的多尺度候选BG分支；仅在实验副本中联合更新。"""
 import torch
 from torch import nn
-from tools.background_four_routes_math import ProposalEncoder,head_objective
+from tools.background_four_routes_math import ProposalEncoder,head_objective,source_symbols
 from tools.background_linear_temporal import region_samples
 
 
@@ -34,6 +34,17 @@ class NativeBackground(nn.Module):
 
 def proposal_loss(logits,bg,quality):
     levels=logits.shape[0];return head_objective(logits.flatten(0,1),bg.repeat(levels),quality.repeat(levels))
+
+
+def cost_proposal_loss(logits,bg,quality,delta):
+    # 原已审APcost函数AST不改，仅避免导入其CPU AP/Numba依赖。
+    from pathlib import Path
+    from torch.nn import functional as F
+    from tools.hard_background_modules import balanced_bg,quality_loss
+    if not hasattr(cost_proposal_loss,'function'):
+        ns=dict(torch=torch,F=F);source_symbols(Path(__file__).with_name('background_ap_cost.py'),['cost_balanced_bg'],ns);cost_proposal_loss.function=ns['cost_balanced_bg']
+    levels=logits.shape[0];z=logits.flatten(0,1);b=bg.repeat(levels);q=quality.repeat(levels);d=delta.repeat(levels)
+    return .5*balanced_bg(z[:,0],b)+.5*cost_proposal_loss.function(z[:,0],b,d)+.25*quality_loss(z[:,1],q)
 
 
 def critical_anchor(seq,teacher,valid,bg,delta):

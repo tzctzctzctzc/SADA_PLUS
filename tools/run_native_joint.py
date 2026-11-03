@@ -13,7 +13,8 @@ CODE=Path(__file__).resolve().parents[1];sys.path.insert(0,str(CODE))
 from tools.baseline_protocol import read,save,sha,code_identity
 from tools.run_dense_revisit import SOURCE,DIAG,seed,raw_load
 DENSE=Path('/vepfs/vlms/highscore_dense_revisit_5ef4cca_1103')
-MODES=('frozen','joint');TASKS=tuple(s+'_'+m for s in ('S1','S2') for m in MODES)
+PARENT=Path('/vepfs/vlms/highscore_native_joint_0e119ee_1103')
+MODES=('frozen','joint','frozencost','jointcost');TASKS=tuple(s+'_'+m for s in ('S1','S2') for m in MODES)
 SPEC=dict(schema='native-pretrained-SGP-background-joint-v1',shifts=['S1','S2'],modes=MODES,tasks=TASKS,
     source='unchanged head-holdout sourceFIT40/99, cached original highscore proposals/BG/quality and fullFIT APcost; heldout/sourceval not used in optimizer',
     representation='originalPrototype pretrained sourceSGP and neck, ALL6nativeFPNlevels; same4/16/4 interpolation at boxes/stride, no newimagefeatures',
@@ -21,7 +22,9 @@ SPEC=dict(schema='native-pretrained-SGP-background-joint-v1',shifts=['S1','S2'],
     frozen='native teacherpyramid samples read-only cached once, only head updates; numeric loss/allgrad/update equivalent to directnative features',
     joint='epoch1headwarmup; epochs2..5 sourceSGP/neck and head jointly learn BG/quality; sourcecriticalFG originalinsidefeature MSE anchor coefficient1, harmfulnonBG costs normalized withinvideo',
     anchor='sourceFIT only negative actual fullFIT delete-one APmarginals on nonBG; no anchoring originalBG hallucinations; marginal weights not additiveAP',
-    source_body_lr=3e-5,head_lr=3e-4,weight_decay=.05,clip=1.,epochs=5,warmup_epochs=1,checkpoints=[1,3,5],seed=311104,order_seed=123,
+    source_body_lr=3e-5,head_lr=3e-4,weight_decay=.05,clip=1.,epochs=20,warmup_epochs=1,checkpoints=[1,3,5,10,20],seed=311104,order_seed=123,
+    continuation='resume immutable parentepoch5 exact states, no replayepochs1..5; sourceoptimizationstillfalling and measured3..5seconds/epoch motivated fixed20 BEFORE reading parent validation/targetAP; all5results retained but not selected',
+    cost_factor='frozencost/jointcost are fresh20epoch paired trials from originalnativeweights; use exact oldcost_balanced_bg AST with FULLFIT marginaldelta, .5ordinary+.5costweightedBG+.25quality; frozen/joint retain ordinaryloss and exact5epoch continuation',
     training_mode='native pretrained backbone/neck/dropout remain eval-mode while gradients allowed; no stochasticdropout/EMA; head train-mode',
     precision='nativefloat32 inheritedTF32, noAMP/quantization or inputnormalization changes',
     rates=[.005,.01,.02,.05],budget_seconds=900,target_train_GT_read=False,target_train_used=False,target_val_used_for_selection=False,
@@ -66,7 +69,7 @@ def extract(entry):
 def train(entry):
     import torch
     from tools import baseline_engine as base
-    from tools.native_joint_math import NativeBackground,proposal_loss,critical_anchor
+    from tools.native_joint_math import NativeBackground,proposal_loss,cost_proposal_loss,critical_anchor
     from tools.run_proposal_foreground import first_cuda_guard
     from tools.run_foreground_calibration_oracle import load_detector
     guard=first_cuda_guard(entry);seed();s,mode=entry.name.split('_');began=time.monotonic();data=torch.load(DENSE/'inputs'/s/'data.pt',map_location='cpu');roles=data['roles'];fit=roles['fit'];done=read(entry.parent/s/'complete.json');assert sha(entry.parent/s/'teacher.pt')==done['teacher_sha256'];teacher=torch.load(entry.parent/s/'teacher.pt',map_location='cpu')['rows'];assert [r['video'] for r in fit]==[r['video'] for r in teacher]
@@ -82,32 +85,42 @@ def train(entry):
         r=fit[i];t=teacher_gpu[i];m.body_mode(joint);m.head.train();o.zero_grad(set_to_none=True)
         if joint or direct_frozen:seq,valid,_=m.sample(raw[i].cuda(non_blocking=True),r['video_metadata'],r['grid_boxes'][r['hard']].cuda())
         else:seq,valid=t['seq'],t['valid']
-        assert torch.equal(valid,t['valid']);logits=m.logits(seq,valid,t['metadata']);ordinary=proposal_loss(logits,t['bg'],t['quality']);anchor=critical_anchor(seq,t['seq'],valid,t['bg'],t['delta']);loss=ordinary+anchor
+        assert torch.equal(valid,t['valid']);logits=m.logits(seq,valid,t['metadata']);ordinary=cost_proposal_loss(logits,t['bg'],t['quality'],t['delta']) if mode in ('frozencost','jointcost') else proposal_loss(logits,t['bg'],t['quality']);anchor=critical_anchor(seq,t['seq'],valid,t['bg'],t['delta']);loss=ordinary+anchor
         assert torch.isfinite(loss);loss.backward();norm=torch.nn.utils.clip_grad_norm_(m.parameters(),1.);assert torch.isfinite(norm);o.step()
         return dict(loss=float(loss.detach()),ordinary=float(ordinary.detach()),anchor=float(anchor.detach()),grad=float(norm))
     # 缓存和原生全金字塔的真实loss/allgrad/AdamW更新等价，不仅核接口。
     order=torch.Generator().manual_seed(123);o=optimizer(model);initial=deepcopy(model.state_dict());update(model,o,0,False);a=base.tensor_digest(model.head.state_dict());oa=base.tensor_digest(o.state_dict());ga={n:p.grad.clone() if p.grad is not None else None for n,p in model.named_parameters()};model.load_state_dict(initial);o=optimizer(model);update(model,o,0,False,True)
     assert a==base.tensor_digest(model.head.state_dict()) and oa==base.tensor_digest(o.state_dict())
     for n,p in model.named_parameters():assert (ga[n] is None and p.grad is None) or torch.equal(ga[n],p.grad)
-    model.load_state_dict(initial);o=optimizer(model);body_before=base.tensor_digest(model.backbone.state_dict());update(model,o,0,mode=='joint');assert mode=='frozen' or body_before!=base.tensor_digest(model.backbone.state_dict())
+    isjoint=mode in ('joint','jointcost');model.load_state_dict(initial);o=optimizer(model);body_before=base.tensor_digest(model.backbone.state_dict());update(model,o,0,isjoint);assert not isjoint or body_before!=base.tensor_digest(model.backbone.state_dict())
     base.checkpoint(entry/'kernel.pt',capture(model,o,order,[],0,1));st=torch.load(entry/'kernel.pt',map_location='cpu');restore(st,model,o,order);rngdraw=(torch.randperm(len(fit),generator=order),torch.rand(3),torch.rand(3,device='cuda'));restore(st,model,o,order);again=(torch.randperm(len(fit),generator=order),torch.rand(3),torch.rand(3,device='cuda'));assert all(torch.equal(a,b) for a,b in zip(rngdraw,again))
-    restore(st,model,o,order);record=update(model,o,0,mode=='joint');final=base.tensor_digest(model.state_dict());osd=base.tensor_digest(o.state_dict())
-    rebuilt_detector=load_detector(SOURCE/s);rebuilt_detector.requires_grad_(False);seed();rebuilt=NativeBackground(rebuilt_detector).cuda();ro=optimizer(rebuilt);restore(st,rebuilt,ro,order);record2=update(rebuilt,ro,0,mode=='joint')
+    restore(st,model,o,order);record=update(model,o,0,isjoint);final=base.tensor_digest(model.state_dict());osd=base.tensor_digest(o.state_dict())
+    rebuilt_detector=load_detector(SOURCE/s);rebuilt_detector.requires_grad_(False);seed();rebuilt=NativeBackground(rebuilt_detector).cuda();ro=optimizer(rebuilt);restore(st,rebuilt,ro,order);record2=update(rebuilt,ro,0,isjoint)
     assert record==record2 and final==base.tensor_digest(rebuilt.state_dict()) and osd==base.tensor_digest(ro.state_dict());del rebuilt,rebuilt_detector,ro;torch.cuda.empty_cache()
-    save(entry/'kernel_complete.json',dict(passed=True,cached_vs_native_loss_allgrad_update_exact=True,real_joint_backbone_update=mode=='joint',complete_model_optimizer_RNG_nextstep_exact=True,guard_sha256=sha(guard),kernel_sha256=sha(entry/'kernel.pt')))
-    # 接线状态不进入正式训练，原预训练主干和新头均精确回到同一初始状态。
-    model.load_state_dict(initial);seed();o=optimizer(model);order=torch.Generator().manual_seed(123);history=[];step=0
-    for epoch in range(1,6):
-        tick=time.monotonic();joint=mode=='joint' and epoch>1;records=[]
+    save(entry/'kernel_complete.json',dict(passed=True,cached_vs_native_loss_allgrad_update_exact=True,real_joint_backbone_update=isjoint,complete_model_optimizer_RNG_nextstep_exact=True,guard_sha256=sha(guard),kernel_sha256=sha(entry/'kernel.pt')))
+    # 旧5轮是合法完整前缀。以磁盘状态重建验证第6轮首步，再回到旧状态正式继续。
+    model.load_state_dict(initial);seed();o=optimizer(model);order=torch.Generator().manual_seed(123);history=[];step=0;start=1
+    if mode in ('frozen','joint'):
+        parent=PARENT/entry.name
+        assert not (PARENT/'stop.json').exists();assert sha(parent/'epoch005.pt')==read(parent/'gpu_complete.json')['checkpoint_sha256']
+        saved=torch.load(parent/'epoch005.pt',map_location='cpu');assert saved['epoch']==5 and saved['step']==5*len(fit)
+        restore(saved,model,o,order);perm=torch.randperm(len(fit),generator=order);first=int(perm[0]);trial=update(model,o,first,isjoint);trial_model=base.tensor_digest(model.state_dict());trial_opt=base.tensor_digest(o.state_dict())
+        base.checkpoint(entry/'resume_kernel.pt',capture(model,o,order,saved['history'],5,saved['step']+1))
+        check_detector=load_detector(SOURCE/s);check_detector.requires_grad_(False);seed();check=NativeBackground(check_detector).cuda();co=optimizer(check);restore(saved,check,co,order);perm2=torch.randperm(len(fit),generator=order);assert torch.equal(perm,perm2);trial2=update(check,co,int(perm2[0]),isjoint)
+        assert trial==trial2 and trial_model==base.tensor_digest(check.state_dict()) and trial_opt==base.tensor_digest(co.state_dict());del check,check_detector,co;torch.cuda.empty_cache()
+        k=read(entry/'kernel_complete.json');k.update(resume_epoch6_firststep_exact=True,parent_checkpoint_sha256=sha(parent/'epoch005.pt'),resume_kernel_sha256=sha(entry/'resume_kernel.pt'));save(entry/'kernel_complete.json',k)
+        o=optimizer(model);restore(saved,model,o,order);history=deepcopy(saved['history']);step=saved['step'];start=6
+    for epoch in range(start,21):
+        tick=time.monotonic();joint=isjoint and epoch>1;records=[]
         for i in torch.randperm(len(fit),generator=order).tolist():records.append(update(model,o,i,joint));step+=1
         torch.cuda.synchronize();seconds=time.monotonic()-tick;history.append(dict(epoch=epoch,joint_backbone=joint,steps=len(records),seconds=seconds,**{k:float(np.mean([a[k] for a in records])) for k in records[0]}));base.checkpoint(entry/'latest.pt',capture(model,o,order,history,epoch,step))
-        if epoch in (1,3,5):os.link(entry/'latest.pt',entry/f'epoch{epoch:03d}.pt')
+        if epoch in (1,3,5,10,20):os.link(entry/'latest.pt',entry/f'epoch{epoch:03d}.pt')
         save(entry/'history.json',history);print('NATIVE_EPOCH',entry.name,epoch,seconds,history[-1],flush=True)
-        # joint的warmup耗时不代表主干反传；epoch2再用真实速度检查剩余预算。
-        if epoch in (1,2):
-            projected=seconds*(5-epoch);save(entry/'throughput.json',dict(epoch=epoch,seconds=seconds,projected_remaining_seconds=projected,elapsed=time.monotonic()-began,limit=900))
+        # 在真实接续速度上再次检查剩余预算，不用旧快照假定健康或耗时。
+        if epoch in (1,2,6,7):
+            projected=seconds*(20-epoch);save(entry/'throughput.json',dict(epoch=epoch,seconds=seconds,projected_remaining_seconds=projected,elapsed=time.monotonic()-began,limit=900))
             if time.monotonic()-began+projected>900:save(entry/'budget_pause.json',dict(scientific_failure=False,automatic_restart_authorized=False,checkpoint_sha256=sha(entry/'latest.pt')));return
-    final_body={k:v.cpu() for k,v in model.state_dict().items() if not k.startswith('head.')};changed=base.tensor_digest(final_body)!=base.tensor_digest(initial_body);assert changed==(mode=='joint')
+    final_body={k:v.cpu() for k,v in model.state_dict().items() if not k.startswith('head.')};changed=base.tensor_digest(final_body)!=base.tensor_digest(initial_body);assert changed==isjoint
     model.eval();model.body_mode(False);digest=base.tensor_digest(model.state_dict());cr=torch.get_rng_state();gr=torch.cuda.get_rng_state(0)
     def readout():
         output={}
@@ -119,10 +132,10 @@ def train(entry):
                     logits=model.logits(seq,valid,meta.cuda());p=torch.zeros(len(h));p[h]=logits[:,:,0].sigmoid().mean(0).cpu();eligible=torch.zeros(len(h),dtype=torch.bool);eligible[h]=(valid[:,:,4:20].sum(-1).min(0).values>=4).cpu()
                     output[role].append({k:r[k] for k in ('video','segments','scores','labels')}|dict(pbg=p,eligible=eligible))
         return output
-    outputs=readout();base.checkpoint(entry/'predictions.pt',outputs);assert digest==base.tensor_digest(model.state_dict()) and torch.equal(cr,torch.get_rng_state()) and torch.equal(gr,torch.cuda.get_rng_state(0));model.load_state_dict(torch.load(entry/'epoch005.pt',map_location='cpu')['model']);again=readout()
+    outputs=readout();base.checkpoint(entry/'predictions.pt',outputs);assert digest==base.tensor_digest(model.state_dict()) and torch.equal(cr,torch.get_rng_state()) and torch.equal(gr,torch.cuda.get_rng_state(0));model.load_state_dict(torch.load(entry/'epoch020.pt',map_location='cpu')['model']);again=readout()
     for role in outputs:
         for a,b in zip(outputs[role],again[role]):assert torch.equal(a['pbg'],b['pbg']) and torch.equal(a['eligible'],b['eligible'])
-    save(entry/'gpu_complete.json',dict(passed=True,guard=guard,guard_sha256=sha(guard),kernel_sha256=sha(entry/'kernel_complete.json'),checkpoint_sha256=sha(entry/'epoch005.pt'),predictions_sha256=sha(entry/'predictions.pt'),teacher_sha256=done['teacher_sha256'],backbone_neck_changed=changed,
+    save(entry/'gpu_complete.json',dict(passed=True,guard=guard,guard_sha256=sha(guard),kernel_sha256=sha(entry/'kernel_complete.json'),checkpoint_sha256=sha(entry/'epoch020.pt'),predictions_sha256=sha(entry/'predictions.pt'),teacher_sha256=done['teacher_sha256'],backbone_neck_changed=changed,
         parameters=sum(p.numel() for p in model.parameters()),readout_parameters_RNG_unchanged=True,saved_model_GPU_predictions_bitwise_equal=True,initial_digest=base.tensor_digest(initial),final_digest=digest,seconds=time.monotonic()-began,target_train_GT_read=False))
 
 
@@ -167,7 +180,18 @@ def evaluate(root,s):
 
 def run(root):
     from tools.baseline_gpu import snapshot
-    root.mkdir(parents=True,exist_ok=False);save(root/'plan.json',dict(spec=SPEC,code=code_identity(),dense_input_audit_sha256=sha(DENSE/'independent_input_audit.json')));active={};done=[]
+    assert not (PARENT/'stop.json').exists() and (PARENT/'final.json').exists();state=read(PARENT/'state.json');assert state['stage']=='complete' and not Path('/proc',str(state['owner_pid'])).exists()
+    root.mkdir(parents=True,exist_ok=False);budget={}
+    for task in TASKS:
+        s,mode=task.split('_');p=PARENT/(s+'_'+('joint' if mode in ('joint','jointcost') else 'frozen'));history=read(p/'history.json');gpu=read(p/'gpu_complete.json');remaining=15 if mode in ('frozen','joint') else 20;estimate=history[-1]['seconds']*remaining+gpu['seconds']+30;assert estimate<900
+        budget[task]=dict(projected_remaining_training_seconds=history[-1]['seconds']*remaining,conservative_endtoend_estimate=estimate,limit=900)
+        e=root/task;e.mkdir()
+        if mode in ('frozen','joint'):
+            for epoch in (1,3,5):os.link(p/f'epoch{epoch:03d}.pt',e/f'epoch{epoch:03d}.pt')
+    for s in ('S1','S2'):
+        e=root/s;e.mkdir()
+        for name in ('teacher.pt','complete.json','lease_extract.json'):os.link(PARENT/s/name,e/name)
+    save(root/'plan.json',dict(spec=SPEC,code=code_identity(),dense_input_audit_sha256=sha(DENSE/'independent_input_audit.json'),parent_root=str(PARENT),parent_production_final_sha256=sha(PARENT/'final.json'),budget=budget,validation_target_metrics_consulted_for_budget=False));active={};done=[]
     def stop(sig,frame):
         save(root/'stop.json',dict(signal=sig,automatic_restart_authorized=False))
         for t in active.values():
@@ -175,7 +199,7 @@ def run(root):
         raise SystemExit(128+sig)
     for sig in (signal.SIGTERM,signal.SIGINT):signal.signal(sig,stop)
     try:
-        for stage,tasks in [('extract',('S1','S2')),('train',TASKS),('evaluate',('S1','S2'))]:
+        for stage,tasks in [('train',TASKS),('evaluate',('S1','S2'))]:
             pending=list(tasks)
             while pending or active:
                 for task,t in list(active.items()):

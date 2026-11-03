@@ -19,4 +19,10 @@ def test_zero_anchor_and_loss():
 
 def test_full_entrypoint_import():
     from tools.run_native_joint import SPEC
-    assert SPEC['epochs']==5 and SPEC['warmup_epochs']==1 and SPEC['target_train_GT_read'] is False
+    assert SPEC['epochs']==20 and SPEC['warmup_epochs']==1 and SPEC['target_train_GT_read'] is False
+
+
+def test_cost_zero_falls_back_to_plain():
+    from tools.native_joint_math import cost_proposal_loss
+    z=torch.randn(3,4,2);b=torch.tensor([0.,0.,1.,1.]);q=torch.tensor([.8,.4,0.,0.]);d=torch.zeros(4)
+    assert torch.equal(proposal_loss(z,b,q),cost_proposal_loss(z,b,q,d))
