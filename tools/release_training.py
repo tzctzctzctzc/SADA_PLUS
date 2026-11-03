@@ -16,7 +16,7 @@ class RecordingEvaluator:
         from libs.evaluation import ANETdetection
         self.ctx,self.entry,self.name=ctx,entry,name
         self.splits=splits
-        self.inner=ANETdetection(str(annotation),splits[0],num_workers=1,
+        self.inner=ANETdetection(str(annotation),splits,num_workers=1,
             action_subsampling='10_majority_classes')
 
     def evaluate(self,results,**kwargs):
@@ -37,7 +37,7 @@ class RecordingEvaluator:
         prefix.parent.mkdir(parents=True,exist_ok=True)
         checkpoint(str(prefix)+'_predictions.pt',results)
         save(str(prefix)+'.json',dict(map_by_tiou=[float(x) for x in values[0]],
-            map_0_1_to_0_5=float(values[1]),GT_split=self.splits[0],prediction_splits=self.splits,
+            map_0_1_to_0_5=float(values[1]),GT_splits=self.splits,prediction_splits=self.splits,
             prediction_count=len(results['score'])))
         return values
 

@@ -1,4 +1,4 @@
-"""只读结果审计：原版首子集GT口径、源选模、完整状态及配对数据流。"""
+"""只读结果审计：完整GT口径、原源选模、完整状态及配对数据流。"""
 import argparse
 from copy import deepcopy
 import json
@@ -85,22 +85,22 @@ def audit(root,task):
     results={}
     for role,splits in [('source',cfg['src_val_split']),('target',cfg['tgt_val_split'])]:
         report=read(entry/'evaluation'/(role+'_val.json'))
-        assert report['split']==splits[0] and report['prediction_splits']==splits
+        assert report['split']==splits and report['prediction_splits']==splits
         assert report['checkpoint_sha256']==sha(entry/'best.pt') and report['selected_epoch']==decision['best_epoch']
         columns=torch.load(entry/'evaluation'/(role+'_predictions.pt'),map_location='cpu');pred=pd.DataFrame(columns)
         members={k for k,v in db.items() if v['subset'].lower() in splits}
         assert set(pred['video-id'])<=members and len(pred)==report['prediction_count'] and report['videos']==len(members)
-        gt=load_gt_seg_from_json(annotation,split=splits[0],action_subsampling='10_majority_classes')
+        gt=load_gt_seg_from_json(annotation,split=splits,action_subsampling='10_majority_classes')
         gt=gt[gt['t-start']!=gt['t-end']].reset_index(drop=True)
         result=independent_metrics(gt,pred)
         assert np.max(np.abs(np.asarray(result['map_by_tiou'])-np.asarray(report['map_by_tiou'])))<1e-7
         assert abs(result['map']-report['map_0.1_to_0.5'])<1e-7
         result.update(GT_videos=int(gt['video-id'].nunique()),prediction_video_scope=len(members),
-            predictions_outside_first_GT_subset=int((~pred['video-id'].isin(set(gt['video-id']))).sum()))
+            prediction_videos_without_task_GT=int((~pred['video-id'].isin(set(gt['video-id']))).sum()))
         results[role]=result
     save(root/'independent_results'/(task+'.json'),dict(passed=True,complete_sha256=sha(entry/'complete.json'),
         results=results,decision=decision,checkpoint_states=states,
-        evaluation='native release first_subset_GT_all_prediction_scope',independent_NumPy_matcher=True,
+        evaluation='full_prediction_scope_and_full_corresponding_GT',independent_NumPy_matcher=True,
         descriptor_scope='four actual video samples per shift checked vs official Dataset/truncate; not all crops',
         debug_AP_scope='debug prediction artifacts bound; only final selected-checkpoint AP independently recomputed'))
     print('RELEASE_AUDITED',task,results['target']['map'],flush=True)
@@ -132,7 +132,7 @@ def run(root):
             save(root/'independent_final_audit.json',dict(passed=len(done)==12,code=code_identity(),
                 producer_final_sha256=sha(root/'final.json'),failed=final['failed'],
                 reports={t:sha(root/'independent_results'/(t+'.json')) for t in sorted(done)},
-                pairs=paired,summaries=summaries,scope='native release metric; not comparable to corrected full_GT metric'))
+                pairs=paired,summaries=summaries,scope='native training; full matching GT evaluation, same metric scope as corrected baseline'))
             return
         time.sleep(15)
 

@@ -1,8 +1,8 @@
-"""发布数据流、原Trainer验证早停和首子集评估的显式协议。"""
+"""发布数据流与原Trainer验证早停；评测全部配置视频与全部对应GT。"""
 from copy import deepcopy
 import math
 
-SCHEMA = 'sada-release-protocol-reproduction-v2'
+SCHEMA = 'sada-native-training-full-GT-evaluation-v3'
 SPEC = dict(schema=SCHEMA, target_crop='release_GT_constrained_has_action_true',
     interval_sort='torch_sort_dim0_labels_follow_start_indices',
     train_generator='shared_CPU_default_generator_returned_by_fix_random_seed',
@@ -10,7 +10,7 @@ SPEC = dict(schema=SCHEMA, target_crop='release_GT_constrained_has_action_true',
     validation_every=2, early_stop_bad_validations=1, max_epochs=50,
     validation_order='target_train_then_source_val',test_every=2,
     debug_evaluation_order=['source_train','source_val','target_train','target_val'],
-    evaluation='all_configured_prediction_videos_vs_first_subset_GT_release_entry',
+    evaluation='all_configured_prediction_videos_vs_all_corresponding_GT',
     validation_division='original_num_pos_no_clamp',
     target_GT_supervision=False, target_GT_sampling_and_native_statistics=True,
     initialization='fresh_seed123_no_trained_weights',

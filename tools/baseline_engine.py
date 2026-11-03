@@ -384,7 +384,7 @@ def evaluate(cfg, entry, annotation):
                     for k,v in [('t-start',item['segments'][:,0]),('t-end',item['segments'][:,1]),
                                 ('label',item['labels']),('score',item['scores'])]:
                         columns[k].extend(v.detach().cpu().tolist())
-        evaluation_split=splits[0] if cfg.get('release_data_protocol') else splits
+        evaluation_split=splits
         evaluator = ANETdetection(str(annotation),evaluation_split,num_workers=4,action_subsampling='10_majority_classes')
         checkpoint(entry/'evaluation'/('%s_predictions.pt'%domain),columns)
         ap,mean,*_ = evaluator.evaluate({k:np.asarray(v) for k,v in columns.items()},verbose=True)

@@ -165,11 +165,12 @@ def worker(entry,stage):
 def prepare(root):
     identity=code_identity();root.mkdir(parents=True,exist_ok=False)
     save(root/'plan.json',dict(code=identity,specification=SPEC,tasks=TASKS,
-        changes='restore target GT crop, interval column sort, original loader, native Trainer validation/stopping/debug evaluation, first-subset GT metric',
+        changes='restore target GT crop, interval column sort, original loader and native Trainer validation/stopping; all AP uses full matching GT',
         comparison='both new arms share release data; old corrected results remain separate',
         prototype='unchanged control branch and frozen 40/200 teacher evidence',
         target_GT='available to original cropping/bookkeeping; no new target detection supervision',
         source_validation='native BaseTrainerDA.train every2 first_non_improvement max50; target_train validation precedes source_val',
+        evaluation_scope='full prediction videos and full corresponding GT; never first subset only',
         efficiency='persistent original workers and non-mutating CPU cycle cache; no batch/precision/budget changes',
         restore='no automatic restart; persistent worker RNG cannot be reconstructed from standard checkpoints',
         blockers=[str(x) for x in BLOCKERS]))
