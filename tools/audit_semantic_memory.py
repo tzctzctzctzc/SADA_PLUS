@@ -11,11 +11,14 @@ from tools.run_semantic_memory import DENSE,TASKS
 
 
 def descriptor_numpy(values,boxes):
-    t=(np.arange(16)+.5)/16;g=boxes[:,0,None]+(boxes[:,1]-boxes[:,0])[:,None]*t
-    lo=np.floor(g).astype(int);hi=lo+1;valid=(lo>=0)&(hi<len(values));a=g-lo
+    # 正式sample_sequence明确用values.dtype生成grid；不能用NumPy默认float64
+    # 重新定义采样时间，再把时间量化误差错误归到特征实现上。容差不变。
+    values=np.asarray(values,dtype=np.float32);boxes=np.asarray(boxes,dtype=np.float32)
+    t=(np.arange(16,dtype=np.float32)+np.float32(.5))/np.float32(16);g=boxes[:,0,None]+(boxes[:,1]-boxes[:,0])[:,None]*t
+    lo=np.floor(g).astype(int);hi=lo+1;valid=(lo>=0)&(hi<len(values));a=g-lo.astype(np.float32)
     x=(values[lo.clip(0,len(values)-1)]*(1-a[...,None])+values[hi.clip(0,len(values)-1)]*a[...,None])*valid[...,None];bins=[]
     for k in (0,4,8,12):
-        z=x[:,k:k+4].sum(1)/np.maximum(1,valid[:,k:k+4].sum(1,keepdims=True));z=z/np.maximum(np.linalg.norm(z,axis=1,keepdims=True),1e-12);bins.append(z)
+        z=x[:,k:k+4].sum(1)/np.maximum(1,valid[:,k:k+4].sum(1,keepdims=True)).astype(np.float32);z=z/np.maximum(np.linalg.norm(z,axis=1,keepdims=True),1e-12);bins.append(z)
     z=np.concatenate(bins,1);return z/np.maximum(np.linalg.norm(z,axis=1,keepdims=True),1e-12),valid.sum(1)>=4
 
 
@@ -28,6 +31,7 @@ def bank_boxes(r):
 
 
 def distances_numpy(query,bank,labels,video,qvideo):
+    query=np.asarray(query,dtype=np.float64);bank=np.asarray(bank,dtype=np.float64)
     d=np.maximum(0,(query*query).sum(1)[:,None]+(bank*bank).sum(1)[None]-2*query@bank.T);columns=[]
     for c in range(98):
         ids=np.flatnonzero((labels==c)&(video!=qvideo))
