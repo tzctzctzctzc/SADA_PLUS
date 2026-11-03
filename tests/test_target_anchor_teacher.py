@@ -29,3 +29,12 @@ def test_augmentation_replay_keeps_global_rng_and_time_coordinates():
     state=g.get_state();global_state=torch.get_rng_state();a=mask_channels(x,g)
     g.set_state(state);b=mask_channels(x,g)
     assert torch.equal(a,b) and torch.equal(global_state,torch.get_rng_state()) and a.shape==x.shape
+
+
+def test_original_sada_threshold_is_used_without_hardcoding_image_confidence():
+    c=torch.zeros(1,2,requires_grad=True);r=torch.ones(1,2,requires_grad=True)
+    tc=torch.tensor([[1.,-2.]])
+    _,image=target_loss([c],[r],[tc],[r.detach()],[torch.tensor([True])],threshold=.9)
+    loss,adapted=target_loss([c],[r],[tc],[r.detach()],[torch.tensor([True])],threshold=.6)
+    assert image['selected']==0 and adapted['selected']==1
+    loss.backward();assert c.grad.abs().sum()>0

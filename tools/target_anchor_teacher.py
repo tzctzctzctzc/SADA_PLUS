@@ -13,14 +13,14 @@ def mask_channels(raw, generator, probability=.1):
     return raw * keep.to(raw.device, raw.dtype)[None] / (1-probability)
 
 
-def target_loss(student_cls, student_reg, teacher_cls, teacher_reg, masks):
+def target_loss(student_cls, student_reg, teacher_cls, teacher_reg, masks, threshold=.9):
     logits = torch.cat(student_cls)
     offsets = torch.cat(student_reg)
     prob = torch.cat(teacher_cls).detach().sigmoid()
     reference = torch.cat(teacher_reg).detach()
     valid = torch.cat(masks)
     confidence = prob.max(-1).values
-    selected = valid & (confidence >= .9)
+    selected = valid & (confidence >= threshold)
     count = int(selected.sum())
     zero = logits.sum()*0 + offsets.sum()*0
     if not count:

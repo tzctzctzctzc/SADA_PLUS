@@ -1,6 +1,6 @@
 {
   "schema": "detector-module-stack-design-v1",
-  "authorization": "用户授权根据Oracle空间迁移和组合涨点模块，直接实施",
+  "authorization": "用户最新授权用目标域挑门限：本版仅targetTRAIN标签校准，targetVAL验收；不再声称严格UDA",
   "oracle_mean_delta_pp": {"classification":6.883351,"localization":2.187057,"joint":7.861102},
   "oracle_scope": "目标训练集监督参照，不是UDA可达保证，不能相加",
   "arms": ["control","quality","teacher","combined"],
@@ -18,6 +18,11 @@
     "diagnostic_root": "/vepfs/vlms/highscore_detector_iacs_kernel_debug_af0a9cd_1103"
   },
   "target_GT_fit": false,
+  "target_TRAIN_GT_threshold_calibration": true,
+  "strict_UDA": false,
+  "calibration": "固定六候选.3/.4/.5/.6/.7/.8，视频宏F0.5，以同类GT IoU>=.5定义可靠教师框；只选输入门限，不以该指标冒充AP收益",
+  "transfer_failure": "旧.9门限在S1全部106targetTRAIN最高教师分.811202下0选中；旧结果保留但不能算有效教师训练",
+  "reuse": "复用旧c5dcf56原对照/质量评分4项完整20轮；teacher/combined四项从原Prototype重新训练，不续空监督前缀",
   "target_val_selection": false,
   "scope": "S1/S2历史开发方向全部视频；四组fixed20全报告，不选epoch",
   "budget_seconds_per_task": 1800,

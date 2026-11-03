@@ -13,6 +13,8 @@ CODE=Path(__file__).resolve().parents[1];sys.path.insert(0,str(CODE))
 from tools.baseline_protocol import read,save,sha,code_identity
 from tools.run_native_joint import SOURCE,DENSE
 MODES=('control','quality','teacher','combined');TASKS=tuple(s+'_'+m for s in ('S1','S2') for m in MODES)
+REUSE_ROOT=Path('/vepfs/vlms/highscore_detector_stack_c5dcf56_1103')
+NEW_TASKS=tuple(s+'_'+m for s in ('S1','S2') for m in ('teacher','combined'))
 READOUTS=('native',)
 SPEC=dict(schema='detector-quality-target-teacher-stack-v1',shifts=['S1','S2'],modes=MODES,epochs=20,checkpoints=[1,5,10,20],
     source='ALL originalsourceTRAIN51/124 videos, all dense detection anchors; sourceval excluded. Previoushead-heldout now entersFIT and is NOT independent evaluation.',
@@ -32,19 +34,24 @@ SPEC=dict(schema='detector-quality-target-teacher-stack-v1',shifts=['S1','S2'],m
     caveat='historically exposedS1/S2 development; not independent six-direction finalmean; metricqualitytarget is not exactAP gradient or oraclematching')
 
 SPEC.update(
-    target_teacher='fixed originalPrototype semantic+regression teacher; targetTRAIN only; confidence>=.9 anchor full soft10class BCE + temporalDIoU, confidence weighted; unselected anchors ignored, NOT background labels',
+    schema='detector-stack-target-calibrated-v1',
+    target_teacher='fixed originalPrototype semantic+regression teacher; targetTRAIN labels select threshold from fixed [.3,.4,.5,.6,.7,.8] using video-macro F0.5; frozen before new training; targetVAL excluded; full soft10class BCE + temporalDIoU, confidence weighted; unselected anchors ignored',
     augmentation='student independentCPU-generator channelmask .1, rescale1/.9; same temporal coordinates; teacher clean; fresh generator saved',
     teacher_weight=1.,teacher_start_epoch=1,adaptation_start_epoch=6,
     inference='fixed EMA20 native originalNMS only; failed scale ensemble excluded',
     readouts=READOUTS,scales=[1.],primary_tracks=['combined/native'],
     checkpoint_contract='exact disk state/RNG restoration; cross-instance nextbackward NOT bitwise; fresh runs ONLY; no resume and no efficiency replacement',
     attribution='inspired by VarifocalNet and SoftTeacher; no ROI/jitter/online teacher reproduction; dense temporal frozen-teacher adaptation',
-    scientific_budget='four modes x S1/S2; same source order, same target draws, same optimizer and20epochs; comparisons all reported')
+    scientific_budget='four modes x S1/S2; reuse completed immutable control/quality runs from c5dcf56; four fresh teacher/combined trainings, same initialization/order/20epochs; comparisons all reported',
+    target_train_GT_read=True,target_train_GT_used_for_threshold_calibration=True,strict_UDA=False,
+    raw_target_GT_in_GPU_minibatches=False)
 
 
 def prepare(root):
     import torch
     from tools import baseline_engine as base
+    from tools.calibrate_target_teacher import calibrate
+    calibrate(REUSE_ROOT,root)
     folder=root/'inputs';folder.mkdir();reports={}
     for s in ('S1','S2'):
         cfg=read(SOURCE/s/'config.json');manifest=SOURCE/s/'source_fit_unlabeled.json';truth=read(SOURCE/s/'source_truth.json');ds=base.dataset(cfg,manifest,cfg['src_train_split'],False,True);rows=[]
@@ -58,6 +65,15 @@ def prepare(root):
         target=prior['roles']['target_train'];evaluation={role:prior['roles'][role] for role in ('validation','target_val')};assert all(set(r)<=allowed for r in target+[r for v in evaluation.values() for r in v]);base.checkpoint(folder/(s+'_source.pt'),rows);base.checkpoint(folder/(s+'_unlabeled.pt'),dict(target_train=target,evaluation=evaluation))
         reports[s]=dict(source_sha256=sha(folder/(s+'_source.pt')),unlabeled_sha256=sha(folder/(s+'_unlabeled.pt')),source_videos=[r['video'] for r in rows],target_videos=[r['video'] for r in target],source_truth_sha256=sha(SOURCE/s/'source_truth.json'),source_config_sha256=sha(SOURCE/s/'config.json'),prior_audited_input_sha256=sha(dpath),source_labels_only=True)
     save(root/'prepare.json',dict(passed=True,shifts=reports,target_train_GT_read=False))
+    # 已完成的无教师对照完全不受新门限影响；复用完整20轮，避免重复训练。
+    for task in TASKS:
+        if task in NEW_TASKS:continue
+        old=REUSE_ROOT/task;entry=root/task;entry.mkdir();assert (old/'gpu_complete.json').exists()
+        for path in old.iterdir():
+            if path.is_file():os.link(path,entry/path.name)
+        save(entry/'reuse_receipt.json',dict(origin=str(old),original_owner_pid=read(REUSE_ROOT/'state.json')['owner_pid'],
+            gpu_complete_sha256=sha(old/'gpu_complete.json'),checkpoint_sha256=sha(old/'epoch020.pt'),
+            predictions_sha256=sha(old/'predictions.pt'),reason='control/quality never call target teacher loss; unchanged complete training reused'))
 
 
 def train(entry):
@@ -73,6 +89,7 @@ def train(entry):
     from tools.detector_scale_math import rescale_raw,fuse_heads
     guard=first_cuda_guard(entry);s,mode=entry.name.split('_');quality=mode in ('quality','combined');use_teacher=mode in ('teacher','combined');began=time.monotonic();inputdir=entry.parent/'inputs';prepared=read(entry.parent/'prepare.json')['shifts'][s]
     assert sha(inputdir/(s+'_source.pt'))==prepared['source_sha256'] and sha(inputdir/(s+'_unlabeled.pt'))==prepared['unlabeled_sha256'];fit=torch.load(inputdir/(s+'_source.pt'),map_location='cpu');data=torch.load(inputdir/(s+'_unlabeled.pt'),map_location='cpu');target=data['target_train'];evaluation=data['evaluation'];cfg=read(SOURCE/s/'config.json')
+    calibration=read(entry.parent/'target_calibration.json');threshold=calibration['shifts'][s]['selected_threshold'];assert not calibration['target_val_read']
     save(entry/'target_loss_GPU_acceptance.json',gpu_acceptance())
     raw=[r['raw'].pin_memory() for r in fit];gt=[(r['gt_segments'].cuda(),r['gt_labels'].cuda()) for r in fit];targetraw={r['video']:raw_load(r).pin_memory() for r in target}
     def build():
@@ -82,7 +99,7 @@ def train(entry):
     m,o,d=build();ema,_,_=build();ema.load_state_dict(m.state_dict());ema.requires_grad_(False);ema.eval();teacher,_,_=build();teacher.requires_grad_(False);teacher.eval();teacher_digest=base.tensor_digest(teacher.state_dict());cache={};augmentation=torch.Generator().manual_seed(311109)
     def controls(m):return dict(loss_normalizer=m.loss_normalizer,loss_normalizer_pseudo_labels=m.loss_normalizer_pseudo_labels)
     def capture(m,e,o,d,order,stream,history,epoch,step):
-        return dict(model=deepcopy(m.state_dict()),ema=deepcopy(e.state_dict()),optimizer=deepcopy(o.state_dict()),disc_optimizer=deepcopy(d.state_dict()),controls=controls(m),order_rng=order.get_state(),target_order=stream.state(),semantic_cache=deepcopy(cache),
+        return dict(model=deepcopy(m.state_dict()),ema=deepcopy(e.state_dict()),optimizer=deepcopy(o.state_dict()),disc_optimizer=deepcopy(d.state_dict()),controls=controls(m),order_rng=order.get_state(),target_order=stream.state(),semantic_cache=deepcopy(cache),calibration_sha256=sha(entry.parent/'target_calibration.json'),teacher_threshold=threshold,
             augmentation_rng=augmentation.get_state(),python_rng=random.getstate(),numpy_rng=np.random.get_state(),cpu_rng=torch.get_rng_state(),cuda_rng=torch.cuda.get_rng_state(0),history=deepcopy(history),epoch=epoch,step=step,spec=SPEC,source_input_sha256=prepared['source_sha256'],unlabeled_input_sha256=prepared['unlabeled_sha256'],original_checkpoint_sha256=sha(REFERENCE/s/'best.pt'))
     def restore(st,m,e,o,d,order,stream):
         m.load_state_dict(st['model']);e.load_state_dict(st['ema']);restore_optimizer(o,st['optimizer']);restore_optimizer(d,st['disc_optimizer']);m.loss_normalizer=st['controls']['loss_normalizer'];m.loss_normalizer_pseudo_labels=st['controls']['loss_normalizer_pseudo_labels'];order.set_state(st['order_rng']);stream.restore(st['target_order']);cache.clear();cache.update(deepcopy(st['semantic_cache']));augmentation.set_state(st['augmentation_rng']);random.setstate(st['python_rng']);np.random.set_state(st['numpy_rng']);torch.set_rng_state(st['cpu_rng']);torch.cuda.set_rng_state(st['cuda_rng'],0)
@@ -103,7 +120,7 @@ def train(entry):
             if use_teacher:
                 _,tm,tc,tz,_=m.forward_heads(mask_channels(x,augmentation),tr['video_metadata'])
                 assert all(torch.equal(a.cuda(),b) for a,b in zip(item['masks'],tm))
-                consistency,target_details=target_loss(tc,tz,tl,[a.cuda() for a in item['reg']],tm)
+                consistency,target_details=target_loss(tc,tz,tl,[a.cuda() for a in item['reg']],tm,threshold=threshold)
                 loss=loss+consistency
         assert torch.isfinite(loss);loss.backward()
         if epoch>5 and cfg['model']['weight_clip_value']>0:
@@ -138,6 +155,11 @@ def train(entry):
         torch.cuda.synchronize();seconds=time.monotonic()-tick;history.append(dict(epoch=epoch,seconds=seconds,steps=len(records),alignment_active=epoch>5,**{k:float(np.mean([r[k] for r in records])) for k in records[0]}));base.checkpoint(entry/'latest.pt',capture(m,ema,o,d,order,stream,history,epoch,step))
         if epoch in (1,5,10,20):os.link(entry/'latest.pt',entry/f'epoch{epoch:03d}.pt')
         save(entry/'history.json',history);print('STACK_EPOCH',entry.name,epoch,history[-1],flush=True)
+        if use_teacher and epoch==1:
+            save(entry/'target_signal_acceptance.json',dict(passed=sum(r['target_selected'] for r in records)>0,
+                threshold=threshold,source='targetTRAIN label calibration authorized by user; targetVAL excluded',
+                selected_anchor_draws=sum(r['target_selected'] for r in records),mean_target_cls=history[-1]['target_cls'],mean_target_reg=history[-1]['target_reg']))
+            assert sum(r['target_selected'] for r in records)>0,'target teacher has no actual training signal; do not continue'
         if epoch in (1,6):
             estimate=time.monotonic()-began+seconds*(20-epoch)+180;save(entry/'throughput.json',dict(epoch=epoch,epoch_seconds=seconds,elapsed=time.monotonic()-began,projected_with_readout_seconds=estimate,limit=1800))
             if estimate>1800:save(entry/'budget_pause.json',dict(scientific_failure=False,automatic_restart_authorized=False));return
@@ -176,7 +198,7 @@ def evaluate(root,s):
 
 def run(root):
     from tools.baseline_gpu import snapshot
-    root.mkdir(parents=True,exist_ok=False);save(root/'plan.json',dict(spec=SPEC,code=code_identity()));prepare(root);active={};done=[]
+    root.mkdir(parents=True,exist_ok=False);save(root/'plan.json',dict(spec=SPEC,code=code_identity()));active={};done=[]
     def stop(sig,frame):
         save(root/'stop.json',dict(signal=sig,automatic_restart_authorized=False))
         for t in active.values():
@@ -184,7 +206,12 @@ def run(root):
         raise SystemExit(128+sig)
     for sig in (signal.SIGINT,signal.SIGTERM):signal.signal(sig,stop)
     try:
-        for stage,tasks in [('train',TASKS),('evaluate',('S1','S2'))]:
+        while not (REUSE_ROOT/'final.json').exists():
+            if (REUSE_ROOT/'error.json').exists() or (REUSE_ROOT/'stop.json').exists():raise RuntimeError('origin did not complete; preserve artifacts, no automatic restart')
+            save(root/'state.json',dict(stage='waiting_completed_controls_and_teacher_cache',owner_pid=os.getpid(),active={}))
+            time.sleep(3)
+        prepare(root)
+        for stage,tasks in [('train',NEW_TASKS),('evaluate',('S1','S2'))]:
             pending=list(tasks)
             while pending or active:
                 for task,t in list(active.items()):
