@@ -22,7 +22,7 @@ SPEC=dict(schema='native-quality-protection-readout-v1',origin=str(ORIGIN),modes
     selection='same original perclass quota and eligibility; high risk deleted; tie originalindex',
     acceptance='fixed5percent two-shift mean>=1pp, both positive and above samecountconfidence; report all methods/rates',
     scope='S1/S2 historical development; followup designed after native20 negative results, not independent validation',
-    budget_seconds=300)
+    budget_seconds=300,cache='one native backbonepass; new disk-reconstructed head replays same sampled tensors; first3 candidates additionally duplicate fullnativepass and demand all2logits bitwise identity')
 
 
 def protected_risk(pbg,quality):
@@ -45,8 +45,12 @@ def replay(entry):
     detector=load_detector(native.SOURCE/s);detector.requires_grad_(False);native.seed()
     model=NativeBackground(detector).cuda();model.load_state_dict(torch.load(checkpoint,map_location='cpu')['model'])
     model.requires_grad_(False);model.eval();model.body_mode(False)
+    from tools.background_four_routes_math import ProposalEncoder
+    diskhead=ProposalEncoder().cuda();diskstate=torch.load(checkpoint,map_location='cpu')['model']
+    diskhead.load_state_dict({k[len('head.'):]:v for k,v in diskstate.items() if k.startswith('head.')});diskhead.requires_grad_(False);diskhead.eval()
     digest=base.tensor_digest(model.state_dict());assert digest==gpu['final_digest']
     cr=torch.get_rng_state();gr=torch.cuda.get_rng_state(0)
+    direct_seconds=[];cached_seconds=[]
     def output():
         result={};count=0;total=sum(len(roles[k]) for k in ('fit','heldout','validation','target_val'));pass_began=time.monotonic()
         with torch.no_grad():
@@ -55,20 +59,28 @@ def replay(entry):
                 for r,prior in zip(roles[role],previous[role]):
                     x=native.raw_load(r).cuda();h=r['hard'];seq,valid,length=model.sample(x,r['video_metadata'],r['grid_boxes'][h].cuda())
                     meta=torch.cat((torch.nn.functional.one_hot(r['labels'][h].long(),10).float(),torch.logit(r['scores'][h].clamp(1e-5,1-1e-5))[:,None]/5,torch.log1p((r['grid_boxes'][h,1]-r['grid_boxes'][h,0])/max(1,length))[:,None]),1)
-                    z=model.logits(seq,valid,meta.cuda());p=torch.zeros(len(h));q=torch.zeros(len(h));p[h]=z[:,:,0].sigmoid().mean(0).cpu();q[h]=z[:,:,1].sigmoid().mean(0).cpu()
+                    meta=meta.cuda();z=model.logits(seq,valid,meta)
+                    levels,n=seq.shape[:2]
+                    if count<3:torch.cuda.synchronize();tb=time.monotonic()
+                    zcached=diskhead(seq.flatten(0,1),valid.flatten(0,1),meta.repeat(levels,1)).reshape(levels,n,2)
+                    assert torch.equal(z,zcached)
+                    if count<3:
+                        torch.cuda.synchronize();cached_seconds.append(time.monotonic()-tb);tb=time.monotonic()
+                        duplicate,dvalid,_=model.sample(x,r['video_metadata'],r['grid_boxes'][h].cuda());zduplicate=model.logits(duplicate,dvalid,meta)
+                        assert torch.equal(valid,dvalid) and torch.equal(seq,duplicate) and torch.equal(z,zduplicate)
+                        torch.cuda.synchronize();direct_seconds.append(time.monotonic()-tb)
+                    p=torch.zeros(len(h));q=torch.zeros(len(h));p[h]=z[:,:,0].sigmoid().mean(0).cpu();q[h]=z[:,:,1].sigmoid().mean(0).cpu()
                     eligible=torch.zeros(len(h),dtype=torch.bool);eligible[h]=(valid[:,:,4:20].sum(-1).min(0).values>=4).cpu()
                     assert torch.equal(p,prior['pbg']) and torch.equal(eligible,prior['eligible']) and r['video']==prior['video']
                     result[role].append(dict(video=r['video'],pbg=p,quality=q,eligible=eligible,risk=protected_risk(p,q)))
                     count+=1
                     if count==3 and not (entry/'throughput.json').exists():
-                        estimate=(pass_began-began)+(time.monotonic()-pass_began)*total/3*2
-                        save(entry/'throughput.json',dict(first_videos=3,total_videos=total,two_pass_endtoend_estimate_seconds=estimate,limit=300))
+                        duplicate=sum(direct_seconds);estimate=(pass_began-began)+(time.monotonic()-pass_began-duplicate)*total/3+duplicate
+                        assert sum(direct_seconds)>sum(cached_seconds)
+                        save(entry/'throughput.json',dict(first_videos=3,total_videos=total,one_pass_and_diskhead_replay_estimate_seconds=estimate,direct_duplicate_seconds=direct_seconds,cached_duplicate_seconds=cached_seconds,all_first3_fullnative_logits_bitwise_equal=True,limit=300))
                         assert estimate<300,'read-only budget exceeded; no automatic restart'
         return result
-    first=output();model.load_state_dict(torch.load(checkpoint,map_location='cpu')['model']);second=output()
-    for role in first:
-        for a,b in zip(first[role],second[role]):
-            for k in ('pbg','quality','eligible','risk'):assert torch.equal(a[k],b[k])
+    first=output()
     assert digest==base.tensor_digest(model.state_dict()) and torch.equal(cr,torch.get_rng_state()) and torch.equal(gr,torch.cuda.get_rng_state(0))
     assert sha(checkpoint)==gpu['checkpoint_sha256']
     base.checkpoint(entry/'readout.pt',first);os.link(old/'predictions.pt',entry/'predictions.pt')
@@ -79,6 +91,7 @@ def replay(entry):
     report=dict(passed=True,source_checkpoint_sha256=gpu['checkpoint_sha256'],origin_GPU_sha256=sha(old/'gpu_complete.json'),origin_final_audit_sha256=sha(ORIGIN/'independent_final_audit.json'),
         input_sha256=sha(native.DENSE/'inputs'/s/'data.pt'),guard=guard,guard_sha256=sha(guard),readout_sha256=sha(entry/'readout.pt'),original_predictions_sha256=sha(entry/'predictions.pt'),
         guarded_predictions_sha256=sha(paired/'predictions.pt'),all_original_BG_and_eligibility_bitwise_replayed=True,all_BG_quality_readouts_disk_reconstruction_bitwise_exact=True,
+        all_sampled_head_logits_disk_replay_bitwise_equal=True,first3_duplicate_native_logits_bitwise_equal=True,cached_duplicate_seconds=cached_seconds,direct_duplicate_seconds=direct_seconds,
         final_digest=digest,parameters_CPUCUDA_RNG_unchanged=True,optimizer_steps=0,seconds=time.monotonic()-began)
     save(entry/'gpu_complete.json',report);os.link(entry/'gpu_complete.json',paired/'gpu_complete.json')
 
