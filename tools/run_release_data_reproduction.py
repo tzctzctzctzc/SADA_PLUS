@@ -140,6 +140,11 @@ def probe(cfg,entry,binding):
 def worker(entry,stage):
     from tools.baseline_gpu import first_cuda_guard
     from tools import baseline_engine as base
+    from tools.native_ap_fast import install
+    efficiency=read(entry.parent/'efficiency_handoff.json')
+    proof=read(efficiency['optimization_proof'])
+    assert proof['passed'] and proof['fast_code_sha256']==sha(CODE/'tools/native_ap_fast.py')
+    install()
     cfg=read(entry/'config.json');binding=read(entry/'origin_binding.json')
     assert cfg['baseline']['code']==code_identity()
     for path,digest in binding['inputs'].items():assert sha(path)==digest
@@ -208,10 +213,15 @@ def blocker_slots():
     return used,states
 
 
-def run(root):
+def run(root,adoption_proof=None):
     import fcntl
     from tools.baseline_gpu import snapshot
-    prepare(root);identity=code_identity();pending=list(TASKS);waiting=[];active={};done=[];failed={}
+    identity=code_identity();handoff=None;audit_process=None
+    if adoption_proof:
+        from tools.native_queue_handoff import adopt
+        pending,waiting,active,done,failed,handoff=adopt(root,identity,adoption_proof,CODE)
+    else:
+        prepare(root);pending=list(TASKS);waiting=[];active={};done=[];failed={}
     def stop(sig,frame):
         save(root/'stop.json',dict(signal=sig,automatic_restart_authorized=False))
         for a in active.values():
@@ -219,14 +229,26 @@ def run(root):
         raise SystemExit(128+sig)
     for sig in (signal.SIGTERM,signal.SIGINT):signal.signal(sig,stop)
     def start(task,stage,gpu,lease,lock):
+        worker_code=Path(handoff['versions'][task]) if handoff else CODE
         env=dict(os.environ,CUDA_VISIBLE_DEVICES=lease['observed']['uuid'],PYTHONDONTWRITEBYTECODE='1',PYTHONPATH=str(CODE),
             PYTHONHASHSEED='123',OMP_NUM_THREADS='8',MKL_NUM_THREADS='8',CUBLAS_WORKSPACE_CONFIG=':4096:8',
             SADA_BASELINE_LEASE=lease['path'],SADA_BASELINE_LEASE_SHA256=sha(lease['path']),
             TMPDIR=str(root/'tmp'),TMP=str(root/'tmp'),TEMP=str(root/'tmp'))
+        env['PYTHONPATH']=str(worker_code)
         with (root/task/(stage+'.log')).open('x') as out:
-            p=subprocess.Popen([sys.executable,'-u','-B',str(Path(__file__)),'--entry',str(root/task),'--stage',stage],
-                cwd=CODE,env=env,stdout=out,stderr=subprocess.STDOUT,start_new_session=True)
+            p=subprocess.Popen([sys.executable,'-u','-B',str(worker_code/'tools/run_release_data_reproduction.py'),'--entry',str(root/task),'--stage',stage],
+                cwd=worker_code,env=env,stdout=out,stderr=subprocess.STDOUT,start_new_session=True)
         active[task]=dict(p=p,stage=stage,gpu=gpu,lease=lease,lock=lock)
+    def admission(gpu,task):
+        observed=snapshot(gpu)
+        if observed['free_mib']<16384:return None
+        lockpath=root/f'private_fast_gpu_{gpu}.lock';lock=lockpath.open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        path=root/'leases'/(str(gpu)+'_'+str(time.time_ns())+'.json')
+        cfg=read(root/task/'config.json')
+        lease=dict(owner_pid=os.getpid(),observed=observed,lock=str(lockpath),minimum_free_mib=16384,
+                   commit=cfg['baseline']['code']['commit'])
+        save(path,lease);lease['path']=str(path)
+        return lease,lock
     try:
         while pending or waiting or active:
             for task,a in list(active.items()):
@@ -242,20 +264,31 @@ def run(root):
                     'evaluation/target_val.json','evaluation/source_predictions.pt','evaluation/target_predictions.pt']
                 files.extend(str(p.relative_to(entry)) for p in sorted((entry/'streams').glob('epoch*.json')))
                 files.extend(str(p.relative_to(entry)) for p in sorted((entry/'debug_evaluation').rglob('*')) if p.is_file())
+                if (entry/'phase_timings.jsonl').exists():files.append('phase_timings.jsonl')
                 save(entry/'complete.json',dict(passed=True,artifacts={f:sha(entry/f) for f in files}))
                 done.append(task);a['lock'].close()
             while waiting and sum(a['stage']=='evaluate' for a in active.values())<2:
-                task,a=waiting.pop(0);start(task,'evaluate',a['gpu'],a['lease'],a['lock'])
+                task,a=waiting[0]
+                if a.get('inherited'):
+                    accepted=admission(a['gpu'],task)
+                    if accepted is None:break
+                    a['lease'],a['lock']=accepted
+                waiting.pop(0);start(task,'evaluate',a['gpu'],a['lease'],a['lock'])
+            if handoff and not (root/'previous_dispatcher_retired.json').exists() and not any(a.get('inherited') for a in active.values()):
+                from tools.native_queue_handoff import retire_previous
+                retire_previous(root,handoff)
+                env=dict(os.environ,CUDA_VISIBLE_DEVICES='',PYTHONDONTWRITEBYTECODE='1',PYTHONPATH=str(CODE),OMP_NUM_THREADS='1',MKL_NUM_THREADS='1')
+                with (root/'independent_fast_audit.log').open('x') as out:
+                    audit_process=subprocess.Popen([sys.executable,'-u','-B',str(CODE/'tools/audit_release_reproduction.py'),str(root)],
+                        cwd=CODE,env=env,stdout=out,stderr=subprocess.STDOUT,start_new_session=True)
+                save(root/'independent_fast_audit_launch.json',dict(pid=audit_process.pid,commit=identity['commit'],code=str(CODE)))
             blocked,states=blocker_slots()
             used=blocked+[a['gpu'] for a in active.values()]+[a['gpu'] for _,a in waiting]
             for gpu in range(4):
                 if not pending or gpu in used:continue
-                view=snapshot(gpu)
-                if view['free_mib']<16384:continue
-                lockpath=root/f'private_gpu_{gpu}.lock';lock=lockpath.open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-                path=root/'leases'/(str(gpu)+'_'+str(time.time_ns())+'.json')
-                lease=dict(owner_pid=os.getpid(),observed=view,lock=str(lockpath),minimum_free_mib=16384,commit=identity['commit'])
-                save(path,lease);lease['path']=str(path);start(pending.pop(0),'train',gpu,lease,lock)
+                accepted=admission(gpu,pending[0])
+                if accepted is None:continue
+                lease,lock=accepted;start(pending.pop(0),'train',gpu,lease,lock)
             save(root/'state.json',dict(owner_pid=os.getpid(),pending=pending,waiting_evaluate=[t for t,_ in waiting],
                 active={t:dict(pid=a['p'].pid,gpu=a['gpu'],stage=a['stage']) for t,a in active.items()},
                 completed=done,failed=failed,blocked_by_existing_authorized_queues=bool(blocked),observed_unix=time.time()))
@@ -270,11 +303,12 @@ def run(root):
         save(root/'final.json',dict(passed=len(done)==12,completed=done,failed=failed,results=results,paired_streams=streams))
     finally:
         for a in active.values():
-            if a['p'].poll() is None:os.killpg(a['p'].pid,signal.SIGTERM)
+            if a['p'].poll() is None and not a.get('inherited'):os.killpg(a['p'].pid,signal.SIGTERM)
         for a in list(active.values())+[a for _,a in waiting]:a['lock'].close()
 
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--root',type=Path);p.add_argument('--entry',type=Path)
+    p.add_argument('--adoption-proof',type=Path)
     p.add_argument('--stage',choices=['train','evaluate']);a=p.parse_args()
-    worker(a.entry,a.stage) if a.entry else run(a.root)
+    worker(a.entry,a.stage) if a.entry else run(a.root,a.adoption_proof)

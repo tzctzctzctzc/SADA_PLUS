@@ -106,3 +106,12 @@ def test_native_train_keeps_validation_debug_order_and_stop(monkeypatch):
 
 def test_stream_compare_only_common_completed_epochs():
     assert stream_pair([{'data_stream_sha256':'a'}],[{'data_stream_sha256':'a'},{'data_stream_sha256':'b'}])==dict(common_epochs=1,passed=True)
+
+
+def test_pair_allows_only_equivalent_core_execution_versions():
+    plain={'model':{'loss':1},'baseline':{'code':{'commit':'old','core_files':{'model':'same'}}}}
+    proto=deepcopy(plain);proto['prototype_capacity']={'variant':'control'}
+    proto['baseline']['code']['commit']='fast'
+    assert_pair(plain,proto)
+    proto['model']['loss']=2
+    with pytest.raises(AssertionError):assert_pair(plain,proto)

@@ -59,9 +59,14 @@ def audit(root,task):
     assert not initial['loaded_trained_weights'] and initial['initial_state_sha256']==probe['initial_state_sha256']
     assert initial['detector_initial_sha256']==binding['historical_detector_initial_sha256']
     owner=read(root/'state.json')['owner_pid']
+    allowed_owners={owner}
+    if (root/'efficiency_handoff.json').exists():
+        handoff=read(root/'efficiency_handoff.json')
+        if task in handoff['inherited_tasks']:allowed_owners.add(handoff['previous_owner'])
     for stage in ('train','evaluate'):
         guard=read(read(entry/(stage+'_complete.json'))['guard']);lease=read(guard['lease'])
-        assert guard['owner_pid']==lease['owner_pid']==owner and lease['commit']==cfg['baseline']['code']['commit']
+        assert guard['owner_pid']==lease['owner_pid'] and lease['owner_pid'] in allowed_owners
+        assert lease['commit']==cfg['baseline']['code']['commit']
         assert guard['lease_sha256']==sha(guard['lease']) and guard['observed']['uuid']==lease['observed']['uuid']
         assert guard['observed']['free_mib']>=lease['minimum_free_mib']
     states={}
@@ -111,6 +116,11 @@ def run(root):
         if (root/'error.json').exists() or (root/'stop.json').exists():return
         time.sleep(10)
     tasks=read(root/'plan.json')['tasks'];done=set()
+    for task in tasks:
+        p=root/'independent_results'/(task+'.json')
+        if p.exists() and (root/task/'complete.json').exists():
+            previous=read(p)
+            if previous.get('passed') and previous['complete_sha256']==sha(root/task/'complete.json'):done.add(task)
     while not (root/'stop.json').exists():
         for task in tasks:
             if task not in done and (root/task/'complete.json').exists():audit(root,task);done.add(task)
@@ -132,6 +142,7 @@ def run(root):
             save(root/'independent_final_audit.json',dict(passed=len(done)==12,code=code_identity(),
                 producer_final_sha256=sha(root/'final.json'),failed=final['failed'],
                 reports={t:sha(root/'independent_results'/(t+'.json')) for t in sorted(done)},
+                efficiency_handoff_sha256=sha(root/'efficiency_handoff.json') if (root/'efficiency_handoff.json').exists() else None,
                 pairs=paired,summaries=summaries,scope='native training; full matching GT evaluation, same metric scope as corrected baseline'))
             return
         time.sleep(15)

@@ -31,6 +31,7 @@ class RecordingEvaluator:
                 except BlockingIOError:candidate.close()
                 else:lock=candidate;break
             if lock is None:time.sleep(5)
+        started=time.monotonic()
         try:values=self.inner.evaluate(results,**kwargs)
         finally:lock.close()
         prefix=self.entry/'debug_evaluation'/f'epoch{self.ctx.release_epoch:03d}'/self.name
@@ -38,7 +39,7 @@ class RecordingEvaluator:
         checkpoint(str(prefix)+'_predictions.pt',results)
         save(str(prefix)+'.json',dict(map_by_tiou=[float(x) for x in values[0]],
             map_0_1_to_0_5=float(values[1]),GT_splits=self.splits,prediction_splits=self.splits,
-            prediction_count=len(results['score'])))
+            prediction_count=len(results['score']),CPU_AP_seconds=time.monotonic()-started))
         return values
 
 
@@ -70,7 +71,10 @@ def train(cfg,entry):
     ctx.discriminator_updates=0;ctx.logger=logging.getLogger('release_trainer')
     ctx.logger.setLevel(logging.INFO);ctx.logger.addHandler(logging.StreamHandler())
     history,rows=[],[]
-    original_epoch,original_validation=ctx._train_epoch,ctx._valid_epoch
+    original_epoch,original_validation,original_test=ctx._train_epoch,ctx._valid_epoch,ctx._test_epoch
+    def phase(name,epoch,seconds,**extra):
+        with (entry/'phase_timings.jsonl').open('a') as out:
+            out.write(json.dumps(dict(phase=name,epoch=epoch,seconds=seconds,**extra))+'\n')
     def epoch(epoch,*args,**kwargs):
         ctx.release_epoch=epoch;ctx.stream_records=[];ctx.first_gradient_norm=None
         count=ctx.checked_steps;torch.cuda.synchronize();started=time.monotonic()
@@ -84,18 +88,27 @@ def train(cfg,entry):
         rows.append(row)
         (entry/'metrics.jsonl').write_text(''.join(json.dumps(x,allow_nan=False)+'\n' for x in rows))
         print('RELEASE_EPOCH',json.dumps(row,allow_nan=False),flush=True)
+        phase('train',epoch,row['seconds'])
         return value
     def validation(epoch,loader,domain='src'):
+        started=time.monotonic()
         value=original_validation(epoch,loader,domain=domain)
+        phase('validation',epoch,time.monotonic()-started,domain=domain)
         if domain=='src':
             recorded=float(value) if math.isfinite(value) else str(float(value))
             history.append([epoch,recorded]);rows[-1]['source_validation_loss']=recorded
             (entry/'metrics.jsonl').write_text(''.join(json.dumps(x,allow_nan=False)+'\n' for x in rows))
         return value
     def checkpoint(mode,epoch):
+        started=time.monotonic()
         base.checkpoint(entry/('best.pt' if mode=='best' else 'latest.pt'),base.capture(ctx,cfg,epoch,history))
+        phase('checkpoint',epoch,time.monotonic()-started,mode=mode)
         if mode=='best':ctx.latest_best_epoch=epoch
-    ctx._train_epoch=epoch;ctx._valid_epoch=validation;ctx.save_ckpt=checkpoint
+    def test(epoch,loader,mode,domain='src'):
+        started=time.monotonic();value=original_test(epoch,loader,mode,domain=domain)
+        phase('debug_inference_and_AP',epoch,time.monotonic()-started,domain=domain,mode=mode)
+        return value
+    ctx._train_epoch=epoch;ctx._valid_epoch=validation;ctx._test_epoch=test;ctx.save_ckpt=checkpoint
     original_wandb_log=wandb.log
     def local_log(values,*args,**kwargs):
         with (entry/'release_debug_metrics.jsonl').open('a') as out:

@@ -45,7 +45,10 @@ def configuration(original, variant, identity, source, target, tmpdir, hashes):
 
 
 def assert_pair(plain, prototype):
-    value=deepcopy(prototype);branch=value.pop('prototype_capacity')
+    value=deepcopy(prototype);branch=value.pop('prototype_capacity');plain=deepcopy(plain)
+    if value['baseline'].get('code')!=plain['baseline'].get('code'):
+        assert value['baseline']['code']['core_files']==plain['baseline']['code']['core_files']
+        value['baseline']['code']=plain['baseline']['code']
     assert value==plain and branch['variant']=='control'
 
 

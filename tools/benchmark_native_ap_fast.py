@@ -49,4 +49,17 @@ def benchmark(entry,output):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('entry',type=Path);p.add_argument('output',type=Path)
-    a=p.parse_args();benchmark(a.entry,a.output)
+    p.add_argument('--slot-root',type=Path)
+    a=p.parse_args();lock=None
+    if a.slot_root:
+        import fcntl
+        while lock is None:
+            for i in range(2):
+                candidate=(a.slot_root/f'private_CPU_evaluation_{i}.lock').open('a')
+                try:fcntl.flock(candidate,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                except BlockingIOError:candidate.close()
+                else:lock=candidate;break
+            if lock is None:time.sleep(5)
+    try:benchmark(a.entry,a.output)
+    finally:
+        if lock:lock.close()
