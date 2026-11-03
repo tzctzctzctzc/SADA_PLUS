@@ -235,7 +235,8 @@ class RegHead(nn.Module):
                 cur_out, _ = self.head[idx](cur_out, cur_mask)
                 cur_out = self.act(self.norm[idx](cur_out))
             cur_offsets, _ = self.offset_head(cur_out, cur_mask)
-            out_offsets += (F.relu(self.scale[l](cur_offsets)),)
+            scaled_offsets=self.scale[l](cur_offsets)
+            out_offsets += (scaled_offsets if getattr(self,'distribution_offsets',False) else F.relu(scaled_offsets),)
             
             cur_actionness, _ = self.actionness_head(cur_out, cur_mask)
             out_actionness += (F.relu(self.scale[l](cur_actionness)),)
@@ -551,6 +552,9 @@ class SADA(nn.Module):
             from .prototype_capacity import build_capacity
             self.rq3_capacity=build_capacity(cfg['prototype_capacity'],fpn_dim,self.num_classes,
                 self.fpn_strides,self.reg_range,self.device)
+        if cfg.get('head_replacement'):
+            from tools.head_replacements import install
+            install(self,fpn_dim,head_dim,head_kernel_size,head_num_layers,head_with_ln)
         
     @property
     def device(self):
@@ -715,13 +719,22 @@ class SADA(nn.Module):
         fpn_masks_tgt = [cur_mask[bs:] for cur_mask in fpn_masks]
         
         # out_cls: List[B, #cls + 1, T_i]
-        out_cls_logits_src, _ = self.cls_head(fpn_feats_src, fpn_masks_src)
-        out_cls_logits_tgt, _ = self.cls_head_target(fpn_feats_tgt, fpn_masks_tgt)
+        if self.cfg.get('head_replacement'):
+            from tools.head_replacements import head_inputs
+            cls_input_src,reg_input_src=head_inputs(self,fpn_feats_src,fpn_masks_src)
+            cls_input_tgt,reg_input_tgt=head_inputs(self,fpn_feats_tgt,fpn_masks_tgt)
+            cls_input_pl,reg_input_pl=head_inputs(self,fpn_feats_tgt_pl,fpn_masks_tgt_pl)
+        else:
+            cls_input_src,reg_input_src=fpn_feats_src,fpn_feats_src
+            cls_input_tgt,reg_input_tgt=fpn_feats_tgt,fpn_feats_tgt
+            cls_input_pl,reg_input_pl=fpn_feats_tgt_pl,fpn_feats_tgt
+        out_cls_logits_src, _ = self.cls_head(cls_input_src, fpn_masks_src)
+        out_cls_logits_tgt, _ = self.cls_head_target(cls_input_tgt, fpn_masks_tgt)
         
         out_cls_logits = [torch.cat((out_cls_logits_src[i], out_cls_logits_tgt[i]), dim=0) for i in range(len(out_cls_logits_src))]
 
         # Generate the logits using the pseudo-label network (frozen in the case of static, or changing in the case of dynamic)
-        out_cls_logits_tgt_pl, _ = self.cls_head_pl(fpn_feats_tgt_pl, fpn_masks_tgt_pl)
+        out_cls_logits_tgt_pl, _ = self.cls_head_pl(cls_input_pl, fpn_masks_tgt_pl)
         
         if self.use_trident_head:
             out_lb_logits_src = self.start_head(fpn_feats_src, fpn_masks_src)
@@ -741,14 +754,14 @@ class SADA(nn.Module):
             out_rb_logits = None
 
         # out_offset: List[B, 2, T_i]
-        out_offsets_src, out_actionness_src = self.reg_head(fpn_feats_src, fpn_masks_src)
-        out_offsets_tgt, out_actionness_tgt= self.reg_head_target(fpn_feats_tgt, fpn_masks_tgt)
+        out_offsets_src, out_actionness_src = self.reg_head(reg_input_src, fpn_masks_src)
+        out_offsets_tgt, out_actionness_tgt= self.reg_head_target(reg_input_tgt, fpn_masks_tgt)
         
         out_offsets = [torch.cat((out_offsets_src[i], out_offsets_tgt[i]), dim=0) for i in range(len(out_offsets_src))]
         out_actionness = [torch.cat((out_actionness_src[i], out_actionness_tgt[i]), dim=0) for i in range(len(out_offsets_src))]
 
         # Generate the regression offsets of the frozen pseudo-label network (frozen in the case of static, or changing in the case of dynamic)
-        out_offsets_tgt_pl, out_actionness_tgt_pl = self.reg_head_pl(fpn_feats_tgt, fpn_masks_tgt)
+        out_offsets_tgt_pl, out_actionness_tgt_pl = self.reg_head_pl(reg_input_tgt, fpn_masks_tgt)
 
         # ------------------------------------------------------------
         # permute the outputs
@@ -1216,7 +1229,7 @@ class SADA(nn.Module):
             raise NotImplementedError('Unknown classification loss type')
             
             
-        if self.use_trident_head: 
+        if self.use_trident_head and not self.cfg.get('head_replacement'): 
             # couple the classification loss with iou score
             iou_rate = ctr_giou_loss_1d(
                 pred_offsets,

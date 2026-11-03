@@ -180,6 +180,8 @@ def capture(ctx, cfg, epoch, history):
 
 
 def checkpoint(path, state):
+    path=Path(path)
+    path.parent.mkdir(parents=True,exist_ok=True)
     tmp = Path(str(path)+'.tmp')
     torch.save(state, tmp)
     tmp.replace(path)
@@ -358,6 +360,7 @@ def evaluate(cfg, entry, annotation):
                                 ('label',item['labels']),('score',item['scores'])]:
                         columns[k].extend(v.detach().cpu().tolist())
         evaluator = ANETdetection(str(annotation),splits,num_workers=4,action_subsampling='10_majority_classes')
+        checkpoint(entry/'evaluation'/('%s_predictions.pt' % domain),columns)
         ap,mean,*_ = evaluator.evaluate({k:np.asarray(v) for k,v in columns.items()},verbose=True)
         result = dict(map_by_tiou=[float(x) for x in ap],
                       videos=len(ds),prediction_count=len(columns['score']),selected_epoch=saved['epoch'],
