@@ -11,6 +11,7 @@ CODE=Path(__file__).resolve().parents[1];sys.path.insert(0,str(CODE))
 from tools.baseline_protocol import read,save,sha,code_identity
 from tools import run_native_joint as native
 ORIGIN=Path('/vepfs/vlms/highscore_native_full20_706d076_1103')
+REUSE=Path('/vepfs/vlms/highscore_quality_guard_cached_569896f_1103')
 BASEMODES=tuple(native.MODES);JOBS=tuple(native.TASKS)
 MODES=BASEMODES+tuple(m+'guard' for m in BASEMODES)
 SPEC=dict(schema='native-quality-protection-readout-v1',origin=str(ORIGIN),modes=MODES,
@@ -22,7 +23,8 @@ SPEC=dict(schema='native-quality-protection-readout-v1',origin=str(ORIGIN),modes
     selection='same original perclass quota and eligibility; high risk deleted; tie originalindex',
     acceptance='fixed5percent two-shift mean>=1pp, both positive and above samecountconfidence; report all methods/rates',
     scope='S1/S2 historical development; followup designed after native20 negative results, not independent validation',
-    budget_seconds=300,cache='one native backbonepass; new disk-reconstructed head replays same sampled tensors; first3 candidates additionally duplicate fullnativepass and demand all2logits bitwise identity')
+    budget_seconds=1200,budget_clarification='user clarified300seconds is short; experiments approaching30minutes are long. Allow20minutes per readonlyidea, no automatic longtraining.',
+    cache='one native backbonepass; new disk-reconstructed head replays same sampled tensors; first3 candidates additionally duplicate fullnativepass and demand all2logits bitwise identity')
 
 
 def protected_risk(pbg,quality):
@@ -77,8 +79,8 @@ def replay(entry):
                     if count==3 and not (entry/'throughput.json').exists():
                         duplicate=sum(direct_seconds);estimate=(pass_began-began)+(time.monotonic()-pass_began-duplicate)*total/3+duplicate
                         assert sum(direct_seconds)>sum(cached_seconds)
-                        save(entry/'throughput.json',dict(first_videos=3,total_videos=total,one_pass_and_diskhead_replay_estimate_seconds=estimate,direct_duplicate_seconds=direct_seconds,cached_duplicate_seconds=cached_seconds,all_first3_fullnative_logits_bitwise_equal=True,limit=300))
-                        assert estimate<300,'read-only budget exceeded; no automatic restart'
+                        save(entry/'throughput.json',dict(first_videos=3,total_videos=total,one_pass_and_diskhead_replay_estimate_seconds=estimate,direct_duplicate_seconds=direct_seconds,cached_duplicate_seconds=cached_seconds,all_first3_fullnative_logits_bitwise_equal=True,limit=SPEC['budget_seconds']))
+                        assert estimate<SPEC['budget_seconds'],'read-only budget exceeded; no automatic restart'
         return result
     first=output()
     assert digest==base.tensor_digest(model.state_dict()) and torch.equal(cr,torch.get_rng_state()) and torch.equal(gr,torch.cuda.get_rng_state(0))
@@ -105,7 +107,17 @@ def run(root):
     from tools.baseline_gpu import snapshot
     assert read(ORIGIN/'independent_final_audit.json')['passed'] and not (ORIGIN/'stop.json').exists()
     assert not Path('/proc',str(read(ORIGIN/'state.json')['owner_pid'])).exists()
-    root.mkdir(parents=True,exist_ok=False);save(root/'plan.json',dict(spec=SPEC,code=code_identity(),origin_final_audit_sha256=sha(ORIGIN/'independent_final_audit.json')))
+    previous=read(REUSE/'state.json');assert all(not Path('/proc',str(pid)).exists() for pid in [previous['owner_pid']]+[v['pid'] for v in previous['active'].values()])
+    root.mkdir(parents=True,exist_ok=False);reused={}
+    for task in JOBS:
+        old=REUSE/task
+        if not (old/'gpu_complete.json').exists():continue
+        report=read(old/'gpu_complete.json');assert report['passed'] and report['optimizer_steps']==0
+        for suffix in ('','guard'):
+            e=root/(task+suffix);e.mkdir()
+            for name in (('gpu_complete.json','predictions.pt','readout.pt','throughput.json','lease_replay.json') if not suffix else ('gpu_complete.json','predictions.pt')):os.link(REUSE/(task+suffix)/name,e/name)
+        reused[task]=dict(source_root=str(REUSE),source_owner_pid=previous['owner_pid'],source_commit=read(Path(str(REUSE)+'_launch.json'))['head'],GPU_sha256=sha(old/'gpu_complete.json'),readout_sha256=sha(old/'readout.pt'),prediction_sha256=sha(old/'predictions.pt'))
+    save(root/'plan.json',dict(spec=SPEC,code=code_identity(),origin_final_audit_sha256=sha(ORIGIN/'independent_final_audit.json'),reused_complete=reused,remaining=[t for t in JOBS if t not in reused],prior_own_group_exited=True))
     active={};done=[]
     def stop(sig,frame):
         save(root/'stop.json',dict(signal=sig,automatic_restart_authorized=False))
@@ -114,7 +126,7 @@ def run(root):
         raise SystemExit(128+sig)
     for sig in (signal.SIGTERM,signal.SIGINT):signal.signal(sig,stop)
     try:
-        for stage,tasks in [('replay',JOBS),('evaluate',('S1','S2'))]:
+        for stage,tasks in [('replay',tuple(t for t in JOBS if t not in reused)),('evaluate',('S1','S2'))]:
             pending=list(tasks)
             while pending or active:
                 for task,t in list(active.items()):
