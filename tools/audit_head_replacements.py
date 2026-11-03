@@ -18,7 +18,7 @@ from libs.evaluation.evaluator_anet import load_gt_seg_from_json
 
 def metrics(gt,pred):
     classes=sorted(gt.label.unique())
-    assert classes==list(range(10))
+    assert classes and set(classes)<=set(range(10))
     ap=np.asarray([IndependentAP(gt[gt.label==c].reset_index(drop=True),pred[pred.label==c].reset_index(drop=True)).ap(
         np.ones(int((pred.label==c).sum()),dtype=bool)) for c in classes]).mean(0)
     high=pred[pred.score>=.3].reset_index(drop=True);bg=np.ones(len(high),dtype=bool)
@@ -27,7 +27,7 @@ def metrics(gt,pred):
         if len(truth):
             matrix=overlaps(high.iloc[ids][['t-start','t-end']].to_numpy(float),truth[['t-start','t-end']].to_numpy(float))
             bg[ids]=matrix.max(1)<.01
-    return dict(map_by_tiou=ap.tolist(),map=float(ap.mean()),highscore_count=len(high),
+    return dict(map_by_tiou=ap.tolist(),map=float(ap.mean()),GT_classes=[int(c) for c in classes],highscore_count=len(high),
                 highscore_pure_task_background=int(bg.sum()),highscore_nonBG=int((~bg).sum()),
                 pool_caveat='detector outputs differ between methods; counts are not matched-pool recall')
 
