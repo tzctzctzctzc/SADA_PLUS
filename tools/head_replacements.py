@@ -51,7 +51,8 @@ def install(model, channels, head_dim, kernel, layers, with_ln):
     assert cfg['specification']==SPEC and cfg['variant'] in SPEC['variants']
     # 构造新部件前，原模型的完整初始化必须与历史基线一致。
     model.head_replacement_base_sha=tensor_digest(model.state_dict())
-    devices=[model.device.index or 0] if model.device.type=='cuda' else []
+    device=torch.device(model.device)
+    devices=[device.index or 0] if device.type=='cuda' else []
     with torch.random.fork_rng(devices=devices):
         torch.manual_seed(SPEC['initialization_seed'])
         if cfg['variant']=='trident':

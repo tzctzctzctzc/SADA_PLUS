@@ -31,3 +31,18 @@ def test_bin_logits_preserve_sign_and_legacy_distances_stay_nonnegative():
     head.distribution_offsets=True
     distributed=head(x,mask)[0][0]
     assert legacy.min()==0 and distributed.max()<0
+
+
+def test_installer_accepts_original_string_device_without_disturbing_RNG():
+    from copy import deepcopy
+    from torch import nn
+    from tools.head_replacements import install,SPEC
+    for variant in ('trident','interaction'):
+        model=nn.Module();model.device='cpu';model.cfg=dict(head_replacement=dict(variant=variant,specification=SPEC))
+        model.use_trident_head=False;model.num_classes=3;model.train_cls_prior_prob=.01;model.train_head_empty_cls=[]
+        model.reg_head=RegHead(4,4,1,num_layers=1,with_ln=False,num_bins=0)
+        before=torch.get_rng_state().clone()
+        install(model,4,4,3,1,False)
+        assert torch.equal(before,torch.get_rng_state()) and model.head_replacement_base_sha
+        if variant=='trident':assert model.use_trident_head and model.reg_head.distribution_offsets
+        else:assert model.task_interaction is not None

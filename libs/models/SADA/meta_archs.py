@@ -1229,7 +1229,7 @@ class SADA(nn.Module):
             raise NotImplementedError('Unknown classification loss type')
             
             
-        if self.use_trident_head and not self.cfg.get('head_replacement'): 
+        if self.use_trident_head and not self.cfg.get('head_replacement'):
             # couple the classification loss with iou score
             iou_rate = ctr_giou_loss_1d(
                 pred_offsets,
