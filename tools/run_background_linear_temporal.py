@@ -80,8 +80,19 @@ def kernel(entry,x,bg,quality,guard):
             timed_digests.append((base.tensor_digest(model.state_dict()),base.tensor_digest(opt.state_dict())))
         assert timed_digests[0]==timed_digests[1]
         reports[m]=dict(parameters=sum(p.numel() for p in a.parameters()),gradient=norm,cached_direct_loss_grad_update_exact=True,full_state_disk_restore_next_update_exact=True,RNG_draws_exact=True,checkpoint_sha256=sha(path),direct_step_seconds=durations[0],cached_step_seconds=durations[1])
-    assert sum(v['cached_step_seconds'] for v in reports.values())<sum(v['direct_step_seconds'] for v in reports.values())
-    save(entry/'kernel_complete.json',dict(passed=True,reports=reports,descriptor_seconds=descriptor_seconds,seconds=time.time()-began,guard=guard,guard_sha256=sha(guard),descriptor_sha256=sha(entry/'kernel_descriptors.pt'),cached_benchmark_includes_CPU_to_GPU=True,timed_updates_exact=True))
+    # 正式三头共用一次描述符提取；按这个实际调度测收益，避免把三次重复编码算作基线。
+    aggregate=[];aggregate_digests=[]
+    for use_cache in (False,True):
+        models={m:LinearBackground(m).cuda() for m in MODES}
+        optimizers={m:torch.optim.AdamW(h.parameters(),lr=3e-4,weight_decay=.05) for m,h in models.items()}
+        torch.cuda.synchronize();begin=time.perf_counter()
+        for _ in range(repeats):
+            reps={m:loaded[m].cuda() for m in MODES} if use_cache else descriptors(**x)
+            for m in MODES:update(models[m],optimizers[m],reps[m],bg,quality)
+        torch.cuda.synchronize();aggregate.append((time.perf_counter()-begin)/repeats)
+        aggregate_digests.append({m:(base.tensor_digest(models[m].state_dict()),base.tensor_digest(optimizers[m].state_dict())) for m in MODES})
+    assert aggregate_digests[0]==aggregate_digests[1] and aggregate[1]<aggregate[0]
+    save(entry/'kernel_complete.json',dict(passed=True,reports=reports,descriptor_seconds=descriptor_seconds,seconds=time.time()-began,guard=guard,guard_sha256=sha(guard),descriptor_sha256=sha(entry/'kernel_descriptors.pt'),cached_benchmark_includes_CPU_to_GPU=True,timed_updates_exact=True,shared_direct_three_head_step_seconds=aggregate[0],cached_three_head_step_seconds=aggregate[1]))
 
 
 def train(entry):
