@@ -139,7 +139,7 @@ def train(entry):
         parameters=sum(p.numel() for p in model.parameters()),readout_parameters_RNG_unchanged=True,saved_model_GPU_predictions_bitwise_equal=True,initial_digest=base.tensor_digest(initial),final_digest=digest,seconds=time.monotonic()-began,target_train_GT_read=False))
 
 
-def evaluate(root,s):
+def evaluate(root,s,MODES=MODES,TASKS=TASKS,SPEC=SPEC):
     import torch,pandas as pd
     from tools.foreground_oracle_ap import prediction_frame,background_mask,ClassAP
     from tools.audit_background_ap_cost import IndependentAP
@@ -158,7 +158,7 @@ def evaluate(root,s):
             frames[m]=prediction_frame(output[role]);e=torch.cat([r['eligible'] for r in output[role]]).numpy()
             if eligible is None:eligible=e
             else:assert np.array_equal(e,eligible)
-        f=frames['frozen'];bg=background_mask(truth[role],f);positions={};fast={};refs={};baseline=[]
+        f=frames[MODES[0]];bg=background_mask(truth[role],f);positions={};fast={};refs={};baseline=[]
         for c in range(10):
             ids=np.flatnonzero(f.label.to_numpy()==c);positions[c]=ids;fast[c]=ClassAP(truth[role][truth[role].label==c],f.iloc[ids]);refs[c]=IndependentAP(truth[role][truth[role].label==c],f.iloc[ids].reset_index(drop=True));baseline.append(refs[c].ap(np.ones(len(ids),bool)))
         def effect(chosen):
