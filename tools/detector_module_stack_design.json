@@ -1,0 +1,25 @@
+{
+  "schema": "detector-module-stack-design-v1",
+  "authorization": "用户授权根据Oracle空间迁移和组合涨点模块，直接实施",
+  "oracle_mean_delta_pp": {"classification":6.883351,"localization":2.187057,"joint":7.861102},
+  "oracle_scope": "目标训练集监督参照，不是UDA可达保证，不能相加",
+  "arms": ["control","quality","teacher","combined"],
+  "modules": ["原十类logits的源IoU质量VFL", "目标TRAIN固定教师软分类及DIoU，学生通道mask一致性", "原SADA条件对齐，四组均启用"],
+  "source_reference": "相同原Prototype初始化，新的模型/优化器/EMA20，不续旧背景训练",
+  "excluded": "三尺度融合已独审平均负，不加入当前组合",
+  "sources": [
+    {"url":"https://openaccess.thecvf.com/content/CVPR2021/html/Zhang_VarifocalNet_An_IoU-Aware_Dense_Object_Detector_CVPR_2021_paper.html","adaptation":"直接调用作者VFL，源GT产生固定五tIoU阈值质量目标"},
+    {"url":"https://raw.githubusercontent.com/microsoft/SoftTeacher/main/ssod/models/soft_teacher.py","adaptation":"参考目标分类及回归伪监督；没有ROI、box jitter或在线教师，不是SoftTeacher复现"},
+    {"url":"https://raw.githubusercontent.com/microsoft/SoftTeacher/main/configs/soft_teacher/base.py","adaptation":"参考分类门限.9；适配权重1和channelmask.1事先固定，无目标GT调参"}
+  ],
+  "checkpoint_contract": {
+    "prior_failure": "同权重同前向跨实例卷积反向末位不同，最大rawgrad差2.6435591280460358e-6，旧门禁没有通过",
+    "fresh_only": "完整磁盘状态及RNG逐值恢复、真实source更新、目标损失CPU/GPU参照；不声称跨实例下一步逐bit，不允许自动接续，不上线等价提速",
+    "diagnostic_root": "/vepfs/vlms/highscore_detector_iacs_kernel_debug_af0a9cd_1103"
+  },
+  "target_GT_fit": false,
+  "target_val_selection": false,
+  "scope": "S1/S2历史开发方向全部视频；四组fixed20全报告，不选epoch",
+  "budget_seconds_per_task": 1800,
+  "goal": "完整目标mAP至少+1pp是目标，不保证收益"
+}
