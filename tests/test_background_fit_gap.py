@@ -1,5 +1,6 @@
 import numpy as np
 from tools.background_fit_gap import auc, summarize
+from tools.audit_background_fit_gap import independent_auc
 
 
 def test_auc_ties_and_missing_class():
@@ -10,6 +11,7 @@ def test_auc_ties_and_missing_class():
     labels=np.array([1,0,1,0,1]);scores=np.array([.2,.2,.1,.5,.9])
     expected=np.mean([float(a>b)+.5*float(a==b) for a in scores[labels==1] for b in scores[labels==0]])
     assert auc(labels,scores)==expected
+    assert independent_auc(labels,scores)==expected
 
 
 def test_macro_denominator_and_fixed_budget():
