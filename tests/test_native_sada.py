@@ -57,3 +57,13 @@ def test_fresh_protocol_has_control_and_no_resume_path():
     import ast
     tree=ast.parse((Path(__file__).parents[1]/'tools/run_native_sada.py').read_text(encoding='utf-8'))
     assert not any(isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='restore' and any(isinstance(a,ast.Name) and a.id=='prior' for a in n.args) for n in ast.walk(tree))
+
+
+def test_batched_count_sync_preserves_loss_grad_metrics_and_random_stream():
+    from tools.native_sada_math import conditional_loss
+    from tools.native_sada_legacy import conditional_loss_legacy
+    torch.manual_seed(711);m=FakeSADA();ref=copy.deepcopy(m);s=[torch.randn(4,13,requires_grad=True),torch.randn(4,7,requires_grad=True)];t=[torch.randn(4,17,requires_grad=True),torch.randn(4,9,requires_grad=True)];sr=[a.detach().clone().requires_grad_() for a in s];tr=[a.detach().clone().requires_grad_() for a in t];sm=[torch.ones(a.shape[1],dtype=torch.bool) for a in s];tm=[torch.ones(a.shape[1],dtype=torch.bool) for a in t];labels=[torch.nn.functional.one_hot(torch.arange(a.shape[1])%3,10).float() for a in s];logits=[torch.randn(a.shape[1],10)-2 for a in t]
+    rng=torch.get_rng_state();a,details=conditional_loss(m,s,sm,t,tm,labels,logits);a.backward();after=torch.get_rng_state();torch.set_rng_state(rng);b,prior=conditional_loss_legacy(ref,sr,sm,tr,tm,labels,logits);b.backward()
+    assert torch.equal(a,b) and details==prior and torch.equal(after,torch.get_rng_state())
+    for x,y in zip(s+t,sr+tr):assert torch.equal(x.grad,y.grad)
+    for x,y in zip(m.parameters(),ref.parameters()):assert (x.grad is None and y.grad is None) or torch.equal(x.grad,y.grad)

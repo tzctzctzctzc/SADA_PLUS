@@ -23,24 +23,25 @@ def conditional_loss(model,source,smasks,target,tmasks,source_labels,target_logi
     for l,(sf,sm,tf,tm,sl,tl) in enumerate(zip(source,smasks,target,tmasks,source_labels,target_logits)):
         sx=sf.T[sm];tx=tf.T[tm];sl=sl[sm];prob=tl[tm].detach().sigmoid();v,idx=prob.max(-1)
         pseudo=F.one_hot(idx,num_classes=10).to(prob.dtype)*(v>=cfg['pl_threshold'])[:,None]
-        src=[];tgt=[];level_counts=[]
-        for c in range(11 if with_background else 10):
-            a=(sl==0).all(-1) if c==10 else sl[:,c]==1
-            b=(pseudo==0).all(-1) if c==10 else pseudo[:,c]==1
+        src=[];tgt=[];nc=11 if with_background else 10
+        selections=[((sl==0).all(-1) if c==10 else sl[:,c]==1,(pseudo==0).all(-1) if c==10 else pseudo[:,c]==1) for c in range(nc)]
+        # 每层一次同步所有计数，代替每类反复any/sum/int；类次序与Dropout调用不变。
+        level_counts=torch.stack([torch.stack((a.sum(),b.sum())) for a,b in selections]).cpu().tolist()
+        for c,((a,b),(na,nb)) in enumerate(zip(selections,level_counts)):
             weight=cfg.get('weight_no_class_adv',1.) if c==10 else 1.
-            level_counts.append([int(a.sum()),int(b.sum())])
-            for x,mask,terms,label in ((sx,a,src,0.),(tx,b,tgt,1.)):
-                if not mask.any():continue
-                value=torch.cat((x[mask],model.learnable_embeddings[c].expand(int(mask.sum()),-1)),1)
+            for x,mask,count,terms,label in ((sx,a,na,src,0.),(tx,b,nb,tgt,1.)):
+                if not count:continue
+                value=torch.cat((x[mask],model.learnable_embeddings[c].expand(count,-1)),1)
                 z=model.compute_level_dom_preds(value,True,l,0,beta=cfg['beta']).squeeze(-1)
                 terms.append(weight*F.binary_cross_entropy_with_logits(z,torch.full_like(z,label)))
-                accuracy.append(float(((z.detach()>=0)==bool(label)).float().mean()))
+                accuracy.append(((z.detach()>=0)==bool(label)).float().mean())
         s=sum(src,sx.new_zeros(()))/max(1,len(src))
         t=sum(tgt,tx.new_zeros(()))/max(1,len(tgt))
         if l in cfg['semantic_alignment_levels']:
             total=total+cfg.get('weight_level_'+str(l),1.)*((cfg['weight_source_cond_adv']*s+cfg['weight_target_cond_adv']*t)/len(cfg['semantic_alignment_levels']))
         counts.append(level_counts)
-    return total,dict(class_counts=counts,domain_group_accuracy=sum(accuracy)/max(1,len(accuracy)))
+    values=torch.stack(accuracy).cpu().tolist() if accuracy else []
+    return total,dict(class_counts=counts,domain_group_accuracy=sum(values)/max(1,len(values)))
 
 
 def official_conditional_reference(model,source,smasks,target,tmasks,source_labels,target_logits,with_background=True):

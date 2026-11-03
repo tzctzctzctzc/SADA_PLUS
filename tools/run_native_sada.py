@@ -31,6 +31,7 @@ SPEC=dict(schema='native-SADA-background-fresh-v1',shifts=['S1','S2'],modes=MODE
     acceptance='fixed5percent targetmean>=1pp, bothshiftspositive and eachabove samecountconfidence; allmodes/allbudgets report',
     caveat='S1/S2 historical development, not full6directions/untouchedtest/full50epochSADA reproduction; sourceheadholdout still seen by originaldetector',
     literature=['https://arxiv.org/html/2312.13377v3','https://github.com/davidpujol/SADA'])
+SPEC['efficiency']='batch only perlevel maskcount CPU synchronization; sameclass order, discriminator Dropout calls, loss reductions, precision and RNG; realGPU fullstep legacy/native equivalence and measured kernel speed required before fresh formaltraining'
 
 
 def train(entry):
@@ -38,6 +39,7 @@ def train(entry):
     from tools import baseline_engine as base
     from tools.native_joint_math import NativeBackground,cost_proposal_loss,critical_anchor
     from tools.native_sada_math import NativeSADA,sample_pyramid,conditional_loss,official_conditional_reference
+    from tools.native_sada_legacy import conditional_loss_legacy
     from tools.run_foreground_calibration_oracle import load_detector
     from tools.run_proposal_foreground import first_cuda_guard
     from tools.run_uda_background import TargetStream
@@ -56,7 +58,7 @@ def train(entry):
         d=torch.optim.AdamW(m.da_parameters(),lr=cfg['opt']['disc_learning_rate'],weight_decay=.05)
         return m,o,d
     labels_cache={};assignment_records={}
-    def update(m,o,d,i,epoch,ti=None,official=False):
+    def update(m,o,d,i,epoch,ti=None,official=False,legacy=False):
         joint=epoch>1;active=uses_da and epoch>5;m.body_mode(joint);m.head.train();m.disc_dom_conditional_adv.train(active);m.cls_head.eval();o.zero_grad(set_to_none=True);d.zero_grad(set_to_none=True)
         r=fit[i];t=teacher[i]
         if joint:
@@ -69,7 +71,7 @@ def train(entry):
                 gt=truth[r['video']];labels_cache[i]=m.source_point_labels(features,torch.tensor(gt['segments'],device='cuda',dtype=torch.float32).reshape(-1,2),torch.tensor(gt['labels'],device='cuda',dtype=torch.long))
                 assignment_records[r['video']]=dict(points=[p.detach().cpu() for p in m.point_generator([f[None] for f in features])],masks=[v.cpu() for v in masks],labels=[v.cpu() for v in labels_cache[i]],center_sample=m.train_center_sample,radius=m.train_center_sample_radius,reg_distance=m.train_reg_distance)
             if official:adv=official_conditional_reference(m,features,masks,tf,tm,labels_cache[i],tl,with_bg)
-            else:adv,details=conditional_loss(m,features,masks,tf,tm,labels_cache[i],tl,with_bg)
+            else:adv,details=(conditional_loss_legacy if legacy else conditional_loss)(m,features,masks,tf,tm,labels_cache[i],tl,with_bg)
             loss=loss+cfg['model']['loss_weights']['weight_adv']/cfg['model']['loss_weights']['weight_downstream']*adv
         assert torch.isfinite(loss);loss.backward()
         # 保留现有SADA先裁判别器权值、再全局梯度裁剪/两优化器step的次序。
@@ -97,12 +99,27 @@ def train(entry):
     m.load_state_dict(initial);o=torch.optim.AdamW([dict(params=list(m.backbone.parameters())+list(m.neck.parameters()),lr=3e-5),dict(params=m.head.parameters(),lr=3e-4)],weight_decay=.05);d=torch.optim.AdamW(m.da_parameters(),lr=cfg['opt']['disc_learning_rate'],weight_decay=.05)
     if uses_da:
         # GPU参照保留原SADA条件分支AST；相同CUDA dropout随机流比较全loss、全部梯度和双AdamW。
-        state=capture(m,o,d,order,stream,[],0,0);a=update(m,o,d,0,6,0);digest=base.tensor_digest(m.state_dict());od=base.tensor_digest(o.state_dict());dd=base.tensor_digest(d.state_dict());grads={n:p.grad.clone() if p.grad is not None else None for n,p in m.named_parameters()}
+        state=capture(m,o,d,order,stream,[],0,0);a=update(m,o,d,0,6,0);digest=base.tensor_digest(m.state_dict());od=base.tensor_digest(o.state_dict());dd=base.tensor_digest(d.state_dict());grads={n:p.grad.clone() if p.grad is not None else None for n,p in m.named_parameters()};after_cpu=torch.get_rng_state();after_cuda=torch.cuda.get_rng_state(0)
         ref,ro,rd=build();restore(state,ref,ro,rd,order,stream);b=update(ref,ro,rd,0,6,0,True)
         assert a['loss']==b['loss'] and digest==base.tensor_digest(ref.state_dict()) and od==base.tensor_digest(ro.state_dict()) and dd==base.tensor_digest(rd.state_dict())
         for n,p in ref.named_parameters():assert (p.grad is None and grads[n] is None) or torch.equal(p.grad,grads[n])
+        restore(state,ref,ro,rd,order,stream);c=update(ref,ro,rd,0,6,0,legacy=True)
+        assert a==c and digest==base.tensor_digest(ref.state_dict()) and od==base.tensor_digest(ro.state_dict()) and dd==base.tensor_digest(rd.state_dict()) and torch.equal(after_cpu,torch.get_rng_state()) and torch.equal(after_cuda,torch.cuda.get_rng_state(0))
+        for n,p in ref.named_parameters():assert (p.grad is None and grads[n] is None) or torch.equal(p.grad,grads[n])
         assert base.tensor_digest(m.backbone.state_dict())!=base.tensor_digest({k[len('backbone.'):]:v for k,v in initial.items() if k.startswith('backbone.')})
         del ref,ro,rd,state,grads;torch.cuda.empty_cache()
+        with torch.no_grad():
+            sf,sm=m.features(get(fit[0]),fit[0]['video_metadata']);tf,tm=m.features(get(target[0]),target[0]['video_metadata']);tl=m.pseudo_logits(tf,tm)
+        sf=[x.detach().requires_grad_() for x in sf];tf=[x.detach().requires_grad_() for x in tf];old_times=[];new_times=[]
+        for _ in range(10):
+            cpu_rng=torch.get_rng_state();cuda_rng=torch.cuda.get_rng_state(0)
+            for fn,times in ((conditional_loss_legacy,old_times),(conditional_loss,new_times)):
+                torch.set_rng_state(cpu_rng);torch.cuda.set_rng_state(cuda_rng,0);m.zero_grad(set_to_none=True)
+                for x in sf+tf:x.grad=None
+                torch.cuda.synchronize();tick=time.monotonic();value,_=fn(m,sf,sm,tf,tm,labels_cache[0],tl,with_bg);value.backward();torch.cuda.synchronize();times.append(time.monotonic()-tick)
+        save(entry/'efficiency_benchmark.json',dict(passed_numeric=True,full_model_dualopt_grad_and_RNG_exact=True,legacy_seconds=old_times,optimized_seconds=new_times,speedup=sum(old_times)/sum(new_times),scope='conditional loss forward-backward on real fullFPN inputs; not endtoendtraining speedup'))
+        assert sum(old_times)>sum(new_times),'no measured synchronization optimization gain'
+        del sf,sm,tf,tm,tl,value;torch.cuda.empty_cache()
     ti=int(stream.draw(1)[0]) if uses_da else None;update(m,o,d,0,6 if uses_da else 2,ti);base.checkpoint(entry/'kernel.pt',capture(m,o,d,order,stream,[],0,1));st=torch.load(entry/'kernel.pt',map_location='cpu')
     def draws():return torch.randperm(len(fit),generator=order),stream.draw(1),torch.rand(3),torch.rand(3,device='cuda')
     restore(st,m,o,d,order,stream);first=draws();restore(st,m,o,d,order,stream);again=draws();assert all(torch.equal(a,b) for a,b in zip(first,again))
