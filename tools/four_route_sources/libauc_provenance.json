@@ -1,0 +1,12 @@
+{
+  "repo": "Optimization-AI/LibAUC",
+  "commit": "3c02aa9877e0091114a00f94a8c6367698eb5637",
+  "files": {
+    "libauc/losses/auc.py": "5040227229fdd2d05ccfb035482a79c8e449bb76736de36df4b4512ef3a429de",
+    "libauc/losses/surrogate.py": "eba5cb3a3ae802109e0c89311af71e05d798d8e1e3068c86e81b323941b88828",
+    "libauc/optimizers/sopa.py": "35c1f2a74d8106346068a6d7a525cc9e517772e86fe05623586da161ab61d6ca"
+  },
+  "licenses": {
+    "LICENSE": "MIT License\n\nCopyright (c) 2023 OptMAI\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n"
+  }
+}

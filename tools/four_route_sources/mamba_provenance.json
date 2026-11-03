@@ -1,0 +1,6 @@
+{
+  "commit": "ec9108b72d5db59f6d634c94cd0e008228a7b918",
+  "url": "https://raw.githubusercontent.com/OpenGVLab/video-mamba-suite/ec9108b72d5db59f6d634c94cd0e008228a7b918/mamba/mamba_ssm/ops/selective_scan_interface.py",
+  "sha256": "8c9ed4a19c2b655e3a5895548830491af17b9598af20464f50afc880c548c06d",
+  "copyright": "Copyright (c) 2023, Tri Dao, Albert Gu. Reference code only; native CUDA kernels not vendored."
+}
