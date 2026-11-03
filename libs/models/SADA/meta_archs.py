@@ -551,6 +551,10 @@ class SADA(nn.Module):
             from .prototype_capacity import build_capacity
             self.rq3_capacity=build_capacity(cfg['prototype_capacity'],fpn_dim,self.num_classes,
                 self.fpn_strides,self.reg_range,self.device)
+        self.domain_factor = None
+        if cfg.get('domain_factor'):
+            from tools.domain_factor_vae import build_factor
+            self.domain_factor = build_factor(cfg['domain_factor'], fpn_dim, self.num_classes, self.device)
         
     @property
     def device(self):
@@ -688,6 +692,13 @@ class SADA(nn.Module):
         # Generate the logits that we use for the pseudo-label computation (static)
         feats_tgt_pl, masks_tgt_pl, _ = self.backbone_pl(batched_inputs_tgt, batched_masks_tgt)
         fpn_feats_tgt_pl, fpn_masks_tgt_pl = self.neck_pl(feats_tgt_pl, masks_tgt_pl)  # Maintains the same shape as its input
+
+        factor_src, factor_tgt = [], []
+        if self.domain_factor is not None:
+            # 检测/回归/Prototype全部经过动作瓶颈；没有原始特征旁路。
+            fpn_feats_src, factor_src = self.domain_factor.transform(fpn_feats_src, fpn_masks_src, mode == 'train')
+            fpn_feats_tgt, factor_tgt = self.domain_factor.transform(fpn_feats_tgt, fpn_masks_tgt, mode == 'train')
+            fpn_feats_tgt_pl, _ = self.domain_factor.transform(fpn_feats_tgt_pl, fpn_masks_tgt_pl, False)
         
 
         # Concatenate the two lists L features levels, each of which with shape [B x F x T] into L feature levels of shape [2B x F x T]
@@ -832,6 +843,13 @@ class SADA(nn.Module):
                 curr_epoch=curr_epoch
             )
             
+            if mode == 'train' and self.domain_factor is not None:
+                auxiliary = self.domain_factor.auxiliary(factor_src, factor_tgt, gts_cls_per_level_src,
+                    [x[bs:] for x in out_cls_logits], curr_epoch, self.cfg['train_cfg'].get('warmup_adv', 0))
+                for key, value in auxiliary.items():
+                    losses['factor_'+key] = torch.as_tensor(value, device=self.device).detach()
+                losses['downstream_loss'] = losses['downstream_loss'] + auxiliary['loss']
+
             if mode=='train' and self.rq3_capacity is not None:
                 auxiliary=self.rq3_capacity(video_list_src,video_list_tgt,fpn_feats_src,fpn_feats_tgt,curr_epoch)
                 for key,value in auxiliary.items():

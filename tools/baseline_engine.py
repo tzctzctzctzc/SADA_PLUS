@@ -74,7 +74,8 @@ def build(cfg):
     ema_model = make_meta_arch('sada', ctx.cfg, device='cuda:0').to('cuda:0')
     ctx.model_ema = ModelEma2(ema_model, decay=cfg['train_cfg']['ema_decay'])
     ctx.initial_state_sha = tensor_digest(ctx.model.state_dict())
-    ctx.initial_detector_sha=tensor_digest({k:v for k,v in ctx.model.state_dict().items() if not k.startswith('rq3_capacity.')})
+    ctx.initial_detector_sha=tensor_digest({k:v for k,v in ctx.model.state_dict().items()
+        if not k.startswith(('rq3_capacity.', 'domain_factor.'))})
     if cfg['baseline']['regime'] == 'so':
         # 模型参数构造与UDA完全相同；仅关闭对抗目标，保持检测与优化器阶段。
         ctx.cfg['model']['adv_method'] = ['None']
@@ -311,6 +312,8 @@ def train(cfg, entry, resume=None):
                    target_gt_cls_loss=0., target_gt_reg_loss=0., target_gt_downstream_loss=0.)
         if cfg.get('prototype_capacity'):
             row['auxiliary']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_rq3_')}
+        if cfg.get('domain_factor'):
+            row['domain_factor']={k[2:]:float(v) for k,v in metrics.items() if k.startswith('t_factor_')}
         if epoch%5 == 0:
             ctx.valid_metrics_src.reset()
             value = float(ctx._valid_epoch(epoch, ctx.val_loader_src, domain='src'))
@@ -358,6 +361,8 @@ def evaluate(cfg, entry, annotation):
                                 ('label',item['labels']),('score',item['scores'])]:
                         columns[k].extend(v.detach().cpu().tolist())
         evaluator = ANETdetection(str(annotation),splits,num_workers=4,action_subsampling='10_majority_classes')
+        # 保留完整原始输出，后续可以独立重算AP；不重新跑检测器或只保留汇总数。
+        checkpoint(entry/'evaluation'/('%s_predictions.pt' % domain), columns)
         ap,mean,*_ = evaluator.evaluate({k:np.asarray(v) for k,v in columns.items()},verbose=True)
         result = dict(map_by_tiou=[float(x) for x in ap],
                       videos=len(ds),prediction_count=len(columns['score']),selected_epoch=saved['epoch'],
