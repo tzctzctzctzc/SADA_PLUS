@@ -1,5 +1,6 @@
 """独立重算全部源留出曲线，复用已测试的NumPy匹配，不选择时点。"""
 import sys
+import time
 from pathlib import Path
 import json
 import hashlib
@@ -76,7 +77,7 @@ def audit(root,s):
                     ids=np.flatnonzero(f.label.to_numpy()==c);positions[role][c]=ids;engines[role][c]=IndependentAP(truth[role][truth[role].label==c],f.iloc[ids].reset_index(drop=True))
                     baseline[role].append(engines[role][c].ap(np.ones(len(ids),dtype=bool)).tolist())
                 if role=='validation':
-                    old=read(ORIGIN/s/'independent_results'/f'{s}.json') if (ORIGIN/s/'independent_results'/f'{s}.json').exists() else read(ORIGIN/'independent_results'/f'{s}.json')
+                    old=read(ORIGIN/'independent_results'/f'{s}.json')
                     assert np.allclose(baseline[role],old['original_per_class_AP'],atol=1e-7,rtol=0)
             else:assert raw.equals(reference_frames[role])
             bg=backgrounds[role];permode={}
@@ -105,7 +106,14 @@ def audit(root,s):
 def main(root):
     results={}
     for i in range(1,7):
-        s=f'S{i}';results[s]=audit(root,s)
+        s=f'S{i}'
+        while not (root/s/'complete.json').exists():
+            assert not (root/'error.json').exists(), 'production failure; preserve completed stages'
+            time.sleep(5)
+        results[s]=audit(root,s)
+    while not (root/'final.json').exists():
+        assert not (root/'error.json').exists()
+        time.sleep(3)
     final=read(root/'final.json');assert set(final['results'])==set(results)
     for s in results:assert final['complete_sha256'][s]==results[s]['complete_sha256'] and final['results'][s]==read(root/s/'complete.json')
     means={}
