@@ -98,7 +98,7 @@ def probe(cfg, entry, binding):
         for opt in base.optimizers(ctx):
             opt.zero_grad(set_to_none=True)
         ctx.model.train()
-        losses = ctx.model(source, target, mode='train', curr_epoch=epoch)[0]
+        losses = ctx.model(video_list_src=source, video_list_tgt=target, mode='train', curr_epoch=epoch)[0]
         final = losses['downstream_loss']*cfg['model']['loss_weights']['weight_downstream']
         final.backward()
         gradients = {k: p.grad.detach().clone() for k, p in branch.named_parameters() if p.grad is not None}
