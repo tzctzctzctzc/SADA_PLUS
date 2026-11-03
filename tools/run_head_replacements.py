@@ -16,7 +16,9 @@ from tools.head_replacements import SPEC
 
 ORIGIN=Path('/vepfs/vlms/prototype_capacity12_5f9a157_1029/formal/control')
 DATA=Path('/vepfs/vlms/SADA_PLUS')
-TASKS=tuple(f'S{s}_{v}' for s in range(1,7) for v in SPEC['variants'])
+VARIANTS=('trident',)
+TASKS=tuple(f'S{s}_{v}' for s in range(1,7) for v in VARIANTS)
+INTERACTION_ROOT=Path('/vepfs/vlms/head_replacements12_764a29a_1104')
 
 
 def configuration(original,variant,identity,tmpdir):
@@ -138,7 +140,7 @@ def run(root):
         for path,key in ((old['dataset']['json_file'],'source_manifest_sha256'),(old['baseline']['target_manifest'],'target_manifest_sha256')):
             assert inputs[path]==old['baseline'][key]
         assert inputs[old['prototype_capacity']['prepared_cache']]==old['prototype_capacity']['prepared_cache_sha256']
-        for variant in SPEC['variants']:
+        for variant in VARIANTS:
             entry=root/(shift+'_'+variant);entry.mkdir();(entry/'evaluation').mkdir()
             save(entry/'config.json',configuration(old,variant,identity,root/'tmp'))
             save(entry/'origin_binding.json',dict(origin=str(ORIGIN/shift),inputs=inputs,
@@ -177,6 +179,14 @@ def run(root):
             while waiting and sum(v['stage']=='evaluate' for v in active.values())<2:
                 task,item=waiting.pop(0);start(task,'evaluate',item['gpu'],item['lease'],item['lock'])
             used=[v['gpu'] for v in active.values()]+[v['gpu'] for _,v in waiting]
+            # 已有交互头不重训、不打断。两父进程不争用同一自有GPU槽。
+            other=read(INTERACTION_ROOT/'state.json')
+            if other['pending']:
+                used=list(range(4))
+            else:
+                used += [x['gpu'] for x in other['active'].values()]+[
+                    read(INTERACTION_ROOT/'state.json')['active'][t]['gpu']
+                    for t in other.get('waiting_evaluate',[]) if t in other['active']]
             for gpu in range(4):
                 if not pending or gpu in used:continue
                 observed=snapshot(gpu)
@@ -190,7 +200,7 @@ def run(root):
             time.sleep(5)
         results={task:dict(source=read(root/task/'evaluation/source_val.json'),target=read(root/task/'evaluation/target_val.json'),
                   complete_sha256=sha(root/task/'complete.json')) for task in completed}
-        save(root/'final.json',dict(passed=len(completed)==12,completed=completed,failed=failed,results=results))
+        save(root/'final.json',dict(passed=len(completed)==len(TASKS),completed=completed,failed=failed,results=results))
     finally:
         for item in active.values():
             if item['p'].poll() is None:os.killpg(item['p'].pid,signal.SIGTERM)

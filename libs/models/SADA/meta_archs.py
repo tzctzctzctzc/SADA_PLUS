@@ -737,12 +737,12 @@ class SADA(nn.Module):
         out_cls_logits_tgt_pl, _ = self.cls_head_pl(cls_input_pl, fpn_masks_tgt_pl)
         
         if self.use_trident_head:
-            out_lb_logits_src = self.start_head(fpn_feats_src, fpn_masks_src)
-            out_lb_logits_tgt = self.start_head(fpn_feats_tgt, fpn_masks_tgt)
+            out_lb_logits_src, _ = self.start_head(fpn_feats_src, fpn_masks_src)
+            out_lb_logits_tgt, _ = self.start_head(fpn_feats_tgt, fpn_masks_tgt)
             out_lb_logits = [torch.cat((out_lb_logits_src[i], out_lb_logits_tgt[i]), dim=0) for i in range(len(out_lb_logits_src))]
             
-            out_rb_logits_src = self.end_head(fpn_feats_src, fpn_masks_src)
-            out_rb_logits_tgt = self.end_head(fpn_feats_tgt, fpn_masks_tgt)
+            out_rb_logits_src, _ = self.end_head(fpn_feats_src, fpn_masks_src)
+            out_rb_logits_tgt, _ = self.end_head(fpn_feats_tgt, fpn_masks_tgt)
             out_rb_logits = [torch.cat((out_rb_logits_src[i], out_rb_logits_tgt[i]), dim=0) for i in range(len(out_rb_logits_src))]
         else:
             out_lb_logits_src = None

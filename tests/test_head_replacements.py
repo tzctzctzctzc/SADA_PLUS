@@ -44,7 +44,7 @@ def test_invalid_padding_cannot_change_valid_interaction_features():
 
 
 def test_all_six_both_heads_preserve_training_configuration():
-    assert len(TASKS)==12 and len(set(TASKS))==12
+    assert len(TASKS)==6 and len(set(TASKS))==6 and all(t.endswith('_trident') for t in TASKS)
     old=dict(model=dict(use_trident_head=False,adv_method=['conditional_rev']),
              baseline=dict(code={},tmpdir='old'),seed=123,loader=dict(batch_size=2))
     original=deepcopy(old)

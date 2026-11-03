@@ -44,5 +44,9 @@ def test_installer_accepts_original_string_device_without_disturbing_RNG():
         before=torch.get_rng_state().clone()
         install(model,4,4,3,1,False)
         assert torch.equal(before,torch.get_rng_state()) and model.head_replacement_base_sha
-        if variant=='trident':assert model.use_trident_head and model.reg_head.distribution_offsets
+        if variant=='trident':
+            assert model.use_trident_head and model.reg_head.distribution_offsets
+            x=[torch.randn(1,4,8)];mask=[torch.ones(1,1,8,dtype=torch.bool)]
+            source,_=model.start_head(x,mask);target,_=model.start_head(x,mask)
+            assert torch.cat((source[0],target[0])).shape==(2,3,8)
         else:assert model.task_interaction is not None
