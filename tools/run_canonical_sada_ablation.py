@@ -15,6 +15,7 @@ from tools.baseline_protocol import read,save,sha,code_identity,termination
 ORIGIN=Path('/vepfs/vlms/prototype_capacity12_5f9a157_1029/formal/control')
 DATA=Path('/vepfs/vlms/SADA_PLUS')
 TASKS=tuple(s+'_'+m for s in ('S1','S2') for m in ('on','off'))
+PROBE_ROOT=Path('/vepfs/vlms/canonical_sada_onoff_5e39fbf_1103')
 
 
 def paired_config(original,mode,identity,tmpdir):
@@ -39,19 +40,28 @@ def worker(entry,stage):
     os.chdir(DATA);guard=first_cuda_guard();started=time.monotonic()
     if stage=='train':
         # probe结束后原train会重新播种/重建模型、EMA、三优化器及loader；不转移probe参数。
-        base.probe(cfg,entry/'probe.json');report=read(entry/'probe.json')
+        reuse=read(entry/'probe_reuse.json');assert sha(Path(reuse['origin'])/'probe.json')==reuse['probe_sha256']
+        report=read(entry/'probe.json')
         assert report['initial_state_sha']==binding['initial_state_sha']
         assert report['rng_roundtrip']['status']=='passed'
         active=report['phases']['5'];estimate=active['seconds']*binding['old_stop_epoch']+180
         save(entry/'throughput.json',dict(full_epoch_seconds=active['seconds'],historical_stop_epoch=binding['old_stop_epoch'],
-            projected_seconds=estimate,max50_training_seconds=active['seconds']*50,admission_budget_seconds=1800,
+            projected_seconds=estimate,max50_training_seconds=active['seconds']*50,admission_budget_seconds=None,
+            authorization='user explicitly authorized all four complete runs beyond one hour on 2026-11-03',
             selection_rule='original source-validation patience15/max50; historical epoch only estimates runtime'))
-        if estimate>1800:
-            save(entry/'budget_pause.json',dict(scientific_failure=False,automatic_restart_authorized=False,estimate_seconds=estimate));return
         gc.collect()
         import torch
         torch.cuda.empty_cache()
-        base.train(cfg,entry)
+        original_build=base.build
+        def checked_build(config):
+            ctx=original_build(config)
+            assert ctx.initial_state_sha==binding['initial_state_sha']
+            save(entry/'formal_initialization.json',dict(passed=True,initial_state_sha=ctx.initial_state_sha,
+                CUDA_seed_proof=ctx.cuda_seed_proof,loaded_trained_checkpoint=False))
+            return ctx
+        base.build=checked_build
+        try:base.train(cfg,entry)
+        finally:base.build=original_build
         end=read(entry/'termination.json');assert end['initial_state_sha']==binding['initial_state_sha']
         termination(end['history'])
     else:
@@ -65,6 +75,8 @@ def run(root):
     import fcntl
     from tools.baseline_gpu import snapshot
     identity=code_identity();root.mkdir(parents=True,exist_ok=False);active={};failed={};paused=[];completed=[]
+    assert (PROBE_ROOT/'final.json').exists(),'wait until all existing probes finish; never repeat them'
+    old_state=read(PROBE_ROOT/'state.json');assert not (Path('/proc')/str(old_state['owner_pid'])).exists()
     # 原训练核心和Prototype逐字节不变；不采用额外微调包装器。
     paths=['tools/baseline_engine.py','libs/trainer/da_trainer.py','libs/models/SADA/meta_archs.py','libs/models/SADA/prototype_capacity.py']
     core={}
@@ -77,6 +89,7 @@ def run(root):
         intervention='only original SADA adversarial weight; Prototype source and target objectives retained in both',
         initialization='original seed123 random initialization; never load trained best.pt',
         policy='original source validation every5, patience15, max50, original EMA best',
+        time_authorization='user explicitly allowed four full runs beyond one hour; no30min admission gate',
         target_data='same unlabeled targetTRAIN loader and budget in both arms',
         caveat='S1/S2 historically exposed development; on-arm reproducibility must be checked before causal attribution'))
     for shift in ('S1','S2'):
@@ -92,6 +105,17 @@ def run(root):
             save(entry/'origin_binding.json',dict(origin=str(ORIGIN/shift),config_sha256=sha(ORIGIN/shift/'config.json'),
                 initial_state_sha=term['initial_state_sha'],old_stop_epoch=term['decision']['epoch'],inputs=inputs,
                 old_target_map=read(ORIGIN/shift/'evaluation/target_val.json')['map_0.1_to_0.5']))
+            prior=PROBE_ROOT/entry.name;old_cfg=read(prior/'config.json');expected=deepcopy(cfg)
+            for name in ('code','tmpdir'):expected['baseline'][name]=old_cfg['baseline'][name]
+            assert expected==old_cfg,'reused probe scientific configuration differs'
+            report=read(prior/'probe.json');assert report['status']=='passed' and report['initial_state_sha']==term['initial_state_sha']
+            guards=[p for p in (PROBE_ROOT/'leases').glob('*_guard_*.json') if read(p)['observed']['uuid']==report['cuda_seed_proof']['uuid']]
+            assert len(guards)==1
+            guard=read(guards[0]);assert guard['owner_pid']==old_state['owner_pid'] and sha(guard['lease'])==guard['lease_sha256']
+            os.link(prior/'probe.json',entry/'probe.json')
+            save(entry/'probe_reuse.json',dict(origin=str(prior),probe_sha256=sha(prior/'probe.json'),
+                config_sha256=sha(prior/'config.json'),guard=str(guards[0]),guard_sha256=sha(guards[0]),
+                reason='same core code, original initialization, data, precision and numeric protocol; only time budget authorization changed'))
     (root/'tmp').mkdir()
     def stop(sig,frame):
         save(root/'stop.json',dict(signal=sig,automatic_restart_authorized=False))
@@ -116,7 +140,7 @@ def run(root):
                     failed[task]=dict(stage=a['stage'],exit_code=a['p'].returncode);a['lock'].close();continue
                 if (root/task/'budget_pause.json').exists():paused.append(task);a['lock'].close();continue
                 if a['stage']=='train':waiting.append((task,a));continue
-                files=['config.json','origin_binding.json','probe.json','throughput.json','train_complete.json','evaluate_complete.json','runtime_config.json','seed_proof.json','metrics.jsonl','termination.json','best.pt','latest.pt','evaluation/source_val.json','evaluation/target_val.json']
+                files=['config.json','origin_binding.json','probe.json','probe_reuse.json','formal_initialization.json','throughput.json','train_complete.json','evaluate_complete.json','runtime_config.json','seed_proof.json','metrics.jsonl','termination.json','best.pt','latest.pt','evaluation/source_val.json','evaluation/target_val.json']
                 save(root/task/'complete.json',dict(passed=True,artifacts={f:sha(root/task/f) for f in files}));completed.append(task);a['lock'].close()
             while waiting and sum(a['stage']=='evaluate' for a in active.values())<2:
                 task,a=waiting.pop(0);start(task,'evaluate',a['gpu'],a['lease'],a['lock'])
