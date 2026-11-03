@@ -59,6 +59,10 @@ def audit(root,s):
     assert sha(replay_root/'final.json')==replay_link['final_sha256']
     replay_final=read(replay_root/'final.json');assert replay_final['passed'] and sha(replay_root/s/'complete.json')==replay_final['reports'][s]
     native=read(replay_root/s/'complete.json');assert native['passed'] and native['all_native_predictions_bitwise_equal'] and native['all_disabled_TF32_CPU_checks_within_3e6'] and native['optimizer_steps']==0
+    assert native['parameters_and_CPUCUDA_RNG_unchanged'] and sha(native['guard'])==native['guard_sha256']
+    ng=read(native['guard']);nl=read(ng['lease']);nlaunch=read(replay_root/'_launch.json')
+    assert sha(ng['lease'])==ng['lease_sha256'] and ng['owner_pid']==nl['owner_pid']==nlaunch['pid'] and nl['commit']==nlaunch['head']
+    assert ng['observed']['uuid']==nl['uuid'] and ng['observed']['index']==nl['index'] and ng['observed']['free_mib']>=12288
     for p,digest in native['source_artifacts'].items():assert sha(p)==digest
     native_rows={(r['role'],r['mode'],r['video']):r for r in native['rows']}
     assert len(native_rows)==len(native['rows'])
