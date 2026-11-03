@@ -135,3 +135,24 @@ def test_empty_foreground_cannot_create_fake_alignment():
     value = model.auxiliary(sc, tc, labels, logits, 1, 5)
     assert value['aligned_classes'] == 0 and value['conditional_domain'] == 0
     assert torch.isfinite(value['loss']) and value['grl_strength'] == 0
+
+
+def test_original_detector_math_only_changes_inside_factor_guards():
+    import ast
+    import subprocess
+    from pathlib import Path
+    code = Path(__file__).resolve().parents[1]
+    path = 'libs/models/SADA/meta_archs.py'
+    before = ast.parse(subprocess.check_output(['git', 'show', '1c3be7234d955a18efd43162ad93a0ca2690b434:'+path],
+                                              cwd=code, text=True))
+    after = ast.parse((code/path).read_text(encoding='utf-8'))
+    class StripFactor(ast.NodeTransformer):
+        def visit_If(self, node):
+            if 'self.domain_factor' in ast.unparse(node.test) or ast.unparse(node.test) == "cfg.get('domain_factor')":
+                return None
+            return self.generic_visit(node)
+        def visit_Assign(self, node):
+            if ast.unparse(node.targets[0]) in ('self.domain_factor', '(factor_src, factor_tgt)'):
+                return None
+            return self.generic_visit(node)
+    assert ast.dump(before) == ast.dump(StripFactor().visit(after))
