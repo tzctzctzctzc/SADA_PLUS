@@ -1132,6 +1132,11 @@ class SADA(nn.Module):
             out_start_logits = []
             out_end_logits = []
             for i in range(len(out_start_src)):
+                if self.cfg.get('head_replacement', {}).get('fixed_window_gradient', False):
+                    from tools.trident_windows import fixed_windows
+                    out_start_logits.append(fixed_windows(out_start_src[i],self.num_bins,True).permute(0,2,1,3))
+                    out_end_logits.append(fixed_windows(out_end_src[i],self.num_bins,False).permute(0,2,1,3))
+                    continue
                 x = (F.pad(out_start_src[i], (self.num_bins, 0), mode='constant', value=0)).unsqueeze(-1)  # pad left
                 x_size = list(x.size())  # bz, cls_num, T+num_bins, 1
                 x_size[-1] = self.num_bins + 1  # bz, cls_num, T+num_bins, num_bins + 1
