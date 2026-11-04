@@ -26,6 +26,7 @@ def configuration(original,variant,identity,tmpdir):
     assert not cfg['model']['use_trident_head']
     cfg['baseline'].update(code=identity,tmpdir=str(tmpdir))
     cfg['head_replacement']=dict(variant=variant,specification=SPEC)
+    if variant=='trident':cfg['head_replacement']['fixed_window_gradient']=True
     return cfg
 
 
@@ -100,6 +101,19 @@ def probe(cfg,entry,binding):
 def worker(entry,stage):
     from tools.baseline_gpu import first_cuda_guard
     cfg,binding=read(entry/'config.json'),read(entry/'origin_binding.json')
+    kernel=read(Path('/vepfs/vlms/trident_replay_window_638149a_1104/kernel_diagnosis.json'))
+    model_gate=read(Path('/vepfs/vlms/trident_replay_model_638149a_1104/model_replay_diagnosis.json'))
+    assert kernel['passed'] and model_gate['passed']
+    assert model_gate['evidence']['fixed']['full_state_unique']==1
+    assert model_gate['evidence']['native']['full_state_unique']>1
+    for path in ['tools/trident_windows.py','libs/models/SADA/meta_archs.py']:
+        import hashlib
+        expected=subprocess.check_output(['git','show','638149a8e81451515d080baec6710e6b4ba88df3:'+path],cwd=CODE)
+        assert hashlib.sha256(expected).hexdigest()==sha(CODE/path)
+    efficiency=read(Path('/vepfs/vlms/native_efficiency_caaa3e0_1104/real_prediction_benchmark.json'))
+    assert efficiency['passed'] and efficiency['fast_code_sha256']==sha(CODE/'tools/native_ap_fast.py')
+    from tools.native_ap_fast import install
+    install()
     assert cfg['baseline']['code']==code_identity()
     for path,digest in binding['inputs'].items():assert sha(path)==digest
     os.chdir(DATA);guard=first_cuda_guard();started=time.monotonic()
@@ -129,10 +143,12 @@ def run(root):
     identity=code_identity();root.mkdir(parents=True,exist_ok=False)
     save(root/'plan.json',dict(code=identity,specification=SPEC,tasks=TASKS,
         initialization='original seed123 fresh random, unchanged base hash, fork_rng for new heads',
-        protocol='original batch2/3optimizers/schedules/EMA/source every5 patience15 max50',
+        protocol='paired with completed interaction: batch2/3optimizers/schedules/EMA/source every5 patience15 max50; full GT evaluation',
         selection='source cls+reg validation only',target_GT_training=False,
         comparison='two separate changes vs existing corresponding SADA+Prototype, no VAE stacking',
-        note='Trident preserves original focal; interaction is head-only TOOD-inspired adaptation, not full TOOD',
+        note='Trident preserves original focal and temporal bins; deterministic linear-window adjoint only; completed interaction tasks are not repeated',
+        repair_gate=dict(kernel='/vepfs/vlms/trident_replay_window_638149a_1104/kernel_diagnosis.json',
+                         model='/vepfs/vlms/trident_replay_model_638149a_1104/model_replay_diagnosis.json'),
         resource='four private slots, min16384MiB, external tasks untouched, no automatic retry of failed runs'))
     for s in range(1,7):
         shift=f'S{s}';old=read(ORIGIN/shift/'config.json');term=read(ORIGIN/shift/'termination.json')
