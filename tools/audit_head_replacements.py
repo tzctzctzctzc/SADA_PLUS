@@ -14,6 +14,7 @@ from tools.baseline_protocol import read,save,sha,termination,code_identity
 from tools.run_head_replacements import TASKS,ORIGIN
 from tools.audit_background_ap_cost import IndependentAP,overlaps
 from libs.evaluation.evaluator_anet import load_gt_seg_from_json
+from tools.head_launch_binding import launch_binding
 
 
 def metrics(gt,pred):
@@ -41,7 +42,8 @@ def audit(root,task):
     assert cfg['prototype_capacity']==original['prototype_capacity'] and cfg['seed']==original['seed']==123
     src=read(cfg['dataset']['json_file'])['database'];tgt=read(cfg['baseline']['target_manifest'])['database']
     assert not set(src)&set(tgt) and all('annotations' not in row for row in tgt.values())
-    owner=read(root/'_launch.json')['parent_pid_snapshot']
+    launch=launch_binding(root);owner=launch['owner_pid']
+    assert cfg['baseline']['code']['commit']==launch['commit']
     for stage in ('train','evaluate'):
         p=read(e/(stage+'_complete.json'));assert sha(p['guard'])==p['guard_sha256']
         g=read(p['guard']);assert sha(g['lease'])==g['lease_sha256'];lease=read(g['lease'])
@@ -83,7 +85,8 @@ def audit(root,task):
         results[domain]=result
     save(root/'independent_results'/(task+'.json'),dict(passed=True,results=results,decision=decision,
          complete_sha256=sha(e/'complete.json'),delta_vs_baseline_pp=100*(results['target']['map']-binding['historical_target_map']),
-         independent_AP_matching=True,GT_loader_reused=True,base_initial_hash_is_producer_GPU_assertion=True))
+         independent_AP_matching=True,GT_loader_reused=True,base_initial_hash_is_producer_GPU_assertion=True,
+         actual_launch_binding=launch))
     print('HEAD_AUDITED',task,results['target']['map'],flush=True)
 
 
