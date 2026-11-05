@@ -1,0 +1,470 @@
+{
+  "schema": "frozen-proto-trident-fusion-v1",
+  "release": "proto-trident-fusion-1105-v1",
+  "evaluated_code_commit": "d36ac68718329fadcb0bd56f507c1879fae42cc4",
+  "seed": 123,
+  "single_seed": true,
+  "inference_models": 2,
+  "training_runs_for_fusion": 0,
+  "metric": "target mAP, arithmetic mean over six shifts and tIoU [0.1,0.2,0.3,0.4,0.5], percent",
+  "fusion": {
+    "score_weights": [
+      0.5,
+      0.5
+    ],
+    "probability": "(p_proto+p_trident)/2",
+    "geometry": "(p_proto*offset_proto+p_trident*offset_trident)/(p_proto+p_trident)",
+    "grid": "identical point, feature-pyramid level and class; class-specific Trident offsets",
+    "postprocessing": "original matched threshold/topk/duration/SoftNMS unchanged",
+    "parameter_search": false,
+    "checkpoint_selection": "existing source-selected best EMA for both; no per-direction model picking or target-val tuning"
+  },
+  "code_sha256_lf": {
+    "libs/datasets/data_utils.py": "b814e3568c5b36967edde6d36e97f17f50ce43aa68c6d8c001919d87e49cae54",
+    "libs/datasets/epic_kitchens.py": "245027697f18e885427c41bf69338d68b72e92a98f2cf3ecf17eaf0f3d3af001",
+    "libs/evaluation/evaluator_anet.py": "b4a1539dfa0cfba12f7c8c34d19a396ab3cf2e18817d9123d9f3c5b176f39ea0",
+    "libs/models/SADA/meta_archs.py": "bd73bed01658b0b4fb50cf0cdc62eed0d8c4cef99b813a462bd8870ae39efecb",
+    "libs/trainer/da_trainer.py": "4223ed5b1195449d49d46a1a8c9ba9d37fe7a632648ccd0b3b7c037198b62147",
+    "tools/audit_head_replacements.py": "8a0fcabcfe1838bc4ba52b6319c6d5cc641a30c6ddcc88d96e5d6a2f43238be4",
+    "tools/baseline_engine.py": "27cf4b2fd77d42e9ab89dab60a175cd515541c928a9fa6e7180da97926bbce24",
+    "tools/head_replacements.py": "bacb17f1bc481ee3188105b40ed6e2fec7ffecd9fd8718235017ca934119f64c",
+    "tools/model_fusion.py": "5a3ced64f7090ebef829e28c421bb3a9dd7464cc323f371d9218b143991a82d4",
+    "tools/native_ap_fast.py": "1b82acb1bb5937db047e2e9738ec82ff8d0e0acb685baee806629558c9de899d",
+    "tools/run_model_fusion.py": "78b0f5357adb565c2852c85af17873cebb6e48e659ba8d61c440532dff18b639",
+    "tools/trident_windows.py": "923424ff3979469fe7508a5f1b26ca18c26249abb64c038b204929d03a4722e9"
+  },
+  "results": {
+    "means_percent": {
+      "proto": 54.73196872805817,
+      "trident": 55.738439618011796,
+      "fusion": 56.160789615853766
+    },
+    "delta_vs_proto_pp": 1.4288208877955952,
+    "delta_vs_trident_pp": 0.4223499978419696,
+    "positive_directions_vs_proto": 6,
+    "positive_directions_vs_trident": 5,
+    "target_met": true
+  },
+  "evidence": {
+    "summary_sha256": "b653a3be0a64939b29150737a0ea135d757fba8453a829ac48fb6c44e5a3280c",
+    "final_audit_sha256": "25be1ee9ea9592d09b06f0867563a124e3257545ade71dce5dd3fc36cef6dc1c",
+    "artifact_hashes_verified": true,
+    "model_checkpoints_unchanged": true,
+    "single_model_AP_exact": true,
+    "trident_archived_arrays_exact": true,
+    "fusion_independent_AP_matched": true,
+    "CPU_checks_passed": 20
+  },
+  "timing": {
+    "target_service_seconds": {
+      "proto": 28.288583477027714,
+      "trident": 30.895492961630225,
+      "fusion": 38.232671558856964
+    },
+    "fusion_over_trident": 1.2374837846523097,
+    "timing_scope": "no checkpoint/data loading, first-video equivalence forward or AP evaluation; measured forward plus production postprocessing"
+  },
+  "shifts": {
+    "S1": {
+      "models": {
+        "proto": {
+          "config_sha256": "8bd9eca2f5904df6c09208c4b881f024191c46112b38c25d9574b1e4f210ffb8",
+          "checkpoint_sha256": "a93d171582dcea681622847d9fec8d97055f2ad995b13415c5b3e01c3dcc7718",
+          "selected_epoch": 20,
+          "training_code_commit": "5f9a157e17e4a605ff4a6ed8dac4bd725b44d7b4",
+          "source_manifest_sha256": "8909913ce0e8f7766e6d14c64bd9be812dca116a9cd89d62b01ed7b10e4d4d43",
+          "target_manifest_sha256": "fb067d19a6d47745b8ecb0bf3b39986ca93c8924ae71374ae234146be2570bcf",
+          "annotation_sha256": "2ed6c137ebce179b0ab0075c132b3ae05748022331f9f3897403f0e7b487d966"
+        },
+        "trident": {
+          "config_sha256": "3fd69c9fc99e9d7f637e8fe1a125e6e0f7d5185e29c7372cce4af0ac5674d53d",
+          "checkpoint_sha256": "9d90b47681cd06bc64db8b7aa81315f2343ab9da4ef610dc8f578b7099a53ffb",
+          "selected_epoch": 20,
+          "training_code_commit": "820b9e3bea90ae375e05456d7e4499338f4ae0db",
+          "source_manifest_sha256": "8909913ce0e8f7766e6d14c64bd9be812dca116a9cd89d62b01ed7b10e4d4d43",
+          "target_manifest_sha256": "fb067d19a6d47745b8ecb0bf3b39986ca93c8924ae71374ae234146be2570bcf",
+          "annotation_sha256": "2ed6c137ebce179b0ab0075c132b3ae05748022331f9f3897403f0e7b487d966"
+        }
+      },
+      "result_sha256": "bdbe1232c7f4e1a9368fb2d5ef19f3a2d2e45edefe2a6b51147d5704001e133e",
+      "binding_sha256": "cef43b1fd1aef3896fc139e061cab47383416c9f95f630e7e3be6d1264fb4754",
+      "prediction_artifacts": {
+        "source/fusion.json": "1d8021ad35c23bd86e2bc611eceb53c5d9e35f0fe2231570664c386b684c9b5e",
+        "source/fusion_predictions.pt": "4347c5f1ca2abe3afd3caa36b177a36629b8316456ada7f70356ef40c3b4f6aa",
+        "source/proto.json": "e3bb257d51618a2958147eec45d79fa3f43428339e692fd0af88825416a81731",
+        "source/proto_predictions.pt": "6ba2db599d7e9ecc3490d34d43498fd2a87d421d2a3cf272c8d9e3ad17abe8b9",
+        "source/trident.json": "03d2dde0148413ec81e02e44e497f48ce5ccb499d2e2b790b6e6685d18ed7cd0",
+        "source/trident_predictions.pt": "acd4628ff0aabe5b2a4866f340d23617db2e9e4437068b430998b54b21d0d301",
+        "target/fusion.json": "f568f135b5dacf106caba82a43dd258fdeb3a8cae4fb145f4dcbfd3e5132f3fa",
+        "target/fusion_predictions.pt": "7f9d26c265e501df6b7da3c3e6efad32384bde70a3100ecf3a20e52e6a0966c6",
+        "target/proto.json": "4813e469dea13d4a795822a21cb766f83aa1d8905d19247a73f4b41c39d466a3",
+        "target/proto_predictions.pt": "61cb2a732287705f35bc498bfb3a9f7376d5376f559c8ebfea2481a76ffea16d",
+        "target/trident.json": "25c1baf4a46d9ffa1ad38d81f2465d3f2ae033ac8f1121b540193d3211e82d15",
+        "target/trident_predictions.pt": "a1606eabd3e4ada467766b3940704a68e0dfe4f5d7745723728e598c08ab3ae7"
+      },
+      "target_maps": {
+        "proto": 0.6242191256132342,
+        "trident": 0.6481365324805433,
+        "fusion": 0.6533515711293528
+      },
+      "target_map_by_tiou": {
+        "proto": [
+          0.7321164184251157,
+          0.7084774976465699,
+          0.6569721990841491,
+          0.5720722310452417,
+          0.4514572818650942
+        ],
+        "trident": [
+          0.7491291869077557,
+          0.7268798692471545,
+          0.6804001672345423,
+          0.598087700586533,
+          0.4861857384267303
+        ],
+        "fusion": [
+          0.7527585793328748,
+          0.7296370760188366,
+          0.684985032446779,
+          0.6072089627773194,
+          0.49216820507095455
+        ]
+      }
+    },
+    "S2": {
+      "models": {
+        "proto": {
+          "config_sha256": "78ce425c27f131d2d6c95898abe35c9a4b2a0b1bcbbe3e794f42edfadec1850d",
+          "checkpoint_sha256": "f5a09f744ebd611699a150cdedbef74981850303e35ba00be08df5e125f7adbf",
+          "selected_epoch": 10,
+          "training_code_commit": "5f9a157e17e4a605ff4a6ed8dac4bd725b44d7b4",
+          "source_manifest_sha256": "58369afd962eca402f2e7bd46dcb69de8ead7ff43f8f6a91372e92b9858136d0",
+          "target_manifest_sha256": "5bf5ce75ea0196182ed85722e54f365b8aac9b28d8559c7cb9e40c60a87effde",
+          "annotation_sha256": "2ed6c137ebce179b0ab0075c132b3ae05748022331f9f3897403f0e7b487d966"
+        },
+        "trident": {
+          "config_sha256": "d16e3fe6c76b4148382b273873949079f321ec6d976aea1d1e72b52f3d8976df",
+          "checkpoint_sha256": "9ecca726d714ab5dce2b334c5883c487ab14d10c6b6fe423c38ac17985ea6c52",
+          "selected_epoch": 10,
+          "training_code_commit": "820b9e3bea90ae375e05456d7e4499338f4ae0db",
+          "source_manifest_sha256": "58369afd962eca402f2e7bd46dcb69de8ead7ff43f8f6a91372e92b9858136d0",
+          "target_manifest_sha256": "5bf5ce75ea0196182ed85722e54f365b8aac9b28d8559c7cb9e40c60a87effde",
+          "annotation_sha256": "2ed6c137ebce179b0ab0075c132b3ae05748022331f9f3897403f0e7b487d966"
+        }
+      },
+      "result_sha256": "cd68ef98f50e63e372cc6ad2d2681ec8de5e2175eeea05da1e5467ab78ee485c",
+      "binding_sha256": "312e1c21e5ec9acefe9a8513847a80de6a31feb75e295b36384e061edb5aa73a",
+      "prediction_artifacts": {
+        "source/fusion.json": "b5e52f0720d33460e0c85fd963cd92796fca87763ed80b8cd2309e98d4468b06",
+        "source/fusion_predictions.pt": "81bb7f7e2f7df0b425abbf10b997e7ec22d3a7c1785bb3358f617680453380a8",
+        "source/proto.json": "fb5e5c7758585d8461055b38d28694ef209421fc0a822e5d4c471a0206c57ad0",
+        "source/proto_predictions.pt": "e43b566e06c7f5dd09d6afb7dd7de355405cc2e75e19852c932675010447af62",
+        "source/trident.json": "bb1e7d3284b06fe95f991fa0ae5c3e8202146c3a6da0b1958a6c79d3a7cad020",
+        "source/trident_predictions.pt": "bbd65c5d7272d5f0cc9c230ff3cd6f555d62eba81bc32c7c4158575bb139a750",
+        "target/fusion.json": "4ed1543b0171704002a03a0b19c27c1c7960cbfa0c0c755a7579114c394d4910",
+        "target/fusion_predictions.pt": "d9175a9e580f9114a99e17f1285ab9f678de56d5d4efc3676a96e092b3b4e26d",
+        "target/proto.json": "40f1b437e4cfb38c16f9dc3254163e8e73c718778a57334a7810180cd10bc6d6",
+        "target/proto_predictions.pt": "825d60943decc865ae3c6b940c2a6896ac92193d6085e0c46f80dd1eba12d87f",
+        "target/trident.json": "11a0be1c57a15c94b3c96f64a0eaf847dac3487193fc3367fc6b2844a88228e2",
+        "target/trident_predictions.pt": "4b3fad0f0430031c4e33d09c5939e756fb02afa0d2f8ea60419a9b0bd84d1dcf"
+      },
+      "target_maps": {
+        "proto": 0.5093514017784955,
+        "trident": 0.5119083151699433,
+        "fusion": 0.5171273555778166
+      },
+      "target_map_by_tiou": {
+        "proto": [
+          0.5802386612456576,
+          0.5617378750939218,
+          0.5329494256473988,
+          0.47986131963810513,
+          0.3919697272673941
+        ],
+        "trident": [
+          0.586097784177587,
+          0.5652760410837344,
+          0.5332239688332487,
+          0.4849332352729797,
+          0.39001054648216676
+        ],
+        "fusion": [
+          0.5883102261853604,
+          0.5686435534217116,
+          0.5383150073201863,
+          0.48753568204876896,
+          0.4028323089130562
+        ]
+      }
+    },
+    "S3": {
+      "models": {
+        "proto": {
+          "config_sha256": "e905d04bbddfd9091dca7edfeaa57091f765f31c9c22f0b455cf31d02eea6e75",
+          "checkpoint_sha256": "10455c6a3cd67bd6c3ec503f5f2c3b7c4350a3b6bcaaec0fbe1e1640d91b25ee",
+          "selected_epoch": 20,
+          "training_code_commit": "5f9a157e17e4a605ff4a6ed8dac4bd725b44d7b4",
+          "source_manifest_sha256": "29085c2efba01a0840431b27ff29dddf93547ee0f856160ef201bf186a78cc8a",
+          "target_manifest_sha256": "66d5ba815c3cd4db6af70953df9b6e97e8df75e69ae7388cbe6982ca8313a982",
+          "annotation_sha256": "2ed6c137ebce179b0ab0075c132b3ae05748022331f9f3897403f0e7b487d966"
+        },
+        "trident": {
+          "config_sha256": "ee81f5fe7184c94ec5aee7618182cf910a8434a6eb088171d9013a3f5c0ccef6",
+          "checkpoint_sha256": "1613298038d56942a271d1ded1b8d3a909da42b9458404d8e398b712b6f6dc77",
+          "selected_epoch": 20,
+          "training_code_commit": "820b9e3bea90ae375e05456d7e4499338f4ae0db",
+          "source_manifest_sha256": "29085c2efba01a0840431b27ff29dddf93547ee0f856160ef201bf186a78cc8a",
+          "target_manifest_sha256": "66d5ba815c3cd4db6af70953df9b6e97e8df75e69ae7388cbe6982ca8313a982",
+          "annotation_sha256": "2ed6c137ebce179b0ab0075c132b3ae05748022331f9f3897403f0e7b487d966"
+        }
+      },
+      "result_sha256": "146a6c16cccf08bf2be73d26761b1499a94534e1a8434235333e75134af73c99",
+      "binding_sha256": "27700c26af434acbc807ca0fb4293f3097f8b4f5d6709b0066646ac973f34668",
+      "prediction_artifacts": {
+        "source/fusion.json": "96207d7a1138b0cac9654124c98d67767f547e5e2ab09b3eda293043e8027907",
+        "source/fusion_predictions.pt": "2bbd72d197d4a2d2f2bb428470b28b0a0e1229d6d23149282699a59e9d094e34",
+        "source/proto.json": "7ed2b7fa78ee85dc1e03cce2969348b10344f44c1c34bd00fcfb671eb8a3ceca",
+        "source/proto_predictions.pt": "85ff2dea45f331579c20850a5921f8727d532e997cf478f4a837388bf51283ea",
+        "source/trident.json": "bec894c6cbb29f203743a3327c2fad5427701e28492622ba1c605233a8cd7f17",
+        "source/trident_predictions.pt": "21a1c927b2421f9848ac413aee102466e2d9f09bbfa3f5a2d6eb34a59034153b",
+        "target/fusion.json": "cf5eb51e2ca36d77a211f58a52a3643325aac9acfe3151d60f4d0e0235dc3fc0",
+        "target/fusion_predictions.pt": "5f531f24c4f85ac0037e1711667def150dd6257e1fb26f6169c7f25c6dc74ba9",
+        "target/proto.json": "5b3e5511a8075d69b693ed5bf7537f00321e77c6d2629638b0b9657c53fe03fe",
+        "target/proto_predictions.pt": "db4850abec2b03dca932c23f88cdf0e649705150e5d191ca0bb151014847b122",
+        "target/trident.json": "833cf6997d4569006d19da2943aa3fd7684241905ba724ae71f9e2974896aadc",
+        "target/trident_predictions.pt": "12a639a701a28bde6937a211bc58cdfe53bcacba82264c0b1ba872a87d492ce0"
+      },
+      "target_maps": {
+        "proto": 0.5848248654774663,
+        "trident": 0.5975606424607686,
+        "fusion": 0.6029955809382512
+      },
+      "target_map_by_tiou": {
+        "proto": [
+          0.6864997272636205,
+          0.6567839264356068,
+          0.6100584143936778,
+          0.5429715548774317,
+          0.4278107044169951
+        ],
+        "trident": [
+          0.696367408882212,
+          0.6639031760089986,
+          0.6208075184398232,
+          0.5539516827389502,
+          0.45277342623385913
+        ],
+        "fusion": [
+          0.6981945148926423,
+          0.6711665265794835,
+          0.627571748220834,
+          0.5637746182683,
+          0.4542704967299966
+        ]
+      }
+    },
+    "S4": {
+      "models": {
+        "proto": {
+          "config_sha256": "9f56ea2feb5491f5796b59f882a5d636eeebe517ce087bfda34d524613e3a4f4",
+          "checkpoint_sha256": "b698e263a6007e9d79f178c874d509423f2aab2403d658d88e17f73bf5e7e101",
+          "selected_epoch": 10,
+          "training_code_commit": "5f9a157e17e4a605ff4a6ed8dac4bd725b44d7b4",
+          "source_manifest_sha256": "162e8202edfa5e0aaaa59a8f4d51a7ebf3d0cfacd146c0d5aa99dcbf903c331e",
+          "target_manifest_sha256": "7bbb77c07fba123a964bfb09e4b76f9edefd6a829e08645aaf46a2aa80e012d7",
+          "annotation_sha256": "2ed6c137ebce179b0ab0075c132b3ae05748022331f9f3897403f0e7b487d966"
+        },
+        "trident": {
+          "config_sha256": "0233f176cfa15da4a582a6660edcb72f7feaa9b5476c041d8ed29e84a3a32646",
+          "checkpoint_sha256": "af0f281b10427f5980b60479768557f51da71cd72b2784fdd4fe0c1dbcb5ebb0",
+          "selected_epoch": 10,
+          "training_code_commit": "820b9e3bea90ae375e05456d7e4499338f4ae0db",
+          "source_manifest_sha256": "162e8202edfa5e0aaaa59a8f4d51a7ebf3d0cfacd146c0d5aa99dcbf903c331e",
+          "target_manifest_sha256": "7bbb77c07fba123a964bfb09e4b76f9edefd6a829e08645aaf46a2aa80e012d7",
+          "annotation_sha256": "2ed6c137ebce179b0ab0075c132b3ae05748022331f9f3897403f0e7b487d966"
+        }
+      },
+      "result_sha256": "f0824d5538b819a5db1e28ab0eadbd6fe7a0186223d440e64859bcb8036d2c65",
+      "binding_sha256": "40c48caa3d97a889033211439fc5f83ca649f0d7b7bb41b4968b270f0789570f",
+      "prediction_artifacts": {
+        "source/fusion.json": "c80cc6e628683c4fff6b791aaee828f4824e41e446fc49deb97da14abe99bfeb",
+        "source/fusion_predictions.pt": "dc48912395bc8f2f43364371510324e0d67dd5de9b25ff5fc4da8dc7a9f856fc",
+        "source/proto.json": "8303a179c677f976f53288aab23504756bb13467f4e329cc8e2bf1c09c442634",
+        "source/proto_predictions.pt": "e6ebdcc2a63fe3f4b9b2d5be2c2146fd6f4f92a0cf720444bdb7312097ffcf3d",
+        "source/trident.json": "542478e8d8a20cd1fcd9a486a301b0003113a48b64ce163d68e44dc195466aff",
+        "source/trident_predictions.pt": "2464c3543d3436d204f9839ebaa89957994f030b3bf73dafaf4aea1411c47cf7",
+        "target/fusion.json": "a6dbda8437597ca2fe8b959816704b0786131fadacf204097d4b5ab5a2b46ccc",
+        "target/fusion_predictions.pt": "0a2598699361ff328efad3c35d6bf011c4baf8357dc11be509b0b8a5a2513f7b",
+        "target/proto.json": "244e2a9043fd41450a3e024c9b038d0417f1ae27da58eb3cc8c181df9e31ff70",
+        "target/proto_predictions.pt": "a350cf8d03782196edec5f3a561e81508c7b1a4491309f5ace6796cf356041c8",
+        "target/trident.json": "4a414c2b3c6e858d3598268c147c07bdb3c29e88793ef8ad075253be4e0350a4",
+        "target/trident_predictions.pt": "add494da9885f383abd228cab32723c1b4053c958ab6e1e337d982660d088e61"
+      },
+      "target_maps": {
+        "proto": 0.4679090427905215,
+        "trident": 0.4722988946596378,
+        "fusion": 0.47604573909039
+      },
+      "target_map_by_tiou": {
+        "proto": [
+          0.5411972333851278,
+          0.5165165323305293,
+          0.4897674430265527,
+          0.43425362743585927,
+          0.3578103777745382
+        ],
+        "trident": [
+          0.5423075311307523,
+          0.5217296352704252,
+          0.4932845445538999,
+          0.4447269757693705,
+          0.3594457865737411
+        ],
+        "fusion": [
+          0.5483493570347915,
+          0.5225357404324666,
+          0.49614891300212155,
+          0.4453375682607147,
+          0.3678571167218555
+        ]
+      }
+    },
+    "S5": {
+      "models": {
+        "proto": {
+          "config_sha256": "e2a46710a2e4fae1abe50881de3ab11e07e86ca45fa07faa82ecd71aa18726f6",
+          "checkpoint_sha256": "9219c8adb0c8d23c9780c3430cab7599b6e081d439d274a94cbd16670802d088",
+          "selected_epoch": 10,
+          "training_code_commit": "5f9a157e17e4a605ff4a6ed8dac4bd725b44d7b4",
+          "source_manifest_sha256": "bed3896f2fe271d4d69ae78c43e8096b1d97da0e337397be66e1ff2e7d935fe1",
+          "target_manifest_sha256": "fdd081c9c9ebb15536d37ec02c984558680f826cf3b628476d19a923a5f4677a",
+          "annotation_sha256": "2ed6c137ebce179b0ab0075c132b3ae05748022331f9f3897403f0e7b487d966"
+        },
+        "trident": {
+          "config_sha256": "6646d22a63711be2aef1e1bd7a5194918101d65cfceb309b1dcc58c073514033",
+          "checkpoint_sha256": "4cc53ac73bf36b4b1cb6b6e4c3df6eb843753c292c42cbdb722c0093ac0b1a68",
+          "selected_epoch": 15,
+          "training_code_commit": "820b9e3bea90ae375e05456d7e4499338f4ae0db",
+          "source_manifest_sha256": "bed3896f2fe271d4d69ae78c43e8096b1d97da0e337397be66e1ff2e7d935fe1",
+          "target_manifest_sha256": "fdd081c9c9ebb15536d37ec02c984558680f826cf3b628476d19a923a5f4677a",
+          "annotation_sha256": "2ed6c137ebce179b0ab0075c132b3ae05748022331f9f3897403f0e7b487d966"
+        }
+      },
+      "result_sha256": "7085e2cf9dedb6ee53c690fbdc776b6789c169038a814b9ce115957bbd8ff87f",
+      "binding_sha256": "0075b819655680e5b354370ca2bd14b77c5af3c46bfece90fa30f7329c90fc70",
+      "prediction_artifacts": {
+        "source/fusion.json": "e07ae71133a0e77e8e338bab31443646db13773fb3541c545c75857dbc3e410f",
+        "source/fusion_predictions.pt": "badd935c54fc7ce1536dcc912e99a1ea039ccf3f1d6cad13f9db6be08e0c6ff0",
+        "source/proto.json": "8433407f22e662355b1870e2b184cadeeeb3e5c0ccabf07717c52eafe5d1206f",
+        "source/proto_predictions.pt": "602493da53a6fe1227c0b861c1d8a2b6e3ee8c9765eaaf1caff0b60a25ef5f86",
+        "source/trident.json": "525b085dcaaf2c5b3fdca12dc2c82f4c87f6f72bb39b8cb8e3a72c3c6a58e37e",
+        "source/trident_predictions.pt": "c9a75ed875c75273711030efeb558f99015da1096a682bcf7baf592dadaaddf3",
+        "target/fusion.json": "58468ef67d319547682d0531ab42fcd3a24976c53e04f26cbc39d971d65a9340",
+        "target/fusion_predictions.pt": "ecb80f5e111f47ae43a45a40e546fd8339e8f4ab80190db398754dbd10ff5f8f",
+        "target/proto.json": "8ec7f7e6bc5abd40ff806c88a8eaacf75af12395913591b93400c2db488aa463",
+        "target/proto_predictions.pt": "6fe6ca7c19321a3f99b94519fe96db03e6c7463ba974f17df430c908eb3e4661",
+        "target/trident.json": "516c83054fe99e7e324140a62fe34d143872f78335592312f044c1242f9e5a5b",
+        "target/trident_predictions.pt": "7121484d149cc611986f5526f1b34d2d91f5877f511f5e3b6b09244dda4951c6"
+      },
+      "target_maps": {
+        "proto": 0.6355325748533316,
+        "trident": 0.654437328290222,
+        "fusion": 0.6538105108206955
+      },
+      "target_map_by_tiou": {
+        "proto": [
+          0.7632782899979205,
+          0.7318967735639982,
+          0.6692711562315765,
+          0.5731513035577257,
+          0.44006535091543686
+        ],
+        "trident": [
+          0.7666738873582133,
+          0.7359536367092354,
+          0.6820992048691896,
+          0.6017679086997794,
+          0.4856920038146922
+        ],
+        "fusion": [
+          0.7709949142055887,
+          0.7411743829916281,
+          0.6902005312148292,
+          0.5967764612893542,
+          0.4699062644020774
+        ]
+      }
+    },
+    "S6": {
+      "models": {
+        "proto": {
+          "config_sha256": "d5faac7c465d9665b5bed567af330f43ba31ae8559b74bd25b2253cb7bb64690",
+          "checkpoint_sha256": "6602ec9c4f72fb431a626ece1709ed8eec7b9f4cba3c2d5b9f5f523ec047cdbd",
+          "selected_epoch": 10,
+          "training_code_commit": "5f9a157e17e4a605ff4a6ed8dac4bd725b44d7b4",
+          "source_manifest_sha256": "4cdd7a3fb51573f6f8e19f7421d3afbf7dfa8c0837c265d0d5d1e4f1b5a86f89",
+          "target_manifest_sha256": "a6be89df69cfb5b86a04d9296324d93b9b16b515100e771afb4f5807be7642a7",
+          "annotation_sha256": "2ed6c137ebce179b0ab0075c132b3ae05748022331f9f3897403f0e7b487d966"
+        },
+        "trident": {
+          "config_sha256": "150b884cfc77ae63c0f37f07a7fdc4d59965f7d81007d10c575668195deb920c",
+          "checkpoint_sha256": "efa0194e5e3b98c4f458d3fcdb22226039b0e7383021428e326388430278ead7",
+          "selected_epoch": 10,
+          "training_code_commit": "820b9e3bea90ae375e05456d7e4499338f4ae0db",
+          "source_manifest_sha256": "4cdd7a3fb51573f6f8e19f7421d3afbf7dfa8c0837c265d0d5d1e4f1b5a86f89",
+          "target_manifest_sha256": "a6be89df69cfb5b86a04d9296324d93b9b16b515100e771afb4f5807be7642a7",
+          "annotation_sha256": "2ed6c137ebce179b0ab0075c132b3ae05748022331f9f3897403f0e7b487d966"
+        }
+      },
+      "result_sha256": "b538ae231d58dd5874d5234166bd6ef8eed56ec06ee3039250aca557b6ad1120",
+      "binding_sha256": "fd63878d6ebc83b8c03049182b8d7bc26edfb0b79165fb89b236f940cb5b684f",
+      "prediction_artifacts": {
+        "source/fusion.json": "cc4993d9190d84073caa2d65f75bc4738ce3fa51548ec7ae1336b89f21c042f8",
+        "source/fusion_predictions.pt": "a7a2c5f0725eddcfb6301daa43b816967c060ce7feb8d49df297651774fca017",
+        "source/proto.json": "bafcf9a1289179d7659ec14ab872ac351e75cb289df4aa9d415af52481750883",
+        "source/proto_predictions.pt": "28dad1f87e8bcf194050c03a90e3d9cbb91281755589c499b6c237fbfe8dbe1d",
+        "source/trident.json": "2b91fb137f5563c8ed611f1dc2a98418679c44125c05682dd7c03b69b84778b9",
+        "source/trident_predictions.pt": "5c3619a80538bc6ab37bc2b182173c07bb9fefe459134f49e2c0eb60e092cdc5",
+        "target/fusion.json": "9ceb8843b464cfb3d40dc45a199a891097675af268a2ad6ee2f2728f5a319acf",
+        "target/fusion_predictions.pt": "d9d86bbe126d46f8b69ce30d86d115265843929adb8d5f7337db01ec47a6e5a8",
+        "target/proto.json": "1da2b9b80d3a321c804bbbb32366ce03b7b2c60426af1341432b62ddaea65b22",
+        "target/proto_predictions.pt": "4b2d673980237a466871fa34671037ea976e8059871f89d29d10dcbb935d2c71",
+        "target/trident.json": "0c5e720f7b7c1daeb7eb93247939694e8f7c4eefc609a8f2ad406e1a10d9c4ef",
+        "target/trident_predictions.pt": "74c3638726d3123fd5495e16f21e0f2c06b1ec23a0496d800757643f71167ff4"
+      },
+      "target_maps": {
+        "proto": 0.4620811131704408,
+        "trident": 0.4599646640195923,
+        "fusion": 0.4663166193947198
+      },
+      "target_map_by_tiou": {
+        "proto": [
+          0.5356131618570816,
+          0.5133070969888386,
+          0.4836505792032474,
+          0.42887462655505904,
+          0.3489601012479776
+        ],
+        "trident": [
+          0.5369466744581743,
+          0.5108150146521833,
+          0.47779116918211206,
+          0.42790279576141377,
+          0.34636766604407815
+        ],
+        "fusion": [
+          0.5403409824900605,
+          0.5163445272940056,
+          0.4849810283784318,
+          0.43363016796536885,
+          0.3562863908457324
+        ]
+      }
+    }
+  },
+  "artifact_storage": "Checkpoints, dataset and predictions are external artifacts identified by SHA256; no weights or data are embedded in this repository.",
+  "limitations": [
+    "Single-seed development result, not a multi-seed stability claim.",
+    "Two-model inference gain; not a single-model auxiliary-module gain."
+  ]
+}
