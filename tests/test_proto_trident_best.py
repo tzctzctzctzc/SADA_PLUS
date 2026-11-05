@@ -19,8 +19,9 @@ def test_neutral_readout_and_unready_class_preserve_scores():
 def test_cosine_and_existing_classifier_use_their_correct_logits():
     r=record()
     for readout,field in [('prototype','prototype_cosines'),('branch_classifier','branch_classifier_logits')]:
-        q=np.exp(r[field].astype(float)/.5);q=q/q.sum(1,keepdims=True);q=q[np.arange(2),r['labels']]
-        s=r['uncertainty_scores'];expected=1/(1+np.exp(-(np.log(s/(1-s))+.25*np.log(q/(1-q)))))
+        logits=r[field].astype(float)/.5;logits=logits-logits.max(1,keepdims=True)
+        q=np.exp(logits);q=q/q.sum(1,keepdims=True);q=q[np.arange(2),r['labels']]
+        s=r['uncertainty_scores'];expected=np.exp(-np.logaddexp(0.,-(np.log(s/(1-s))+.25*np.log(q/(1-q)))))
         assert np.array_equal(expected,rescore(r,dict(readout=readout,temperature=.5,beta=.25)))
 
 
