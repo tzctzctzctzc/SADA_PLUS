@@ -1,0 +1,48 @@
+{
+  "passed": true,
+  "code_commit_evaluated": "b5632cd1583634ea603f0c50b576e30f8140a221",
+  "full_six_direction_cache_replay": true,
+  "optimizer_steps": 0,
+  "mean_percent": 56.22733524999254,
+  "directions": {
+    "S1": {
+      "map_percent": 65.36862888106052,
+      "videos": 30,
+      "checkpoint_sha256": "9d90b47681cd06bc64db8b7aa81315f2343ab9da4ef610dc8f578b7099a53ffb",
+      "selected_score_reproduced": true
+    },
+    "S2": {
+      "map_percent": 51.465285323288676,
+      "videos": 50,
+      "checkpoint_sha256": "9ecca726d714ab5dce2b334c5883c487ab14d10c6b6fe423c38ac17985ea6c52",
+      "selected_score_reproduced": true
+    },
+    "S3": {
+      "map_percent": 60.54200905079393,
+      "videos": 22,
+      "checkpoint_sha256": "1613298038d56942a271d1ded1b8d3a909da42b9458404d8e398b712b6f6dc77",
+      "selected_score_reproduced": true
+    },
+    "S4": {
+      "map_percent": 47.38712428604788,
+      "videos": 54,
+      "checkpoint_sha256": "af0f281b10427f5980b60479768557f51da71cd72b2784fdd4fe0c1dbcb5ebb0",
+      "selected_score_reproduced": true
+    },
+    "S5": {
+      "map_percent": 66.1166360811981,
+      "videos": 37,
+      "checkpoint_sha256": "4cc53ac73bf36b4b1cb6b6e4c3df6eb843753c292c42cbdb722c0093ac0b1a68",
+      "selected_score_reproduced": true
+    },
+    "S6": {
+      "map_percent": 46.48432787756624,
+      "videos": 87,
+      "checkpoint_sha256": "efa0194e5e3b98c4f458d3fcdb22226039b0e7383021428e326388430278ead7",
+      "selected_score_reproduced": true
+    }
+  },
+  "scope": "Repackaged scoring reproduces all selected target-validation mAP values from SHA-bound frozen features. Full fresh GPU inference is a separate path.",
+  "single_seed": true,
+  "target_validation_selected": true
+}
