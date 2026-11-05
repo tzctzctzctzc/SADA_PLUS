@@ -1,4 +1,4 @@
-"""S1/S6已选EMA的只读uncertainty诊断，不训练、不修改模型与NMS。"""
+"""六方向已选EMA的只读uncertainty诊断，不训练、不修改模型与NMS。"""
 import argparse,json,os,subprocess,sys,time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
@@ -6,7 +6,8 @@ CODE=Path(__file__).resolve().parents[1];sys.path.insert(0,str(CODE))
 from tools.baseline_protocol import read,save,sha,code_identity
 REFERENCE=Path('/vepfs/vlms/trident_repaired6_820b9e3_1104')
 PY='/vepfs/vlms/envs/sada_py39/bin/python'
-SHIFTS=('S1','S6')
+SHIFTS=tuple('S'+str(i) for i in range(1,7))
+LEGACY=Path('/vepfs/vlms/trident_uncertainty_6ba8536_1105')
 
 
 def extract(root,shift):
@@ -74,6 +75,26 @@ def extract(root,shift):
     save(entry/'extraction.json',record);save(entry/'progress.json',dict(stage='extraction_complete',updated=time.time()))
 
 
+def summarize_six(summaries):
+    assert set(summaries)==set(SHIFTS) and all(v['passed'] for v in summaries.values()),'六方向齐全才汇总'
+    comparisons={}
+    for threshold in ('.3','.5'):
+        key=str(float(threshold));comparisons[key]={}
+        for domain in ('source_heldout','target'):
+            comparisons[key][domain]={}
+            for pool in ('all_candidates','score_ge_0.3'):
+                rows=[v['evaluation'][key][domain][pool] for v in summaries.values()]
+                record={}
+                for metric in ('auroc','brier','ece','log_loss'):
+                    valid=[r for r in rows if r['nuisance'].get(metric) is not None and r['with_uncertainty'].get(metric) is not None]
+                    delta=[r['with_uncertainty'][metric]-r['nuisance'][metric] for r in valid]
+                    record[metric]=dict(directions=len(valid),macro_delta=sum(delta)/len(delta) if delta else None,
+                        improved_directions=sum(d>0 if metric=='auroc' else d<0 for d in delta))
+                comparisons[key][domain][pool]=record
+    return dict(all_six_complete=True,count=6,comparisons=comparisons,aggregation='unweighted mean across directions, not pooled candidate metrics',
+                interpretation='diagnostic prediction-quality signal; no mAP gain or calibrated target uncertainty guarantee')
+
+
 def analyze(root):
     import numpy as np
     import torch
@@ -122,7 +143,35 @@ def analyze(root):
             label_definition='Best same-class GT tIoU quality, NOT one-to-one detection TP; duplicates remain. Endpoint correlations separately require overlapping same-class GT.',
             target_is_development=True,new_training_started=False)
         save(entry/'calibrators_diagnostic_only.json',models);save(entry/'result.json',summary);summaries[shift]=summary
-    save(root/'final.json',dict(passed=True,shifts=SHIFTS,results=summaries,training_started=False,raw_distributions_exported=True))
+    save(root/'final.json',dict(passed=True,shifts=SHIFTS,results=summaries,six_direction_summary=summarize_six(summaries),training_started=False,raw_distributions_exported=True))
+
+
+def reuse_legacy(root,shift):
+    """仅复用原两向已完成导出；活跃/未知原队列不重复推理。"""
+    import shutil
+    old=LEGACY/shift;manifest=old/'extraction.json'
+    if (LEGACY/'superseded_before_launch.json').exists():return False
+    while LEGACY.exists() and not manifest.exists():
+        if (LEGACY/'error.json').exists() or (old/'error.json').exists():raise RuntimeError('旧诊断失败，须核实后修复，不能盲目重提')
+        receipt=LEGACY.with_name(LEGACY.name+'_launch.json')
+        if receipt.exists():
+            launch=read(receipt);path=Path('/proc')/str(launch['pid'])
+            if not path.exists():raise RuntimeError('旧诊断退出且导出不完整，须保留现场核实')
+            command=(path/'cmdline').read_bytes();assert str(Path(launch['code'])/'tools/run_trident_uncertainty.py').encode() in command
+        save(root/shift/'progress.json',dict(stage='waiting_for_existing_export',legacy=str(old),updated=time.time()));time.sleep(15)
+    if not manifest.exists():return False
+    record=read(manifest);assert record['passed'] and record['shift']==shift and record['model_state_unchanged']
+    reference=REFERENCE/(shift+'_trident')
+    assert record['checkpoint_sha256']==sha(reference/'best.pt') and record['config_sha256']==sha(reference/'config.json')
+    entry=root/shift;hashes={}
+    for domain,info in record['domains'].items():
+        assert all(info['all_arrays_exact'].values())
+        (entry/domain).mkdir()
+        for vid in info['video_order']:
+            source=old/domain/(vid+'.pt');target=entry/domain/(vid+'.pt')
+            shutil.copyfile(source,target);hashes[str(target.relative_to(entry))]=sha(target)
+    save(entry/'extraction.json',record);save(entry/'reuse.json',dict(legacy=str(old),extraction_sha256=sha(manifest),copied_raw_sha256=hashes,no_inference_repeated=True))
+    save(entry/'progress.json',dict(stage='extraction_reused',updated=time.time()));return True
 
 
 def run(root):
@@ -132,6 +181,7 @@ def run(root):
         scope='Selected EMA source/target validation inference replay and boundary uncertainty analysis; source-video-disjoint diagnostic calibration; no target fitting'))
     def task(shift):
         entry=root/shift;entry.mkdir()
+        if shift in ('S1','S6') and reuse_legacy(root,shift):return
         while True:
             chosen=None
             for gpu in sorted([snapshot(i) for i in range(4)],key=lambda x:x['utilization']):
@@ -150,7 +200,8 @@ def run(root):
             assert rc==0,shift+' extraction failed rc='+str(rc)
         finally:context.__exit__(None,None,None)
     save(root/'state.json',dict(stage='extracting'))
-    with ThreadPoolExecutor(max_workers=2) as pool:list(pool.map(task,SHIFTS))
+    # 新四向先推进；两向若旧任务已启动则等待复用，不争抢它们的资源。
+    with ThreadPoolExecutor(max_workers=2) as pool:list(pool.map(task,('S2','S3','S4','S5','S1','S6')))
     save(root/'state.json',dict(stage='cpu_analysis'));analyze(root)
     save(root/'state.json',dict(stage='diagnostics_complete',training_started=False))
 

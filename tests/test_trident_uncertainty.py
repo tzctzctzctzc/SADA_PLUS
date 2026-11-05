@@ -3,6 +3,8 @@ import numpy as np
 import torch
 from tools.trident_uncertainty import DistributionObserver,distributions,to_seconds
 from tools.uncertainty_analysis import features,match_quality,auc,source_partition,fit_logistic,predict,metrics
+from tools.run_trident_uncertainty import summarize_six,SHIFTS
+from copy import deepcopy
 
 
 class FakeModel:
@@ -67,3 +69,20 @@ def test_calibration_fit_and_prediction_are_finite_and_independent_of_global_rng
     state=np.random.get_state();model=fit_logistic(x[:160],y[:160],videos[:160]);p=predict(model,x[160:])
     assert all(np.array_equal(a,b) for a,b in zip(state,np.random.get_state()))
     assert metrics(y[160:],p)['auroc']>.95 and np.isfinite(p).all()
+
+
+def test_six_direction_summary_requires_all_six_and_uses_direction_macro_average():
+    summaries={}
+    for i,shift in enumerate(SHIFTS):
+        delta=-.2 if i==0 else .1
+        comparison=dict(nuisance=dict(auroc=.6,brier=.2,ece=.15,log_loss=.5),
+            with_uncertainty=dict(auroc=.6+delta,brier=.2-delta/2,ece=.15-delta/2,log_loss=.5-delta/2))
+        evaluation={str(t):{d:{p:deepcopy(comparison) for p in ('all_candidates','score_ge_0.3')} for d in ('source_heldout','target')} for t in (.3,.5)}
+        summaries[shift]=dict(passed=True,evaluation=evaluation)
+    result=summarize_six(summaries);row=result['comparisons']['0.5']['target']['score_ge_0.3']['auroc']
+    assert result['all_six_complete'] and result['count']==6 and row['improved_directions']==5
+    assert abs(row['macro_delta']-.05)<1e-12
+    summaries.pop('S6')
+    try:summarize_six(summaries)
+    except AssertionError:pass
+    else:raise AssertionError('不能把部分方向当完整六向总结')
