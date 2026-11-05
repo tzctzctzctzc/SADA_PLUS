@@ -555,6 +555,9 @@ class SADA(nn.Module):
         if cfg.get('head_replacement'):
             from tools.head_replacements import install
             install(self,fpn_dim,head_dim,head_kernel_size,head_num_layers,head_with_ln)
+        if cfg.get('unified_prototype'):
+            from tools.unified_prototype_classifier import install
+            install(self,cfg['unified_prototype'])
         
     @property
     def device(self):
@@ -728,8 +731,12 @@ class SADA(nn.Module):
             cls_input_src,reg_input_src=fpn_feats_src,fpn_feats_src
             cls_input_tgt,reg_input_tgt=fpn_feats_tgt,fpn_feats_tgt
             cls_input_pl,reg_input_pl=fpn_feats_tgt_pl,fpn_feats_tgt
-        out_cls_logits_src, _ = self.cls_head(cls_input_src, fpn_masks_src)
-        out_cls_logits_tgt, _ = self.cls_head_target(cls_input_tgt, fpn_masks_tgt)
+        if self.cfg.get('unified_prototype'):
+            out_cls_logits_src,out_cls_logits_tgt=self.rq3_capacity.prepare(video_list_src,cls_input_src,fpn_masks_src,
+                cls_input_tgt,fpn_masks_tgt,mode=='train')
+        else:
+            out_cls_logits_src, _ = self.cls_head(cls_input_src, fpn_masks_src)
+            out_cls_logits_tgt, _ = self.cls_head_target(cls_input_tgt, fpn_masks_tgt)
         
         out_cls_logits = [torch.cat((out_cls_logits_src[i], out_cls_logits_tgt[i]), dim=0) for i in range(len(out_cls_logits_src))]
 

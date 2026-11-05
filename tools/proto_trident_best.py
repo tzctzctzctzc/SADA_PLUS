@@ -58,7 +58,12 @@ def native_readout(model,fpn,raw,ids):
     branch=model.rq3_capacity.branch;unique,inverse=torch.unique(ids,sorted=True,return_inverse=True)
     embedded=[];classified=[];device=next(branch.parameters()).device
     for part in unique.split(64):
-        result=branch.encode(fpn,[dict(segments=raw['segments'][part].to(device),levels=raw['level'][part].to(device))],model.fpn_strides)
+        proposals=[dict(segments=raw['segments'][part].to(device),levels=raw['level'][part].to(device))]
+        if model.cfg.get('unified_prototype'):
+            embedding=branch.region_embeddings(model.rq3_capacity.readout_features,proposals,model.fpn_strides)
+            result=dict(embedding=embedding,logits=branch.region_logits(embedding))
+        else:
+            result=branch.encode(fpn,proposals,model.fpn_strides)
         embedded.append(result['embedding']);classified.append(result['logits'])
     if embedded:
         embedding=torch.cat(embedded);logits=torch.cat(classified)
