@@ -3,6 +3,7 @@ import argparse
 from copy import deepcopy
 import gc
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -59,15 +60,31 @@ def probe(cfg,entry):
     expected=[None if g is None else g.detach().cpu() for g in expected]
     expected_losses={k:float(v.detach()) for k,v in original.items()}
     del original
+    # 先测原生自身重放噪声；官方CUDA backward并不保证逐元素逐位一致。
+    model.loss_normalizer=normalizer;torch.set_rng_state(cpu);torch.cuda.set_rng_state(cuda)
+    replay=model.native(native_videos(source))
+    replay_grad=torch.autograd.grad(replay['final_loss'],params,allow_unused=True)
+    native_sq=native_scale=native_max=0.
+    for want,got in zip(expected,replay_grad):
+        assert (want is None)==(got is None)
+        if want is not None:
+            delta=(got.detach().cpu()-want).double()
+            native_sq+=float(delta.square().sum());native_scale+=float(want.double().square().sum())
+            native_max=max(native_max,float(delta.abs().max()))
+    native_relative=math.sqrt(native_sq/max(native_scale,1e-30))
+    del replay_grad,replay
     model.loss_normalizer=normalizer;torch.set_rng_state(cpu);torch.cuda.set_rng_state(cuda)
     actual,*_=model.source_dense(source)
     gradients=torch.autograd.grad(actual['final_loss'],params,allow_unused=True)
-    max_error=0.
+    max_error=actual_sq=0.
     for want,got in zip(expected,gradients):
         assert (want is None)==(got is None)
         if want is not None:
-            got=got.detach().cpu();torch.testing.assert_close(got,want,atol=1e-6,rtol=1e-4)
-            max_error=max(max_error,float((got-want).abs().max()))
+            delta=(got.detach().cpu()-want).double()
+            actual_sq+=float(delta.square().sum());max_error=max(max_error,float(delta.abs().max()))
+    actual_relative=math.sqrt(actual_sq/max(native_scale,1e-30))
+    assert max_error<=max(1e-6,2*native_max),(max_error,native_max)
+    assert actual_relative<=max(1e-6,2*native_relative),(actual_relative,native_relative)
     for key,value in expected_losses.items():
         assert abs(float(actual[key].detach())-value)<=1e-6+1e-4*abs(value)
     del actual,gradients,expected;gc.collect()
@@ -107,6 +124,9 @@ def probe(cfg,entry):
         assert len(outputs)==len(check) and all(torch.isfinite(p['scores']).all() for p in outputs)
     save(entry/'probe.json',dict(passed=True,native_source_forward_gradient_reference_passed=True,
         max_native_gradient_absolute_error=max_error,full_disk_restore=True,
+        native_self_replay=dict(max_abs=native_max,relative_L2=native_relative),
+        adaptation_source_relative_L2=actual_relative,
+        gradient_reference_policy='native measured self-replay envelope; no precision change; no bitwise claim',
         original_prototype_file_sha256=sha(CODE/'libs/models/SADA/prototype_capacity.py'),
         target_GT_training=False,new_VLM_queries=0,probe_weights_transferred=False,
         peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,updates=rows))
