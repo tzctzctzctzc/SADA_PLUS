@@ -60,7 +60,7 @@ def probe(cfg,entry):
     expected_losses={k:float(v.detach()) for k,v in original.items()}
     del original
     model.loss_normalizer=normalizer;torch.set_rng_state(cpu);torch.cuda.set_rng_state(cuda)
-    actual,*_=model.dense(source,losses=True)
+    actual,*_=model.source_dense(source)
     gradients=torch.autograd.grad(actual['final_loss'],params,allow_unused=True)
     max_error=0.
     for want,got in zip(expected,gradients):

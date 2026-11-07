@@ -98,7 +98,32 @@ class DetectorWithAdaptation(nn.Module):
         self.cls_thres_ti = torch.ones(10,device=device)
         self.ema_src_centroids = [torch.zeros(10,channels,device=device) for _ in range(levels)]
         self.ema_tgt_centroids = [torch.zeros(10,channels,device=device) for _ in range(levels)]
+        self._captured = None
+        self.native.neck.register_forward_hook(self._capture_neck)
+        self.native.point_generator.register_forward_hook(self._capture_points)
+        self.native.cls_head.register_forward_hook(self._capture_logits)
         self.to(device)
+
+    def _capture_neck(self, module, inputs, output):
+        if self._captured is not None:self._captured['pyramid']=output
+
+    def _capture_points(self, module, inputs, output):
+        if self._captured is not None:self._captured['points']=output
+
+    def _capture_logits(self, module, inputs, output):
+        if self._captured is not None:self._captured['logits']=output
+
+    def source_dense(self, videos):
+        # 训练源路径直接运行官方forward；hooks只取回辅助分支所需特征。
+        self._captured={}
+        try:
+            losses=self.native(native_videos(videos))
+            captured=self._captured
+        finally:
+            self._captured=None
+        features,masks=captured['pyramid'];points=captured['points']
+        labels,_=self.native.label_points(points,[v['segments'] for v in videos],[v['labels'] for v in videos])
+        return losses,features,masks,points,captured['logits'],labels
 
     @property
     def device(self):
@@ -183,7 +208,8 @@ class DetectorWithAdaptation(nn.Module):
             return (rows,rows,None,None,None,None,None)
         if mode=='train':
             assert all(v['segments'].numel()==0 and v['labels'].numel()==0 for v in video_list_tgt)
-        losses,sf,sm,sp,sl,labels=self.dense(video_list_src,losses=True)
+        losses,sf,sm,sp,sl,labels=(self.source_dense(video_list_src) if mode=='train'
+                                 else self.dense(video_list_src,losses=True))
         result=dict(cls_loss=losses['cls_loss'],reg_loss=losses['reg_loss'],downstream_loss=losses['final_loss'])
         if mode=='train' and self.condition!='so':
             target=self.dense(video_list_tgt)
