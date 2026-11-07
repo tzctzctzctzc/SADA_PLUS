@@ -1,0 +1,12 @@
+{
+  "actionformer": {
+    "repository": "https://github.com/happyharrycn/actionformer_release",
+    "commit": "61ea7eb9308a568b0cf45e3804830836e30061de",
+    "archive_sha256": "1054aecd1111fd57659ab9aba8028b908c93b680dd377cf0baa937361c6875be"
+  },
+  "tridet": {
+    "repository": "https://github.com/dingfengshi/TriDet",
+    "commit": "764b8165b0d7eb3dfce29f126493564e15003d6e",
+    "archive_sha256": "8bb4044874d4cc6a9da151fc289cc203b1f831827eb414314a4656e3781926b0"
+  }
+}
