@@ -161,7 +161,15 @@ class DetectorWithAdaptation(nn.Module):
                 offsets, classes, bounds]
         if self.detector == 'tridet':
             args.extend([n.start_head(features,masks), n.end_head(features,masks)])
-        return n.losses(*args), features, masks, points, logits, classes
+        # TriDet用根模块的training标志区分批量loss解码和逐视频推理解码。
+        # 源验证仍保持所有子模块eval，仅为loss选择批量解码路径。
+        was_training=n.training
+        try:
+            if self.detector == 'tridet':n.training=True
+            values=n.losses(*args)
+        finally:
+            n.training=was_training
+        return values, features, masks, points, logits, classes
 
     def domain_loss(self, source, target, labels, epoch):
         sf, sm, _, _ = source

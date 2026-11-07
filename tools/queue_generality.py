@@ -18,13 +18,17 @@ def ticks(pid):
     return (Path('/proc')/str(pid)/'stat').read_text().split(') ',1)[1].split()[19]
 
 
-def run(root):
+def run(root,tasks_json=None):
     import fcntl
     identity=code_identity();commit=identity['commit']
     own=(root/'controller.lock').open('a');fcntl.flock(own,fcntl.LOCK_EX|fcntl.LOCK_NB)
     assert not (root/'state.json').exists(),'existing state: inspect, never silently resubmit'
     pending=[f'{d}/{c}/S{s}' for s in (1,3,2,4,5,6)
              for d in ('actionformer','tridet') for c in ('so','sada','sada_prototype')]
+    if tasks_json:
+        selected=read(tasks_json)
+        assert len(selected)==len(set(selected)) and set(selected)<=set(pending)
+        pending=selected
     stages=['probe','train','evaluate','audit'];active={};complete=[];failed={};formal=0
     cancelled=False
     def state():
@@ -103,4 +107,4 @@ def run(root):
 
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--root',required=True);a=p.parse_args();run(Path(a.root))
+    p=argparse.ArgumentParser();p.add_argument('--root',required=True);p.add_argument('--tasks-json');a=p.parse_args();run(Path(a.root),a.tasks_json)

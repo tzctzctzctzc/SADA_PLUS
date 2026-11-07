@@ -122,6 +122,9 @@ def probe(cfg,entry):
         check=move_to_device(next(iter(ctx.val_loader_src)),model.device)
         outputs=model(video_list_src=check,video_list_tgt=check,mode='test',domain='src')[0]
         assert len(outputs)==len(check) and all(torch.isfinite(p['scores']).all() for p in outputs)
+    ctx.valid_metrics_src.reset()
+    validation=float(ctx._valid_epoch(5,ctx.val_loader_src,domain='src'))
+    assert math.isfinite(validation) and validation>0
     save(entry/'probe.json',dict(passed=True,native_source_forward_gradient_reference_passed=True,
         max_native_gradient_absolute_error=max_error,full_disk_restore=True,
         native_self_replay=dict(max_abs=native_max,relative_L2=native_relative),
@@ -129,6 +132,7 @@ def probe(cfg,entry):
         gradient_reference_policy='native measured self-replay envelope; no precision change; no bitwise claim',
         original_prototype_file_sha256=sha(CODE/'libs/models/SADA/prototype_capacity.py'),
         target_GT_training=False,new_VLM_queries=0,probe_weights_transferred=False,
+        full_source_validation_loss=validation,
         peak_reserved_mib=torch.cuda.max_memory_reserved()/2**20,updates=rows))
 
 
