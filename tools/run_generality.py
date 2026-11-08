@@ -150,6 +150,9 @@ def audit(cfg,entry):
 
 
 def worker(mode,cfg,entry):
+    if mode in ('evaluate','audit'):
+        from tools.native_ap_fast import install
+        install()
     if mode!='audit':
         from tools.baseline_gpu import first_cuda_guard
         first_cuda_guard()
