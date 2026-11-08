@@ -256,7 +256,7 @@ def probe_wiring(cfg,entry,engine):
     hook=m.adapt_route.register_forward_hook(lambda mod,args,out:values.append((args,out)))
     epoch=max(5,cfg['train_cfg']['warmup_adv'])
     engine.epoch_setup(ctx,epoch)
-    losses=m(src,tgt,mode='train',curr_epoch=epoch)[0]
+    losses=m(video_list_src=src,video_list_tgt=tgt,mode='train',curr_epoch=epoch)[0]
     hook.remove()
     args,out=values[0]
     s,t=tuple(args[3]),tuple(args[4])
