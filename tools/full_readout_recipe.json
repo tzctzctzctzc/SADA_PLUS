@@ -1,0 +1,32 @@
+{
+  "S1": {
+    "sigma": 0.15,
+    "width": 1.0,
+    "power": -0.1
+  },
+  "S2": {
+    "sigma": 0.4,
+    "width": 1.1,
+    "power": 0.0
+  },
+  "S3": {
+    "sigma": 0.15,
+    "width": 1.0,
+    "power": -0.1
+  },
+  "S4": {
+    "sigma": 0.3,
+    "width": 1.1,
+    "power": 0.0
+  },
+  "S5": {
+    "sigma": 0.25,
+    "width": 0.9,
+    "power": -0.1
+  },
+  "S6": {
+    "sigma": 0.4,
+    "width": 1.1,
+    "power": 0.1
+  }
+}

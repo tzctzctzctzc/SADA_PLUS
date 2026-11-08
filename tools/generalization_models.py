@@ -93,6 +93,10 @@ class DetectorWithAdaptation(nn.Module):
             self.learnable_embeddings = nn.Parameter(torch.randn(11,channels))
         self.rq3_capacity = (build_capacity(cfg['prototype_capacity'], channels, 10,
             self.fpn_strides, self.reg_range, device) if cfg.get('prototype_capacity') else None)
+        self.adapt_route = None
+        if cfg.get('full_tf'):
+            from tools.full_tf_alignment import ClassConditionalPathAlignment
+            self.adapt_route = ClassConditionalPathAlignment(channels, channels, 10, cfg['full_tf'])
         self.loss_normalizer_pseudo_labels = 1.
         self.cls_thres_prob = torch.zeros(10,device=device)
         self.cls_thres_ti = torch.ones(10,device=device)
@@ -223,6 +227,14 @@ class DetectorWithAdaptation(nn.Module):
             target=self.dense(video_list_tgt)
             if curr_epoch>=self.cfg['train_cfg']['warmup_adv']:
                 result['loss_conditional_adv_rev']=self.domain_loss((sf,sm,sp,sl),target,labels,curr_epoch)
+            if self.adapt_route is not None:
+                gt = torch.stack(labels).split([x.shape[-1] for x in sf],dim=1)
+                soft = [x.detach().transpose(1,2).sigmoid() for x in target[3]]
+                term, stats = self.adapt_route(self,video_list_src,video_list_tgt,sf,target[0],
+                                               curr_epoch,gt,soft)
+                result['downstream_loss'] = result['downstream_loss'] + term
+                result['tf_alignment_loss'] = term.detach()
+                result['tf_aligned_groups'] = stats.get('aligned_groups',term.detach()*0)
             if self.rq3_capacity is not None:
                 aux=self.rq3_capacity(video_list_src,video_list_tgt,sf,target[0],curr_epoch)
                 result['downstream_loss']=result['downstream_loss']+aux['loss']

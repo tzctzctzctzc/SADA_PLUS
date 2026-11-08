@@ -24,7 +24,7 @@ def run(root,tasks_json=None):
     own=(root/'controller.lock').open('a');fcntl.flock(own,fcntl.LOCK_EX|fcntl.LOCK_NB)
     assert not (root/'state.json').exists(),'existing state: inspect, never silently resubmit'
     pending=[f'{d}/{c}/S{s}' for s in (1,3,2,4,5,6)
-             for d in ('actionformer','tridet') for c in ('so','sada','sada_prototype')]
+             for d in ('actionformer','tridet') for c in ('full',)]
     if tasks_json:
         selected=read(tasks_json)
         assert len(selected)==len(set(selected)) and set(selected)<=set(pending)
@@ -93,16 +93,18 @@ def run(root,tasks_json=None):
         if active or pending:time.sleep(10)
     summaries={}
     for detector in ('actionformer','tridet'):
-        for condition in ('so','sada','sada_prototype'):
+        for condition in ('full',):
             rows={}
             for s in range(1,7):
                 path=root/detector/condition/f'S{s}'/'audit.json'
-                if path.exists():rows[f'S{s}']=read(path)['results']['target']
+                if path.exists():
+                    final=path.parent/'full_result.json'
+                    if final.exists():rows[f'S{s}']=dict(map_0_1_to_0_5=read(final)['mAP']/100,native=read(path)['results']['target'])
             summaries[detector+'/'+condition]=dict(count=len(rows),rows=rows,
-                mean_percent=sum(v['map_0.1_to_0.5'] for v in rows.values())/6*100 if len(rows)==6 else None)
-    save(root/'summary.json',dict(all_36_complete=len(complete)==36,formal_launches=formal,
-        summaries=summaries,failed=failed,seed=123,original_prototype=True,
-        target_validation_hyperparameter_selection=False))
+                mean_percent=sum(v['map_0_1_to_0_5'] for v in rows.values())/6*100 if len(rows)==6 else None)
+    save(root/'summary.json',dict(all_12_complete=len(complete)==12,formal_launches=formal,
+        summaries=summaries,failed=failed,seed=123,source_anchored_tf=True,
+        frozen_target_development_readout=True))
     state()
 
 

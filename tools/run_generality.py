@@ -14,7 +14,7 @@ sys.path.insert(0,str(CODE))
 from tools.baseline_protocol import read,save,sha,code_identity
 
 REFERENCE=Path('/vepfs/vlms/prototype_capacity12_5f9a157_1029/formal/control')
-MODES=('so','sada','sada_prototype')
+MODES=('full',)
 
 
 def prepare(root):
@@ -29,7 +29,7 @@ def prepare(root):
                 cfg['generality']=dict(detector=detector,condition=condition,
                     source='official complete detector, native classification/localization losses',
                     original_prototype_commit='5f9a157e17e4a605ff4a6ed8dac4bd725b44d7b4')
-                if condition!='sada_prototype':cfg.pop('prototype_capacity')
+                cfg['full_tf']=dict(source_anchor=True)
                 cfg['model']['adv_method']=['None'] if condition=='so' else ['conditional_rev']
                 entry=root/detector/condition/shift
                 save(entry/'config.json',cfg)
@@ -38,10 +38,10 @@ def prepare(root):
                     source_manifest_sha256=cfg['baseline']['source_manifest_sha256'],
                     target_manifest_sha256=cfg['baseline']['target_manifest_sha256'],
                     target_GT_training=False,new_VLM_queries=0))
-    save(root/'plan.json',dict(code=identity,total_table_cells=54,reused_original_sada_cells=18,
-        max_new_formal_runs=36,seed=123,source_selection='cls+reg loss every5/patience15/max50',
-        original_prototype_only=True,old_sada_prototype_trident_hybrid=False,
-        native_tridet_is_external_detector=True,posthoc_readout=False,
+    save(root/'plan.json',dict(code=identity,total_table_cells=12,reused_original_sada_cells=0,
+        max_new_formal_runs=12,seed=123,source_selection='cls+reg loss every5/patience15/max50',
+        original_prototype_only=False,old_sada_prototype_trident_hybrid=False,
+        native_tridet_is_external_detector=True,posthoc_readout=True,
         native_sources=read(CODE/'tools/native_sources/provenance.json')))
 
 
@@ -156,10 +156,18 @@ def worker(mode,cfg,entry):
     from tools.generalization_models import install_runtime
     base=install_runtime()
     os.chdir('/vepfs/vlms/SADA_PLUS')
-    if mode=='probe':probe(cfg,entry)
-    elif mode=='train':base.train(cfg,entry)
+    if mode=='probe':
+        from tools.full_readout import probe_wiring
+        probe_wiring(cfg,entry,base)
+    elif mode=='train':
+        assert read(entry/'probe.json')['passed']
+        with (entry/'train_claim.json').open('x') as f: json.dump(dict(seed=123),f)
+        base.train(cfg,entry)
     elif mode=='evaluate':base.evaluate(cfg,entry,cfg['baseline']['annotation_for_offline_evaluation'])
-    else:audit(cfg,entry)
+    else:
+        audit(cfg,entry)
+        from tools.full_readout import run
+        run(cfg,entry)
 
 
 if __name__=='__main__':
