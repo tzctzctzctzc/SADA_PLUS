@@ -33,11 +33,16 @@ def prepare(root):
                     b_mode='shared_joint_path', b_variant='path8',
                     b_evidence_mode='shared_joint_path', b_same_view=True,
                     b_semantic_alpha=.1, b_temporal_residual=.1,
+                    b_selective_boundary=True, selective_residual=.1,
+                    b_vlm_gate=True, b_vlm_gate_threshold=.8,
                     source_anchor=True, start_epoch=5, ramp_epochs=5,
                     alignment_weight=.1, length=32, windows_per_video_scale=2,
                     projection_dim=16, bins=4, bandwidths=[.5,1.,2.],
                     initialization_seed=11072026,
                 )
+                moe_path=f'/vepfs/vlms/module_a_quantity_local_score_1113/signals/threshold/{shift}.json'
+                cfg['moe_signal']=dict(path=moe_path,sha256=sha(moe_path),variant='threshold',router_frozen=True,
+                    original_A_loss=True,selection_rule='threshold')
                 cfg['model']['adv_method']=['None'] if condition=='so' else ['conditional_rev']
                 entry=root/detector/condition/shift
                 save(entry/'config.json',cfg)
@@ -167,7 +172,8 @@ def worker(mode,cfg,entry):
         first_cuda_guard()
     from tools.generalization_models import install_runtime
     base=install_runtime()
-    os.chdir('/vepfs/vlms/SADA_PLUS')
+    # 使用本次独立代码树，避免改动仍保留的旧外部队列代码。
+    os.chdir(str(CODE))
     if mode=='probe':
         from tools.full_readout import probe_wiring
         probe_wiring(cfg,entry,base)

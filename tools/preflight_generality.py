@@ -15,13 +15,15 @@ from tools.baseline_gpu import slot
 def run(root):
     identity=code_identity();reports={}
     for detector in ('actionformer','tridet'):
-        for condition in ('so','sada','sada_prototype'):
+        # 本 campaign 只派发最终 full 条件；旧目录的 so/sada/sada_prototype
+        # 预检属于历史对照，不能让它阻塞当前正式版本。
+        for condition in ('full',):
             key=detector+'/'+condition;entry=root/'preflight'/detector/condition/'S1'
             save(entry/'config.json',read(root/detector/condition/'S1/config.json'))
             while True:
                 admitted=False
                 for gpu in range(4):
-                    ctx=slot(gpu,'/vepfs/vlms/SADA_PLUS',root,16384,identity['commit'])
+                    ctx=slot(gpu,str(CODE),root,16384,identity['commit'])
                     try:lease=ctx.__enter__()
                     except BlockingIOError:continue
                     admitted=True

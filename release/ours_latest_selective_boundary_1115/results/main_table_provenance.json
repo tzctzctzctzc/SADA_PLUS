@@ -1,0 +1,35 @@
+{
+  "status": "transfer_interim_not_final",
+  "method": "A-conditioned dual-path linkage B on final multiVLM A",
+  "sada_new_six_direction_result": true,
+  "sada_mean_percent": 55.49075261836026,
+  "external_detector_rows": "interim frozen-detector transfer records under the same unified readout; detector-specific retraining with final B is still required",
+  "detectors": [
+    "sada",
+    "actionformer",
+    "tridet",
+    "cltdr-gmg",
+    "nas-tad"
+  ],
+  "external_sources": {
+    "actionformer_tridet": "CVPR_Ours_Final/results/final_detector_transfer_audit.json",
+    "cltdr-gmg": "remote /vepfs/vlms/cltdr_so6_577753d_1101 six-direction formal audited outputs; values match existing final experiment table",
+    "nas-tad": "remote /vepfs/vlms/nas_tad_formal12_1111/jobs/nastad_ours/S1-S6/result.json"
+  },
+  "limitations": [
+    "SADA row is newly selected final B checkpoint; external detector rows are frozen transfer/readout rows, not retrained with detector-specific dual-path B.",
+    "CLTDR-GMG values are retained at two-decimal precision from the audited final table row; raw per-tIoU files remain on the server.",
+    "The external-detector rows must not be reported as the final jointly trained main table until ActionFormer, TriDet, CLTDR-GMG and NAS-TAD each complete S1-S6 cold starts with the final A-conditioned dual-path B."
+  ],
+  "authorized_next_campaign": {
+    "scope": "actionformer,tridet,cltdr-gmg,nas-tad",
+    "cold_starts": 24,
+    "seed": 123,
+    "max_gpus": 4,
+    "target_train_gt": false,
+    "status": "locally_adapted_remote_start_unconfirmed",
+    "local_external_adapter_commit": "e8e27e8855c27bb92eb5233979bcdde063bcd817",
+    "remote_start_blocker": "固定IPv6通道banner超时，IPv4备用通道连接超时；未确认PID，不重复提交"
+  },
+  "old_table_preserved": "ours_paired_witness_main_table.csv"
+}

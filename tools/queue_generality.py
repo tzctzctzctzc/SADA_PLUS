@@ -46,7 +46,7 @@ def run(root,tasks_json=None):
             SADA_BASELINE_LEASE=lease['lease'],SADA_BASELINE_LEASE_SHA256=lease['lease_sha256'])
         with (entry/(stage+'.log')).open('x') as output:
             p=subprocess.Popen([sys.executable,'-u','-B',str(CODE/'tools/run_generality.py'),stage,'--entry',str(entry)],
-                env=env,cwd='/vepfs/vlms/SADA_PLUS',stdout=output,stderr=subprocess.STDOUT,start_new_session=True)
+                env=env,cwd=str(CODE),stdout=output,stderr=subprocess.STDOUT,start_new_session=True)
         record=dict(stage=stage,pid=p.pid,start_ticks=ticks(p.pid),gpu=gpu,started=time.time())
         save(entry/(stage+'_launch.json'),dict(record,commit=commit))
         if stage=='train':formal+=1
@@ -81,7 +81,7 @@ def run(root,tasks_json=None):
         used={v['gpu'] for v in active.values()}
         for gpu in range(4):
             if not pending or gpu in used:continue
-            ctx=slot(gpu,'/vepfs/vlms/SADA_PLUS',root,16384,commit)
+            ctx=slot(gpu,str(CODE),root,16384,commit)
             try:lease=ctx.__enter__()
             except BlockingIOError:continue
             task=pending.pop(0)

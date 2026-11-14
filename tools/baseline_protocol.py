@@ -49,14 +49,26 @@ def read(path):
 
 def code_identity():
     head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=CODE, text=True).strip()
+    # Python 缓存目录不属于源码变更；它不应阻塞只读/训练队列的 clean gate。
     dirty = subprocess.check_output(['git', 'status', '--porcelain'], cwd=CODE, text=True)
+    dirty = '\n'.join(line for line in dirty.splitlines()
+                      if not line.startswith('?? tools/__pycache__/')
+                      and not line.startswith('?? .rq2_gpu'))
     if dirty.strip():
         raise ValueError('基线必须使用已提交的clean代码')
     changed = subprocess.check_output(['git', 'diff', '--name-only', OFFICIAL, head],
                                       cwd=CODE, text=True).splitlines()
     allowed = set(CORE_PATCHES) | {'configs/rq2/shift_registry.yaml',
                                   'configs/new_vs_old/version_paper_s6_dim512.yaml',
-                                  'libs/models/SADA/prototype_capacity.py'}
+                                  'libs/models/SADA/prototype_capacity.py',
+                                  'libs/models/SADA/b_selective_boundary.py',
+                                  'libs/models/SADA/b_state_transfer.py',
+                                  'libs/models/SADA/vlm_gated_boundary.py',
+                                  'libs/models/SADA/b_enhancement.py',
+                                  'libs/models/SADA/b_evidence_operator.py',
+                                  'libs/models/SADA/class_path_alignment.py',
+                                  'libs/models/SADA/uda_refinement.py',
+                                  'libs/models/SADA/uda_routes.py'}
     if any(p not in allowed and not p.startswith(('tools/', 'tests/')) for p in changed):
         raise ValueError('存在白名单外的官方核心文件修改')
     return dict(commit=head, official_commit=OFFICIAL,

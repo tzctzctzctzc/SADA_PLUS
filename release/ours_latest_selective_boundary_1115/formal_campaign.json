@@ -1,0 +1,19 @@
+{
+  "root": "/vepfs/vlms/module_b_selective_boundary_formal6_1114_fix5",
+  "payload_sha256": "c67c7c1d8e061ed7cdeab7e83fecf6f95d20149c00658314d2a2cbb068ab561f",
+  "launch": {
+    "pid": 3450082,
+    "start_ticks": "563734541",
+    "payload_sha256": "c67c7c1d8e061ed7cdeab7e83fecf6f95d20149c00658314d2a2cbb068ab561f",
+    "code_sha256": "5ba5a7d60ce5a052c5d3167b4861ba2aab4aa35524ae6a082146263ebd3b6762",
+    "time": 1794666061.0120227,
+    "formal_cold_starts": 6,
+    "seed": 123,
+    "max_GPU_jobs": 6,
+    "original_A_fixed": false,
+    "multivlm_A": true
+  },
+  "submission_state": "submitted",
+  "budget": 6,
+  "seed": 123
+}

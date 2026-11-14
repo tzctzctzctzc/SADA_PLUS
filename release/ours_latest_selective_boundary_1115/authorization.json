@@ -1,0 +1,41 @@
+{
+  "formal_training_authorized": true,
+  "budget": 6,
+  "seed": 123,
+  "entries": [
+    "S1",
+    "S2",
+    "S3",
+    "S4",
+    "S5",
+    "S6"
+  ],
+  "physical_GPUs": 4,
+  "max_GPU_jobs": 6,
+  "max_own_jobs_per_card": 2,
+  "shared_GPU_authorized": true,
+  "per_direction_tuning": false,
+  "target_TRAIN_GT": false,
+  "VLM_calls": 0,
+  "user_authorization": "之前55.7539%跑一个基于多vlm的版本，优化效率",
+  "authorized_utc": "2026-11-14T01:57:31.429192+00:00",
+  "baseline_final_percent": 55.753910475952445,
+  "multivlm_A": {
+    "teachers": [
+      "Qwen3-VL-8B",
+      "InternVL3.5-8B",
+      "VideoChat3-4B"
+    ],
+    "rule": "source-trained frozen router; r>=0.8; no fixed K; no pruning"
+  },
+  "method": {
+    "b_variant": "path8",
+    "b_evidence_mode": "shared_joint_path",
+    "b_semantic_alpha": 0.1,
+    "b_same_view": true
+  },
+  "original_A_fixed": false,
+  "B_and_readout_fixed": true,
+  "scientific_protocol": "Unchanged batch/order/RNG/precision/3 optimizers/EMA/source cls+reg selection every5 patience15 max50 bestEMA",
+  "old_paused_jobs": "Do not resume or terminate; current experiment owns only its new root"
+}

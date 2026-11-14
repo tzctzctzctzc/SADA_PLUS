@@ -1,0 +1,44 @@
+{
+  "release": "ours_latest_selective_boundary_1115",
+  "method": "multivlm-A + selective-boundary-evidence B",
+  "remote_root": "/vepfs/vlms/module_b_selective_boundary_formal6_1114_fix5",
+  "remote_code_sha256": "5ba5a7d60ce5a052c5d3167b4861ba2aab4aa35524ae6a082146263ebd3b6762",
+  "payload_sha256": "c67c7c1d8e061ed7cdeab7e83fecf6f95d20149c00658314d2a2cbb068ab561f",
+  "seed": 123,
+  "directions": [
+    "S1",
+    "S2",
+    "S3",
+    "S4",
+    "S5",
+    "S6"
+  ],
+  "target_train_gt": false,
+  "vlm_calls": 0,
+  "A": {
+    "router": "frozen threshold router",
+    "threshold": 0.8,
+    "teachers": [
+      "Qwen3-VL-8B",
+      "InternVL3.5-8B",
+      "VideoChat3-4B"
+    ],
+    "topK": false,
+    "pruning": false
+  },
+  "B": {
+    "selective_residual": 0.1,
+    "ramp_epochs": 5,
+    "vlm_gate": true,
+    "semantic_alpha": 0.1,
+    "vlm_gate_threshold": 0.8,
+    "selective_boundary": true,
+    "start_epoch": 5,
+    "alignment_weight": 0.1,
+    "variant": "path8",
+    "evidence_mode": "shared_joint_path"
+  },
+  "result_binding": "remote formal_status snapshot included; final summary/result/audit must be present before claiming 55.6531 as final six-way mean",
+  "remote_status_snapshot": "results/formal_status_snapshot.json",
+  "main_table_status": "interim_transfer_external_rows"
+}

@@ -3,6 +3,7 @@
 检测器源码固定在native_sources；仅转换数据接口，保留原分类/定位损失。
 """
 from copy import deepcopy
+import json
 import importlib
 import inspect
 from pathlib import Path
@@ -93,11 +94,17 @@ class DetectorWithAdaptation(nn.Module):
             self.learnable_embeddings = nn.Parameter(torch.randn(11,channels))
         self.rq3_capacity = (build_capacity(cfg['prototype_capacity'], channels, 10,
             self.fpn_strides, self.reg_range, device) if cfg.get('prototype_capacity') else None)
+        if self.rq3_capacity is not None and cfg.get('moe_signal'):
+            payload=json.loads(Path(cfg['moe_signal']['path']).read_text())
+            self.rq3_capacity._moe_target_cache=payload['by_video']
         self.adapt_route = None
         if cfg.get('full_tf'):
             # 外部检测器正式重训使用当前最终的 A 条件化双路径 B；
             # 旧 full_tf 仅作为迁移/历史对照，不在本 campaign 中复用。
-            if cfg['full_tf'].get('b_mode') == 'shared_joint_path':
+            if cfg['full_tf'].get('b_selective_boundary'):
+                from libs.models.SADA.b_selective_boundary import SelectiveBoundaryEvidence
+                self.adapt_route = SelectiveBoundaryEvidence(channels, channels, 10, cfg['full_tf'])
+            elif cfg['full_tf'].get('b_mode') == 'shared_joint_path':
                 from libs.models.SADA.b_evidence_operator import EvidenceAlignment
                 self.adapt_route = EvidenceAlignment(channels, channels, 10, cfg['full_tf'])
             else:
@@ -138,6 +145,21 @@ class DetectorWithAdaptation(nn.Module):
     @property
     def device(self):
         return next(self.native.parameters()).device
+
+    def point_generator(self, features):
+        return self.native.point_generator(features)
+
+    def inference_single_video(self, *args, **kwargs):
+        return self.native.inference_single_video(*args, **kwargs)
+
+    def boundary_outputs(self, features, masks):
+        """返回统一的 [B,T,D] 回归偏移及可选左右边界头。"""
+        offsets = tuple(x.permute(0, 2, 1) for x in self.native.reg_head(features, masks))
+        boundary = ()
+        if self.detector != 'actionformer' and hasattr(self.native, 'start_head'):
+            boundary = (self.native.start_head(features, masks),
+                        self.native.end_head(features, masks))
+        return offsets, boundary
 
     @property
     def loss_normalizer(self):
@@ -237,9 +259,15 @@ class DetectorWithAdaptation(nn.Module):
                 gt = torch.stack(labels).split([x.shape[-1] for x in sf],dim=1)
                 soft = [x.detach().transpose(1,2).sigmoid() for x in target[3]]
                 source_soft = [x.detach().transpose(1,2).sigmoid() for x in sl]
+                source_offsets,source_boundary=self.boundary_outputs(sf,sm)
+                # dense(losses=False) 返回 features, masks, points, logits。
+                target_offsets,target_boundary=self.boundary_outputs(target[0],target[1])
                 term, stats = self.adapt_route(self,video_list_src,video_list_tgt,sf,target[0],
                                                curr_epoch,gt,soft,
-                                               source_prediction_semantics=source_soft)
+                                               source_prediction_semantics=source_soft,
+                                               source_native_outputs=(sp,sm,sl,source_offsets,*source_boundary),
+                                               # target dense(losses=False) 顺序为 features, masks, points, logits。
+                                               target_native_outputs=(target[2],target[1],target[3],target_offsets,*target_boundary))
                 result['downstream_loss'] = result['downstream_loss'] + term
                 result['tf_alignment_loss'] = term.detach()
                 result['tf_aligned_groups'] = stats.get('aligned_groups',term.detach()*0)
