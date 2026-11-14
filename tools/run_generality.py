@@ -29,7 +29,15 @@ def prepare(root):
                 cfg['generality']=dict(detector=detector,condition=condition,
                     source='official complete detector, native classification/localization losses',
                     original_prototype_commit='5f9a157e17e4a605ff4a6ed8dac4bd725b44d7b4')
-                cfg['full_tf']=dict(source_anchor=True)
+                cfg['full_tf']=dict(
+                    b_mode='shared_joint_path', b_variant='path8',
+                    b_evidence_mode='shared_joint_path', b_same_view=True,
+                    b_semantic_alpha=.1, b_temporal_residual=.1,
+                    source_anchor=True, start_epoch=5, ramp_epochs=5,
+                    alignment_weight=.1, length=32, windows_per_video_scale=2,
+                    projection_dim=16, bins=4, bandwidths=[.5,1.,2.],
+                    initialization_seed=11072026,
+                )
                 cfg['model']['adv_method']=['None'] if condition=='so' else ['conditional_rev']
                 entry=root/detector/condition/shift
                 save(entry/'config.json',cfg)
@@ -40,6 +48,7 @@ def prepare(root):
                     target_GT_training=False,new_VLM_queries=0))
     save(root/'plan.json',dict(code=identity,total_table_cells=12,reused_original_sada_cells=0,
         max_new_formal_runs=12,seed=123,source_selection='cls+reg loss every5/patience15/max50',
+        final_B='A-conditioned dual-path path8 evidence alignment; source and target shared observation; target train GT forbidden',
         original_prototype_only=False,old_sada_prototype_trident_hybrid=False,
         native_tridet_is_external_detector=True,posthoc_readout=True,
         native_sources=read(CODE/'tools/native_sources/provenance.json')))

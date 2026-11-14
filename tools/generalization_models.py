@@ -95,8 +95,14 @@ class DetectorWithAdaptation(nn.Module):
             self.fpn_strides, self.reg_range, device) if cfg.get('prototype_capacity') else None)
         self.adapt_route = None
         if cfg.get('full_tf'):
-            from tools.full_tf_alignment import ClassConditionalPathAlignment
-            self.adapt_route = ClassConditionalPathAlignment(channels, channels, 10, cfg['full_tf'])
+            # 外部检测器正式重训使用当前最终的 A 条件化双路径 B；
+            # 旧 full_tf 仅作为迁移/历史对照，不在本 campaign 中复用。
+            if cfg['full_tf'].get('b_mode') == 'shared_joint_path':
+                from libs.models.SADA.b_evidence_operator import EvidenceAlignment
+                self.adapt_route = EvidenceAlignment(channels, channels, 10, cfg['full_tf'])
+            else:
+                from tools.full_tf_alignment import ClassConditionalPathAlignment
+                self.adapt_route = ClassConditionalPathAlignment(channels, channels, 10, cfg['full_tf'])
         self.loss_normalizer_pseudo_labels = 1.
         self.cls_thres_prob = torch.zeros(10,device=device)
         self.cls_thres_ti = torch.ones(10,device=device)
@@ -230,8 +236,10 @@ class DetectorWithAdaptation(nn.Module):
             if self.adapt_route is not None:
                 gt = torch.stack(labels).split([x.shape[-1] for x in sf],dim=1)
                 soft = [x.detach().transpose(1,2).sigmoid() for x in target[3]]
+                source_soft = [x.detach().transpose(1,2).sigmoid() for x in sl]
                 term, stats = self.adapt_route(self,video_list_src,video_list_tgt,sf,target[0],
-                                               curr_epoch,gt,soft)
+                                               curr_epoch,gt,soft,
+                                               source_prediction_semantics=source_soft)
                 result['downstream_loss'] = result['downstream_loss'] + term
                 result['tf_alignment_loss'] = term.detach()
                 result['tf_aligned_groups'] = stats.get('aligned_groups',term.detach()*0)
